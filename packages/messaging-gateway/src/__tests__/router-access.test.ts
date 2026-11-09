@@ -31,7 +31,7 @@ afterEach(() => {
 
 function baseMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chat-1',
     messageId: '1',
     senderId: 'sender-A',
@@ -48,7 +48,7 @@ function makeFakeAdapter() {
     throw new Error('unused')
   }
   const adapter = {
-    platform: 'telegram',
+    platform: 'lark',
     capabilities: {
       messageEditing: true,
       inlineButtons: true,
@@ -64,7 +64,7 @@ function makeFakeAdapter() {
     onButtonPress: () => {},
     sendText: mock(async (_channelId: string, text: string) => {
       sent.push(text)
-      return { platform: 'telegram', channelId: 'chat-1', messageId: 'm' }
+      return { platform: 'lark', channelId: 'chat-1', messageId: 'm' }
     }),
     editMessage: noop,
     sendButtons: noop,
@@ -95,7 +95,7 @@ function makeHarness(args: {
   store.bind(
     'ws1',
     'sess-A',
-    'telegram',
+    'lark',
     'chat-1',
     undefined,
     args.bindingConfig,
@@ -125,7 +125,7 @@ describe('Router access control', () => {
     const harness = makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
       bindingConfig: { accessMode: 'open' },
     })
@@ -140,7 +140,7 @@ describe('Router access control', () => {
       workspaceConfig: {
         enabled: true,
         platforms: {
-          telegram: {
+          lark: {
             enabled: true,
             accessMode: 'owner-only',
             owners: [{ userId: 'owner-1', addedAt: 0 }],
@@ -154,7 +154,7 @@ describe('Router access control', () => {
     expect(harness.sessionManager.sendMessage).not.toHaveBeenCalled()
     expect(adapter.sent.some((s) => s.includes('private'))).toBe(true)
     // Recorded in pending store.
-    const pending = harness.pendingStore.list('telegram')
+    const pending = harness.pendingStore.list('lark')
     expect(pending.length).toBe(1)
     expect(pending[0]!.userId).toBe('stranger')
   })
@@ -163,7 +163,7 @@ describe('Router access control', () => {
     const harness = makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
       bindingConfig: { accessMode: 'allow-list', allowedSenderIds: ['allowed-1'] },
     })
@@ -171,7 +171,7 @@ describe('Router access control', () => {
     await harness.router.route(adapter, baseMsg({ senderId: 'stranger' }))
     expect(harness.sessionManager.sendMessage).not.toHaveBeenCalled()
     expect(adapter.sent.some((s) => s.includes('allow-list'))).toBe(true)
-    const pending = harness.pendingStore.list('telegram')
+    const pending = harness.pendingStore.list('lark')
     expect(pending.length).toBe(1)
   })
 
@@ -179,7 +179,7 @@ describe('Router access control', () => {
     const harness = makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
       bindingConfig: { accessMode: 'allow-list', allowedSenderIds: ['allowed-1'] },
     })
@@ -193,7 +193,7 @@ describe('Router access control', () => {
     const harness = makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
       bindingConfig: { accessMode: 'open' },
     })
@@ -204,7 +204,7 @@ describe('Router access control', () => {
     )
     expect(harness.sessionManager.sendMessage).not.toHaveBeenCalled()
     expect(adapter.sent.length).toBe(0)
-    expect(harness.pendingStore.list('telegram').length).toBe(0)
+    expect(harness.pendingStore.list('lark').length).toBe(0)
   })
 
   it('throttles rejection replies — second reject within cooldown does not re-reply', async () => {
@@ -212,7 +212,7 @@ describe('Router access control', () => {
       workspaceConfig: {
         enabled: true,
         platforms: {
-          telegram: {
+          lark: {
             enabled: true,
             accessMode: 'owner-only',
             owners: [{ userId: 'owner-1', addedAt: 0 }],
@@ -226,7 +226,7 @@ describe('Router access control', () => {
     await harness.router.route(adapter, baseMsg({ senderId: 'stranger' }))
     expect(adapter.sent.length).toBe(1)
     // Both attempts still recorded in pending store.
-    const pending = harness.pendingStore.list('telegram')
+    const pending = harness.pendingStore.list('lark')
     expect(pending[0]!.attemptCount).toBe(2)
   })
 })

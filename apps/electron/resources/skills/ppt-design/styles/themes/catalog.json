@@ -1,0 +1,86 @@
+{
+  "jiangshan": {
+    "name": "千里青绿",
+    "file": "styles/themes/jiangshan.json",
+    "serif": true,
+    "example": "ppt169_qianli_jiangshan_scroll",
+    "note": "受「千里江山图·十八岁的青绿」的青绿色和暖纸色启发。不使用那幅画，也不嵌入画作。"
+  },
+  "sugar-rush": {
+    "name": "糖彩",
+    "file": "styles/themes/sugar-rush.json",
+    "serif": false,
+    "example": "ppt169_sugar_rush_memphis",
+    "note": "受 Memphis 风格示例 Sugar Rush 的高饱和撞色启发。名称和配色是自拟的，不是那个示例的标志。"
+  },
+  "glass-saas": {
+    "name": "玻璃界面",
+    "file": "styles/themes/glass-saas.json",
+    "serif": false,
+    "example": "ppt169_glassmorphism_demo",
+    "note": "受玻璃拟态界面示例的冷色雾面启发。没有复制其中的产品界面。"
+  },
+  "paper-cut": {
+    "name": "剪纸月色",
+    "file": "styles/themes/paper-cut.json",
+    "serif": false,
+    "example": "ppt169_mid_autumn_papercut",
+    "note": "受中秋剪纸示例的夜蓝和暖纸色启发。没有使用节日品牌或剪纸图案文件。"
+  },
+  "pixel-breakfast": {
+    "name": "像素早餐",
+    "file": "styles/themes/pixel-breakfast.json",
+    "serif": false,
+    "example": "ppt169_pixel_breakfast_atlas",
+    "note": "受像素早餐图鉴的深靛底和蛋黄、番茄色启发。没有嵌入像素画。"
+  },
+  "swiss-grid": {
+    "name": "瑞士网格",
+    "file": "styles/themes/swiss-grid.json",
+    "serif": false,
+    "example": "ppt169_swiss_grid_systems",
+    "note": "受瑞士网格示例和一张红黑信息图的网格、单一红色启发。不是任何国家或机构的标志色使用规范。"
+  },
+  "tea-tasting": {
+    "name": "点茶",
+    "file": "styles/themes/tea-tasting.json",
+    "serif": true,
+    "example": "xiaohongshu_song_diancha",
+    "note": "受宋人点茶图文的茶褐、朱印和暖纸色启发。没有使用器物照片。"
+  },
+  "brutal-stone": {
+    "name": "粗石",
+    "file": "styles/themes/brutal-stone.json",
+    "serif": false,
+    "example": "ppt169_brutalism_field_guide",
+    "note": "受粗野主义建筑图解的石色、近黑和一块红启发。没有使用建筑照片或事务所名称。"
+  },
+  "zine-shelf": {
+    "name": "独立书摊",
+    "file": "styles/themes/zine-shelf.json",
+    "serif": false,
+    "example": "ppt169_indie_bookstore_zine_guide",
+    "note": "受独立书店小册子示例的奶油纸、一块蓝和一块粉启发。没有使用书店名称或封面。"
+  },
+  "keynote-stage": {
+    "name": "暗场讲台",
+    "file": "styles/themes/keynote-stage.json",
+    "serif": false,
+    "example": "",
+    "note": "自拟的暗场讲台：近黑底、暖色信号。不是任何公司的发布会配色，没有标志。"
+  },
+  "academic-ink": {
+    "name": "论文墨色",
+    "file": "styles/themes/academic-ink.json",
+    "serif": true,
+    "example": "ppt169_researchstudio_reel_paper",
+    "note": "受研究简报示例的墨色和一处蓝色启发。不使用论文版式里的机构名。"
+  },
+  "night-circuit": {
+    "name": "夜航电路",
+    "file": "styles/themes/night-circuit.json",
+    "serif": false,
+    "example": "ppt169_uv_launch",
+    "note": "受夜间产品演示的深色界面和一处冷光启发。不使用该示例的名称、标志或路径图形。"
+  }
+}

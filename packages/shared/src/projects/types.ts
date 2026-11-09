@@ -50,6 +50,8 @@ export interface ProjectConfig {
   updatedAt: number;
   /** Set when project is archived (hidden from sidebar but kept on disk) */
   archivedAt?: number;
+  /** User opt-in for on-demand PRO search of project conversation logs. No prompt injection. */
+  historySearchEnabled?: boolean;
   /** Per-project Kanban columns. Absent → the board uses the default 3 columns. */
   kanbanColumns?: KanbanColumnDef[];
 }
@@ -72,7 +74,8 @@ export interface ProjectAsset {
 export interface CreateProjectInput {
   name: string;
   description?: string;
-  workingDirectory?: string;
+  /** Absolute folder. Required: a project cannot be created without one. */
+  workingDirectory: string;
   details?: string;
   colorTheme?: string;
   color?: string;
@@ -104,8 +107,8 @@ export interface ProjectPromptContext {
   assetsPath: string;
   /** Lightweight manifest of reference files (newest-first); bodies are read on-demand. */
   assets: { filename: string; mimeType: string; sizeBytes: number }[];
-  /** Absolute path to MEMORY.md, so the agent knows where to persist learnings. */
-  memoryPath: string;
+  /** Absolute path to MEMORY.md when this session opted into shared project memory. */
+  memoryPath?: string;
   /** MEMORY.md content, already capped by loadProjectMemory. */
   memoryContent?: string;
 }

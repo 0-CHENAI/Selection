@@ -1,0 +1,2067 @@
+{
+  "format": "selection-deck",
+  "version": 1,
+  "title": "演示核心 4:3 · Presentation Core",
+  "canvas": {
+    "width": 768,
+    "height": 576
+  },
+  "theme": {
+    "id": "presentation_core_43",
+    "name": "石板预览",
+    "margin": 48,
+    "colors": {
+      "ink": "#1E293B",
+      "paper": "#FFFFFF",
+      "muted": "#64748B",
+      "accent": "#334155",
+      "line": "#CBD5E1",
+      "surface": "#F4F6F8",
+      "inverse": "#F8FAFC",
+      "signal": "#475569",
+      "good": "#1F7A4D",
+      "watch": "#8A5A12",
+      "bad": "#8E2A24"
+    },
+    "fonts": {
+      "cjk": {
+        "mac": "PingFang SC",
+        "win": "Microsoft YaHei",
+        "linux": "Noto Sans CJK SC"
+      },
+      "latin": {
+        "mac": "Arial",
+        "win": "Arial",
+        "linux": "Arial"
+      }
+    },
+    "type": {
+      "display": {
+        "min": 32,
+        "max": 72
+      },
+      "title": {
+        "min": 22,
+        "max": 40
+      },
+      "body": {
+        "min": 14,
+        "max": 22
+      },
+      "caption": {
+        "min": 10,
+        "max": 14
+      }
+    },
+    "source": "ppt-master 版式的中性预览色，不是品牌色"
+  },
+  "pages": [
+    {
+      "id": "01",
+      "layout": "01_title_slide",
+      "name": "Title Slide",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "title-slide-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 186,
+            "w": 6,
+            "h": 132
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$accent",
+          "radius": 3
+        },
+        {
+          "id": "title-slide-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 72,
+            "y": 186,
+            "w": 654,
+            "h": 78
+          },
+          "text": "把一件事说清楚",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 34.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "title-slide-subtitle-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 72,
+            "y": 279,
+            "w": 540,
+            "h": 42
+          },
+          "text": "证据在左，下一步在右",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "layout": "02_title_content",
+      "name": "Title and Content",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "title-content-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 90,
+            "w": 684,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 684,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "title-content-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "title-content-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 114,
+            "w": 684,
+            "h": 420
+          },
+          "text": "先写结论，再放能核对的证据。这一格只示范结构，不代表真实数据，换主题时这些字仍然可读。",
+          "textCapacity": {
+            "maxChars": 43,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "layout": "03_section_header",
+      "name": "Section Header",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "section-header-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 210,
+            "w": 48,
+            "h": 4.5
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$accent",
+          "radius": 2.25
+        },
+        {
+          "id": "section-header-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 240,
+            "w": 684,
+            "h": 72
+          },
+          "text": "这一章只讲一件事",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 33,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "section-header-desc-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 327,
+            "w": 576,
+            "h": 54
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "layout": "04_two_content",
+      "name": "Two Content",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "two-content-left-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 330,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "two-content-right-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 396,
+            "y": 102,
+            "w": 330,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "two-content-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "two-content-left-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 120,
+            "w": 294,
+            "h": 396
+          },
+          "text": "先写下现在的做法",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "two-content-right-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 414,
+            "y": 120,
+            "w": 294,
+            "h": 396
+          },
+          "text": "再写下打算改的做法",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "layout": "05_comparison",
+      "name": "Comparison",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "comparison-left-head",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 330,
+            "h": 48
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "radius": 9
+        },
+        {
+          "id": "comparison-right-head",
+          "type": "shape",
+          "bounds": {
+            "x": 396,
+            "y": 102,
+            "w": 330,
+            "h": 48
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "radius": 9
+        },
+        {
+          "id": "comparison-left-body",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 162,
+            "w": 330,
+            "h": 372
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "comparison-right-body",
+          "type": "shape",
+          "bounds": {
+            "x": 396,
+            "y": 162,
+            "w": 330,
+            "h": 372
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "comparison-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "comparison-left-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 114,
+            "w": 294,
+            "h": 24
+          },
+          "text": "改之前",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "comparison-left-content-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 180,
+            "w": 294,
+            "h": 336
+          },
+          "text": "先写下现在的做法",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "comparison-right-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 414,
+            "y": 114,
+            "w": 294,
+            "h": 24
+          },
+          "text": "改之后",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "comparison-right-content-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 414,
+            "y": 180,
+            "w": 294,
+            "h": 336
+          },
+          "text": "再写下打算改的做法",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "layout": "06_title_only",
+      "name": "Title Only",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "title-only-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 90,
+            "w": 684,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 684,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "title-only-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "07",
+      "layout": "07_blank",
+      "name": "Blank",
+      "background": "$paper",
+      "elements": []
+    },
+    {
+      "id": "08",
+      "layout": "08_content_caption",
+      "name": "Content with Caption",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "content-caption-main-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 468,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "content-caption-rail-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 528,
+            "y": 102,
+            "w": 198,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "content-caption-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "content-caption-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 120,
+            "w": 432,
+            "h": 396
+          },
+          "text": "先写结论，再放能核对的证据。这一格只示范结构",
+          "textCapacity": {
+            "maxChars": 22,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "content-caption-caption-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 546,
+            "y": 120,
+            "w": 162,
+            "h": 396
+          },
+          "text": "图注",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12.75,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "09",
+      "layout": "09_picture_caption",
+      "name": "Picture with Caption",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "picture-caption-image-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 42,
+            "w": 462,
+            "h": 492
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "picture-caption-rail-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 522,
+            "y": 42,
+            "w": 204,
+            "h": 492
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "picture-caption-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 540,
+            "y": 78,
+            "w": 168,
+            "h": 66
+          },
+          "text": "这一页只留一个",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 22.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "picture-caption-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 540,
+            "y": 168,
+            "w": 168,
+            "h": 258
+          },
+          "text": "图注",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "picture-caption-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 42,
+            "w": 462,
+            "h": 492
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "layout": "10_hero_statement",
+      "name": "Hero Statement",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "hero-statement-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 180,
+            "w": 66,
+            "h": 4.5
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$accent",
+          "radius": 2.25
+        },
+        {
+          "id": "hero-statement-message-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 219,
+            "w": 684,
+            "h": 126
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 36,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "hero-statement-subtitle-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 363,
+            "w": 540,
+            "h": 42
+          },
+          "text": "证据在左，下一步在右",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "layout": "11_three_card",
+      "name": "Three-Card Synthesis",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "three-card-panel-one",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 216,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "three-card-panel-two",
+          "type": "shape",
+          "bounds": {
+            "x": 276,
+            "y": 102,
+            "w": 216,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "three-card-panel-three",
+          "type": "shape",
+          "bounds": {
+            "x": 510,
+            "y": 102,
+            "w": 216,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "three-card-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-card-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 120,
+            "w": 180,
+            "h": 396
+          },
+          "text": "第一点只说一件事",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-card-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 294,
+            "y": 120,
+            "w": 180,
+            "h": 396
+          },
+          "text": "第二点拿证据",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-card-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 528,
+            "y": 120,
+            "w": 180,
+            "h": 396
+          },
+          "text": "第三点写下一步",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "layout": "12_kpi_grid",
+      "name": "KPI Grid",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "kpi-grid-card-one",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 333,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "kpi-grid-card-two",
+          "type": "shape",
+          "bounds": {
+            "x": 393,
+            "y": 102,
+            "w": 333,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "kpi-grid-card-three",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 210,
+            "w": 333,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "kpi-grid-card-four",
+          "type": "shape",
+          "bounds": {
+            "x": 393,
+            "y": 210,
+            "w": 333,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "kpi-grid-evidence-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 318,
+            "w": 684,
+            "h": 216
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "kpi-grid-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-grid-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 114,
+            "w": 297,
+            "h": 66
+          },
+          "text": "128",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 19.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-grid-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 411,
+            "y": 114,
+            "w": 297,
+            "h": 66
+          },
+          "text": "36",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 19.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-grid-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 222,
+            "w": 297,
+            "h": 66
+          },
+          "text": "4",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 19.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-grid-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 411,
+            "y": 222,
+            "w": 297,
+            "h": 66
+          },
+          "text": "12",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 19.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-grid-evidence-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 336,
+            "w": 648,
+            "h": 180
+          },
+          "text": "先写结论，再放能核对的证据。这一格只示范结构，不代表真实数据，换主题时这些字仍然可读。",
+          "textCapacity": {
+            "maxChars": 43,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "layout": "13_process_timeline",
+      "name": "Process Timeline",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "process-timeline-axis",
+          "type": "shape",
+          "bounds": {
+            "x": 127.5,
+            "y": 174,
+            "w": 513,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 3,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 513,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "process-timeline-node-one",
+          "type": "shape",
+          "bounds": {
+            "x": 118.5,
+            "y": 165,
+            "w": 18,
+            "h": 18
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 3
+          }
+        },
+        {
+          "id": "process-timeline-node-two",
+          "type": "shape",
+          "bounds": {
+            "x": 289.5,
+            "y": 165,
+            "w": 18,
+            "h": 18
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 3
+          }
+        },
+        {
+          "id": "process-timeline-node-three",
+          "type": "shape",
+          "bounds": {
+            "x": 460.5,
+            "y": 165,
+            "w": 18,
+            "h": 18
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 3
+          }
+        },
+        {
+          "id": "process-timeline-node-four",
+          "type": "shape",
+          "bounds": {
+            "x": 631.5,
+            "y": 165,
+            "w": 18,
+            "h": 18
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 3
+          }
+        },
+        {
+          "id": "process-timeline-takeaway-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 480,
+            "w": 684,
+            "h": 48
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "process-timeline-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 51,
+            "y": 216,
+            "w": 153,
+            "h": 240
+          },
+          "text": "发现",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 222,
+            "y": 216,
+            "w": 153,
+            "h": 240
+          },
+          "text": "判断",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 393,
+            "y": 216,
+            "w": 153,
+            "h": 240
+          },
+          "text": "行动",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 564,
+            "y": 216,
+            "w": 153,
+            "h": 240
+          },
+          "text": "复核",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-takeaway-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 492,
+            "w": 648,
+            "h": 24
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "14",
+      "layout": "14_stacked_split",
+      "name": "Stacked Split",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "stacked-split-top-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 684,
+            "h": 204
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "stacked-split-bottom-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 330,
+            "w": 684,
+            "h": 204
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "stacked-split-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "stacked-split-top-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 120,
+            "w": 648,
+            "h": 168
+          },
+          "text": "上半部分只留一个事实",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "stacked-split-bottom-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 348,
+            "w": 648,
+            "h": 168
+          },
+          "text": "下半部分写下一步",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "15",
+      "layout": "15_chart_insight",
+      "name": "Chart and Insight",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "chart-insight-chart-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 462,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "chart-insight-message-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 522,
+            "y": 102,
+            "w": 204,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "chart-insight-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chart-insight-chart-carrier",
+          "type": "chart",
+          "bounds": {
+            "x": 57,
+            "y": 117,
+            "w": 432,
+            "h": 402
+          },
+          "role": "content",
+          "chart": {
+            "kind": "column",
+            "categories": [
+              "Q1",
+              "Q2",
+              "Q3",
+              "Q4"
+            ],
+            "series": [
+              {
+                "name": "Actual",
+                "values": [
+                  42,
+                  55,
+                  63,
+                  78
+                ]
+              },
+              {
+                "name": "Plan",
+                "values": [
+                  48,
+                  58,
+                  68,
+                  74
+                ]
+              }
+            ],
+            "colors": [
+              "$accent",
+              "$muted"
+            ],
+            "showLegend": true,
+            "grid": "solid"
+          }
+        },
+        {
+          "id": "chart-insight-message-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 537,
+            "y": 117,
+            "w": 174,
+            "h": 342
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chart-insight-source-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 537,
+            "y": 480,
+            "w": 174,
+            "h": 24
+          },
+          "text": "示例来源",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9.75,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "16",
+      "layout": "16_table_summary",
+      "name": "Table and Summary",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "table-summary-table-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 42,
+            "y": 102,
+            "w": 492,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "table-summary-message-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 552,
+            "y": 102,
+            "w": 174,
+            "h": 432
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$surface",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 9
+        },
+        {
+          "id": "table-summary-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 42,
+            "y": 27,
+            "w": 684,
+            "h": 48
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "table-summary-table-carrier",
+          "type": "table",
+          "bounds": {
+            "x": 57,
+            "y": 117,
+            "w": 462,
+            "h": 402
+          },
+          "role": "content",
+          "table": {
+            "columns": [
+              0.42857142857142855,
+              0.2857142857142857,
+              0.2857142857142857
+            ],
+            "rowHeights": [
+              54,
+              87,
+              87,
+              87,
+              87
+            ],
+            "rows": [
+              [
+                {
+                  "text": "指标",
+                  "bold": true,
+                  "align": "left"
+                },
+                {
+                  "text": "现状",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "目标",
+                  "bold": true,
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "采用",
+                  "align": "left"
+                },
+                {
+                  "text": "68%",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "80%",
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "周期",
+                  "align": "left"
+                },
+                {
+                  "text": "12 d",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "8 d",
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "质量",
+                  "align": "left"
+                },
+                {
+                  "text": "94%",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "97%",
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "成本",
+                  "align": "left"
+                },
+                {
+                  "text": "1.08",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "1.00",
+                  "align": "right"
+                }
+              ]
+            ],
+            "fontSize": 12.75,
+            "fontFamily": "$cjk",
+            "color": "$ink",
+            "fill": "$paper",
+            "border": {
+              "color": "$line",
+              "width": 0.75
+            },
+            "header": {
+              "bold": true,
+              "color": "$ink",
+              "fill": "$surface"
+            }
+          }
+        },
+        {
+          "id": "table-summary-message-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 567,
+            "y": 117,
+            "w": 144,
+            "h": 342
+          },
+          "text": "先看变化",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "table-summary-source-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 567,
+            "y": 480,
+            "w": 144,
+            "h": 24
+          },
+          "text": "示例来源",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9.75,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    }
+  ]
+}

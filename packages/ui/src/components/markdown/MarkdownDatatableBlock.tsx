@@ -28,20 +28,13 @@
 
 import * as React from 'react'
 import niceTicks from 'nice-ticks'
-import { ArrowUpDown, Check, ChevronRight, Group, ListFilter, Maximize2, Table2 } from 'lucide-react'
+import { ArrowUpDown, Check, ChevronRight, Group, ListFilter, Maximize2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
 import { DataTableOverlay } from '../overlay/DataTableOverlay'
 import { useScrollFade } from './useScrollFade'
+import { compareDatatableText, isDatatableColumnSortable } from './datatable-sort'
 import { TableExportDropdown } from './TableExportDropdown'
-import {
-  PREVIEW_OVERLAY_ACTION,
-  PreviewBlockAction,
-  PreviewBlockError,
-  PreviewBlockFrame,
-  PreviewBlockHeader,
-  PreviewBlockLoading,
-} from './PreviewBlockChrome'
 import { usePlatform } from '../../context/PlatformContext'
 import {
   DropdownMenu,
@@ -81,11 +74,8 @@ type SortDir = 'asc' | 'desc' | null
 
 // ── Cell formatting ──────────────────────────────────────────────────────────
 
-/** Badge chips: 20px, radius-xs, label-sm on a status tint (same chips as the transcript). */
-const BADGE_CHIP = 'inline-flex h-5 items-center whitespace-nowrap rounded-xs px-1.5 align-middle text-label-sm'
-
-function formatCell(value: unknown, type: ColumnDef['type'] | undefined, labels: { yes: string; no: string }): React.ReactNode {
-  if (value === null || value === undefined) return <span className="text-tertiary">—</span>
+function formatCell(value: unknown, type?: ColumnDef['type']): React.ReactNode {
+  if (value === null || value === undefined) return <span className="text-muted-foreground/40">—</span>
   switch (type) {
     case 'currency': {
       const num = typeof value === 'number' ? value : Number(value)
@@ -105,15 +95,15 @@ function formatCell(value: unknown, type: ColumnDef['type'] | undefined, labels:
       return <span className="tabular-nums">{n.toLocaleString()}</span>
     }
     case 'boolean':
-      return value ? <span className="text-success">{labels.yes}</span> : <span className="text-tertiary">{labels.no}</span>
+      return value ? <span className="text-success">Yes</span> : <span className="text-muted-foreground">No</span>
     case 'badge': {
       const s = String(value).toLowerCase()
       const color = s === 'active' || s === 'passing' || s === 'success' || s === 'done'
-        ? 'bg-success-tint text-success'
+        ? 'bg-success/10 text-success'
         : s === 'revoked' || s === 'failed' || s === 'error'
-        ? 'bg-destructive-tint text-destructive'
-        : 'bg-fill-hover text-secondary'
-      return <span className={cn(BADGE_CHIP, color)}>{String(value)}</span>
+        ? 'bg-destructive/10 text-destructive'
+        : 'bg-muted text-muted-foreground'
+      return <span className={cn('inline-block px-1.5 py-0.5 rounded text-[11px] font-medium', color)}>{String(value)}</span>
     }
     default:
       return String(value)
@@ -130,7 +120,7 @@ function colAlign(type?: ColumnDef['type'], explicit?: string): string {
 
 function SortIcon({ dir }: { dir: SortDir }) {
   return (
-    <svg aria-hidden className={cn('size-3 shrink-0', dir ? 'text-secondary' : 'text-disabled')} viewBox="0 0 16 16" fill="currentColor">
+    <svg className={cn('w-3 h-3 shrink-0', dir ? 'opacity-60' : 'opacity-20')} viewBox="0 0 16 16" fill="currentColor">
       {dir === 'asc' ? (
         <path d="M8 3l4 5H4l4-5z" />
       ) : dir === 'desc' ? (
@@ -301,10 +291,12 @@ class DatatableErrorBoundary extends React.Component<
 
 export interface MarkdownDatatableBlockProps {
   code: string
+  renderHeader?: (columnKey: string) => React.ReactNode
+  renderCell?: (row: Record<string, unknown>, columnKey: string) => React.ReactNode
   className?: string
 }
 
-export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlockProps) {
+export function MarkdownDatatableBlock({ code, className, renderCell, renderHeader }: MarkdownDatatableBlockProps) {
   const { t } = useTranslation()
   const { onReadFile } = usePlatform()
 
@@ -389,11 +381,18 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     })
   }, [])
 
+  const sortableColumnKeys = React.useMemo(() => {
+    if (!parsed) return new Set<string>()
+    return new Set(parsed.columns
+      .filter(column => isDatatableColumnSortable(parsed.rows.map(row => row[column.key])))
+      .map(column => column.key))
+  }, [parsed])
+
   const processedRows = React.useMemo(() => {
     if (!parsed) return []
     let rows = [...parsed.rows]
     // Sort
-    if (sortKey && sortDir) {
+    if (sortKey && sortDir && sortableColumnKeys.has(sortKey)) {
       rows.sort((a, b) => {
         const av = a[sortKey]
         const bv = b[sortKey]
@@ -402,12 +401,12 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
         if (bv === null || bv === undefined) return -1
         const cmp = typeof av === 'number' && typeof bv === 'number'
           ? av - bv
-          : String(av).localeCompare(String(bv))
+          : compareDatatableText(String(av), String(bv))
         return sortDir === 'asc' ? cmp : -cmp
       })
     }
     return rows
-  }, [parsed, sortKey, sortDir])
+  }, [parsed, sortKey, sortDir, sortableColumnKeys])
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
@@ -449,27 +448,27 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     setCollapsedGroups(new Set())
   }, [])
 
-  // A file-backed table whose read hasn't started yet (the effect runs after the first paint) shows
-  // the loading well instead of flashing the JSON fallback for a frame.
-  const awaitingFile = !!spec?.src && !!onReadFile && !fileData && !fileError
-
   // Loading state for file-backed datatable
-  if ((spec?.src && fileLoading) || awaitingFile) {
+  if (spec?.src && fileLoading) {
     return (
-      <PreviewBlockFrame className={className}>
-        <PreviewBlockHeader icon={<Table2 />} title={spec?.title || t('datatable.defaultTitle')} />
-        <PreviewBlockLoading className="py-8">{t('datatable.loadingData')}</PreviewBlockLoading>
-      </PreviewBlockFrame>
+      <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
+        <div className="px-3 py-2 bg-muted/50 border-b">
+          <span className="text-[12px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
+        </div>
+        <div className="py-8 text-center text-muted-foreground text-[13px]">{t('datatable.loadingData')}</div>
+      </div>
     )
   }
 
   // Error state for file-backed datatable
   if (spec?.src && fileError) {
     return (
-      <PreviewBlockFrame className={className}>
-        <PreviewBlockHeader icon={<Table2 />} title={spec.title || t('datatable.defaultTitle')} />
-        <PreviewBlockError>{fileError}</PreviewBlockError>
-      </PreviewBlockFrame>
+      <div className={cn('rounded-[8px] overflow-hidden border bg-muted/10', className)}>
+        <div className="px-3 py-2 bg-muted/50 border-b">
+          <span className="text-[12px] text-muted-foreground font-medium">{spec.title || t('datatable.defaultTitle')}</span>
+        </div>
+        <div className="py-6 text-center text-destructive/70 text-[13px]">{fileError}</div>
+      </div>
     )
   }
 
@@ -480,59 +479,71 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
   const fallback = <CodeBlock code={code} language="json" mode="full" className={className} />
 
   const groupColumnLabel = groupKey ? parsed.columns.find((c) => c.key === groupKey)?.label ?? groupKey : ''
-  const booleanLabels = { yes: t('datatable.yes'), no: t('datatable.no') }
 
-  // Rows: hairlines, hover fill in instantly and out over 100ms (same table language as Markdown tables)
   const renderRows = (rows: Record<string, unknown>[]) =>
     rows.map((row, i) => (
-      <tr key={i} className="border-b border-subtle last:border-0 transition-colors duration-micro ease-out-subtle hover:bg-fill-hover hover:duration-instant">
+      <tr key={i} className="border-b border-foreground/[0.03] last:border-0 hover:bg-foreground/[0.015] transition-colors">
         {parsed.columns.map((col) => (
           <td key={col.key} className={cn('py-2 px-3 whitespace-nowrap', colAlign(col.type, col.align))}>
-            {formatCell(row[col.key], col.type, booleanLabels)}
+            {renderCell ? renderCell(row, col.key) : formatCell(row[col.key], col.type)}
           </td>
         ))}
       </tr>
     ))
 
+  // Avoid nested vertical scroll in chat; keep horizontal scroll for wide tables.
   const tableContent = (maxHeight?: boolean, scrollable?: boolean) => (
     <div
       ref={scrollable ? scrollRef : undefined}
-      className={cn(maxHeight && 'max-h-[400px]', 'overflow-y-auto')}
+      className={cn(
+        maxHeight ? 'max-h-[400px] overflow-y-auto' : 'overflow-y-visible',
+        'overflow-x-auto',
+      )}
       style={scrollable ? {
-        overflowX: 'auto',
         maskImage,
         WebkitMaskImage: maskImage,
-      } : { overflowX: 'auto' }}
+      } : undefined}
     >
-      <table className="w-max min-w-full text-label text-foreground">
+      <table className="w-max min-w-full text-[13px]">
         <thead>
-          <tr className="border-b border-subtle">
-            {parsed.columns.map((col) => (
+          <tr className="border-b border-foreground/[0.06] bg-foreground/[0.02]">
+            {parsed.columns.map((col) => {
+              const sortable = sortableColumnKeys.has(col.key)
+              return (
               <th
                 key={col.key}
-                className={cn('py-2 px-3 cursor-pointer select-none whitespace-nowrap text-label-sm font-semibold', colAlign(col.type, col.align))}
-                onClick={() => handleSort(col.key)}
+                className={cn('py-2 px-3 text-[12px] select-none whitespace-nowrap', sortable && 'cursor-pointer', colAlign(col.type, col.align))}
+                onClick={sortable ? () => handleSort(col.key) : undefined}
+                tabIndex={sortable ? 0 : undefined}
+                aria-sort={sortable && sortKey === col.key && sortDir ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                onKeyDown={sortable ? event => {
+                  if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault()
+                    handleSort(col.key)
+                  }
+                } : undefined}
               >
-                <span className="inline-flex items-center gap-1 text-secondary transition-colors duration-micro ease-out-subtle hover:text-foreground hover:duration-instant">
-                  {col.label}
-                  <SortIcon dir={sortKey === col.key ? sortDir : null} />
+                <span className={cn('inline-flex items-center gap-1 font-medium text-muted-foreground', sortable && 'hover:text-foreground transition-colors')}>
+                  {renderHeader ? renderHeader(col.key) : col.label}
+                  {sortable && <SortIcon dir={sortKey === col.key ? sortDir : null} />}
                 </span>
               </th>
-            ))}
+              )
+            })}
           </tr>
         </thead>
         <tbody>
           {groupedData ? groupedData.map((group) => (
             <React.Fragment key={group.value}>
               <tr
-                className="cursor-pointer select-none bg-fill-hover transition-colors duration-micro ease-out-subtle hover:bg-fill-pressed hover:duration-instant"
+                className="cursor-pointer select-none"
                 onClick={() => toggleCollapsed(group.value)}
               >
-                <td colSpan={parsed.columns.length} className="py-2 px-3 border-b border-subtle">
-                  <span className="inline-flex items-center gap-2 text-label-sm font-medium text-secondary">
-                    <ChevronRight className={cn('size-3 text-tertiary transition-transform duration-(--spring-snap-dur) ease-(--spring-snap)', !collapsedGroups.has(group.value) && 'rotate-90')} />
+                <td colSpan={parsed.columns.length} className="py-2 px-3 bg-foreground/[0.03] border-b border-foreground/[0.06]">
+                  <span className="inline-flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+                    <ChevronRight className={cn('w-3 h-3 transition-transform', !collapsedGroups.has(group.value) && 'rotate-90')} />
                     {groupColumnLabel}: {group.value}
-                    <span className="text-tertiary tabular-nums">({group.rows.length})</span>
+                    <span className="text-muted-foreground/50">({group.rows.length})</span>
                   </span>
                 </td>
               </tr>
@@ -540,8 +551,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
             </React.Fragment>
           )) : processedRows.length ? renderRows(processedRows) : (
             <tr>
-              <td colSpan={parsed.columns.length} className="py-6 text-center text-label text-tertiary">
-                {t('datatable.noRows')}
+              <td colSpan={parsed.columns.length} className="py-6 text-center text-muted-foreground text-[13px]">
+                No rows
               </td>
             </tr>
           )}
@@ -550,49 +561,55 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
     </div>
   )
 
-  // Inline: a header icon button. Overlay (alwaysVisible): the 28px variant beside the overlay's
-  // own controls. Active sort/group shows as an accent tint on the button.
   const renderControlsDropdown = (alwaysVisible?: boolean) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <PreviewBlockAction
-          aria-label={t('table.tableControls')}
-          icon={<ListFilter />}
+        <button
           className={cn(
-            alwaysVisible && PREVIEW_OVERLAY_ACTION,
-            hasActiveControls && 'bg-accent-tint text-accent hover:bg-accent-tint-strong hover:text-accent data-[state=open]:bg-accent-tint-strong data-[state=open]:text-accent',
+            'p-1 rounded-[6px] transition-all select-none',
+            'bg-background shadow-minimal',
+            'data-[state=open]:opacity-100',
+            hasActiveControls
+              ? 'opacity-100 bg-accent/5 text-accent shadow-tinted'
+              : alwaysVisible
+                ? 'opacity-70 hover:opacity-100 transition-opacity'
+                : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-foreground',
+            'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100',
           )}
-        />
+          title={t('table.tableControls')}
+        >
+          <ListFilter className="w-3.5 h-3.5" />
+        </button>
       </DropdownMenuTrigger>
       <StyledDropdownMenuContent sideOffset={6} align="end" className="min-w-36" style={{ zIndex: 'var(--z-floating-menu, 400)' }}>
         {/* Sort sub-menu */}
-        <DropdownMenuSub>
+        {sortableColumnKeys.size > 0 && <DropdownMenuSub>
           <StyledDropdownMenuSubTrigger>
             <ArrowUpDown />
             <span className="flex-1">{t('table.sortBy')}</span>
-            {sortKey && sortDir && <Check className="size-3 text-accent" />}
+            {sortKey && sortDir && <Check className="w-3 h-3 text-accent" />}
           </StyledDropdownMenuSubTrigger>
           <StyledDropdownMenuSubContent style={{ zIndex: 'calc(var(--z-floating-menu, 400) + 1)' }}>
-            {parsed.columns.map((col) => {
+            {parsed.columns.filter(col => sortableColumnKeys.has(col.key)).map((col) => {
               const isActive = sortKey === col.key && sortDir !== null
               return (
                 <StyledDropdownMenuItem
                   key={`sort-${col.key}`}
                   onSelect={(e) => { e.preventDefault(); handleSort(col.key) }}
                 >
-                  <span className={cn('flex-1', isActive && 'text-accent')}>{col.label}</span>
+                  <span className={cn('flex-1', isActive && 'text-accent font-medium')}>{col.label}</span>
                   {isActive && <SortIcon dir={sortDir} />}
                 </StyledDropdownMenuItem>
               )
             })}
           </StyledDropdownMenuSubContent>
-        </DropdownMenuSub>
+        </DropdownMenuSub>}
         {/* Group sub-menu */}
         <DropdownMenuSub>
           <StyledDropdownMenuSubTrigger>
             <Group />
             <span className="flex-1">{t('table.groupBy')}</span>
-            {groupKey && <Check className="size-3 text-accent" />}
+            {groupKey && <Check className="w-3 h-3 text-accent" />}
           </StyledDropdownMenuSubTrigger>
           <StyledDropdownMenuSubContent style={{ zIndex: 'calc(var(--z-floating-menu, 400) + 1)' }}>
             {parsed.columns.map((col) => {
@@ -604,8 +621,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                 return (
                   <DropdownMenuSub key={`group-${col.key}`}>
                     <StyledDropdownMenuSubTrigger>
-                      <span className={cn('flex-1', isActive && 'text-accent')}>{col.label}</span>
-                      {isActive && <Check className="size-3 text-accent" />}
+                      <span className={cn('flex-1', isActive && 'text-accent font-medium')}>{col.label}</span>
+                      {isActive && <Check className="w-3 h-3 text-accent" />}
                     </StyledDropdownMenuSubTrigger>
                     <StyledDropdownMenuSubContent style={{ zIndex: 'calc(var(--z-floating-menu, 400) + 2)' }}>
                       {opts.map((opt) => {
@@ -624,8 +641,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                               setCollapsedGroups(new Set())
                             }}
                           >
-                            <span className={cn('flex-1', optActive && 'text-accent')}>{opt.label}</span>
-                            {optActive && <Check className="size-3.5 text-accent" />}
+                            <span className={cn('flex-1', optActive && 'text-accent font-medium')}>{opt.label}</span>
+                            {optActive && <Check className="w-3.5 h-3.5 text-accent" />}
                           </StyledDropdownMenuItem>
                         )
                       })}
@@ -649,8 +666,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                     setCollapsedGroups(new Set())
                   }}
                 >
-                  <span className={cn('flex-1', isActive && 'text-accent')}>{col.label}</span>
-                  {isActive && <Check className="size-3.5 text-accent" />}
+                  <span className={cn('flex-1', isActive && 'text-accent font-medium')}>{col.label}</span>
+                  {isActive && <Check className="w-3.5 h-3.5 text-accent" />}
                 </StyledDropdownMenuItem>
               )
             })}
@@ -671,20 +688,37 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
 
   return (
     <DatatableErrorBoundary fallback={fallback}>
-      <PreviewBlockFrame className={className}>
-        {/* Header: title · table controls · fullscreen */}
-        <PreviewBlockHeader icon={<Table2 />} title={parsed.title || t('datatable.defaultTitle')}>
+      <div className={cn('relative group rounded-[8px] overflow-hidden border bg-muted/10', className)}>
+        {/* Control button */}
+        <div className="absolute top-[7px] right-10 z-10">
           {renderControlsDropdown()}
-          <PreviewBlockAction
-            aria-label={t('common.viewFullscreen')}
-            icon={<Maximize2 />}
-            onClick={() => setIsFullscreen(true)}
-          />
-        </PreviewBlockHeader>
+        </div>
 
-        {/* Table with max height and scroll fade */}
-        {tableContent(true, true)}
-      </PreviewBlockFrame>
+        {/* Expand button */}
+        <button
+          onClick={() => setIsFullscreen(true)}
+          className={cn(
+            "absolute top-[7px] right-2 p-1 rounded-[6px] transition-all z-10 select-none",
+            "bg-background shadow-minimal",
+            hasActiveControls ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            "text-muted-foreground/50 hover:text-foreground",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
+          )}
+          title={t('common.viewFullscreen')}
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+
+        {/* Header */}
+        <div className="px-3 py-2 bg-muted/50 border-b">
+          <span className="text-[12px] text-muted-foreground font-medium">
+            {parsed.title || t('datatable.defaultTitle')}
+          </span>
+        </div>
+
+        {/* Expand with content; horizontal scroll only (no nested vertical scroll in chat) */}
+        {tableContent(false, true)}
+      </div>
 
       {/* Fullscreen overlay */}
       <DataTableOverlay
@@ -693,14 +727,14 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
         title={parsed.title || t('datatable.defaultTitle')}
         subtitle={t('datatable.rowCount', { count: parsed.rows.length })}
         headerActions={
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             {renderControlsDropdown(true)}
             <TableExportDropdown columns={parsed.columns} rows={parsed.rows} filename={parsed.title || t('datatable.defaultTitle')} />
           </div>
         }
       >
         <div className="px-6">
-          <div className="overflow-hidden rounded-lg bg-raised shadow-elev-1">
+          <div className="bg-background shadow-minimal rounded-[12px] overflow-hidden">
             {tableContent(false)}
           </div>
         </div>

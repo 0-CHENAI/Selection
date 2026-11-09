@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'bun:test';
 import { evaluateConditions } from './conditions.ts';
-import { matcherMatches, matcherMatchesSdk } from './utils.ts';
+import { matcherMatches } from './utils.ts';
 import type { AutomationCondition } from './types.ts';
 import type { ConditionContext } from './conditions.ts';
 
@@ -216,7 +216,7 @@ describe('evaluateConditions', () => {
       });
     });
 
-    describe('contains (array membership)', () => {
+    describe('contains (array membership or substring)', () => {
       it('should pass when array contains value', () => {
         const conditions: AutomationCondition[] = [
           { condition: 'state', field: 'labels', contains: 'urgent' },
@@ -231,11 +231,37 @@ describe('evaluateConditions', () => {
         expect(evaluateConditions(conditions, ctx({ labels: ['low', 'bug'] }))).toBe(false);
       });
 
-      it('should fail when field is not an array', () => {
+      it('should pass when a string field contains the substring', () => {
         const conditions: AutomationCondition[] = [
           { condition: 'state', field: 'labels', contains: 'urgent' },
         ];
-        expect(evaluateConditions(conditions, ctx({ labels: 'urgent' }))).toBe(false);
+        expect(evaluateConditions(conditions, ctx({ labels: 'urgent' }))).toBe(true);
+      });
+
+      it('should match dotted paths and command substrings', () => {
+        const conditions: AutomationCondition[] = [
+          { condition: 'state', field: 'tool_input.command', contains: 'rm -rf' },
+        ];
+        expect(evaluateConditions(conditions, ctx({
+          tool_input: { command: 'rm -rf /tmp/foo' },
+        }))).toBe(true);
+        expect(evaluateConditions(conditions, ctx({
+          tool_input: { command: 'ls /tmp' },
+        }))).toBe(false);
+      });
+
+      it('should not follow prototype-polluting paths', () => {
+        const conditions: AutomationCondition[] = [
+          { condition: 'state', field: '__proto__.polluted', contains: 'x' },
+        ];
+        expect(evaluateConditions(conditions, ctx({ labels: ['urgent'] }))).toBe(false);
+      });
+
+      it('should fail when field is neither array nor string', () => {
+        const conditions: AutomationCondition[] = [
+          { condition: 'state', field: 'labels', contains: 'urgent' },
+        ];
+        expect(evaluateConditions(conditions, ctx({ labels: 12 }))).toBe(false);
       });
     });
 
@@ -495,54 +521,5 @@ describe('matcherMatches with conditions', () => {
       actions: [{ type: 'prompt' as const, prompt: 'test' }],
     };
     expect(matcherMatches(matcher, 'SessionStatusChange', { newState: 'done' })).toBe(true);
-  });
-});
-
-describe('matcherMatchesSdk with conditions', () => {
-  it('should pass when SDK matcher and conditions both pass', () => {
-    const matcher = {
-      matcher: '^Bash$',
-      conditions: [
-        { condition: 'state' as const, field: 'hook_event_name', value: 'PreToolUse' },
-      ],
-      actions: [{ type: 'prompt' as const, prompt: 'test' }],
-    };
-
-    expect(matcherMatchesSdk(matcher, 'PreToolUse', {
-      hook_event_name: 'PreToolUse',
-      tool_name: 'Bash',
-      tool_input: { command: 'echo hi' },
-    })).toBe(true);
-  });
-
-  it('should fail when SDK matcher passes but conditions fail', () => {
-    const matcher = {
-      matcher: '^Bash$',
-      conditions: [
-        { condition: 'state' as const, field: 'hook_event_name', value: 'PostToolUse' },
-      ],
-      actions: [{ type: 'prompt' as const, prompt: 'test' }],
-    };
-
-    expect(matcherMatchesSdk(matcher, 'PreToolUse', {
-      hook_event_name: 'PreToolUse',
-      tool_name: 'Bash',
-      tool_input: { command: 'echo hi' },
-    })).toBe(false);
-  });
-
-  it('should fail when SDK matcher does not match regardless of conditions', () => {
-    const matcher = {
-      matcher: '^Read$',
-      conditions: [
-        { condition: 'state' as const, field: 'tool_name', value: 'Read' },
-      ],
-      actions: [{ type: 'prompt' as const, prompt: 'test' }],
-    };
-
-    expect(matcherMatchesSdk(matcher, 'PreToolUse', {
-      hook_event_name: 'PreToolUse',
-      tool_name: 'Bash',
-    })).toBe(false);
   });
 });

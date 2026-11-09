@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { ComponentEntry } from './types'
-import { Markdown, CollapsibleMarkdownProvider, CodeBlock, InlineCode, MarkdownDatatableBlock, MarkdownSpreadsheetBlock, MarkdownImageBlock, ImageCardStack, PlatformProvider, RunCommandProvider } from '@craft-agent/ui'
+import { Markdown, CollapsibleMarkdownProvider, CodeBlock, InlineCode, MarkdownDatatableBlock, MarkdownSpreadsheetBlock, MarkdownImageBlock, ImageCardStack, PlatformProvider } from '@craft-agent/ui'
 
 const sampleMarkdown = `# Welcome to Markdown
 
@@ -248,52 +248,7 @@ function ImageCardStackPlayground({
   )
 }
 
-const runnableMarkdown = [
-  'Shell and console blocks get **Run in background** where the transcript provides a runner:',
-  '',
-  '```console',
-  '$ list-md.sh apps/electron -r | head -3',
-  'apps/electron/CLAUDE.md',
-  'apps/electron/README.md',
-  '```',
-  '',
-  '```bash',
-  'bun test src/labels',
-  '```',
-  '',
-  'Other languages do not:',
-  '',
-  '```ts',
-  "const x = 'no play button'",
-  '```',
-].join('\n')
-
-/** Code blocks inside a RunCommandProvider (the chat transcript in the app) */
-function RunnableCodeBlocks() {
-  const [ran, setRan] = React.useState<string[]>([])
-  return (
-    <RunCommandProvider value={(command) => setRan(previous => [...previous, command])}>
-      <div className="flex flex-col gap-3 p-4">
-        <Markdown mode="full">{runnableMarkdown}</Markdown>
-        <div className="text-xs text-muted-foreground" data-testid="ran-commands">
-          {ran.length ? `Ran: ${ran.map(c => JSON.stringify(c)).join(', ')}` : 'Nothing run yet'}
-        </div>
-      </div>
-    </RunCommandProvider>
-  )
-}
-
 export const markdownComponents: ComponentEntry[] = [
-  {
-    id: 'markdown-run-command',
-    name: 'Code blocks · Run in background',
-    category: 'Markdown',
-    description: 'Shell/console code blocks show a play button when a RunCommandProvider supplies a runner',
-    component: RunnableCodeBlocks,
-    layout: 'top',
-    props: [],
-    variants: [{ name: 'Default', props: {} }],
-  },
   {
     id: 'markdown',
     name: 'Markdown',

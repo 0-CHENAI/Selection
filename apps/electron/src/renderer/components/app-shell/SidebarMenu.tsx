@@ -12,21 +12,17 @@
  * - "Configure Statuses" (for allSessions/status/flagged items) - triggers EditPopover callback
  * - "Add Source" (for sources) - triggers EditPopover callback
  * - "Add Skill" (for skills) - triggers EditPopover callback
- * - "Open in New Window" (for newSession only) - uses deep link
  */
 
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import {
-  AppWindow,
   CheckCheck,
   Settings2,
   Plus,
   Trash2,
-  ExternalLink,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
-import { getDocUrl, type DocFeature } from '@craft-agent/shared/docs/doc-links'
 
 export type SidebarMenuType = 'allSessions' | 'flagged' | 'status' | 'sources' | 'skills' | 'automations' | 'projects' | 'labels' | 'views' | 'newSession'
 
@@ -92,34 +88,23 @@ export function SidebarMenu({
   // Get menu components from context (works with both DropdownMenu and ContextMenu)
   const { MenuItem, Separator } = useMenuComponents()
 
-  // New Session: only shows "Open in New Window"
-  if (type === 'newSession') {
+  // Ordinary sessions retain the unrelated "Mark All Read" action without
+  // exposing the removed status configuration workflow.
+  if (type === 'allSessions' && onMarkAllRead) {
     return (
-      <MenuItem onClick={() => window.electronAPI.openUrl('craftagents://action/new-session?window=focused')}>
-        <AppWindow className="h-3.5 w-3.5" />
-        <span className="flex-1">{t("sidebarMenu.openInNewWindow")}</span>
+      <MenuItem onClick={onMarkAllRead}>
+        <CheckCheck className="h-3.5 w-3.5" />
+        <span className="flex-1">{t("sidebarMenu.markAllRead")}</span>
       </MenuItem>
     )
   }
 
-  // All Sessions / Status / Flagged: show "Configure Statuses" (+ "Mark All Read" for allSessions)
-  if ((type === 'allSessions' || type === 'status' || type === 'flagged') && onConfigureStatuses) {
+  if ((type === 'status' || type === 'flagged') && onConfigureStatuses) {
     return (
-      <>
-        {type === 'allSessions' && onMarkAllRead && (
-          <>
-            <MenuItem onClick={onMarkAllRead}>
-              <CheckCheck className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebarMenu.markAllRead")}</span>
-            </MenuItem>
-            <Separator />
-          </>
-        )}
-        <MenuItem onClick={onConfigureStatuses}>
-          <Settings2 className="h-3.5 w-3.5" />
-          <span className="flex-1">{t("sidebarMenu.configureStatuses")}</span>
-        </MenuItem>
-      </>
+      <MenuItem onClick={onConfigureStatuses}>
+        <Settings2 className="h-3.5 w-3.5" />
+        <span className="flex-1">{t("sidebarMenu.configureStatuses")}</span>
+      </MenuItem>
     )
   }
 
@@ -177,22 +162,8 @@ export function SidebarMenu({
     )
   }
 
-  // Sources: show "Add Source" and "Learn More"
+  // Sources: show "Add Source"
   if (type === 'sources') {
-    // Determine which docs page to open based on source type filter
-    const docFeature: DocFeature = sourceType
-      ? `sources-${sourceType}` as DocFeature
-      : 'sources'
-
-    // Display label varies by source type
-    const learnMoreLabel = sourceType === 'api'
-      ? t('sidebarMenu.learnMoreApis')
-      : sourceType === 'mcp'
-        ? t('sidebarMenu.learnMoreMcp')
-        : sourceType === 'local'
-          ? t('sidebarMenu.learnMoreLocalFolders')
-          : t('sidebarMenu.learnMoreSources')
-
     return (
       <>
         {onAddSource && (
@@ -201,11 +172,6 @@ export function SidebarMenu({
             <span className="flex-1">{t("sidebarMenu.addSource")}</span>
           </MenuItem>
         )}
-        <Separator />
-        <MenuItem onClick={() => window.electronAPI.openUrl(getDocUrl(docFeature))}>
-          <ExternalLink className="h-3.5 w-3.5" />
-          <span className="flex-1">{learnMoreLabel}</span>
-        </MenuItem>
       </>
     )
   }
@@ -234,7 +200,7 @@ export function SidebarMenu({
     )
   }
 
-  // Automations: show "Add Automation" and "Learn More"
+  // Automations: show "Add Automation"
   if (type === 'automations') {
     return (
       <>
@@ -244,11 +210,6 @@ export function SidebarMenu({
             <span className="flex-1">{t("sidebarMenu.addAutomation")}</span>
           </MenuItem>
         )}
-        <Separator />
-        <MenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('automations'))}>
-          <ExternalLink className="h-3.5 w-3.5" />
-          <span className="flex-1">{t("sidebarMenu.learnMoreAutomations")}</span>
-        </MenuItem>
       </>
     )
   }

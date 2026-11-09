@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
+import { build } from 'esbuild';
+import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled, isTasksOrchestrateEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -7,6 +8,7 @@ const ORIGINAL_ENV = {
   CRAFT_FEATURE_DEVELOPER_FEEDBACK: process.env.CRAFT_FEATURE_DEVELOPER_FEEDBACK,
   CRAFT_FEATURE_CRAFT_AGENTS_CLI: process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI,
   CRAFT_FEATURE_EMBEDDED_SERVER: process.env.CRAFT_FEATURE_EMBEDDED_SERVER,
+  CRAFT_FEATURE_TASKS_ORCHESTRATE: process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE,
 };
 
 afterEach(() => {
@@ -24,6 +26,30 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.CRAFT_FEATURE_EMBEDDED_SERVER;
   else process.env.CRAFT_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER;
+
+  if (ORIGINAL_ENV.CRAFT_FEATURE_TASKS_ORCHESTRATE === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+  else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = ORIGINAL_ENV.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+
+});
+
+describe('renderer build flags without a process global', () => {
+  for (const [override, preview, enabled] of [
+    ['1', '', true], ['', '1', true], ['0', '1', false], ['', '', true],
+  ] as const) {
+    it(`honors orchestration=${override || 'unset'}, preview=${preview || 'unset'}`, async () => {
+      const result = await build({
+        entryPoints: [new URL('../feature-flags.ts', import.meta.url).pathname],
+        bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'flags',
+        define: {
+          'process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE': JSON.stringify(override),
+          'process.env.CRAFT_SWARM_PREVIEW_BUILD': JSON.stringify(preview),
+        },
+      });
+      const flags = new Function('process', `${result.outputFiles[0]!.text}; return flags;`)(undefined);
+      expect(flags.isTasksOrchestrateEnabled()).toBe(enabled);
+      expect(flags.isSwarmPreviewBuild()).toBe(preview === '1');
+    });
+  }
 });
 
 describe('feature-flags runtime helpers', () => {
@@ -99,4 +125,20 @@ describe('feature-flags runtime helpers', () => {
 
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
+
+  it('isTasksOrchestrateEnabled is available in standard builds', () => {
+    delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    expect(isTasksOrchestrateEnabled()).toBe(true);
+  });
+
+  it('isTasksOrchestrateEnabled honors explicit override true', () => {
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    expect(isTasksOrchestrateEnabled()).toBe(true);
+  });
+
+  it('isTasksOrchestrateEnabled honors explicit override false', () => {
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '0';
+    expect(isTasksOrchestrateEnabled()).toBe(false);
+  });
+
 });

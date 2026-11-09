@@ -15,6 +15,7 @@ export interface FilterableSelectPopoverProps<T> {
   items: T[]
   getKey: (item: T) => string
   getLabel: (item: T) => string
+  getSearchText?: (item: T) => string
   isSelected: (item: T) => boolean
   onToggle: (item: T) => void
   renderItem?: (item: T, state: FilterableSelectRenderState, index: number) => React.ReactNode
@@ -40,6 +41,7 @@ export function FilterableSelectPopover<T>({
   items,
   getKey,
   getLabel,
+  getSearchText,
   isSelected,
   onToggle,
   renderItem,
@@ -61,8 +63,8 @@ export function FilterableSelectPopover<T>({
   const filteredItems = React.useMemo(() => {
     const query = filter.trim().toLowerCase()
     if (!query) return items
-    return items.filter(item => getLabel(item).toLowerCase().includes(query))
-  }, [items, filter, getLabel])
+    return items.filter(item => (getSearchText?.(item) ?? getLabel(item)).toLowerCase().includes(query))
+  }, [items, filter, getLabel, getSearchText])
 
   const updatePosition = React.useCallback(() => {
     const anchor = anchorRef.current

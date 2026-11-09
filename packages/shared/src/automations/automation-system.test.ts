@@ -33,33 +33,6 @@ describe('AutomationSystem', () => {
       await system.dispose();
     });
 
-    it('should still load the other automations when one uses the removed command action', async () => {
-      // Before: one invalid matcher made the whole file invalid, so nothing ran.
-      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
-        automations: {
-          LabelAdd: [
-            { matcher: '^urgent$', actions: [{ type: 'command', command: 'echo legacy' }] },
-          ],
-          SchedulerTick: [
-            { cron: '0 9 * * *', actions: [{ type: 'prompt', prompt: 'morning briefing' }] },
-          ],
-        },
-      }));
-
-      const warn = spyOn(console, 'warn').mockImplementation(() => {});
-      const system = new AutomationSystem({
-        workspaceRootPath: tempDir,
-        workspaceId: 'test-workspace',
-      });
-
-      expect(system.getMatchersForEvent('LabelAdd')).toEqual([]);
-      expect(system.getMatchersForEvent('SchedulerTick').map(m => m.cron)).toEqual(['0 9 * * *']);
-      expect(String(warn.mock.calls[0]?.[1])).toContain('removed "command" type');
-
-      warn.mockRestore();
-      await system.dispose();
-    });
-
     it('should load automations.json if present', async () => {
       writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
         automations: {
@@ -181,31 +154,29 @@ describe('AutomationSystem', () => {
       await system.dispose();
     });
 
-    it('should skip an invalid matcher, report it, and keep loading the rest', async () => {
+    it('should return errors for invalid config', async () => {
       const system = new AutomationSystem({
         workspaceRootPath: tempDir,
         workspaceId: 'test-workspace',
       });
 
+      // Invalid JSON structure (actions must have at least one action)
       writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
         automations: {
           LabelAdd: [
             { matcher: 'test', actions: 'not-an-array' }, // Invalid: actions should be an array
-            { matcher: 'good', actions: [{ type: 'prompt', prompt: 'still runs' }] },
           ],
         },
       }));
 
       const result = system.reloadConfig();
-      expect(result.success).toBe(true);
-      expect(result.errors.some(e => e.startsWith('LabelAdd[0]'))).toBe(true);
-      const loaded = system.getMatchersForEvent('LabelAdd');
-      expect(loaded.map(m => m.matcher)).toEqual(['good']);
+      expect(result.success).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
 
       await system.dispose();
     });
 
-    it('should skip a matcher with semantically invalid conditions', async () => {
+    it('should return errors for semantically invalid conditions', async () => {
       const system = new AutomationSystem({
         workspaceRootPath: tempDir,
         workspaceId: 'test-workspace',
@@ -223,28 +194,8 @@ describe('AutomationSystem', () => {
       }));
 
       const result = system.reloadConfig();
-      expect(result.success).toBe(true);
-      expect(result.errors.some(e => e.includes('Invalid time value'))).toBe(true);
-      expect(system.getMatchersForEvent('LabelAdd')).toEqual([]);
-
-      await system.dispose();
-    });
-
-    it('should keep the last loaded config when the file stops being valid JSON', async () => {
-      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
-        automations: { LabelAdd: [{ actions: [{ type: 'prompt', prompt: 'keep me' }] }] },
-      }));
-      const system = new AutomationSystem({
-        workspaceRootPath: tempDir,
-        workspaceId: 'test-workspace',
-      });
-      expect(system.getMatchersForEvent('LabelAdd')).toHaveLength(1);
-
-      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), '{ "automations": {'); // mid-edit
-      const result = system.reloadConfig();
       expect(result.success).toBe(false);
-      expect(result.errors[0]).toContain('Failed to parse JSON');
-      expect(system.getMatchersForEvent('LabelAdd')).toHaveLength(1);
+      expect(result.errors.some(e => e.includes('Invalid time value'))).toBe(true);
 
       await system.dispose();
     });
@@ -504,86 +455,6 @@ describe('AutomationSystem', () => {
       expect(emitSpy).toHaveBeenCalledWith('LabelConfigChange', expect.objectContaining({
         workspaceId: 'test-workspace',
       }));
-
-      await system.dispose();
-    });
-  });
-
-  describe('executeAgentEvent', () => {
-    it('should match agent events when matcher and conditions pass', async () => {
-      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
-        automations: {
-          PreToolUse: [
-            {
-              matcher: '^Bash$',
-              conditions: [{ condition: 'state', field: 'hook_event_name', value: 'PreToolUse' }],
-              actions: [{ type: 'prompt', prompt: 'check this' }],
-            },
-          ],
-        },
-      }));
-
-      const system = new AutomationSystem({
-        workspaceRootPath: tempDir,
-        workspaceId: 'test-workspace',
-      });
-
-      const matched = await system.executeAgentEvent('PreToolUse', {
-        hook_event_name: 'PreToolUse',
-        tool_name: 'Bash',
-        tool_input: { command: 'echo hi' },
-      });
-
-      expect(matched).toBe(1);
-      await system.dispose();
-    });
-
-    it('should not match agent events when conditions fail', async () => {
-      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
-        automations: {
-          PreToolUse: [
-            {
-              matcher: '^Bash$',
-              conditions: [{ condition: 'state', field: 'hook_event_name', value: 'PostToolUse' }],
-              actions: [{ type: 'prompt', prompt: 'check this' }],
-            },
-          ],
-        },
-      }));
-
-      const system = new AutomationSystem({
-        workspaceRootPath: tempDir,
-        workspaceId: 'test-workspace',
-      });
-
-      const matched = await system.executeAgentEvent('PreToolUse', {
-        hook_event_name: 'PreToolUse',
-        tool_name: 'Bash',
-        tool_input: { command: 'echo hi' },
-      });
-
-      expect(matched).toBe(0);
-      await system.dispose();
-    });
-  });
-
-  describe('buildSdkHooks', () => {
-    it('should return empty object (command execution removed)', async () => {
-      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
-        automations: {
-          PreToolUse: [
-            { matcher: 'Bash', actions: [{ type: 'prompt', prompt: 'check this' }] },
-          ],
-        },
-      }));
-
-      const system = new AutomationSystem({
-        workspaceRootPath: tempDir,
-        workspaceId: 'test-workspace',
-      });
-
-      const result = system.buildSdkHooks();
-      expect(result).toEqual({});
 
       await system.dispose();
     });

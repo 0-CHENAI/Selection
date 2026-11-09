@@ -12,19 +12,19 @@ import type { ContentBadge } from '@craft-agent/core'
 import type { MentionItemType } from '@/components/ui/mention-menu'
 import type { LoadedSkill, LoadedSource } from '../../shared/types'
 import { AGENTS_PLUGIN_NAME } from '@craft-agent/shared/skills/types'
+import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { getSourceIconSync, getSkillIconSync } from './icon-cache'
 
 // Import and re-export parsing functions from shared (pure string operations, no renderer deps)
-import { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions } from '@craft-agent/shared/mentions'
+import {
+  parseMentions,
+  stripAllMentions,
+  resolveSkillMentions,
+  resolveSourceMentions,
+  WS_ID_CHARS,
+  type ParsedMentions,
+} from '@craft-agent/shared/mentions'
 export { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions }
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-// Workspace ID character class for regex: word chars, spaces (NOT newlines), hyphens, dots
-// Using literal space instead of \s to avoid matching newlines which would break parsing
-const WS_ID_CHARS = '[\\w .-]'
 
 // ============================================================================
 // Types
@@ -74,9 +74,8 @@ export function findMentionMatches(
   }
 
   // Match skill mentions: [skill:slug] or [skill:workspaceId:slug]
-  // The pattern captures the full match and extracts the slug (last component)
-  // Workspace IDs can contain spaces, hyphens, underscores, and dots
-  const skillPattern = new RegExp(`(\\[skill:(?:${WS_ID_CHARS}+:)?([\\w-]+)\\])`, 'g')
+  // Workspace IDs may be Unicode (e.g. 巡察工作) — must not be limited to ASCII \w
+  const skillPattern = new RegExp(`(\\[skill:(?:${WS_ID_CHARS}+:)?([\\w.-]+)\\])`, 'g')
   while ((match = skillPattern.exec(text)) !== null) {
     const slug = match[2]
     if (availableSkillSlugs.includes(slug)) {
@@ -138,8 +137,7 @@ export function removeMention(text: string, type: MentionItemType, id: string): 
       break
     case 'skill':
     default:
-      // Match both [skill:slug] and [skill:workspaceId:slug]
-      // Workspace IDs can contain spaces, hyphens, underscores, and dots
+      // Match both [skill:slug] and [skill:workspaceId:slug] (Unicode workspace IDs)
       pattern = new RegExp(`\\[skill:(?:${WS_ID_CHARS}+:)?${escapeRegExp(id)}\\]`, 'g')
       break
   }
@@ -221,13 +219,13 @@ export function extractBadges(
 
     if (match.type === 'skill') {
       const skill = skillsBySlug.get(match.id)
-      label = skill?.metadata.name || match.id
+      label = skill ? resolveSkillTitle(skill) : match.id
 
       // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
       iconDataUrl = getSkillIconSync(workspaceId, match.id) ?? undefined
     } else if (match.type === 'source') {
       const source = sourcesBySlug.get(match.id)
-      label = source?.config.name || match.id
+      label = source ? resolveSourceTitle(source) : match.id
 
       // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
       iconDataUrl = getSourceIconSync(workspaceId, match.id) ?? undefined

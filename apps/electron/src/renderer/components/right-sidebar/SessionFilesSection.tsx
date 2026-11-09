@@ -18,13 +18,14 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { File, Folder, FolderOpen, FileText, Image, FileCode, ChevronRight, ExternalLink } from 'lucide-react'
+import { Folder, FolderOpen, ChevronRight, ExternalLink } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuTrigger,
   StyledContextMenuContent,
   StyledContextMenuItem,
 } from '@/components/ui/styled-context-menu'
+import { FileTypeIcon } from '@craft-agent/ui'
 import type { SessionFile } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import * as storage from '@/lib/local-storage'
@@ -116,21 +117,7 @@ function getFileIcon(file: SessionFile, isExpanded?: boolean) {
       : <Folder className={iconClass} />
   }
 
-  const ext = file.name.split('.').pop()?.toLowerCase()
-
-  if (ext === 'md' || ext === 'markdown') {
-    return <FileText className={iconClass} />
-  }
-
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(ext || '')) {
-    return <Image className={iconClass} />
-  }
-
-  if (['ts', 'tsx', 'js', 'jsx', 'json', 'yaml', 'yml', 'py', 'rb', 'go', 'rs'].includes(ext || '')) {
-    return <FileCode className={iconClass} />
-  }
-
-  return <File className={iconClass} />
+  return <FileTypeIcon fileName={file.name} className="h-3.5 w-3.5" />
 }
 
 /**
@@ -576,12 +563,12 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
       {/* Header - matches sidebar styling with select-none, extra top padding for visual balance */}
       {!hideHeader && (
         <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0 select-none">
-          <span className="text-label-sm font-medium text-secondary">{t("chat.sessionFiles")}</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("chat.sessionFiles")}</span>
           {sessionFolderPath && (
             <button
               type="button"
               onClick={() => window.electronAPI.showInFolder(sessionFolderPath)}
-              className="text-label-sm text-tertiary hover:text-secondary hover:underline underline-offset-2 transition-colors duration-micro ease-out-subtle hover:duration-instant"
+              className="text-xs text-foreground/50 hover:text-foreground/80 hover:underline underline-offset-2 transition-colors"
             >
               {t("chat.viewInFileManager", { fileManager: fileManagerName })}
             </button>

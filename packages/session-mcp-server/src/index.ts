@@ -13,16 +13,19 @@
  * stderr and handles these callbacks.
  *
  * Usage:
- *   node session-mcp-server.js --session-id <id> --workspace-root <path> --plans-folder <path>
+ *   node session-mcp-server.js --session-id <id> --workspace-root <path> --plans-folder <path> [--working-directory <path>]
  *
  * Arguments:
  *   --session-id: Unique session identifier
- *   --workspace-root: Path to workspace folder (~/.craft-agent/workspaces/{id})
+ *   --workspace-root: Path to workspace folder (~/.selection/workspaces/{id})
  *   --plans-folder: Path to session's plans folder
+ *   --working-directory: Optional project working directory for relative tool paths
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -31,6 +34,7 @@ import {
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeveloperFeedbackEnabled } from '@craft-agent/shared/feature-flags';
+import { wrapSpawnSessionToolError } from '@craft-agent/shared/agent';
 // Import from session-tools-core
 import {
   type SessionToolContext,
@@ -42,6 +46,7 @@ import {
   // Registry
   getSessionToolRegistry,
   getToolDefsAsJsonSchema,
+  SESSION_SAFE_BLOCKED_TOOL_NAMES,
   // Helpers
   loadSourceConfig as loadSourceConfigFromHelpers,
   errorResponse,
@@ -55,7 +60,10 @@ interface SessionConfig {
   sessionId: string;
   workspaceRootPath: string;
   plansFolderPath: string;
+  workingDirectory?: string;
   callbackPort?: string;
+  supportsImages?: boolean;
+  permissionMode?: string;
 }
 
 const CALLBACK_TOOL_TIMEOUT_MS = 120000;
@@ -193,7 +201,6 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
   // Session paths for transform_data / render_template
   const sessionsDir = join(workspaceRootPath, 'sessions', sessionId);
   const sessionDataDir = join(sessionsDir, 'data');
-
   // Build context
   return {
     sessionId,
@@ -203,6 +210,9 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     plansFolderPath,
     sessionPath: sessionsDir,
     dataPath: sessionDataDir,
+    workingDirectory: config.workingDirectory,
+    ...(config.permissionMode ? { permissionMode: config.permissionMode } : {}),
+    ...(config.supportsImages !== undefined ? { supportsImages: config.supportsImages } : {}),
     callbacks,
     fs,
     loadSourceConfig: (sourceSlug: string): SourceConfig | null => {
@@ -215,8 +225,8 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     // Preferences: write directly to preferences.json
     updatePreferences: (updates: Record<string, unknown>) => {
       // Resolve preferences path from config dir (parent of workspaces dir)
-      // workspaceRootPath = ~/.craft-agent/workspaces/{id}
-      // preferencesPath = ~/.craft-agent/preferences.json
+      // workspaceRootPath = ~/.selection/workspaces/{id}
+      // preferencesPath = ~/.selection/preferences.json
       const configDir = join(workspaceRootPath, '..', '..');
       const prefsPath = join(configDir, 'preferences.json');
       try {
@@ -263,7 +273,76 @@ function createSessionTools(includeDeveloperFeedback: boolean): Tool[] {
     name: def.name,
     description: def.description,
     inputSchema: def.inputSchema as Tool['inputSchema'],
+    ...(def.annotations ? { annotations: def.annotations } : {}),
   }));
+}
+
+// ============================================================
+// Selection Docs Upstream Proxy
+// ============================================================
+
+const DOCS_MCP_URL = 'https://agents.craft.do/docs/mcp';
+
+/** Cached upstream client + tool list */
+let docsClient: Client | null = null;
+let docsTools: Tool[] = [];
+
+/**
+ * Connect to the craft-agents-docs MCP server and fetch its tool definitions.
+ * Falls back gracefully if the server is unreachable (tools will just be empty).
+ */
+async function connectDocsUpstream(): Promise<void> {
+  try {
+    const client = new Client(
+      { name: 'craft-agent-session-proxy', version: '1.0.0' },
+      { capabilities: {} }
+    );
+
+    const transport = new StreamableHTTPClientTransport(new URL(DOCS_MCP_URL));
+    await client.connect(transport);
+
+    const result = await client.listTools();
+    docsTools = (result.tools || []) as Tool[];
+    docsClient = client;
+
+    console.error(`Selection Docs proxy connected: ${docsTools.length} tools`);
+  } catch (err) {
+    console.error(`Selection Docs proxy connection failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    docsClient = null;
+    docsTools = [];
+  }
+}
+
+/**
+ * Route a tool call to the upstream docs client.
+ */
+async function callDocsUpstream(
+  name: string,
+  args: Record<string, unknown>
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  if (!docsClient) {
+    return errorResponse(`Selection Docs server is not connected. Tool '${name}' unavailable.`);
+  }
+
+  try {
+    const result = await docsClient.callTool({ name, arguments: args });
+    // Convert MCP result to our format
+    const textContent = (result.content as Array<{ type: string; text?: string }> || [])
+      .filter(c => c.type === 'text' && c.text)
+      .map(c => ({ type: 'text' as const, text: c.text! }));
+
+    return {
+      content: textContent.length > 0 ? textContent : [{ type: 'text', text: '(No response from docs server)' }],
+      isError: result.isError as boolean | undefined,
+    };
+  } catch (err) {
+    return errorResponse(`Docs tool '${name}' failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Check if a tool name belongs to the docs upstream */
+function isDocsUpstreamTool(name: string): boolean {
+  return docsTools.some(t => t.name === name);
 }
 
 // ============================================================
@@ -337,7 +416,7 @@ async function handleSpawnSession(
     try {
       const parsed = JSON.parse(precomputed);
       if (parsed.error) {
-        return errorResponse(`spawn_session failed: ${parsed.error}`);
+        return errorResponse(wrapSpawnSessionToolError(String(parsed.error)));
       }
       // Return the full result (could be help info or spawn result)
       return {
@@ -359,7 +438,7 @@ async function handleSpawnSession(
       });
       const result = await resp.json() as Record<string, unknown>;
       if (result.error) {
-        return errorResponse(`spawn_session failed: ${result.error}`);
+        return errorResponse(wrapSpawnSessionToolError(String(result.error)));
       }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
@@ -401,7 +480,10 @@ async function main() {
   let sessionId: string | undefined;
   let workspaceRootPath: string | undefined;
   let plansFolderPath: string | undefined;
+  let workingDirectory: string | undefined;
   let callbackPort: string | undefined;
+  let supportsImages: boolean | undefined;
+  let permissionMode: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--session-id' && args[i + 1]) {
@@ -413,14 +495,23 @@ async function main() {
     } else if (args[i] === '--plans-folder' && args[i + 1]) {
       plansFolderPath = args[i + 1];
       i++;
+    } else if (args[i] === '--working-directory' && args[i + 1]) {
+      workingDirectory = args[i + 1];
+      i++;
     } else if (args[i] === '--callback-port' && args[i + 1]) {
       callbackPort = args[i + 1];
+      i++;
+    } else if (args[i] === '--supports-images' && args[i + 1]) {
+      supportsImages = args[i + 1] === 'true' || args[i + 1] === '1';
+      i++;
+    } else if (args[i] === '--permission-mode' && args[i + 1]) {
+      permissionMode = args[i + 1];
       i++;
     }
   }
 
   if (!sessionId || !workspaceRootPath || !plansFolderPath) {
-    console.error('Usage: session-mcp-server --session-id <id> --workspace-root <path> --plans-folder <path>');
+    console.error('Usage: session-mcp-server --session-id <id> --workspace-root <path> --plans-folder <path> [--working-directory <path>]');
     process.exit(1);
   }
 
@@ -428,8 +519,17 @@ async function main() {
     sessionId,
     workspaceRootPath,
     plansFolderPath,
+    workingDirectory,
+    permissionMode: permissionMode ?? process.env.CRAFT_PERMISSION_MODE,
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.CRAFT_LLM_CALLBACK_PORT,
+    supportsImages: supportsImages ?? (
+      process.env.CRAFT_MODEL_SUPPORTS_IMAGES === '1' || process.env.CRAFT_MODEL_SUPPORTS_IMAGES === 'true'
+        ? true
+        : process.env.CRAFT_MODEL_SUPPORTS_IMAGES === '0' || process.env.CRAFT_MODEL_SUPPORTS_IMAGES === 'false'
+          ? false
+          : undefined
+    ),
   };
 
   // Create the Codex context
@@ -451,13 +551,16 @@ async function main() {
     }
   );
 
-  // Handle tool listing — session tools
+  // Connect to upstream docs server (non-blocking, best-effort)
+  await connectDocsUpstream();
+
+  // Handle tool listing — session tools + docs upstream tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: createSessionTools(includeDeveloperFeedback),
+    tools: [...createSessionTools(includeDeveloperFeedback), ...docsTools],
   }));
 
-  // Handle tool calls — route via canonical registry or call_llm
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  // Handle tool calls — route via canonical registry, call_llm, or docs upstream
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: toolArgs } = request.params;
 
     try {
@@ -474,7 +577,15 @@ async function main() {
       // Check canonical session tool registry first (feature-filtered)
       const def = sessionToolRegistry.get(name);
       if (def?.handler) {
-        return await def.handler(ctx, toolArgs);
+        if (config.permissionMode === 'safe' && SESSION_SAFE_BLOCKED_TOOL_NAMES.has(name)) {
+          return errorResponse(`Tool '${name}' is blocked in Safe mode.`);
+        }
+        return await def.handler({ ...ctx, signal: extra.signal }, name === 'skill_install' || name === 'skill_inspect' ? def.inputSchema.parse(toolArgs) : toolArgs);
+      }
+
+      // Route to docs upstream if it's a docs tool
+      if (isDocsUpstreamTool(name)) {
+        return await callDocsUpstream(name, toolArgs as Record<string, unknown>);
       }
 
       return errorResponse(`Unknown tool: ${name}`);

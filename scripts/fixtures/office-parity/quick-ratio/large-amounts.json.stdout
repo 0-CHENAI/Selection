@@ -1,0 +1,20 @@
+{
+  "quick_ratio": 100.7369654550276,
+  "quick_ratio_display": "100.74",
+  "status": "EXCELLENT",
+  "interpretation": "Strong, efficient growth - gaining revenue 4x faster than losing it",
+  "components": {
+    "growth_mrr": 1333333.32,
+    "lost_mrr": 13235.79,
+    "new_mrr": 1234567.89,
+    "expansion_mrr": 98765.43,
+    "churned_mrr": 12345.67,
+    "contraction_mrr": 890.12
+  },
+  "breakdown": {
+    "new_mrr_pct": 92.6,
+    "expansion_mrr_pct": 7.4,
+    "churned_mrr_pct": 93.3,
+    "contraction_mrr_pct": 6.7
+  }
+}

@@ -8,7 +8,7 @@ import { SessionManager } from './SessionManager.ts'
 describe('adoptGeneratedTaskOrchestrator guards', () => {
   function seed(sm: SessionManager, id: string, fields: { taskDraft?: boolean; taskSlug?: string }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(sm as any).sessions.set(id, { id, ...fields })
+    ;(sm as any).sessions.set(id, { id, workMode: 'PRO', ...fields })
   }
 
   it('returns false when the session does not exist', async () => {
@@ -40,13 +40,12 @@ describe('adoptGeneratedTaskOrchestrator guards', () => {
 
 // bindExistingSessionToTask attaches an authored spec onto a *visible* (non-draft) tile — the
 // edit-mode save path. Unlike adopt it doesn't require `taskDraft`, but it must still never
-// hijack a session already owned by a different task, or make a sub-session an orchestrator. The
-// success path persists/flushes (needs storage wiring), so we pin the early-return guards that run
-// before any I/O.
+// hijack a session already owned by a different task. The success path persists/flushes (needs
+// storage wiring), so we pin the three early-return guards that run before any I/O.
 describe('bindExistingSessionToTask guards', () => {
-  function seed(sm: SessionManager, id: string, fields: { taskDraft?: boolean; taskSlug?: string; parentSessionId?: string }) {
+  function seed(sm: SessionManager, id: string, fields: { taskDraft?: boolean; taskSlug?: string }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(sm as any).sessions.set(id, { id, ...fields })
+    ;(sm as any).sessions.set(id, { id, workMode: 'PRO', ...fields })
   }
 
   it('returns false when the session does not exist', async () => {
@@ -67,16 +66,6 @@ describe('bindExistingSessionToTask guards', () => {
     // The existing binding is untouched.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((sm as any).sessions.get('orch').taskSlug).toBe('slug-a')
-  })
-
-  it("refuses (false) a sub-session, even a Conductor child carrying the task's own slug", async () => {
-    const sm = new SessionManager()
-    seed(sm, 'quick-add-child', { parentSessionId: 'orch' })
-    seed(sm, 'conductor-child', { parentSessionId: 'orch', taskSlug: 'slug-a' })
-    expect(await sm.bindExistingSessionToTask('quick-add-child', 'slug-a')).toBe(false)
-    expect(await sm.bindExistingSessionToTask('conductor-child', 'slug-a')).toBe(false)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((sm as any).sessions.get('quick-add-child').taskSlug).toBeUndefined()
   })
 })
 
@@ -101,6 +90,7 @@ describe('adopt/bind route changed fields through canonical live-update mutators
     any.setSessionPermissionMode = (_id: string, m: string) => { calls.mode.push(m) }
     any.sessions.set('s', {
       id: 's',
+      workMode: 'PRO',
       taskDraft: true,
       messages: [],
       connectionLocked: false,

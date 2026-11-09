@@ -40,6 +40,20 @@ describe('annotation interaction policy', () => {
     expect(isAnnotationChipClickable(annotation)).toBe(false)
   })
 
+  it('keeps tracked sent feedback accessible before and after result delivery', () => {
+    const annotation = createAnnotation('Revise this')
+    for (const resultMessageId of [undefined, 'revision']) {
+      annotation.meta = { followUp: {
+        text: 'Revise this', lastSentText: 'Revise this', lastSentAt: 1,
+        requestMessageId: 'request', resultMessageId,
+      } }
+      const policy = getAnnotationChipInteraction(annotation)
+      expect(policy.state).toBe('sent')
+      expect(policy.clickable).toBe(true)
+      expect(policy.tooltipOnly).toBe(false)
+    }
+  })
+
   it('keeps pending annotations clickable in view mode', () => {
     const annotation = createAnnotation('Needs follow-up')
 

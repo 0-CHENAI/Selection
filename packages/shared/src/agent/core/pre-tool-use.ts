@@ -9,18 +9,21 @@
  * so they inherit this pipeline transparently.
  *
  * Pipeline steps:
+ * 0. PPT visual QA: block OCR of slide screenshots before any other step
  * 1. Permission mode check: Block tools disallowed by current mode
  * 2. Source blocking: Block tools from inactive MCP sources
- * 3. Prerequisite check: Block source tools until guide.md is read
- * 4. call_llm detection: Intercept mcp__session__call_llm
- * 5. Input transforms: Path expansion, config validation, skill qualification, metadata stripping
+ * 3. Prerequisite check: Prepare meaningful source guides; enforce Skill/browser reads
+ * 4. call_llm / spawn_session detection: Intercept prefixed and short names
+ * 5. Input transforms: Path expansion, config validation, skill qualification,
+ *    metadata stripping
  * 6. Ask-mode prompt decision: Determine if user approval is needed
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { expandPath } from '../../utils/paths.ts';
+import { resolveBundledOfficecliSkillRead } from '../../utils/officecli.ts';
 import {
   detectConfigFileType,
   detectAppConfigFileType,
@@ -35,22 +38,28 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { pptVisualQaViolation } from '../ppt-visual-qa-policy.ts';
+import { complexToolCapability, complexCapabilityError, type WorkModeSession } from '../../sessions/work-mode.ts';
+import { SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
-import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../../skills/storage.ts';
+import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, resolveBundledSkillMdPath } from '../../skills/storage.ts';
 import {
   shouldAllowToolInMode,
+  isApiEndpointAllowed,
   isReadOnlyBashCommandWithConfig,
   getPermissionModeDiagnostics,
-  resolveEffectivePermissionMode,
   PERMISSION_MODE_CONFIG,
-  matchesAllowedWritePath,
   type PermissionMode,
 } from '../mode-manager.ts';
-import { evaluateApiEndpointPolicy, evaluateMcpToolPolicy } from '../source-policy.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
 import type { PrerequisiteCheckResult } from './prerequisite-manager.ts';
-import { getBashRememberKey, getFileWriteRememberKey, getNetworkCommandHosts, type PermissionRemember } from './permission-remember.ts';
-import { rewriteBashWithRtk } from './rtk-rewrite.ts';
+import {
+  classifyFileWrite,
+  isAutoApprovableBashCommand,
+  rememberKeys,
+  resolveTrustedZones,
+  type TrustedZones,
+} from './smart-confirm.ts';
 
 // ============================================================
 // TYPES
@@ -108,6 +117,7 @@ export const BUILT_IN_TOOLS = new Set([
   'WebFetch',
   'WebSearch',
   'Task',
+  'TaskOutput',
   'TodoWrite',
   'MultiEdit',
   'NotebookEdit',
@@ -185,6 +195,16 @@ export function expandToolPaths(
     updatedInput = { ...(updatedInput || input), path: expandedPath };
   }
 
+  const withExpansions = updatedInput || input;
+  for (const key of ['file_path', 'path'] as const) {
+    const value = withExpansions[key];
+    if (typeof value !== 'string') continue;
+    const rewritten = resolveBundledOfficecliSkillRead(value);
+    if (!rewritten || rewritten === value) continue;
+    onDebug?.(`OfficeCLI skill path: ${value} → ${rewritten}`);
+    updatedInput = { ...(updatedInput || input), [key]: rewritten };
+  }
+
   return {
     modified: updatedInput !== null,
     input: updatedInput || input,
@@ -203,6 +223,7 @@ export function expandToolPaths(
  *   1. Workspace: {workspaceRoot}/skills/{slug}/ → plugin name from plugin.json
  *   2. Project:   {workingDir}/.agents/skills/{slug}/ → plugin name = ".agents"
  *   3. Global:    ~/.agents/skills/{slug}/ → plugin name = ".agents"
+ *   4. Bundled:   app resources/skills/{slug}/ or officecli/<version>/skills/{slug}/ → plugin name = ".agents"
  *
  * This function resolves the bare slug to the correct plugin prefix by checking
  * which directory actually contains the skill. It also handles re-qualifying
@@ -263,7 +284,7 @@ function resolveSkillPlugin(
   workspaceRootPath: string,
   workingDirectory?: string,
 ): string {
-  // Priority order matches loadAllSkills: project (highest) > workspace > global (lowest)
+  // Priority order matches loadAllSkills: project > workspace > bundled > global
 
   // 1. Project: {workingDir}/.agents/skills/{slug}/SKILL.md
   if (workingDirectory && existsSync(join(workingDirectory, PROJECT_AGENT_SKILLS_DIR, bareSlug, 'SKILL.md'))) {
@@ -275,7 +296,12 @@ function resolveSkillPlugin(
     return `${workspaceSlug}:${bareSlug}`;
   }
 
-  // 3. Global: ~/.agents/skills/{slug}/SKILL.md
+  // 3. Bundled: app resources/skills/{slug}/SKILL.md or officecli official skills
+  if (resolveBundledSkillMdPath(bareSlug)) {
+    return `${AGENTS_PLUGIN_NAME}:${bareSlug}`;
+  }
+
+  // 4. Global: ~/.agents/skills/{slug}/SKILL.md
   if (existsSync(join(GLOBAL_AGENT_SKILLS_DIR, bareSlug, 'SKILL.md'))) {
     return `${AGENTS_PLUGIN_NAME}:${bareSlug}`;
   }
@@ -485,7 +511,8 @@ export function getConfigCliRedirect(
   workspaceRootPath: string,
   workingDirectory?: string,
 ): { message: string } | null {
-  const filePath = input.file_path as string | undefined;
+  const filePath = (input.file_path as string | undefined)
+    ?? (toolName === 'Read' ? input.path as string | undefined : undefined);
 
   if (filePath && LABELS_BLOCKED_FILE_TOOLS.has(toolName)) {
     const relativePath = getWorkspaceRelativePath(filePath, workspaceRootPath, workingDirectory)
@@ -598,10 +625,18 @@ export type PreToolUseCheckResult =
       rememberForMinutes?: number;
       commandHash?: string;
       approvalTtlSeconds?: number;
-      /** What an "Always Allow" answer stores. Absent: the prompt cannot be remembered. */
-      remember?: PermissionRemember;
+      /** Session approval key recorded when the user picks "Always allow". */
+      rememberKey?: string;
     }
-  | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean }
+  | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean; additionalSourceSlugs?: string[] }
+  | {
+      type: 'source_guide_required';
+      sourceSlug: string;
+      guidePath: string;
+      guideContent: string;
+      guideVersion: string;
+      alreadyPreparedInGeneration: boolean;
+    }
   | { type: 'call_llm_intercept'; input: Record<string, unknown> }
   | { type: 'spawn_session_intercept'; input: Record<string, unknown> };
 
@@ -610,6 +645,7 @@ export type PreToolUseCheckResult =
  * hook input. All fields needed for the pipeline are normalized here.
  */
 export interface PreToolUseInput {
+  executionSession?: WorkModeSession;
   /** SDK-normalized tool name (PascalCase for built-in, mcp__server__tool for MCP) */
   toolName: string;
   /** Tool input object */
@@ -636,14 +672,14 @@ export interface PreToolUseInput {
   hasSourceActivation: boolean;
   /** PermissionManager for session-scoped whitelists */
   permissionManager: PermissionManagerLike;
-  /** PrerequisiteManager for guide.md checking */
+  /** PrerequisiteManager for source-guide preparation and Skill/browser checks */
   prerequisiteManager?: PrerequisiteManagerLike;
   /** Backend metadata (e.g. Pi forwards intent / displayName via input.metadata) */
   backendMetadata?: { intent?: string; displayName?: string };
-  /** Keep `_intent` on source tools: Claude's source proxies require it and take it out themselves */
-  keepSourceToolIntent?: boolean;
-  /** RTK Bash-rewrite context (undefined when toggle is off or rtk binary missing) */
-  rtkContext?: import('./rtk-rewrite.ts').RtkContext;
+  /** Resolved image capability. Slide visual QA matches enabled vs unavailable. */
+  supportsImages?: boolean;
+  /** Assistant message generation, used to defer source-call siblings until replanning. */
+  assistantGeneration?: number;
   /** Debug callback */
   onDebug?: (message: string) => void;
 }
@@ -653,8 +689,12 @@ export interface PreToolUseInput {
  * This keeps the pipeline testable without importing the full PermissionManager.
  */
 export interface PermissionManagerLike {
+  /** Exact-match approvals recorded via "Always allow" (smart-confirm keys). */
+  isApprovalRemembered?(key: string): boolean;
   isCommandWhitelisted(command: string): boolean;
+  isDangerousCommand(command: string): boolean;
   getBaseCommand(command: string): string;
+  extractDomainFromNetworkCommand(command: string): string | null;
   isDomainWhitelisted(domain: string): boolean;
 }
 
@@ -662,13 +702,13 @@ export interface PermissionManagerLike {
  * Minimal interface for PrerequisiteManager.
  */
 export interface PrerequisiteManagerLike {
-  checkPrerequisites(toolName: string): PrerequisiteCheckResult;
-  /** Bash's check: files the command prints (cat, head, sed -n …) count as read. */
-  checkBashPrerequisites(command: string): PrerequisiteCheckResult;
+  checkPrerequisites(toolName: string, assistantGeneration?: number): PrerequisiteCheckResult;
+  isPendingSkillReadCommand(input: Record<string, unknown>): boolean;
+  findCatalogSkillForTool?(toolName: string, input: Record<string, unknown>): { requiredSources?: string[] } | null;
 }
 
 /** Built-in MCP servers that are always available (not user sources) */
-const BUILT_IN_MCP_SERVERS = new Set(['session']);
+const BUILT_IN_MCP_SERVERS = new Set(['session', 'craft-agents-docs']);
 
 /** File write tools that require permission in ask mode */
 const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
@@ -680,11 +720,12 @@ const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
  * user prompting) is handled by the calling agent based on the result type.
  *
  * Pipeline:
+ * 0. PPT visual QA: reject OCR of slide screenshots (native Read / call_llm images only)
  * 1. Permission mode check (shouldAllowToolInMode)
  * 2. Source blocking (inactive MCP sources)
- * 3. Prerequisite check (guide.md before source tools)
+ * 3. Prerequisite check (on-demand source guides and Skill/browser requirements)
  * 4. call_llm interception
- * 5. Input transforms (paths, config validation, skills, metadata)
+ * 5. Input transforms and routing guards (paths, Office, config, skills, metadata)
  * 6. Ask-mode prompt decision
  *
  * @returns A discriminated union that the agent translates to its SDK format
@@ -703,6 +744,19 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
 }
 
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
+  const visualQaBlock = pptVisualQaViolation(
+    ctx.toolName,
+    ctx.input,
+    ctx.backendMetadata,
+    ctx.supportsImages,
+  );
+  if (visualQaBlock) return { type: 'block', reason: visualQaBlock };
+
+  const capability = complexToolCapability(ctx.toolName);
+  if (capability) {
+    const reason = complexCapabilityError(ctx.executionSession, capability);
+    if (reason) return { type: 'block', reason };
+  }
   const {
     toolName,
     input,
@@ -719,6 +773,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     permissionManager,
     prerequisiteManager,
     backendMetadata,
+    assistantGeneration,
     onDebug,
   } = ctx;
 
@@ -731,14 +786,22 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // Canonical mode source of truth for this session.
   // Keep incoming permissionMode only for mismatch diagnostics.
   const diagnostics = getPermissionModeDiagnostics(sessionId);
-  // Guarded without an active risk check behaves as Ask (see resolveEffectivePermissionMode).
-  const effectivePermissionMode = resolveEffectivePermissionMode(diagnostics.permissionMode);
+  const effectivePermissionMode = diagnostics.permissionMode;
 
   if (permissionMode !== effectivePermissionMode) {
     onDebug?.(
       `[ModeSync] sessionId=${sessionId} incomingMode=${permissionMode} effectiveMode=${effectivePermissionMode} ` +
       `modeVersion=${diagnostics.modeVersion} changedBy=${diagnostics.lastChangedBy} changedAt=${diagnostics.lastChangedAt}`
     );
+  }
+
+  // Developer feedback is an external persistent side effect. It always
+  // requires a visible, per-message approval, including in allow-all mode.
+  if (isDeveloperFeedbackTool(toolName)) {
+    return {
+      type: 'prompt',
+      ...developerFeedbackPrompt(toolName, input),
+    };
   }
 
   // ============================================================
@@ -778,26 +841,46 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   }
 
   // ============================================================
-  // 3. PREREQUISITE CHECK (guide.md before source tools)
+  // 3. PREREQUISITE CHECK (on-demand source guides and Skill/browser requirements)
   // ============================================================
   if (prerequisiteManager) {
-    // A shell read of a guide or skill file (cat, head, sed -n) counts like the Read tool.
-    // Pi's `bash` tool arrives here as "Bash" too (PI_TOOL_NAME_MAP).
-    const prereqResult = toolName === 'Bash'
-      ? prerequisiteManager.checkBashPrerequisites(typeof input.command === 'string' ? input.command : '')
-      : prerequisiteManager.checkPrerequisites(toolName);
-    if (!prereqResult.allowed) {
-      return { type: 'block', reason: prereqResult.blockReason!, source: 'prerequisite' };
+    // Allow a skill read attempt; only successful results satisfy prerequisites.
+    if (toolName === 'Bash' && prerequisiteManager.isPendingSkillReadCommand(input)) {
+      // Read attempt allowed — continue permission checks before execution
+    } else {
+      const prereqResult = prerequisiteManager.checkPrerequisites(toolName, assistantGeneration);
+      if (!prereqResult.allowed) {
+        if (prereqResult.sourceGuide) {
+          const guide = prereqResult.sourceGuide;
+          return {
+            type: 'source_guide_required',
+            sourceSlug: guide.sourceSlug,
+            guidePath: guide.filePath,
+            guideContent: guide.content,
+            guideVersion: guide.version,
+            alreadyPreparedInGeneration: guide.alreadyPreparedInGeneration,
+          };
+        }
+        return { type: 'block', reason: prereqResult.blockReason!, source: 'prerequisite' };
+      }
     }
   }
 
   // ============================================================
   // 4. CALL_LLM / SPAWN_SESSION INTERCEPTION
   // ============================================================
-  if (toolName === 'mcp__session__call_llm') {
+  if (
+    toolName === 'mcp__session__call_llm'
+    || toolName === 'session__call_llm'
+    || toolName === 'call_llm'
+  ) {
     return { type: 'call_llm_intercept', input };
   }
-  if (toolName === 'mcp__session__spawn_session') {
+  if (
+    toolName === 'mcp__session__spawn_session'
+    || toolName === 'session__spawn_session'
+    || toolName === 'spawn_session'
+  ) {
     return { type: 'spawn_session_intercept', input };
   }
 
@@ -814,7 +897,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     wasModified = true;
   }
 
-  // 5b. Config-domain Bash guard (block direct labels/automations path operations unless using craft-agent)
+  // 5c. Config-domain Bash guard (block direct labels/automations path operations unless using craft-agent)
   if (FEATURE_FLAGS.craftAgentsCli && toolName === 'Bash') {
     const configDomainBashRedirect = getConfigDomainBashRedirect(currentInput, workspaceRootPath, workingDirectory);
     if (configDomainBashRedirect) {
@@ -822,13 +905,13 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     }
   }
 
-  // 5c. Config file validation
+  // 5d. Config file validation
   const configResult = validateConfigWrite(toolName, currentInput, workspaceRootPath, onDebug);
   if (!configResult.valid) {
     return { type: 'block', reason: configResult.error! };
   }
 
-  // 5d. Config file CLI redirect (labels + automations)
+  // 5e. Config file CLI redirect (labels + automations)
   if (FEATURE_FLAGS.craftAgentsCli) {
     const cliRedirect = getConfigCliRedirect(toolName, currentInput, workspaceRootPath, workingDirectory);
     if (cliRedirect) {
@@ -836,7 +919,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     }
   }
 
-  // 5e. Skill qualification
+  // 5f. Skill qualification
   if (toolName === 'Skill') {
     const skillResult = qualifySkillName(
       currentInput,
@@ -851,31 +934,27 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     }
   }
 
-  // 5f. Metadata stripping
+  // 5g. Metadata stripping
   const metadataResult = stripToolMetadata(toolName, currentInput, onDebug);
   if (metadataResult.modified) {
-    const serverName = toolName.startsWith('mcp__') ? toolName.split('__')[1] : undefined;
-    const keepIntent = ctx.keepSourceToolIntent && serverName && activeSourceSlugs.includes(serverName) && '_intent' in currentInput;
-    currentInput = keepIntent ? { ...metadataResult.input, _intent: currentInput._intent } : metadataResult.input;
+    currentInput = metadataResult.input;
     wasModified = true;
   }
 
-  // 5g. RTK Bash rewrite (last input transform — flows into both 'modify' and 'prompt' results).
-  // Permission decisions above and the ask-mode prompt below operate on the
-  // ORIGINAL `input` parameter, so the LLM still believes it ran the original
-  // command and our permission system gates the original command — only the
-  // SDK's actual execution sees the rewritten form.
-  if (ctx.rtkContext?.enabled && ctx.rtkContext.path) {
-    const rtkResult = rewriteBashWithRtk(
-      toolName,
-      currentInput,
-      ctx.rtkContext.path,
-      ctx.rtkContext.exclude,
-      onDebug,
+  // 5h. Catalog SKILL.md Read → activate requiredSources (model self-select)
+  if (hasSourceActivation && prerequisiteManager?.findCatalogSkillForTool) {
+    const catalogSkill = prerequisiteManager.findCatalogSkillForTool(toolName, currentInput);
+    const missing = (catalogSkill?.requiredSources ?? []).filter(slug =>
+      !activeSourceSlugs.includes(slug) && allSourceSlugs.includes(slug)
     );
-    if (rtkResult.modified) {
-      currentInput = rtkResult.input;
-      wasModified = true;
+    if (missing.length > 0) {
+      onDebug?.(`Catalog skill Read needs sources: ${missing.join(', ')}`);
+      return {
+        type: 'source_activation_needed',
+        sourceSlug: missing[0]!,
+        sourceExists: true,
+        additionalSourceSlugs: missing.slice(1),
+      };
     }
   }
 
@@ -890,6 +969,11 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
       permissionsContext,
       plansFolderPath,
       onDebug,
+      {
+        workingDirectory,
+        // plans/ lives directly under the session folder.
+        sessionFolder: plansFolderPath ? dirname(plansFolderPath) : undefined,
+      },
     );
     if (promptInfo) {
       const adminWrappedInput =
@@ -913,7 +997,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
         rememberForMinutes: promptInfo.rememberForMinutes,
         commandHash: promptInfo.commandHash,
         approvalTtlSeconds: promptInfo.approvalTtlSeconds,
-        remember: promptInfo.remember,
+        rememberKey: promptInfo.rememberKey,
       };
     }
   }
@@ -942,9 +1026,26 @@ interface PromptInfo {
   rememberForMinutes?: number;
   commandHash?: string;
   approvalTtlSeconds?: number;
-  /** What an "Always Allow" answer stores: the same key the whitelist check below looks up. */
-  remember?: PermissionRemember;
+  rememberKey?: string;
 }
+
+/** Folders that bound smart confirmation; see smart-confirm.ts. */
+export interface SmartConfirmContext {
+  /** Session working directory (also the base for relative paths). */
+  workingDirectory?: string;
+  /** Session-owned folder; writes there never prompt. */
+  sessionFolder?: string;
+}
+
+function isRemembered(permissionManager: PermissionManagerLike, key: string): boolean {
+  return permissionManager.isApprovalRemembered?.(key) ?? false;
+}
+
+const FILE_WRITE_REASON_TEXT = {
+  sensitive: 'sensitive file',
+  outside_zone: 'outside the working directory',
+  unknown_path: 'path could not be resolved',
+} as const;
 
 function hashCommand(command: string): string {
   return createHash('sha256').update(command, 'utf8').digest('hex');
@@ -952,6 +1053,32 @@ function hashCommand(command: string): string {
 
 function toDisplayName(token: string): string {
   return token.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function isDeveloperFeedbackTool(toolName: string): boolean {
+  return toolName === 'send_developer_feedback'
+    || toolName === 'session__send_developer_feedback'
+    || toolName === 'mcp__session__send_developer_feedback';
+}
+
+function developerFeedbackPrompt(
+  toolName: string,
+  input: Record<string, unknown>,
+): PromptInfo {
+  const message = typeof input.message === 'string' ? input.message.trim() : '';
+  return {
+    promptType: 'mcp_mutation',
+    description: [
+      'Send this feedback to the Selection development team?',
+      '',
+      message || '(empty feedback message)',
+      '',
+      'Only the text above will be persisted. Session and connection metadata are not included.',
+    ].join('\n'),
+    command: toolName.startsWith('mcp__session__')
+      ? toolName
+      : 'send_developer_feedback',
+  };
 }
 
 function classifyAdminApproval(command: string): PromptInfo | null {
@@ -1021,13 +1148,19 @@ function wrapCommandForMacAdminPrompt(command: string): string {
 }
 
 /**
- * Determine if user approval is needed in 'ask' mode.
+ * Determine if user approval is needed in 'ask' mode ("Smart Approval").
  *
  * Returns prompt info if user should be asked, null if auto-allowed.
  * This is the single source of truth for ask-mode decisions across all agents.
  * `shouldAllowToolInMode()` always returns `{allowed: true}` in ask mode, so
  * the prompt decision lives here rather than being inferred from a permission
  * check.
+ *
+ * Reversible work inside the session's own folders runs without a prompt;
+ * writes elsewhere, sensitive files, irreversible or unrecognised commands,
+ * and external side effects (MCP / API mutations) still ask. Without a
+ * `smartContext` nothing is treated as trusted, so every write and every
+ * non-read-only command prompts.
  */
 export function shouldPromptInAskMode(
   toolName: string,
@@ -1036,45 +1169,43 @@ export function shouldPromptInAskMode(
   permissionsContext: PermissionsContext,
   plansFolderPath?: string,
   onDebug?: (message: string) => void,
+  smartContext: SmartConfirmContext = {},
 ): PromptInfo | null {
+
+  if (isDeveloperFeedbackTool(toolName)) {
+    return developerFeedbackPrompt(toolName, input);
+  }
+
+  let zones: TrustedZones | undefined;
+  const getZones = (): TrustedZones => {
+    zones ??= resolveTrustedZones(smartContext.workingDirectory, smartContext.sessionFolder);
+    return zones;
+  };
 
   // --- File writes ---
   if (FILE_WRITE_TOOLS.has(toolName)) {
-    const filePath = (input.file_path as string) || (input.notebook_path as string) || 'unknown';
-    // "Always Allow" covers writes into the same folder, never other paths (~/.ssh, ~/.zshrc).
-    const rememberKey = filePath !== 'unknown' ? getFileWriteRememberKey(filePath) : null;
-    if (rememberKey && permissionManager.isCommandWhitelisted(rememberKey)) {
-      onDebug?.(`Auto-allowing "${toolName}" to "${filePath}" (folder previously approved)`);
+    const filePath = (input.file_path as string) || (input.notebook_path as string) || '';
+    const decision = classifyFileWrite(
+      filePath,
+      getZones(),
+      smartContext.workingDirectory,
+      key => isRemembered(permissionManager, key),
+    );
+    if (decision.autoAllow) {
+      onDebug?.(`Smart confirm: auto-allowing ${toolName} to "${filePath}"`);
       return null;
-    }
-    // Honor the workspace allowedWritePaths allowlist here too. Explore mode already
-    // auto-allows these paths, so re-prompting for them in Ask mode only pushed
-    // automations to Allow-All (OSS #1065). Writes outside the allowlist still prompt.
-    if (filePath !== 'unknown') {
-      const { allowedWritePaths } = permissionsConfigCache.getMergedConfig(permissionsContext);
-      if (allowedWritePaths.length > 0 && matchesAllowedWritePath(filePath, allowedWritePaths)) {
-        onDebug?.(`Auto-allowing "${toolName}" to "${filePath}" via allowedWritePaths`);
-        return null;
-      }
     }
     return {
       promptType: 'file_write',
-      description: `${toolName}: ${filePath}`,
-      command: filePath,
-      remember: rememberKey ? { kind: 'command', key: rememberKey } : undefined,
+      description: `${toolName}: ${filePath || 'unknown'} (${FILE_WRITE_REASON_TEXT[decision.reason]})`,
+      command: decision.resolvedPath ?? (filePath || 'unknown'),
+      rememberKey: decision.rememberKey,
     };
-  }
-
-  // --- Monitor: runs its `command` in a shell as Bash does (a WebSocket watch only reads) ---
-  if (toolName === 'Monitor') {
-    if (input.command === undefined) return null;
-    return shouldPromptInAskMode('Bash', { command: input.command }, permissionManager, permissionsContext, plansFolderPath, onDebug);
   }
 
   // --- Bash commands ---
   if (toolName === 'Bash') {
     const command = typeof input.command === 'string' ? input.command : '';
-    const baseCommand = permissionManager.getBaseCommand(command);
 
     const adminPrompt = classifyAdminApproval(command);
     if (adminPrompt) {
@@ -1085,57 +1216,75 @@ export function shouldPromptInAskMode(
     // (same pipeline as Explore mode — catches redirects, substitutions, pipes to write commands)
     const mergedConfig = permissionsConfigCache.getMergedConfig(permissionsContext);
     if (isReadOnlyBashCommandWithConfig(command, mergedConfig)) {
-      onDebug?.(`Auto-allowing read-only command: ${baseCommand}`);
+      onDebug?.(`Auto-allowing read-only command: ${permissionManager.getBaseCommand(command)}`);
       return null;
     }
 
-    // Session whitelist. The key covers exactly this one plain command; chains,
-    // wrappers and dangerous commands have no key (permission-remember.ts).
-    const rememberKey = getBashRememberKey(command);
-    if (rememberKey && permissionManager.isCommandWhitelisted(rememberKey)) {
-      onDebug?.(`Auto-allowing "${rememberKey}" (previously approved)`);
+    // "Always allow" remembers the exact command, never the base command:
+    // approving `rm -rf build` must not approve every `rm`.
+    const rememberKey = rememberKeys.bash(command);
+    if (isRemembered(permissionManager, rememberKey)) {
+      onDebug?.('Auto-allowing previously approved command');
       return null;
     }
 
-    // Domain whitelist for a single plain curl/wget call: every host it contacts must be approved.
-    const hosts = getNetworkCommandHosts(command);
-    if (hosts && hosts.length > 0 && hosts.every(host => permissionManager.isDomainWhitelisted(host))) {
-      onDebug?.(`Auto-allowing ${baseCommand} to ${hosts.join(', ')} (domains whitelisted)`);
+    if (isAutoApprovableBashCommand(command, mergedConfig.readOnlyBashPatterns, getZones())) {
+      onDebug?.(`Smart confirm: auto-allowing routine command: ${command}`);
       return null;
     }
 
-    const remember: PermissionRemember | undefined = hosts && hosts.length > 0
-      ? { kind: 'domains', domains: hosts }
-      : rememberKey ? { kind: 'command', key: rememberKey } : undefined;
     return {
       promptType: 'bash',
       description: `Execute: ${command}`,
       command,
-      remember,
+      rememberKey,
     };
+  }
+
+  // --- Canonical session-tool mutations ---
+  // Pi may register session tools by their public canonical names.
+  // Preserve the same ask-mode behavior as their MCP-prefixed counterparts.
+  if (SESSION_TOOL_NAMES.has(toolName)) {
+    const safeModeResult = shouldAllowToolInMode(
+      toolName, input, 'safe', { plansFolderPath }
+    );
+    if (!safeModeResult.allowed) {
+      if (isRemembered(permissionManager, rememberKeys.tool(toolName)) || permissionManager.isCommandWhitelisted(toolName)) {
+        onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
+        return null;
+      }
+      return {
+        promptType: 'mcp_mutation',
+        description: `Session tool: ${toolName}`,
+        command: toolName,
+        rememberKey: rememberKeys.tool(toolName),
+      };
+    }
+    return null;
   }
 
   // --- MCP mutations ---
   if (toolName.startsWith('mcp__')) {
-    // Freestanding policy: blocked-in-safe-mode = mutation (shared with the Pages action bridge)
-    // Same read-only rules as Explore mode (default verbs + workspace/source patterns): a tool
-    // Explore runs silently must not prompt in Ask.
-    const policy = evaluateMcpToolPolicy(toolName, input, { plansFolderPath, permissionsContext });
-    if (policy.decision === 'allow') {
-      // Read-only MCP tool — no prompt needed
-      return null;
+    // Check if it would be blocked in safe mode (= it's a mutation)
+    const safeModeResult = shouldAllowToolInMode(
+      toolName, input, 'safe', { plansFolderPath }
+    );
+    if (!safeModeResult.allowed) {
+      // It's a mutation — check whitelist
+      if (isRemembered(permissionManager, rememberKeys.tool(toolName)) || permissionManager.isCommandWhitelisted(toolName)) {
+        onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
+        return null;
+      }
+      const serverAndTool = toolName.replace('mcp__', '').replace(/__/g, '/');
+      return {
+        promptType: 'mcp_mutation',
+        description: `MCP: ${serverAndTool}`,
+        command: toolName,
+        rememberKey: rememberKeys.tool(toolName),
+      };
     }
-    // It's a mutation — check session whitelist
-    if (permissionManager.isCommandWhitelisted(toolName)) {
-      onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
-      return null;
-    }
-    return {
-      promptType: 'mcp_mutation',
-      description: policy.description,
-      command: toolName,
-      remember: { kind: 'command', key: toolName },
-    };
+    // Read-only MCP tool — no prompt needed
+    return null;
   }
 
   // --- API mutations ---
@@ -1143,29 +1292,28 @@ export function shouldPromptInAskMode(
     const method = ((input?.method as string) || 'GET').toUpperCase();
     const path = input?.path as string | undefined;
 
-    // Freestanding policy: GET / allowlisted endpoints (shared with the Pages action bridge)
-    const policy = evaluateApiEndpointPolicy(method, path, permissionsContext);
-    if (policy.decision === 'allow') {
-      if (policy.reason === 'endpoint-allowlisted') {
-        onDebug?.(`Auto-allowing API "${method} ${path || ''}" (whitelisted in permissions.json)`);
+    if (method !== 'GET') {
+      const apiDescription = `${method} ${path || ''}`;
+
+      // Check permissions.json whitelist
+      if (isApiEndpointAllowed(method, path, permissionsContext)) {
+        onDebug?.(`Auto-allowing API "${apiDescription}" (whitelisted in permissions.json)`);
+        return null;
       }
-      return null;
+
+      // Check session whitelist
+      if (isRemembered(permissionManager, rememberKeys.api(`${toolName} ${apiDescription}`)) || permissionManager.isCommandWhitelisted(apiDescription)) {
+        onDebug?.(`Auto-allowing API "${apiDescription}" (previously approved)`);
+        return null;
+      }
+
+      return {
+        promptType: 'api_mutation',
+        description: `API: ${apiDescription}`,
+        command: apiDescription,
+        rememberKey: rememberKeys.api(`${toolName} ${apiDescription}`),
+      };
     }
-
-    const apiDescription = policy.description;
-
-    // Check session whitelist
-    if (permissionManager.isCommandWhitelisted(apiDescription)) {
-      onDebug?.(`Auto-allowing API "${apiDescription}" (previously approved)`);
-      return null;
-    }
-
-    return {
-      promptType: 'api_mutation',
-      description: `API: ${apiDescription}`,
-      command: apiDescription,
-      remember: { kind: 'command', key: apiDescription },
-    };
   }
 
   return null;

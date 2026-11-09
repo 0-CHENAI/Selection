@@ -7,6 +7,7 @@
  *
  * Architecture:
  *   Markdown click → PlatformContext → App.tsx → useLinkInterceptor
+ *     ├── HTML? → isolated built-in browser
  *     ├── canPreview? → set previewState (renders overlay in App.tsx)
  *     └── can't preview? → electronAPI.openFile (opens externally)
  *
@@ -15,7 +16,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { classifyFile, type FilePreviewType } from '@craft-agent/ui'
+import { resolveFileOpenRoute, type FilePreviewType } from '@craft-agent/ui'
 import { getLanguageFromPath } from '@/lib/file-utils'
 
 // ── Preview state types ────────────────────────────────────────────────────────
@@ -74,8 +75,10 @@ export type FilePreviewState =
 // Callbacks injected by App.tsx so the hook doesn't depend on window.electronAPI directly.
 
 interface LinkInterceptorOptions {
+  /** Open HTML in the isolated built-in browser, with its document resources. */
+  openHtmlFile: (path: string) => Promise<boolean>
   /** Open file in default external application (e.g., VS Code) */
-  openFileExternal: (path: string) => Promise<void>
+  openFileExternal: (path: string) => Promise<void | boolean>
   /** Open URL in default browser */
   openUrl: (url: string) => Promise<void>
   /** Reveal file in system file manager */
@@ -92,11 +95,11 @@ interface LinkInterceptorOptions {
 
 interface LinkInterceptorResult {
   /** Replacement for App.tsx handleOpenFile — classifies and routes */
-  handleOpenFile: (path: string) => void
+  handleOpenFile: (path: string) => Promise<boolean>
   /** Replacement for App.tsx handleOpenUrl — always opens externally */
   handleOpenUrl: (url: string) => void
   /** Open file directly in external app, bypassing classification/preview */
-  openFileExternal: (path: string) => void
+  openFileExternal: (path: string) => Promise<void | boolean>
   /** Current preview state, drives which overlay renders in App.tsx */
   previewState: FilePreviewState | null
   /** Close the preview overlay */
@@ -138,20 +141,22 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
    * (e.g., @uiw/react-json-view crashes on null value).
    */
   const handleOpenFile = useCallback(async (path: string) => {
-    const classification = classifyFile(path)
+    const route = await resolveFileOpenRoute(path, async (candidate) => {
+      await optionsRef.current.readFileDataUrl(candidate)
+      return true
+    })
 
-    if (!classification.canPreview || !classification.type) {
-      // No preview available — open in default external app
-      optionsRef.current.openFileExternal(path)
-      return
+    if (route.kind === 'external') {
+      return (await optionsRef.current.openFileExternal(path)) !== false
     }
 
-    const type = classification.type
+    if (route.kind === 'html') return optionsRef.current.openHtmlFile(path)
 
+    const type = route.type
     // For image/pdf: set state immediately — the overlay handles its own async loading
     if (type === 'image' || type === 'pdf') {
       setPreviewState({ type, filePath: path })
-      return
+      return true
     }
 
     // For text-based files: read content first, then show overlay with content ready.
@@ -160,17 +165,19 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
       const content = await optionsRef.current.readFile(path)
       const state = buildInitialTextState(type, path)
       setPreviewState({ ...state, content } as FilePreviewState)
+      return true
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to read file'
       const state = buildInitialTextState(type, path)
       setPreviewState({ ...state, content: '', error: errorMsg } as FilePreviewState)
+      return false
     }
   }, []) // Stable: uses optionsRef
 
   /** Open file directly in external app, bypassing classification/preview.
    * Used by overlay header badges — when already viewing a file, "Open" should launch the editor. */
   const openFileExternal = useCallback((path: string) => {
-    optionsRef.current.openFileExternal(path)
+    return optionsRef.current.openFileExternal(path)
   }, []) // Stable: uses optionsRef
 
   /** URLs always open externally — no in-app browser for security */

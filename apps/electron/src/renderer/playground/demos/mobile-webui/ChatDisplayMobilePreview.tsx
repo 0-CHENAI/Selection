@@ -8,6 +8,7 @@ import {
   MOCK_MESSAGES,
   MOCK_LABELS,
   MOCK_LLM_CONNECTIONS,
+  MOCK_SESSION_STATUSES,
   MOCK_SOURCES,
   MOCK_SKILLS,
   MOBILE_WORKSPACE_ID,
@@ -18,12 +19,12 @@ const log = (label: string) => (...args: unknown[]) => {
   console.log(`[Mobile ChatDisplay] ${label}`, args)
 }
 
-type MessageCount = '1' | '5' | '20'
+type MessageCount = '1' | '5' | '20' | '100'
 
 interface ChatDisplayMobilePreviewProps {
   device?: MobileDevice
   showBezel?: boolean
-  /** Number of messages to show. '1' = single user msg, '5' = full thread, '20' = scroll test */
+  /** Long threads exercise scrolling and history pagination. */
   messageCount?: MessageCount
   /** Show the last assistant turn as still streaming. */
   streaming?: boolean
@@ -54,14 +55,16 @@ function buildMessages(count: MessageCount, streaming: boolean): Message[] {
       },
     ]
   }
-  // '20': cycle the base messages with new ids and timestamps
+  // Long threads exercise pagination and the record navigation rail.
   const out: Message[] = []
-  for (let i = 0; i < 20; i++) {
+  const total = Number(count)
+  for (let i = 0; i < total; i++) {
     const base = MOCK_MESSAGES[i % MOCK_MESSAGES.length]
     out.push({
       ...base,
       id: `${base.id}-loop-${i}`,
-      timestamp: (base.timestamp ?? Date.now()) - (20 - i) * 60_000,
+      turnId: base.turnId ? `${base.turnId}-loop-${i}` : undefined,
+      timestamp: Date.now() - (total - i) * 60_000,
     })
   }
   if (streaming) {
@@ -118,6 +121,8 @@ export function ChatDisplayMobilePreview({
             skills={MOCK_SKILLS}
             labels={MOCK_LABELS}
             onLabelsChange={log('onLabelsChange')}
+            sessionStatuses={MOCK_SESSION_STATUSES}
+            onSessionStatusChange={log('onSessionStatusChange')}
             workspaceId={MOBILE_WORKSPACE_ID}
             compactMode={true}
             enableCompactModelPicker={true}

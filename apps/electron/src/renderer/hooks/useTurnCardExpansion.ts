@@ -7,8 +7,8 @@
  * Shape: { [sessionId]: { turns: string[], groups: string[], lastAccessed: number } }
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react'
-import * as storage from '@/lib/local-storage'
+import { useState, useCallback, useEffect } from 'react'
+import * as storage from '../lib/local-storage'
 
 const MAX_SESSIONS = 100
 
@@ -70,14 +70,11 @@ export function useTurnCardExpansion(sessionId: string | undefined) {
     return entry ? new Set(entry.groups) : new Set()
   })
 
-  // Track sessionId so we can save/restore on session switch
-  const prevSessionIdRef = useRef(sessionId)
-
-  // When sessionId changes, save current state and load new session's state
-  useEffect(() => {
-    if (prevSessionIdRef.current === sessionId) return
-
-    // Load the new session's expansion state from localStorage
+  // Restore before children commit. An effect would briefly expose the previous
+  // session's folds and persist them under the new session's ID.
+  const [stateSessionId, setStateSessionId] = useState(sessionId)
+  if (stateSessionId !== sessionId) {
+    setStateSessionId(sessionId)
     if (sessionId) {
       const map = readMap()
       const entry = map[sessionId]
@@ -88,21 +85,14 @@ export function useTurnCardExpansion(sessionId: string | undefined) {
       setExpandedActivityGroups(new Set())
     }
 
-    prevSessionIdRef.current = sessionId
-  }, [sessionId])
+  }
 
-  // Persist to localStorage whenever expansion state changes.
-  // Uses a ref to avoid stale closures and only writes when we have a valid session.
-  const expandedTurnsRef = useRef(expandedTurns)
-  const expandedGroupsRef = useRef(expandedActivityGroups)
-  expandedTurnsRef.current = expandedTurns
-  expandedGroupsRef.current = expandedActivityGroups
-
+  // Persist only this session's manual choices.
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId || stateSessionId !== sessionId) return
     const map = readMap()
-    const turns = [...expandedTurnsRef.current]
-    const groups = [...expandedGroupsRef.current]
+    const turns = [...expandedTurns]
+    const groups = [...expandedActivityGroups]
 
     // Only write an entry if there's something expanded; remove entry if empty
     if (turns.length === 0 && groups.length === 0) {
@@ -119,7 +109,7 @@ export function useTurnCardExpansion(sessionId: string | undefined) {
       lastAccessed: Date.now(),
     }
     writeMap(map)
-  }, [sessionId, expandedTurns, expandedActivityGroups])
+  }, [sessionId, stateSessionId, expandedTurns, expandedActivityGroups])
 
   // Toggle a single turn's expansion state
   const toggleTurn = useCallback((turnId: string, expanded: boolean) => {

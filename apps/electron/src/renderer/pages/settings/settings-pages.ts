@@ -17,12 +17,11 @@ import type { SettingsSubpage } from '../../../shared/settings-registry'
 import AppSettingsPage from './AppSettingsPage'
 import AiSettingsPage from './AiSettingsPage'
 import AppearanceSettingsPage from './AppearanceSettingsPage'
-import InputSettingsPage from './InputSettingsPage'
 import WorkspaceSettingsPage from './WorkspaceSettingsPage'
+import AdvancedSettingsPage from './AdvancedSettingsPage'
 import PermissionsSettingsPage from './PermissionsSettingsPage'
 import LabelsSettingsPage from './LabelsSettingsPage'
 import MessagingSettingsPage from './MessagingSettingsPage'
-import ServerSettingsPage from './ServerSettingsPage'
 import ShortcutsPage from './ShortcutsPage'
 import PreferencesPage from './PreferencesPage'
 
@@ -34,12 +33,12 @@ export const SETTINGS_PAGE_COMPONENTS: Record<SettingsSubpage, ComponentType> = 
   app: AppSettingsPage,
   ai: AiSettingsPage,
   appearance: AppearanceSettingsPage,
-  input: InputSettingsPage,
+  input: AppSettingsPage,
   workspace: WorkspaceSettingsPage,
+  advanced: AdvancedSettingsPage,
   permissions: PermissionsSettingsPage,
   labels: LabelsSettingsPage,
   messaging: MessagingSettingsPage,
-  server: ServerSettingsPage,
   shortcuts: ShortcutsPage,
   preferences: PreferencesPage,
 }

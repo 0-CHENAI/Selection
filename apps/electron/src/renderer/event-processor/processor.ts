@@ -13,14 +13,13 @@
  */
 
 import type { SessionState, AgentEvent, ProcessResult } from './types'
-import { handleTextDelta, handleTextComplete, handleTextDiscard, handleMessagesRetracted } from './handlers/text'
-import { handleToolStart, handleToolResult, handleTaskBackgrounded, handleShellBackgrounded, handleTaskProgress, handleTaskCompleted } from './handlers/tool'
+import { handleTextDelta, handleTextComplete, handleAnswerPreview } from './handlers/text'
+import { handleToolStart, handleToolResult, handleToolProgress, handleTaskBackgrounded, handleShellBackgrounded, handleTaskProgress, handleTaskCompleted } from './handlers/tool'
 import {
   handleComplete,
   handleError,
   handleTypedError,
   handleSourcesChanged,
-  handleCodingModeChanged,
   handleLabelsChanged,
   handleProjectIdChanged,
   handleSessionStatusChanged,
@@ -34,7 +33,6 @@ import {
   handleCredentialRequest,
   handlePlanSubmitted,
   handleStatus,
-  handleRetry,
   handleInfo,
   handleInterrupted,
   handleTitleGenerated,
@@ -45,11 +43,17 @@ import {
   handleSessionModelChanged,
   handleConnectionChanged,
   handleUserMessage,
+  handleQueueChanged,
+  handleMessagesTruncated,
+  handleMessagesRestored,
+  handleRegenerateStarted,
   handleMessageAnnotationsUpdated,
   handleSessionShared,
   handleSessionUnshared,
   handleAuthRequest,
   handleAuthCompleted,
+  handleClarificationRequest,
+  handleClarificationResolved,
   handleUsageUpdate,
 } from './handlers/session'
 
@@ -67,23 +71,22 @@ export function processEvent(
   state: SessionState,
   event: AgentEvent
 ): ProcessResult {
+  const hadAnswerPreview = event.type === 'text_complete' && event.answerCommitted
+    && state.session.messages.some(message => message.answerPreview && message.answerRunId === event.answerRunId)
+  if (['complete', 'error', 'typed_error', 'interrupted', 'plan_submitted', 'auth_request', 'clarification_request', 'clarification_resolved', 'regenerate_started', 'messages_restored', 'messages_truncated'].includes(event.type)
+    || (event.type === 'text_complete' && event.answerCommitted)) {
+    state = { ...state, session: { ...state.session, messages: state.session.messages.filter(m => !m.answerPreview) } }
+  }
   switch (event.type) {
-    case 'text_discard':
-      return { state: handleTextDiscard(state, event), effects: [] }
-
-    case 'messages_retracted':
-      return { state: handleMessagesRetracted(state, event), effects: [] }
-
-    case 'retry':
-      return handleRetry(state, event)
-
+    case 'answer_preview':
+      return { state: handleAnswerPreview(state, event), effects: [] }
     case 'text_delta': {
       const newState = handleTextDelta(state, event)
       return { state: newState, effects: [] }
     }
 
     case 'text_complete': {
-      const newState = handleTextComplete(state, event)
+      const newState = handleTextComplete(state, event, hadAnswerPreview)
       return { state: newState, effects: [] }
     }
 
@@ -91,6 +94,9 @@ export function processEvent(
       const newState = handleToolStart(state, event)
       return { state: newState, effects: [] }
     }
+
+    case 'tool_progress':
+      return { state: handleToolProgress(state, event), effects: [] }
 
     case 'tool_result': {
       const newState = handleToolResult(state, event)
@@ -118,9 +124,8 @@ export function processEvent(
     }
 
     case 'workflow_agent_completed':
-    case 'task_activity':
-      // Live background-task progress (workflow fan-out count, an agent's summary): the chip is
-      // updated in App.tsx's handleBackgroundTaskEvent; nothing to change in message/session state.
+      // Live workflow fan-out progress — the chip counter is updated in App.tsx's
+      // handleBackgroundTaskEvent; nothing to change in message/session state here.
       return { state, effects: [] }
 
     case 'complete':
@@ -172,9 +177,6 @@ export function processEvent(
     case 'sources_changed':
       return handleSourcesChanged(state, event)
 
-    case 'coding_mode_changed':
-      return handleCodingModeChanged(state, event)
-
     case 'labels_changed':
       return handleLabelsChanged(state, event)
 
@@ -214,6 +216,9 @@ export function processEvent(
     case 'user_message':
       return handleUserMessage(state, event)
 
+    case 'queue_changed':
+      return handleQueueChanged(state, event)
+
     case 'message_annotations_updated':
       return handleMessageAnnotationsUpdated(state, event)
 
@@ -229,13 +234,30 @@ export function processEvent(
     case 'auth_completed':
       return handleAuthCompleted(state, event)
 
+    case 'clarification_request':
+      return handleClarificationRequest(state, event)
+
+    case 'clarification_resolved':
+      return handleClarificationResolved(state, event)
+
     case 'source_activated':
       // Server-side handles the auto-retry now (craft-agents-oss#804); the renderer
       // just receives the event for UI feedback. See SessionManager.processEvent.
       return { state, effects: [] }
 
+    case 'progress_supervision':
+      return { state: { ...state, session: { ...state.session, progressSupervision: event.state } }, effects: [] }
     case 'usage_update':
       return handleUsageUpdate(state, event)
+
+    case 'regenerate_started':
+      return handleRegenerateStarted(state, event)
+
+    case 'messages_truncated':
+      return handleMessagesTruncated(state, event)
+
+    case 'messages_restored':
+      return handleMessagesRestored(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

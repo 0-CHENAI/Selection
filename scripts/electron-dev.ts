@@ -4,27 +4,18 @@
  */
 
 import { spawn, type Subprocess } from "bun";
-import { existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSync } from "fs";
+import { chmodSync, existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join, basename } from "path";
 import * as esbuild from "esbuild";
-import { downloadUv, type Platform, type Arch } from "./build/common";
+import { downloadOfficecli, downloadUv, type Platform, type Arch } from "./build/common";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 const ELECTRON_DIR = join(ROOT_DIR, "apps/electron");
 const DIST_DIR = join(ELECTRON_DIR, "dist");
 
-// Replace grammY's bundled polyfills (node-fetch@2 + abort-controller@3) with
-// native Node globals. esbuild otherwise renames the polyfill's `class
-// AbortSignal` to `_AbortSignal` to dodge collision with the global, which
-// breaks node-fetch@2's `constructor.name === 'AbortSignal'` check and fails
-// every Telegram API call with a TypeError. Kept in sync with
-// `apps/electron/package.json` build:main and `scripts/electron-build-main.ts`.
-const MAIN_PROCESS_ALIAS: Record<string, string> = {
-  "node-fetch": join(ROOT_DIR, "apps/electron/src/main/shims/node-fetch.cjs"),
-  "abort-controller": join(ROOT_DIR, "apps/electron/src/main/shims/abort-controller.cjs"),
-};
-
-// Subprocess server paths
+// MCP server paths
+const SESSION_SERVER_DIR = join(ROOT_DIR, "packages/session-mcp-server");
+const SESSION_SERVER_OUTPUT = join(SESSION_SERVER_DIR, "dist/index.js");
 // Pi agent server path (subprocess for Pi SDK sessions)
 const PI_AGENT_SERVER_DIR = join(ROOT_DIR, "packages/pi-agent-server");
 const PI_AGENT_SERVER_OUTPUT = join(PI_AGENT_SERVER_DIR, "dist/index.js");
@@ -48,6 +39,18 @@ function resolveBuildArch(): Arch {
   throw new Error(`Unsupported architecture for uv bootstrap: ${process.arch}`);
 }
 
+function currentBuildConfig() {
+  return {
+    platform: resolveBuildPlatform(),
+    arch: resolveBuildArch(),
+    upload: false,
+    uploadLatest: false,
+    uploadScript: false,
+    rootDir: ROOT_DIR,
+    electronDir: ELECTRON_DIR,
+  };
+}
+
 async function ensureBundledUvForCurrentPlatform(): Promise<void> {
   const platform = resolveBuildPlatform();
   const arch = resolveBuildArch();
@@ -61,15 +64,21 @@ async function ensureBundledUvForCurrentPlatform(): Promise<void> {
   }
 
   console.log(`⬇️  Bundled uv missing, bootstrapping ${platformKey}...`);
-  await downloadUv({
-    platform,
-    arch,
-    upload: false,
-    uploadLatest: false,
-    uploadScript: false,
-    rootDir: ROOT_DIR,
-    electronDir: ELECTRON_DIR,
-  });
+  await downloadUv(currentBuildConfig());
+}
+
+async function ensureBundledOfficecliForCurrentPlatform(): Promise<void> {
+  await downloadOfficecli(currentBuildConfig());
+}
+
+function ensureTrustedBunForDev(): void {
+  const bunName = process.platform === "win32" ? "bun.exe" : "bun";
+  const bunPath = join(ELECTRON_DIR, "vendor", "bun", bunName);
+  if (existsSync(bunPath)) return;
+  mkdirSync(join(ELECTRON_DIR, "vendor", "bun"), { recursive: true });
+  cpSync(process.execPath, bunPath);
+  if (process.platform !== "win32") chmodSync(bunPath, 0o755);
+  console.log(`✅ Staged trusted Bun runtime for dev: ${bunPath}`);
 }
 
 // Multi-instance detection (matches detect-instance.sh logic)
@@ -85,8 +94,8 @@ function detectInstance(): void {
     const instanceNum = match[1];
     process.env.CRAFT_INSTANCE_NUMBER = instanceNum;
     process.env.CRAFT_VITE_PORT = `${instanceNum}173`;
-    process.env.CRAFT_APP_NAME = `Craft Agents [${instanceNum}]`;
-    process.env.CRAFT_CONFIG_DIR = join(process.env.HOME || "", `.craft-agent-${instanceNum}`);
+    process.env.CRAFT_APP_NAME = `Selection [${instanceNum}]`;
+    process.env.CRAFT_CONFIG_DIR = join(process.env.HOME || "", `.selection-${instanceNum}`);
     process.env.CRAFT_DEEPLINK_SCHEME = `craftagents${instanceNum}`;
     console.log(`🔢 Instance ${instanceNum} detected: port=${process.env.CRAFT_VITE_PORT}, config=${process.env.CRAFT_CONFIG_DIR}`);
   }
@@ -123,9 +132,18 @@ async function killProcessOnPort(port: string): Promise<void> {
 
   try {
     if (isWindows) {
-      // Windows: use netstat to find PID, then taskkill
+      // Some Windows PowerShell environments omit System32 from PATH. Resolve
+      // the system tools explicitly so stale Vite processes are still cleaned
+      // up before strictPort starts the new dev server.
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+      const netstatPath = join(systemRoot, "System32", "netstat.exe");
+      const taskkillPath = join(systemRoot, "System32", "taskkill.exe");
+      if (!existsSync(netstatPath) || !existsSync(taskkillPath)) {
+        throw new Error("Windows netstat.exe or taskkill.exe was not found");
+      }
+
       const netstat = spawn({
-        cmd: ["cmd", "/c", `netstat -ano | findstr :${port}`],
+        cmd: [netstatPath, "-ano", "-p", "TCP"],
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -137,6 +155,8 @@ async function killProcessOnPort(port: string): Promise<void> {
       for (const line of output.split("\n")) {
         const parts = line.trim().split(/\s+/);
         if (parts.length >= 5) {
+          const localEndpoint = parts[1] || "";
+          if (!localEndpoint.endsWith(`:${port}`)) continue;
           const pid = parts[parts.length - 1];
           if (pid && /^\d+$/.test(pid) && pid !== "0") {
             pids.add(pid);
@@ -147,11 +167,15 @@ async function killProcessOnPort(port: string): Promise<void> {
       // Kill each PID
       for (const pid of pids) {
         const kill = spawn({
-          cmd: ["taskkill", "/PID", pid, "/F"],
+          cmd: [taskkillPath, "/PID", pid, "/T", "/F"],
           stdout: "pipe",
           stderr: "pipe",
         });
-        await kill.exited;
+        const exitCode = await kill.exited;
+        if (exitCode !== 0) {
+          const error = await new Response(kill.stderr).text();
+          throw new Error(`Failed to stop PID ${pid} on port ${port}: ${error.trim()}`);
+        }
       }
 
       if (pids.size > 0) {
@@ -171,8 +195,8 @@ async function killProcessOnPort(port: string): Promise<void> {
         console.log(`🔪 Killed process(es) on port ${port}`);
       }
     }
-  } catch {
-    // Ignore errors - port may not be in use
+  } catch (error) {
+    console.warn(`Unable to clean port ${port}:`, error instanceof Error ? error.message : error);
   }
 }
 
@@ -190,35 +214,35 @@ function copyResources(): void {
   const srcDir = join(ELECTRON_DIR, "resources");
   const destDir = join(ELECTRON_DIR, "dist/resources");
   if (existsSync(srcDir)) {
+    rmSync(destDir, { recursive: true, force: true });
     cpSync(srcDir, destDir, { recursive: true, force: true });
     console.log("📦 Copied resources to dist");
   }
 }
 
-// Build the WhatsApp worker bundle (dist/worker.cjs). Runs the canonical
-// `scripts/build-wa-worker.ts` as a subprocess so the dev path stays in
-// sync with the packaged/CI build. Cheap (~70ms) so we always rebuild.
-async function buildWaWorker(): Promise<void> {
-  console.log("📨 Building WhatsApp worker...");
-  const proc = spawn({
-    cmd: ["bun", "run", "scripts/build-wa-worker.ts"],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    console.error("❌ WhatsApp worker build failed");
+// Build MCP servers for Codex sessions and Pi agent server (one-time, no watch needed)
+async function buildMcpServers(): Promise<void> {
+  console.log("🌉 Building MCP servers and Pi agent server...");
+
+  // Ensure dist directories exist
+  const sessionDistDir = join(SESSION_SERVER_DIR, "dist");
+  const piDistDir = join(PI_AGENT_SERVER_DIR, "dist");
+  if (!existsSync(sessionDistDir)) mkdirSync(sessionDistDir, { recursive: true });
+  if (!existsSync(piDistDir)) mkdirSync(piDistDir, { recursive: true });
+
+  // Build session MCP server (esbuild, packages external — deps resolve from root node_modules)
+  const sessionResult = await runEsbuild(
+    "packages/session-mcp-server/src/index.ts",
+    "packages/session-mcp-server/dist/index.js",
+    {},
+    { packagesExternal: true }
+  );
+
+  if (!sessionResult.success) {
+    console.error("❌ Session MCP server build failed:", sessionResult.error);
     process.exit(1);
   }
-}
-
-// Build the Pi agent server subprocess (one-time, no watch needed)
-async function buildSubprocessServers(): Promise<void> {
-  console.log("🌉 Building Pi agent server...");
-
-  const piDistDir = join(PI_AGENT_SERVER_DIR, "dist");
-  if (!existsSync(piDistDir)) mkdirSync(piDistDir, { recursive: true });
+  console.log("✅ Session MCP server built");
 
   // Build Pi agent server with bun (not esbuild) because its Pi SDK deps are ESM-only.
   // esbuild with packages:external leaves them as require() calls which fail at runtime.
@@ -258,11 +282,15 @@ function getOAuthDefines(): Record<string, string> {
 function getElectronEnv(): Record<string, string> {
   const vitePort = process.env.CRAFT_VITE_PORT || "5173";
 
+  // Codex binary path is resolved at runtime by the binary-resolver module.
+  // It checks: CODEX_PATH env var > bundled binary > local dev fork > system PATH.
+  // You can override with CODEX_PATH env var if needed for debugging.
+
   return {
     ...process.env as Record<string, string>,
     VITE_DEV_SERVER_URL: `http://localhost:${vitePort}`,
     CRAFT_CONFIG_DIR: process.env.CRAFT_CONFIG_DIR || "",
-    CRAFT_APP_NAME: process.env.CRAFT_APP_NAME || "Craft Agents",
+    CRAFT_APP_NAME: process.env.CRAFT_APP_NAME || "Selection",
     CRAFT_DEEPLINK_SCHEME: process.env.CRAFT_DEEPLINK_SCHEME || "craftagents",
     CRAFT_INSTANCE_NUMBER: process.env.CRAFT_INSTANCE_NUMBER || "",
   };
@@ -270,15 +298,7 @@ function getElectronEnv(): Record<string, string> {
 
 // Externals for the main-process bundle.
 // - `electron`: the runtime, not bundleable.
-// - `@anthropic-ai/claude-agent-sdk`: SDK 0.3.x is pure ESM and calls
-//   `createRequire(import.meta.url)` at module-init; esbuild's CJS bundling
-//   leaves the synthesized `import_meta.url` undefined and the bundled
-//   main.cjs throws ERR_INVALID_ARG_VALUE on load. Externalize so Node loads
-//   the SDK natively as ESM. Electron 39 = Node 22.x supports `require()` of
-//   TLA-free ESM, so the runtime `require('@anthropic-ai/claude-agent-sdk')`
-//   resolves correctly. Mirror of the same flag in `scripts/electron-build-main.ts`
-//   and `apps/electron/package.json` build:main.
-const MAIN_BUNDLE_EXTERNALS = ["electron", "@anthropic-ai/claude-agent-sdk"];
+const MAIN_BUNDLE_EXTERNALS = ["electron"];
 
 // Run a one-shot esbuild using the JavaScript API
 async function runEsbuild(
@@ -313,7 +333,7 @@ async function runEsbuild(
 async function buildPiAgentServer(): Promise<{ success: boolean; error?: string }> {
   try {
     const proc = spawn({
-      cmd: ["bun", "build", "src/index.ts", "--outdir=dist", "--target=bun", "--format=esm"],
+      cmd: ["bun", "run", "build"],
       cwd: PI_AGENT_SERVER_DIR,
       stdout: "pipe",
       stderr: "pipe",
@@ -405,14 +425,13 @@ async function main(): Promise<void> {
   }
 
   await ensureBundledUvForCurrentPlatform();
+  await ensureBundledOfficecliForCurrentPlatform();
+  ensureTrustedBunForDev();
 
   copyResources();
 
-  // Build the Pi agent server subprocess
-  await buildSubprocessServers();
-
-  // Build WhatsApp worker bundle so the adapter can spawn it on demand
-  await buildWaWorker();
+  // Build MCP servers for Codex sessions
+  await buildMcpServers();
 
   const vitePort = process.env.CRAFT_VITE_PORT || "5173";
   const oauthDefines = getOAuthDefines();
@@ -439,8 +458,7 @@ async function main(): Promise<void> {
     runEsbuild(
       "apps/electron/src/main/index.ts",
       "apps/electron/dist/main.cjs",
-      oauthDefines,
-      { alias: MAIN_PROCESS_ALIAS }
+      oauthDefines
     ),
     runEsbuild(
       "apps/electron/src/preload/bootstrap.ts",
@@ -532,7 +550,6 @@ async function main(): Promise<void> {
     format: "cjs",
     outfile: join(ROOT_DIR, "apps/electron/dist/main.cjs"),
     external: MAIN_BUNDLE_EXTERNALS,
-    alias: MAIN_PROCESS_ALIAS,
     define: oauthDefines,
     logLevel: "info",
   });

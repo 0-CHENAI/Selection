@@ -482,6 +482,27 @@ describe('extractToolResults', () => {
     })
   })
 
+  it('preserves MCP/Anthropic image blocks live while keeping Base64 out of the persisted result string', () => {
+    toolIndex.register('toolu_preview', 'Read', {})
+    const blocks: ContentBlock[] = [makeToolResultBlock('toolu_preview', [
+      { type: 'text', text: '{"artifacts":[{"path":"data/preview/full.png"}]}' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cG5n' } },
+    ])]
+
+    const events = extractToolResults(blocks, null, undefined, toolIndex)
+    const event = events[0]
+    expect(event?.type).toBe('tool_result')
+    if (!event || event.type !== 'tool_result') throw new Error('Expected one tool_result event')
+    expect(event.result.includes('cG5n')).toBe(false)
+    expect(event).toMatchObject({
+      result: expect.stringContaining('data/preview/full.png'),
+      content: [
+        { type: 'text', text: expect.stringContaining('data/preview/full.png') },
+        { type: 'image', data: 'cG5n', mimeType: 'image/png' },
+      ],
+    })
+  })
+
   it('handles multiple tool_result blocks in one message', () => {
     toolIndex.register('toolu_1', 'Read', {})
     toolIndex.register('toolu_2', 'Grep', {})
@@ -786,20 +807,6 @@ describe('extractToolResults', () => {
       intent: 'Run tests',
       command: 'npm test',
     })
-  })
-
-  it("ignores a subagent's background Shell and background Agent (sidechain results belong to the subagent)", () => {
-    toolIndex.register('toolu_sub_bash', 'Bash', { command: 'bun test', description: 'Run tests' })
-    toolIndex.register('toolu_sub_agent', 'Agent', { description: 'Nested', run_in_background: true })
-
-    const blocks: ContentBlock[] = [
-      makeToolResultBlock('toolu_sub_bash', 'shell_id: shell_sub'),
-      makeToolResultBlock('toolu_sub_agent', 'Async agent launched. agentId: nested1 output_file: /tmp/x'),
-    ]
-
-    const events = extractToolResults(blocks, 'toolu_parent_task', undefined, toolIndex)
-
-    expect(events.map(e => e.type)).toEqual(['tool_result', 'tool_result'])
   })
 
   it('parseWorkflowIdFromTranscriptPath extracts wf ids and ignores non-workflow paths', () => {

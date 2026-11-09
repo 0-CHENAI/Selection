@@ -1,7 +1,8 @@
 /**
  * LarkConnectDialog — App ID + App Secret pairing flow for Lark / Feishu.
  *
- * Same modal shape as `TelegramConnectDialog`. Differences:
+ * Credential-based connection dialog for Lark / Feishu. Differences from
+ * token-based messaging setup:
  *   - Two secret fields (App ID + App Secret) instead of one (bot token)
  *   - A region selector — Lark and Feishu are separate Open Platforms;
  *     a bot belongs to one or the other and the choice is permanent.
@@ -10,7 +11,6 @@
 import * as React from 'react'
 import { Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -120,35 +120,31 @@ export function LarkConnectDialog({
         <div className="space-y-3 py-2">
           {/* Region selector */}
           <div>
-            <div className="mb-1.5 text-label font-medium">
+            <div className="mb-1.5 text-xs text-muted-foreground">
               {t('settings.messaging.lark.domainLabel')}
             </div>
-            {/* Segmented control (same treatment as the onboarding provider switch) */}
-            <div className="inline-flex rounded-md bg-fill-hover p-0.5">
-              {(['lark', 'feishu'] as const).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={domain === value}
-                  onClick={() => setDomain(value)}
-                  disabled={saving}
-                  className={cn(
-                    'h-control-sm px-3 text-label font-medium rounded-sm transition-[background-color,color,box-shadow] duration-micro ease-out-subtle disabled:text-disabled',
-                    domain === value
-                      ? 'bg-floating shadow-elev-1 text-foreground'
-                      : 'text-secondary hover:text-foreground',
-                  )}
-                >
-                  {value === 'lark'
-                    ? t('settings.messaging.lark.domainLark')
-                    : t('settings.messaging.lark.domainFeishu')}
-                </button>
-              ))}
+            <div className="flex gap-2">
+              <Button
+                variant={domain === 'lark' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setDomain('lark')}
+                disabled={saving}
+              >
+                {t('settings.messaging.lark.domainLark')}
+              </Button>
+              <Button
+                variant={domain === 'feishu' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setDomain('feishu')}
+                disabled={saving}
+              >
+                {t('settings.messaging.lark.domainFeishu')}
+              </Button>
             </div>
           </div>
 
           <div>
-            <div className="mb-1.5 text-label font-medium">
+            <div className="mb-1.5 text-xs text-muted-foreground">
               {t('settings.messaging.lark.appIdLabel')}
             </div>
             <SettingsSecretInput
@@ -160,7 +156,7 @@ export function LarkConnectDialog({
           </div>
 
           <div>
-            <div className="mb-1.5 text-label font-medium">
+            <div className="mb-1.5 text-xs text-muted-foreground">
               {t('settings.messaging.lark.appSecretLabel')}
             </div>
             <SettingsSecretInput
@@ -173,24 +169,24 @@ export function LarkConnectDialog({
 
           <div className="flex items-center gap-2">
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               onClick={handleTest}
               disabled={!ready || test.state === 'testing' || saving}
             >
-              {test.state === 'testing' && <Spinner className="text-label" />}
+              {test.state === 'testing' && <Spinner className="mr-1 text-[14px]" />}
               {t('settings.messaging.lark.testConnection')}
             </Button>
 
             {test.state === 'success' && (
-              <span className="inline-flex items-center gap-1 text-label-sm text-success">
-                <Check className="size-3.5" />
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                <Check className="h-3.5 w-3.5" />
                 {t('settings.messaging.lark.testOk')}
               </span>
             )}
             {test.state === 'error' && (
-              <span className="inline-flex items-center gap-1 text-label-sm text-destructive">
-                <X className="size-3.5" />
+              <span className="inline-flex items-center gap-1 text-xs text-destructive">
+                <X className="h-3.5 w-3.5" />
                 {test.error}
               </span>
             )}
@@ -198,15 +194,16 @@ export function LarkConnectDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
             {t('common.cancel')}
           </Button>
           <Button
-            variant="primary"
+            variant="outline"
+            size="sm"
             onClick={handleSave}
             disabled={!ready || test.state !== 'success' || saving}
           >
-            {saving && <Spinner className="text-label" />}
+            {saving && <Spinner className="mr-1 text-[14px]" />}
             {t('settings.messaging.lark.save')}
           </Button>
         </DialogFooter>

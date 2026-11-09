@@ -89,7 +89,7 @@ export function BatchAutomationMenu() {
   return (
     <>
       {/* Header showing selection count */}
-      <div className="px-2 py-1.5 text-label-sm font-medium text-tertiary">
+      <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium">
         {t('automations.batchSelected', { count })}
       </div>
       <Separator />

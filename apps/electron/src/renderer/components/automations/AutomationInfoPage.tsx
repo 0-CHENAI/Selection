@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { PauseCircle, AlertCircle, Hash } from 'lucide-react'
+import { PauseCircle, AlertCircle } from 'lucide-react'
 import {
   Info_Page,
   Info_Section,
@@ -15,12 +15,12 @@ import {
   Info_Alert,
   Info_Badge,
   Info_Markdown,
-  Info_HeaderMenu,
 } from '@/components/info'
-import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
+import { EditPopover, EditButton, getAutomationEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { AutomationAvatar } from './AutomationAvatar'
 import { AutomationMenu } from './AutomationMenu'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { AutomationActionRow } from './AutomationActionRow'
 import { AutomationTestPanel } from './AutomationTestPanel'
 import { AutomationEventTimeline } from './AutomationEventTimeline'
@@ -38,6 +38,7 @@ export interface AutomationInfoPageProps {
   testResult?: TestResult
   onToggleEnabled?: () => void
   onTest?: () => void
+  onSimulateMatch?: () => void
   onDuplicate?: () => void
   onDelete?: () => void
   onReplay?: (automationId: string, event: string) => void
@@ -50,6 +51,7 @@ export function AutomationInfoPage({
   testResult,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onDelete,
   onReplay,
@@ -57,78 +59,52 @@ export function AutomationInfoPage({
 }: AutomationInfoPageProps) {
   const { t } = useTranslation()
   const workspace = useActiveWorkspace()
-  const nextRuns = automation.cron ? computeNextRuns(automation.cron, 3, automation.timezone) : []
-
-  // Lightweight per-mount fetch — mirrors the pattern used in MessagingSettingsPage.
-  // Only fired when the matcher actually declares a topic to avoid unnecessary IPC.
-  const [hasSupergroup, setHasSupergroup] = React.useState<boolean | null>(null)
-  React.useEffect(() => {
-    if (!automation.telegramTopic) {
-      setHasSupergroup(null)
-      return
-    }
-    let cancelled = false
-    void window.electronAPI.getMessagingSupergroup().then((sg) => {
-      if (!cancelled) setHasSupergroup(Boolean(sg?.chatId))
-    }).catch(() => {
-      if (!cancelled) setHasSupergroup(false)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [automation.telegramTopic])
+  const [exportOpen, setExportOpen] = React.useState(false)
+  const nextRuns = automation.cron ? computeNextRuns(automation.cron) : []
 
   const editActions = workspace?.rootPath ? (
     <EditPopover
+      key={`${workspace.id}:${automation.id}`}
       trigger={<EditButton />}
-      {...getEditConfig('automation-config', workspace.rootPath)}
+      {...getAutomationEditConfig(workspace.rootPath, automation)}
       secondaryAction={{ label: t('automations.editFile'), filePath: `${workspace.rootPath}/automations.json` }}
     />
   ) : undefined
 
   return (
+    <>
     <Info_Page className={className}>
-      {/* The name lives in the hero; the header carries the actions menu (same items as before) */}
       <Info_Page.Header
-        actions={
-          <Info_HeaderMenu>
-            <AutomationMenu
-              automationId={automation.id}
-              automationName={automation.name}
-              enabled={automation.enabled}
-              onToggleEnabled={onToggleEnabled}
-              onTest={onTest}
-              onDuplicate={onDuplicate}
-              onDelete={onDelete}
-            />
-          </Info_HeaderMenu>
+        title={automation.name}
+        titleMenu={
+          <AutomationMenu
+            automationId={automation.id}
+            automationName={automation.name}
+            enabled={automation.enabled}
+            onToggleEnabled={onToggleEnabled}
+            onTest={onTest}
+            onSimulateMatch={onSimulateMatch}
+            onDuplicate={onDuplicate}
+            onExport={() => setExportOpen(true)}
+            onDelete={onDelete}
+          />
         }
       />
 
       <Info_Page.Content>
         {/* Hero */}
-        <Info_Page.Hero
-          avatar={<AutomationAvatar event={automation.event} fluid />}
-          title={automation.name}
-          tagline={automation.summary}
-          actions={editActions}
-        />
-
-        {/* Not running: the server skipped this entry, or its event never runs */}
-        {automation.issues && (
-          <Info_Alert variant="error" icon={<AlertCircle />}>
-            <Info_Alert.Title>{t('automations.notRunningTitle')}</Info_Alert.Title>
-            <Info_Alert.Description>
-              {automation.issues.map((message, i) => (
-                <span key={i} className="block break-words">{message}</span>
-              ))}
-            </Info_Alert.Description>
-          </Info_Alert>
-        )}
+        <div className="flex items-start justify-between">
+          <Info_Page.Hero
+            avatar={<AutomationAvatar event={automation.event} fluid />}
+            title={automation.name}
+            tagline={automation.summary}
+          />
+          {editActions}
+        </div>
 
         {/* Disabled warning */}
         {!automation.enabled && (
-          <Info_Alert variant="warning" icon={<PauseCircle />}>
+          <Info_Alert variant="warning" icon={<PauseCircle className="h-4 w-4" />}>
             <Info_Alert.Title>{t('automations.pausedTitle')}</Info_Alert.Title>
             <Info_Alert.Description>
               {t('automations.pausedDescription')}
@@ -151,7 +127,7 @@ export function AutomationInfoPage({
             </Info_Table.Row>
             {automation.matcher && (
               <Info_Table.Row label={t('automations.labelOnlyWhenMatching')}>
-                <code className="rounded-xs bg-fill-hover px-1.5 py-0.5 font-mono text-mono-ui [overflow-wrap:anywhere]">
+                <code className="text-xs font-mono bg-foreground/5 px-1.5 py-0.5 rounded">
                   {automation.matcher}
                 </code>
               </Info_Table.Row>
@@ -160,7 +136,7 @@ export function AutomationInfoPage({
               <>
                 <Info_Table.Row label={t('automations.labelRepeats')} value={describeCron(automation.cron)} />
                 <Info_Table.Row label={t('automations.labelScheduleExpression')}>
-                  <code className="rounded-xs bg-fill-hover px-1.5 py-0.5 font-mono text-mono-ui">
+                  <code className="text-xs font-mono bg-foreground/5 px-1.5 py-0.5 rounded">
                     {automation.cron}
                   </code>
                 </Info_Table.Row>
@@ -170,9 +146,9 @@ export function AutomationInfoPage({
                       {(() => {
                         const spansYears = nextRuns.length > 1 && nextRuns[0].getFullYear() !== nextRuns[nextRuns.length - 1].getFullYear()
                         return nextRuns.map((date, i) => (
-                          <span key={i} className="text-label text-secondary tabular-nums">
-                            {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: automation.timezone, ...(spansYears && { year: 'numeric' }) })}{' '}
-                            {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: automation.timezone })}
+                          <span key={i} className="text-sm text-foreground/70">
+                            {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(spansYears && { year: 'numeric' }) })}{' '}
+                            {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
                           </span>
                         ))
                       })()}
@@ -195,7 +171,7 @@ export function AutomationInfoPage({
             <Info_Table>
               {flattenConditions(automation.conditions).map((row, i) => (
                 <Info_Table.Row key={i} label={row.label}>
-                  <span className="text-label text-secondary">
+                  <span className="text-sm text-foreground/70">
                     {row.description}
                   </span>
                 </Info_Table.Row>
@@ -210,7 +186,7 @@ export function AutomationInfoPage({
           description={t('automations.sectionThenDescription', { count: automation.actions.length })}
           actions={editActions}
         >
-          <div className="divide-y divide-separator">
+          <div className="divide-y divide-border/30">
             {automation.actions.map((action, i) => (
               <AutomationActionRow key={i} action={action} index={i} />
             ))}
@@ -227,11 +203,8 @@ export function AutomationInfoPage({
           <Info_Table>
             <Info_Table.Row label={t('automations.labelAccessLevel')} value={getPermissionDisplayName(automation.permissionMode)} />
             <Info_Table.Row label={t('automations.labelStatus')}>
-              {/* Enabled is not the same as running: a skipped entry is enabled but never fires */}
-              <Info_Badge color={!automation.enabled ? 'default' : automation.issues ? 'destructive' : 'success'} dot>
-                {!automation.enabled
-                  ? t('automations.statusDisabled')
-                  : automation.issues ? t('automations.notRunning') : t('automations.statusActive')}
+              <Info_Badge color={automation.enabled ? 'success' : 'muted'}>
+                {automation.enabled ? t('automations.statusActive') : t('automations.statusDisabled')}
               </Info_Badge>
             </Info_Table.Row>
             {automation.labels && automation.labels.length > 0 && (
@@ -240,21 +213,6 @@ export function AutomationInfoPage({
                   {automation.labels.map((l) => (
                     <Info_Badge key={l} color="muted">{l}</Info_Badge>
                   ))}
-                </div>
-              </Info_Table.Row>
-            )}
-            {automation.telegramTopic && (
-              <Info_Table.Row label={t('automations.labelTelegramTopic')}>
-                <div className="flex flex-col gap-1">
-                  <div className="inline-flex items-center gap-1.5 text-foreground">
-                    <Hash className="size-3.5 text-tertiary" aria-hidden />
-                    <span className="font-mono text-mono-ui">{automation.telegramTopic}</span>
-                  </div>
-                  <span className="text-label-sm text-tertiary">
-                    {hasSupergroup === false
-                      ? t('automations.telegramTopicHintNoSupergroup')
-                      : t('automations.telegramTopicHintBound')}
-                  </span>
                 </div>
               </Info_Table.Row>
             )}
@@ -271,7 +229,7 @@ export function AutomationInfoPage({
 
         {/* Section: Raw config (JSON) */}
         <Info_Section title={t('automations.sectionRawConfig')}>
-          <div className="overflow-hidden [&_pre]:!bg-transparent [&_.relative]:!bg-transparent [&_.relative]:!border-0 [&_.relative>div:first-child]:!bg-transparent [&_.relative>div:first-child]:!border-0">
+          <div className="rounded-[8px] shadow-minimal overflow-hidden [&_pre]:!bg-transparent [&_.relative]:!bg-transparent [&_.relative]:!border-0 [&_.relative>div:first-child]:!bg-transparent [&_.relative>div:first-child]:!border-0">
             <Info_Markdown maxHeight={300} fullscreen>
               {`\`\`\`json\n${JSON.stringify({
                 event: automation.event,
@@ -281,7 +239,6 @@ export function AutomationInfoPage({
                 timezone: automation.timezone,
                 permissionMode: automation.permissionMode,
                 labels: automation.labels,
-                telegramTopic: automation.telegramTopic,
                 enabled: automation.enabled,
                 actions: automation.actions,
               }, null, 2)}\n\`\`\``}
@@ -290,5 +247,15 @@ export function AutomationInfoPage({
         </Info_Section>
       </Info_Page.Content>
     </Info_Page>
+    {workspace?.id && (
+      <ResourceTransferDialog
+        open={exportOpen}
+        mode="export"
+        workspaceId={workspace.id}
+        initialSelection={[{ type: 'automation', id: automation.id }]}
+        onOpenChange={setExportOpen}
+      />
+    )}
+    </>
   )
 }

@@ -1,14 +1,33 @@
+import { fastConnectionFamily } from '@craft-agent/shared/agent/fast-mode'
+import { FastModeButton } from './FastModeButton'
+import { createPendingDraftSync } from './pending-draft-sync'
+import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
+import { useAtom, useAtomValue } from 'jotai'
+import { pptComposerAtomFamily, pptComposerOverrideAtomFamily } from '@/atoms/ppt'
+import { officeComposerAtomFamily } from '@/atoms/office'
+import { attachedOfficeCase } from '@/components/office/OfficeSelectedCase'
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
-import { checkAttachmentSizes, DEFAULT_MAX_MESSAGE_BYTES, formatAttachmentBytes, type AttachmentSizeInput, type AttachmentSizeProblem } from '@craft-agent/shared/protocol'
+import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
+import { clipboardFiles } from '@/lib/clipboard-files'
 import {
   Paperclip,
+  ArrowUp,
+  ArrowLeft,
+  ChevronRight,
+  Square,
+  Check,
+  DatabaseZap,
+  ChevronDown,
   ChevronUp,
+  AlertCircle,
 } from 'lucide-react'
-import { Icon_Home, consoleSnippetCommand } from '@craft-agent/ui'
 
-import { IconButton } from '@/components/ui/button'
+import * as storage from '@/lib/local-storage'
+import { Button } from '@/components/ui/button'
 import {
   InlineSlashCommand,
   useInlineSlashCommand,
@@ -27,60 +46,235 @@ import {
 import type { LabelConfig } from '@craft-agent/shared/labels'
 import { parseMentions } from '@/lib/mentions'
 import { RichTextInput, type RichTextInputHandle } from '@/components/ui/rich-text-input'
-import { useInputAvailableHeight } from '@/hooks/useInputAvailableHeight'
-import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
-import { getComposerMaxHeight } from './composer-height'
-import { getContextDisplay, getContextDisplayLabels, type ContextStatus } from './context-display'
-import { createPendingPlanDispatcher } from './pending-plan-dispatch'
-import { scrollFocusedCaretIntoView } from '@/lib/scroll-focused-caret'
+import { reconcileSessionSourceSelection } from './session-source-selection'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuPortal,
+} from '@/components/ui/dropdown-menu'
+import {
+  StyledDropdownMenuContent,
+  StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
+  StyledDropdownMenuSubTrigger,
+  StyledDropdownMenuSubContent,
+} from '@/components/ui/styled-dropdown'
 import { cn } from '@/lib/utils'
 import { coerceInputText } from '@/lib/input-text'
 import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
+import { SessionModeBadge } from '../SessionModeBadge'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
-import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow } from '@config/models'
+import { getModelShortName, getModelDisplayName } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
-  isCompatProvider,
-  modelSupportsImages,
+  resolveModelImageSupportFromCatalog,
 } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
-import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
+import { SourceAvatar } from '@/components/ui/source-avatar'
+import { SourceSelectorPopover } from '@/components/ui/SourceSelectorPopover'
+import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
+import { ChatWorkingDirectoryControl } from './ChatWorkingDirectoryControl'
+import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import { derivePickerMode } from './picker-mode'
+import { derivePickerMode, pickerPageShowsCurrentConnection } from './picker-mode'
+import { modelPickerPlacement } from './model-picker-position'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
-import { isPermissionMode, planExecutionMode, type PermissionMode } from '@craft-agent/shared/agent/modes'
-import { useAvailablePermissionModes } from '@/hooks/useAvailablePermissionModes'
-import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import type { PermissionMode } from '@craft-agent/shared/agent/modes'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
+import { type ThinkingLevel, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
 import { buildPlanApprovalMessage } from '../plan-approval-message'
 import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp } from './input-event-guards'
 import { clearPendingFocusForSession, consumePendingFocusForSession } from './focus-input-events'
+import { keepComposerFocusOnPickerClose, restoreComposerFocus } from './restore-composer-focus'
+import { assessDelegateCommandSubmission, buildDelegateCommandDraft } from './delegate-command'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import {
   getRecentWorkingDirs,
   addRecentWorkingDir,
 } from './working-directory-history'
-import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirectorySelector'
+import { ProjectWorkingDirectoryMark } from './ProjectWorkingDirectoryMark'
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
+  appendMissingPickerModel,
+  chosenPickerModelId,
+  connectionPinnedModelIds,
   groupConnectionsByProvider,
+  isOpenRouterConnection,
+  isPickerModelSelected,
+  isUnavailablePickerModel,
+  pickerModelId,
+  resolvePickerModelsWithLive,
+  resolveVisiblePickerModels,
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
-import { useModelVisionToggle } from './useModelVisionToggle'
-import { ComposerSourcesChip } from './ComposerSourcesChip'
-import { ComposerCodingChip } from './ComposerCodingChip'
-import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
-import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
-import { ComposerModelMenu } from './ComposerModelMenu'
-import { ComposerModeChip } from './ComposerModeChip'
-import { ContextUsageChip } from './ContextUsageChip'
-import { FollowUpChips } from './FollowUpChips'
-import { SendButton } from './SendButton'
+import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import { ContextUsageIndicator, type ContextStatus } from './ContextUsageIndicator'
+import { PromptSparks, PromptThinkingSettings } from './PromptBarEffects'
+import {
+  ModelPickerEmptyResults,
+  ModelPickerOverflowHint,
+  ModelPickerSearchField,
+  pickerModelLimitCaption,
+  shouldShowPickerSearch,
+  usePickerSearchQuery,
+  useVisiblePickerModels,
+} from './ModelPickerSearch'
+
+const MODEL_PICKER_DURATION = 0.3
+const MODEL_PICKER_EASE = [0.32, 0.72, 0, 1] as const
+const MODEL_PICKER_VARIANTS = {
+  enter: ({ direction, reduced }: { direction: number; reduced: boolean }) => ({
+    opacity: 0,
+    x: reduced ? 0 : direction * 12,
+  }),
+  visible: { opacity: 1, x: 0 },
+  exit: ({ direction, reduced }: { direction: number; reduced: boolean }) => ({
+    opacity: 0,
+    x: reduced ? 0 : -direction * 8,
+    transition: { duration: reduced ? 0.08 : 0.12, ease: 'easeOut' as const },
+  }),
+}
+
+function ModelPickerPageContent({ children }: { children: React.ReactNode }) {
+  const isPresent = useIsPresent()
+  return (
+    <div
+      className="contents"
+      data-model-picker-active={isPresent}
+      aria-hidden={!isPresent || undefined}
+      {...(!isPresent ? { inert: '' } : {})}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SwitcherConnectionModels({
+  conn,
+  liveOpenRouterModels,
+  currentModel,
+  isCurrentConnection,
+  onPick,
+  onBack,
+  thinkingSettings,
+}: {
+  conn: Parameters<typeof resolvePickerModelsWithLive>[0] & { slug: string; name: string }
+  liveOpenRouterModels: Parameters<typeof resolvePickerModelsWithLive>[1]
+  currentModel: string
+  isCurrentConnection: boolean
+  onPick: (modelId: string, connectionSlug: string) => void
+  onBack: () => void
+  thinkingSettings?: React.ReactNode
+}) {
+  const { t } = useTranslation()
+  const [query, setQuery] = React.useState('')
+  const catalog = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const models = appendMissingPickerModel(
+    catalog,
+    isCurrentConnection ? currentModel : undefined,
+  )
+  const visibleCatalog = resolveVisiblePickerModels(models, {
+    query,
+    currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
+    pinnedIds: connectionPinnedModelIds(conn),
+  })
+  const showSearch = shouldShowPickerSearch(models.length, query)
+
+  return (
+    <>
+      <StyledDropdownMenuItem
+        data-model-picker-back
+        aria-label={t('chat.modelPicker.backToProviders')}
+        onSelect={event => { event.preventDefault(); onBack() }}
+        className="shrink-0 flex items-center gap-2 px-2 py-2 rounded-lg"
+      >
+        <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate font-medium text-sm">{conn.name}</span>
+      </StyledDropdownMenuItem>
+      <StyledDropdownMenuSeparator className="my-1 shrink-0" />
+      <div data-model-picker-list className="min-h-0 overflow-y-auto">
+        {showSearch && (
+          <ModelPickerSearchField value={query} onChange={setQuery} className="px-1 pt-1" />
+        )}
+        {visibleCatalog.visible.length === 0 ? (
+          <ModelPickerEmptyResults />
+        ) : (
+          visibleCatalog.visible.map((model) => {
+            const modelId = pickerModelId(model)
+            const modelName = typeof model === 'string'
+              ? stripPiPrefixForDisplay(getModelShortName(model))
+              : (model.name ?? stripPiPrefixForDisplay(model.id))
+            const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+            const unavailable = isUnavailablePickerModel(catalog, modelId)
+            const limitCaption = unavailable
+              ? t('chat.modelPicker.unavailable')
+              : pickerModelLimitCaption(model, t)
+            return (
+              <StyledDropdownMenuItem
+                key={modelId}
+                onSelect={(event) => {
+                  event.preventDefault()
+                  const next = chosenPickerModelId(
+                    modelId,
+                    isCurrentConnection ? currentModel : '',
+                    catalog,
+                  )
+                  if (next === undefined) return
+                  onPick(next, conn.slug)
+                }}
+                className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+              >
+                <div className="min-w-0 text-left">
+                  <div className="font-medium text-sm">{modelName}</div>
+                  {limitCaption && (
+                    <div className={cn(
+                      'text-xs tabular-nums',
+                      unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                    )}>
+                      {limitCaption}
+                    </div>
+                  )}
+                </div>
+                {isSelectedModel && (
+                  <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
+                )}
+              </StyledDropdownMenuItem>
+            )
+          })
+        )}
+        <ModelPickerOverflowHint
+          hiddenCount={visibleCatalog.hiddenCount}
+          searching={query.trim().length > 0}
+        />
+      </div>
+      {thinkingSettings && (
+        <div className="prompt-thinking-reveal shrink-0">
+          <StyledDropdownMenuSeparator className="my-1" />
+          {thinkingSettings}
+        </div>
+      )}
+    </>
+  )
+}
+
+function formatFollowUpChipText(text: string, fallback: string, maxLength = 50): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return fallback
+
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
+    : normalized
+}
 
 
 /** Platform-specific modifier key for keyboard shortcuts */
@@ -109,8 +303,7 @@ export interface FollowUpInputItem {
 }
 
 export interface FreeFormInputProps {
-  /** A console snippet was pasted (`$ cmd` lines or a fenced shell block): offer to run it in the background */
-  onConsoleSnippetPaste?: (snippet: { command: string; text: string }) => void
+  pptMode?: boolean
   /** Placeholder text(s) for the textarea - can be array for rotation */
   placeholder?: string | string[]
   /** Whether input is disabled */
@@ -118,7 +311,7 @@ export interface FreeFormInputProps {
   /** Whether the session is currently processing */
   isProcessing?: boolean
   /** Callback when message is submitted (skillSlugs from @mentions) */
-  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => boolean | void | Promise<boolean | void>
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
   /** External ref for the input */
@@ -129,22 +322,18 @@ export interface FreeFormInputProps {
   onModelChange: (model: string, connection?: string) => void
   // Thinking level (session-level setting)
   /** Current thinking level ('off', 'think', 'max') */
+  fastMode?: boolean
+  onFastModeChange?: (enabled: boolean) => void
   thinkingLevel?: ThinkingLevel
   /** Callback when thinking level changes */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   // Advanced options
   permissionMode?: PermissionMode
-  /** Mode before the last change: an approved plan leaving Explore returns to Guarded from it */
-  previousPermissionMode?: PermissionMode
+  /** Execution mode of this conversation or draft, independent of permissions. */
+  workMode?: WorkMode
   onPermissionModeChange?: (mode: PermissionMode) => void
   /** Enabled permission modes for Shift+Tab cycling (min 2 modes) */
   enabledModes?: PermissionMode[]
-  /**
-   * Desktop: show the permission-mode chip in the toolbar (it moved there from the badge row
-   * above the composer). Compact always uses the drawer selector when `onPermissionModeChange`
-   * is set.
-   */
-  showPermissionModeChip?: boolean
   // Controlled input value (for persisting across mode switches and conversation changes)
   /** Current input value - if provided, component becomes controlled */
   inputValue?: string
@@ -156,8 +345,8 @@ export interface FreeFormInputProps {
   onAttachmentsChange?: (attachments: FileAttachment[]) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
-  /** Total height budget, including actions; supplied by InputContainer when wrapped. */
-  maxHeight?: number
+  /** PromptBar visual treatment; behavior still belongs to this composer. */
+  appearance?: 'classic' | 'prompt'
   /** Callback when component height changes (for external animation sync) */
   onHeightChange?: (height: number) => void
   /** Callback when focus state changes */
@@ -167,10 +356,12 @@ export interface FreeFormInputProps {
   sources?: LoadedSource[]
   /** Currently enabled source slugs for this session */
   enabledSourceSlugs?: string[]
+  /** Stable composer identity, including drafts that have no real session ID. */
+  sourceSelectionKey?: string
   /** Callback when source selection changes */
   onSourcesChange?: (slugs: string[]) => void
   // Skill selection (for @mentions)
-  /** Available skills for @mention autocomplete */
+  /** Available skills for / slash-command autocomplete */
   skills?: LoadedSkill[]
   // Label selection (for #labels)
   /** Available labels for #label autocomplete */
@@ -185,6 +376,8 @@ export interface FreeFormInputProps {
   workingDirectory?: string
   /** Callback when working directory changes */
   onWorkingDirectoryChange?: (path: string) => void
+  /** Project conversations show the project folder and cannot change it here. */
+  workingDirectoryLocked?: boolean
   /** Session folder path (for "Reset to Session Root" option) */
   sessionFolderPath?: string
   /** Session ID for scoping events like approve-plan */
@@ -195,14 +388,7 @@ export interface FreeFormInputProps {
   disableSend?: boolean
   /** Whether the session is empty (no messages yet) - affects context badge prominence */
   isEmptySession?: boolean
-  // Coding mode (session-level, fixed once the conversation starts)
-  /** Coding mode is on: lean coding prompt and session tools */
-  codingMode?: boolean
-  /** Toggle coding mode (only before the first message) */
-  onCodingModeChange?: (enabled: boolean) => void
-  /** Continue a started session in a new one with coding mode set to `enabled` */
-  onContinueWithCodingMode?: (enabled: boolean) => void
-  /** Context status for showing compaction indicator and token usage */
+  /** Context status for the send-adjacent usage ring */
   contextStatus?: ContextStatus
   /** Follow-up annotations shown as context chips above the input */
   followUpItems?: FollowUpInputItem[]
@@ -224,6 +410,8 @@ export interface FreeFormInputProps {
    * behavior.
    */
   enableCompactModelPicker?: boolean
+  /** Override the compact composer max height (EditPopover viewport clamp). */
+  compactInputMaxHeight?: number
   // Connection selection (hierarchical connection → model selector)
   /** Current LLM connection slug (locked after first message) */
   currentConnection?: string
@@ -251,9 +439,11 @@ export interface FreeFormInputProps {
  * - Model selector
  * - Active option badges
  */
+const NO_SLASH_FOLDERS: string[] = []
+
 export function FreeFormInput({
-  onConsoleSnippetPaste,
   placeholder,
+  pptMode = false,
   disabled = false,
   isProcessing = false,
   onSubmit,
@@ -261,23 +451,25 @@ export function FreeFormInput({
   inputRef: externalInputRef,
   currentModel,
   onModelChange,
+  fastMode = false,
+  onFastModeChange,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
   permissionMode = 'ask',
-  previousPermissionMode,
+  workMode,
   onPermissionModeChange,
   enabledModes = ['safe', 'ask', 'allow-all'],
-  showPermissionModeChip = false,
   inputValue,
   onInputChange,
   attachmentsValue,
   onAttachmentsChange,
   unstyled = false,
+  appearance = 'classic',
   onHeightChange,
-  maxHeight,
   onFocusChange,
   sources = [],
   enabledSourceSlugs = [],
+  sourceSelectionKey,
   onSourcesChange,
   skills = [],
   labels = [],
@@ -286,41 +478,45 @@ export function FreeFormInput({
   workspaceId,
   workingDirectory,
   onWorkingDirectoryChange,
+  workingDirectoryLocked = false,
   sessionFolderPath,
   sessionId,
   currentSessionStatus,
   disableSend = false,
   isEmptySession = false,
-  codingMode = false,
-  onCodingModeChange,
-  onContinueWithCodingMode,
   contextStatus,
   followUpItems = [],
   onFollowUpClick,
   onFollowUpIndexClick,
   compactMode = false,
   enableCompactModelPicker = false,
+  compactInputMaxHeight,
   currentConnection,
   onConnectionChange,
   connectionUnavailable = false,
   isCollapsedInCompact = false,
   onRequestExpand,
 }: FreeFormInputProps) {
+  const reduceMotion = useReducedMotion()
+  const usePromptAppearance = appearance === 'prompt' && !compactMode
+  const typingEnergy = React.useRef(0)
   const { t } = useTranslation()
+  const pptComposerKey = sourceSelectionKey ?? sessionId ?? ''
+  const [, setPptRequest] = useAtom(pptComposerAtomFamily(pptComposerKey))
+  const pptOverride = useAtomValue(pptComposerOverrideAtomFamily(pptComposerKey))
+  const officeCase = useAtomValue(officeComposerAtomFamily(pptComposerKey))
 
-  // Default rotating placeholders for onboarding/empty state (i18n-aware). The keyboard tips are
-  // left out in compact (touch) layouts, where they are noise.
+  // Default rotating placeholders for onboarding/empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
     t("chatInput.placeholder.workOn"),
-    ...(compactMode ? [] : [t("chatInput.placeholder.shiftTab")]),
+    t("chatInput.placeholder.shiftTab"),
     t("chatInput.placeholder.mention"),
-    t("chatInput.placeholder.labels"),
-    ...(compactMode ? [] : [
-      t("chatInput.placeholder.newLine"),
-      t("chatInput.placeholder.sidebar", { key: cmdKey }),
-      t("chatInput.placeholder.focusMode", { key: cmdKey }),
-    ]),
-  ], [t, compactMode])
+    t("chatInput.placeholder.newLine"),
+    t("chatInput.placeholder.immersiveMode", { key: cmdKey }),
+    t("chatInput.placeholder.focusMode", { key: cmdKey }),
+  ], [t])
+
+  const effectivePlaceholderProp = placeholder ?? defaultPlaceholders
 
   // Read connection default model, connections, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -328,68 +524,66 @@ export function FreeFormInput({
   const llmConnections = appShellCtx?.llmConnections ?? []
   const workspaceDefaultConnection = appShellCtx?.workspaceDefaultLlmConnection
 
-  // Derive connectionDefaultModel per-session from the effective connection.
-  // Only non-null for compat providers (custom endpoints with fixed models).
-  // Standard providers (anthropic, pi) → null → normal model picker.
-  const connectionDefaultModel = React.useMemo(() => {
-    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-    const conn = llmConnections.find(c => c.slug === effectiveSlug)
-    if (!conn) return null
-    if (!isCompatProvider(conn.providerType)) return null
-    // Allow model switching when connection has multiple models
-    if (conn.models && conn.models.length > 1) return null
-    return conn.defaultModel ?? null
-  }, [currentConnection, workspaceDefaultConnection, llmConnections])
-
-  // Decide which of the four picker UIs to render. The `switcher` branch
-  // wins over `locked-single` so users with a single-model pi_compat default
-  // can still reach the connection list on a fresh session (#727).
   const pickerMode = derivePickerMode({
     connectionUnavailable,
-    connectionDefaultModel,
-    isEmptySession,
     connectionCount: llmConnections.length,
   })
 
-  // Compute available models from the effective connection.
-  // All connections have models populated by backfillAllConnectionModels().
-  const availableModels = React.useMemo(() => {
-    // Connection removed — don't fall through to another connection's models
+  const effectiveConnection = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
+  const effectiveConnectionDetails = React.useMemo(() => {
+    if (!effectiveConnection) return null
+    return llmConnections.find(c => c.slug === effectiveConnection) ?? null
+  }, [llmConnections, effectiveConnection])
+
+  const fastFamily = connectionUnavailable ? undefined : fastConnectionFamily(currentModel, effectiveConnectionDetails)
+  const fastSupported = fastFamily !== undefined
+
+  const liveOpenRouterModels = useLiveOpenRouterModels(
+    !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
+  )
+
+  const pickerCatalog = React.useMemo(() => {
     if (connectionUnavailable) return []
+    return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
+  }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
 
-    // Determine effective connection using the canonical fallback chain
-    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-    const connection = llmConnections.find(c => c.slug === effectiveSlug)
+  const availableModels = React.useMemo(
+    () => appendMissingPickerModel(pickerCatalog, currentModel),
+    [pickerCatalog, currentModel],
+  )
 
-    if (!connection) {
-      return ANTHROPIC_MODELS // Safety net — shouldn't happen
-    }
+  const pinnedModelIds = React.useMemo(() => {
+    return connectionPinnedModelIds(effectiveConnectionDetails)
+  }, [effectiveConnectionDetails])
 
-    return connection.models || ANTHROPIC_MODELS
-  }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
+  useThinkingCatalog()
+  const configuredThinkingModel = pickerCatalog.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+    ?? effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+  const thinkingModel: ThinkingModelRef | undefined = typeof configuredThinkingModel === 'object'
+    ? { ...configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+    : (typeof configuredThinkingModel === 'string'
+      ? { id: configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+      : (currentModel ? { id: currentModel, provider: effectiveConnectionDetails?.piAuthProvider } : undefined))
+  const thinkingCapability = modelThinkingCapability(thinkingModel)
+  const availableThinkingLevels = modelThinkingLevels(thinkingModel)
 
-  // Disable thinking selector when the current model explicitly doesn't support it
-  const thinkingDisabled = React.useMemo(() => {
-    const model = availableModels.find(m => typeof m !== 'string' && m.id === currentModel)
-    return typeof model !== 'string' && model?.supportsThinking === false
-  }, [availableModels, currentModel])
 
-  // Get display name for current model (full name, not short name)
+  // The prompt slider is replaced by an explanation when this model cannot scale effort.
+  const thinkingUnavailable = thinkingCapability.mode === 'levels' ? undefined : thinkingCapability.mode
+  const thinkingDisabled = thinkingUnavailable !== undefined || availableThinkingLevels.length <= 1
+  const promptMaxed = usePromptAppearance && !thinkingDisabled && availableThinkingLevels.length > 1
+    && thinkingLevel === availableThinkingLevels.at(-1)?.id
+
   const currentModelDisplayName = React.useMemo(() => {
-    const modelToDisplay = connectionDefaultModel ?? currentModel
     const model = availableModels.find(m =>
-      typeof m === 'string' ? m === modelToDisplay : m.id === modelToDisplay
+      isPickerModelSelected(currentModel, pickerModelId(m)),
     )
     if (!model) {
-      // Fallback: use helper function to format unknown model IDs nicely
-      return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
+      return stripPiPrefixForDisplay(getModelDisplayName(currentModel))
     }
     if (typeof model === 'string') return stripPiPrefixForDisplay(model)
-    // Defensive: partial entries (custom-endpoint user-config or vision-toggle
-    // promotions) may lack `name`. Fall back to the id so the trigger button
-    // never goes blank.
     return model.name ?? stripPiPrefixForDisplay(model.id)
-  }, [availableModels, currentModel, connectionDefaultModel])
+  }, [availableModels, currentModel])
 
   // Group connections by provider type for hierarchical dropdown.
   // Each provider (Anthropic, Pi) can have multiple connections (API Key, OAuth, etc.)
@@ -403,18 +597,6 @@ export function FreeFormInput({
     if (!currentConnection) return null
     return llmConnections.find(c => c.slug === currentConnection) ?? null
   }, [llmConnections, currentConnection])
-
-  // Effective connection: canonical fallback chain (session → workspace default → global default → first)
-  const effectiveConnection = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-
-  // Effective connection details (with fallbacks) for model list
-  // Unlike currentConnectionDetails which is null when no explicit connection is set,
-  // this resolves to the actual connection being used (including workspace default)
-  const effectiveConnectionDetails = React.useMemo(() => {
-    if (!effectiveConnection) return null
-    return llmConnections.find(c => c.slug === effectiveConnection) ?? null
-  }, [llmConnections, effectiveConnection])
-
 
   // Access sessionStatuses and onSessionStatusChange from context for the # menu state picker
   const sessionStatuses = appShellCtx?.sessionStatuses ?? []
@@ -436,28 +618,26 @@ export function FreeFormInput({
   const appShellContext = useOptionalAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
-  // In compact mode, suppress desktop-keyboard guidance that is noisy or misleading on
-  // narrow/mobile-like layouts: the defaults drop their keyboard tips above, and caller-provided
-  // lists drop entries that mention keys.
+  // Shuffle placeholder order once per mount so each session feels fresh.
+  // In compact mode, suppress desktop-keyboard guidance that is noisy or misleading
+  // on narrow/mobile-like layouts.
   const placeholderOptions = React.useMemo(() => {
-    if (placeholder === undefined) return defaultPlaceholders
     if (!Array.isArray(placeholder)) return placeholder
     if (!compactMode) return placeholder
     return placeholder.filter((entry) => {
       const lower = entry.toLowerCase()
       return !lower.includes('shift + tab')
         && !lower.includes('shift + return')
-        && !lower.includes('toggle the sidebar')
+        && !lower.includes('immersive')
         && !lower.includes('focus mode')
         && !lower.includes('⌘')
         && !lower.includes('ctrl')
     })
-  }, [placeholder, compactMode, defaultPlaceholders])
+  }, [placeholder, compactMode])
 
-  // Shuffle placeholder order once per mount so each session feels fresh.
   // Hide placeholder entirely when panel is unfocused in multi-panel layout
   const shuffledPlaceholder = React.useMemo(
-    () => Array.isArray(placeholderOptions) ? shuffleArray(placeholderOptions) : placeholderOptions,
+    () => Array.isArray(effectivePlaceholderProp) ? shuffleArray(effectivePlaceholderProp) : effectivePlaceholderProp,
     [] // eslint-disable-line react-hooks/exhaustive-deps -- intentionally shuffle only on mount
   )
   const effectivePlaceholder = isFocusedPanel ? shuffledPlaceholder : ''
@@ -467,38 +647,19 @@ export function FreeFormInput({
   // Sync TO parent on blur/submit (debounced persistence)
   const [input, setInput] = React.useState(() => coerceInputText(inputValue))
   const [attachments, setAttachments] = React.useState<FileAttachment[]>(attachmentsValue ?? [])
+  const showVisionWarning = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
+    && !!effectiveConnectionDetails
+    && !resolveModelImageSupportFromCatalog({
+      modelId: currentModel,
+      models: effectiveConnectionDetails.models,
+      endpointSupportsImages: effectiveConnectionDetails.customEndpoint?.supportsImages,
+    }).supportsImages
 
   // Ref to track current attachments for use in event handlers (avoids stale closure issues)
   const attachmentsRef = React.useRef<FileAttachment[]>([])
   React.useEffect(() => {
     attachmentsRef.current = attachments
   }, [attachments])
-
-  // Attachments must fit in one message to the connected server, or the send drops the
-  // connection ("Connection lost"); the server advertises its limit (message-limits.ts).
-  const transportState = useTransportConnectionState()
-  const maxMessageBytesRef = React.useRef(DEFAULT_MAX_MESSAGE_BYTES)
-  React.useEffect(() => {
-    maxMessageBytesRef.current = transportState?.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES
-  }, [transportState?.maxMessageBytes])
-
-  const showAttachmentSizeProblem = React.useCallback((problem: AttachmentSizeProblem) => {
-    const size = formatAttachmentBytes(problem.size)
-    const limit = formatAttachmentBytes(problem.limit)
-    if (problem.kind === 'file') {
-      toast.error(t('toast.attachmentTooLarge', { name: problem.name }), { description: t('toast.attachmentTooLargeDescription', { size, limit }) })
-    } else {
-      toast.error(t('toast.attachmentsTooLarge'), { description: t('toast.attachmentsTooLargeDescription', { size, limit }) })
-    }
-  }, [t])
-
-  /** Refuse a file that can never be sent, before reading it (reading a huge file can freeze the window). */
-  const refuseOversizedAttachment = React.useCallback((attachment: AttachmentSizeInput): boolean => {
-    const problem = checkAttachmentSizes([attachment], maxMessageBytesRef.current)
-    if (problem?.kind !== 'file') return false
-    showAttachmentSizeProblem(problem)
-    return true
-  }, [showAttachmentSizeProblem])
 
   // Seed from parent when `attachmentsValue` changes (e.g., switching sessions).
   // `skipPersistRef` tells the save effect below that the next `attachments` change
@@ -532,21 +693,16 @@ export function FreeFormInput({
   }, [attachments])
 
   // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
-  const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
-
-  // Sync from prop when server state changes (reconciles after IPC or on external updates)
-  // Use content comparison (not reference) to avoid infinite loops with empty arrays
-  const prevEnabledSourceSlugsRef = React.useRef(enabledSourceSlugs)
-  React.useEffect(() => {
-    const prev = prevEnabledSourceSlugsRef.current
-    const changed = enabledSourceSlugs.length !== prev.length ||
-      enabledSourceSlugs.some((slug, i) => slug !== prev[i])
-
-    if (changed) {
-      setOptimisticSourceSlugs(enabledSourceSlugs)
-      prevEnabledSourceSlugsRef.current = enabledSourceSlugs
-    }
-  }, [enabledSourceSlugs])
+  const [sourceSelection, setSourceSelection] = React.useState(() =>
+    reconcileSessionSourceSelection(undefined, sourceSelectionKey ?? sessionId, enabledSourceSlugs))
+  const currentSourceSelection = reconcileSessionSourceSelection(sourceSelection, sourceSelectionKey ?? sessionId, enabledSourceSlugs)
+  // Reconcile during render so a session switch cannot expose the previous
+  // composer's unacknowledged selection even for one render/event.
+  if (currentSourceSelection !== sourceSelection) setSourceSelection(currentSourceSelection)
+  const optimisticSourceSlugs = currentSourceSelection.slugs
+  const setOptimisticSourceSlugs = React.useCallback((slugs: string[]) => {
+    setSourceSelection(previous => ({ ...previous, slugs }))
+  }, [])
 
   // Sync from parent when inputValue changes externally (e.g., switching sessions)
   const prevInputValueRef = React.useRef(coerceInputText(inputValue))
@@ -559,79 +715,223 @@ export function FreeFormInput({
     }
   }, [inputValue])
 
-  // Debounced sync to parent (saves draft without blocking typing)
-  const syncTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
-  const syncToParent = React.useCallback((value: string) => {
-    if (!onInputChange) return
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
-    syncTimeoutRef.current = setTimeout(() => {
-      onInputChange(value)
-      prevInputValueRef.current = value
-    }, 300) // Debounce 300ms
-  }, [onInputChange])
-
-  // Sync immediately on unmount to preserve input across mode switches
-  // Also cleanup any pending debounced sync
+  // Flush only pending edits on unmount. Comparing rendered state to props can
+  // resurrect a sent prompt after the parent clears the draft and navigates.
+  const draftSync = React.useMemo(() => createPendingDraftSync(value => {
+    prevInputValueRef.current = value
+    onInputChange?.(value)
+  }), [onInputChange])
+  const syncToParent = draftSync.schedule
   const inputRef = React.useRef(input)
-  inputRef.current = input // Keep ref in sync with state
-
-  React.useEffect(() => {
-    return () => {
-      // Cancel pending debounced sync
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
-      // Immediately sync current value to parent on unmount
-      // This preserves input when switching to structured input (e.g., permission request)
-      if (onInputChange && inputRef.current !== prevInputValueRef.current) {
-        onInputChange(inputRef.current)
-      }
-    }
-  }, [onInputChange])
+  inputRef.current = input
+  React.useEffect(() => () => draftSync.flush(), [draftSync])
 
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
   const [sourceDropdownOpen, setSourceDropdownOpen] = React.useState(false)
   const [isFocused, setIsFocused] = React.useState(false)
+  const [inputMaxHeight, setInputMaxHeight] = React.useState(540)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
-
-  // Input settings (loaded from config)
-  const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
-  const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
-  const [spellCheck, setSpellCheck] = React.useState(false)
-
-  // Load input settings on mount
-  React.useEffect(() => {
-    const loadInputSettings = async () => {
-      if (!window.electronAPI) return
-      try {
-        const [autoCapEnabled, sendKey, spellCheckEnabled] = await Promise.all([
-          window.electronAPI.getAutoCapitalisation(),
-          window.electronAPI.getSendMessageKey(),
-          window.electronAPI.getSpellCheck(),
-        ])
-        setAutoCapitalisation(autoCapEnabled)
-        setSendMessageKey(sendKey ?? 'enter')
-        setSpellCheck(spellCheckEnabled)
-      } catch (error) {
-        console.error('Failed to load input settings:', error)
+  const [modelPickerPage, setModelPickerPage] = React.useState<{
+    connectionSlug: string | null
+    direction: 'forward' | 'back' | null
+  }>({ connectionSlug: null, direction: null })
+  const browsedConnectionSlug = modelPickerPage.connectionSlug
+  const browsedConnection = llmConnections.find(conn => conn.slug === browsedConnectionSlug)
+  const modelPickerReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const modelPickerMotion = {
+    direction: modelPickerPage.direction === 'back' ? -1 : 1,
+    reduced: modelPickerReducedMotion,
+  }
+  const modelMenuRef = React.useRef<HTMLDivElement>(null)
+  const modelTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const [modelMenuPlacement, setModelMenuPlacement] = React.useState<{ side: 'top' | 'bottom'; maxHeight: number }>({ side: 'top', maxHeight: 384 })
+  const modelMenuPreviousBoundsRef = React.useRef<{ height: number; edge: number; side: string; reason: 'page' | 'model' } | null>(null)
+  const rememberModelPickerBounds = React.useCallback((reason: 'page' | 'model') => {
+    const menu = modelMenuRef.current
+    if (menu) {
+      const rect = menu.getBoundingClientRect()
+      const side = menu.dataset.side ?? 'top'
+      modelMenuPreviousBoundsRef.current = {
+        height: parseFloat(getComputedStyle(menu).height),
+        edge: side === 'top' ? rect.bottom : rect.top,
+        side,
+        reason,
       }
     }
-    loadInputSettings()
   }, [])
+  const navigateModelPicker = React.useCallback((connectionSlug: string | null) => {
+    rememberModelPickerBounds('page')
+    setModelPickerPage({ connectionSlug, direction: connectionSlug ? 'forward' : 'back' })
+  }, [rememberModelPickerBounds])
+  React.useLayoutEffect(() => {
+    const menu = modelMenuRef.current
+    const previous = modelMenuPreviousBoundsRef.current
+    modelMenuPreviousBoundsRef.current = null
+    if (!modelDropdownOpen || !menu || !previous) return
+    const nextHeight = parseFloat(getComputedStyle(menu).height)
+    if (Math.abs(nextHeight - previous.height) < 1) return
+    // Preserve the model list's natural height while the menu grows, so the
+    // new footer is revealed by the expanding edge instead of squeezing it.
+    const revealFooter = previous.reason === 'model' && nextHeight > previous.height && !modelPickerReducedMotion
+    const options = { duration: modelPickerReducedMotion ? 0 : MODEL_PICKER_DURATION * 1000, easing: `cubic-bezier(${MODEL_PICKER_EASE.join(',')})` }
+    const activePage = menu.querySelector<HTMLElement>('[data-model-picker-active="true"]')
+    const footer = activePage?.querySelector<HTMLElement>('.prompt-thinking-reveal')
+    const list = revealFooter && footer
+      ? activePage?.querySelector<HTMLElement>('[data-model-picker-list]')
+      : null
+    const originalListShrink = list?.style.flexShrink ?? ''
+    const originalListHeight = list?.style.height ?? ''
+    if (list) {
+      list.style.height = `${list.getBoundingClientRect().height}px`
+      list.style.flexShrink = '0'
+    }
+    const animation = menu.animate([{ height: `${previous.height}px` }, { height: `${nextHeight}px` }], options)
+    animation.id = 'model-picker-height'
+    const originalTranslate = menu.style.translate
+    let offset = 0
+    let finished = false
+    let disposed = false
+    const dispose = () => {
+      disposed = true
+      resizeObserver.disconnect()
+      positionObserver.disconnect()
+      menu.style.translate = originalTranslate
+      if (list) {
+        list.style.flexShrink = originalListShrink
+        list.style.height = originalListHeight
+      }
+    }
+    const syncEdge = () => {
+      if (disposed) return
+      if (menu.dataset.side !== previous.side) {
+        dispose()
+        animation.cancel()
+        return
+      }
+      const rect = menu.getBoundingClientRect()
+      offset += previous.edge - (previous.side === 'top' ? rect.bottom : rect.top)
+      menu.style.translate = `0 ${offset}px`
+      if (finished && Math.abs(offset) < 0.5) dispose()
+    }
+    const resizeObserver = new ResizeObserver(syncEdge)
+    const positionObserver = new MutationObserver(syncEdge)
+    resizeObserver.observe(menu)
+    if (menu.parentElement) positionObserver.observe(menu.parentElement, { attributes: true, attributeFilter: ['style'] })
+    syncEdge()
+    void animation.finished.then(() => { finished = true; syncEdge() }, () => {})
+    return () => { dispose(); animation.cancel() }
+  }, [modelDropdownOpen, browsedConnectionSlug, pickerMode, modelPickerReducedMotion, effectiveConnection, currentModel])
+  const { query: modelSearchQuery, setQuery: setModelSearchQuery } = usePickerSearchQuery(modelDropdownOpen)
+  const modelSearchInputRef = React.useRef<HTMLInputElement>(null)
+  const visibleCatalog = useVisiblePickerModels(
+    availableModels,
+    modelSearchQuery,
+    currentModel,
+    pinnedModelIds,
+  )
+  const showModelSearch = shouldShowPickerSearch(availableModels.length, modelSearchQuery)
+
+  // Input settings. The removed Input page leaves Enter-to-send and spell check off.
+  const [sendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
+  const [spellCheck] = React.useState(false)
+  const { swarmAgentsEnabled } = useAdvancedSettings()
 
   // Double-Esc interrupt: show warning overlay on first Esc, interrupt on second
   const { showEscapeOverlay } = useEscapeInterrupt()
 
+  // Calculate max height: min(66% of window height, 540px). EditPopover
+  // passes a tighter cap so a long paste cannot squeeze the title bar or send row.
+  React.useEffect(() => {
+    const updateMaxHeight = () => {
+      if (compactInputMaxHeight) {
+        setInputMaxHeight(compactInputMaxHeight)
+        return
+      }
+      const maxFromWindow = Math.floor(window.innerHeight * 0.66)
+      setInputMaxHeight(Math.min(maxFromWindow, 540))
+    }
+    updateMaxHeight()
+    window.addEventListener('resize', updateMaxHeight)
+    return () => window.removeEventListener('resize', updateMaxHeight)
+  }, [compactInputMaxHeight])
+
   const dragCounterRef = React.useRef(0)
+  // A submit can be triggered twice in the same browser task (for example by
+  // an Enter handler and a scoped submit event before React commits the input
+  // clear). Hold a synchronous one-tick lock so one user action produces one
+  // send RPC while preserving intentional rapid follow-ups after the commit.
+  const submitLockRef = React.useRef(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
-  const contentScrollRef = React.useRef<HTMLDivElement>(null)
-  const availableHeight = useInputAvailableHeight(containerRef, maxHeight === undefined)
-  const composerMaxHeight = maxHeight ?? getComposerMaxHeight(availableHeight, 'freeform')
   const sourceButtonRef = React.useRef<HTMLButtonElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // Merge refs for RichTextInput
   const internalInputRef = React.useRef<RichTextInputHandle>(null)
   const richInputRef = externalInputRef || internalInputRef
+
+  const focusComposerAfterPicker = React.useCallback(() => {
+    if (!disabled) restoreComposerFocus(richInputRef)
+  }, [disabled, richInputRef])
+
+  const handleSourceDropdownOpenChange = React.useCallback((open: boolean) => {
+    setSourceDropdownOpen(open)
+    if (!open) focusComposerAfterPicker()
+  }, [focusComposerAfterPicker])
+
+  const handleModelDropdownOpenChange = React.useCallback((open: boolean) => {
+    if (open && modelTriggerRef.current) {
+      setModelMenuPlacement(modelPickerPlacement(modelTriggerRef.current.getBoundingClientRect(), window.innerHeight))
+    }
+    setModelDropdownOpen(open)
+    setModelPickerPage({
+      connectionSlug: open && pickerMode === 'switcher' && currentModel && effectiveConnectionDetails?.isAuthenticated
+        ? effectiveConnectionDetails.slug : null,
+      direction: null,
+    })
+    if (!open) focusComposerAfterPicker()
+  }, [focusComposerAfterPicker, pickerMode, currentModel, effectiveConnectionDetails])
+
+  React.useEffect(() => {
+    if (!modelDropdownOpen) return
+    const update = (event: Event) => {
+      // Scrolling the model list cannot move its trigger and should not cause
+      // a layout read for every wheel or touch event.
+      if (event.type === 'scroll' && event.target instanceof Node && modelMenuRef.current?.contains(event.target)) return
+      const trigger = modelTriggerRef.current
+      if (!trigger) return
+      setModelMenuPlacement(previous => {
+        const next = modelPickerPlacement(trigger.getBoundingClientRect(), window.innerHeight, previous.side)
+        return next.side === previous.side && next.maxHeight === previous.maxHeight ? previous : next
+      })
+    }
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => { window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true) }
+  }, [modelDropdownOpen])
+
+  // The pages share one menu. Move focus to the new page's first item.
+  React.useEffect(() => {
+    if (!modelDropdownOpen) return
+    const frame = requestAnimationFrame(() => {
+      if (pickerMode === 'flat' && modelSearchInputRef.current) {
+        modelSearchInputRef.current.focus()
+        return
+      }
+      modelMenuRef.current?.querySelector<HTMLElement>('[data-model-picker-active="true"] [role="menuitem"]:not([data-disabled])')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [modelDropdownOpen, browsedConnectionSlug, pickerMode])
+
+  React.useEffect(() => {
+    const openPicker = (event: CustomEvent<{ sessionId?: string }>) => {
+      if (disabled || !isFocusedPanel || (compactMode && !enableCompactModelPicker)
+        || !shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId: event.detail?.sessionId })) return
+      handleModelDropdownOpenChange(true)
+    }
+    window.addEventListener('craft:open-model-picker', openPicker as EventListener)
+    return () => window.removeEventListener('craft:open-model-picker', openPicker as EventListener)
+  }, [sessionId, isFocusedPanel, disabled, compactMode, enableCompactModelPicker, handleModelDropdownOpenChange])
 
   // Track last caret position for focus restoration (e.g., after permission mode popover closes)
   const lastCaretPositionRef = React.useRef<number | null>(null)
@@ -660,12 +960,10 @@ export function FreeFormInput({
 
   const clearInputDraft = React.useCallback(() => {
     setInput('')
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+    draftSync.cancel()
     onInputChange?.('')
     prevInputValueRef.current = ''
-  }, [onInputChange])
-
-  const handleToggleModelVision = useModelVisionToggle()
+  }, [onInputChange, draftSync])
 
   const consumeInputDraftSnapshot = React.useCallback((): string => {
     const snapshot = input.trim()
@@ -697,10 +995,11 @@ export function FreeFormInput({
         draftInput,
       })
 
-      // Leave Explore mode so the plan can run without prompts (back to Guarded if the session
-      // came from it). Only switch if currently in safe mode - if user is in 'ask' mode, respect their choice
+      // Approving a plan is consent to execute it, not to Full Takeover. Switch
+      // Explore -> Smart Approval only (routine work runs, risky actions still ask);
+      // if the user is already in another mode, respect their choice.
       if (permissionMode === 'safe') {
-        onPermissionModeChange?.(planExecutionMode(previousPermissionMode))
+        onPermissionModeChange?.('ask')
       }
 
       onSubmit(text, undefined)
@@ -708,80 +1007,138 @@ export function FreeFormInput({
 
     window.addEventListener('craft:approve-plan', handleApprovePlan as EventListener)
     return () => window.removeEventListener('craft:approve-plan', handleApprovePlan as EventListener)
-  }, [sessionId, permissionMode, previousPermissionMode, onPermissionModeChange, onSubmit, consumeInputDraftSnapshot])
+  }, [sessionId, permissionMode, onPermissionModeChange, onSubmit, consumeInputDraftSnapshot])
 
-  // Live completion and reload recovery share one persisted-state dispatcher.
-  // Register its listener before the approval listener can send /compact.
-  const processingRef = React.useRef(isProcessing)
-  processingRef.current = isProcessing
-  const requestPendingPlanRef = React.useRef<(() => void) | null>(null)
-
+  // Listen for craft:approve-plan-with-compact events (Accept & Compact option)
+  // This compacts the conversation first, then executes the plan.
+  // The pending state is persisted to survive page reloads (CMD+R).
   React.useEffect(() => {
-    if (!sessionId) return
-    const dispatcher = createPendingPlanDispatcher({
-      isBusy: () => processingRef.current,
-      load: () => window.electronAPI.getPendingPlanExecution(sessionId),
-      claim: () => window.electronAPI.sessionCommand(sessionId, { type: 'markPendingPlanExecutionDispatched' }),
-      submit: pending => onSubmit(buildPlanApprovalMessage({
-        planPath: pending.planPath,
-        draftInput: pending.draftInputSnapshot,
-      }), undefined),
-      clear: () => window.electronAPI.sessionCommand(sessionId, { type: 'clearPendingPlanExecution' }),
-    })
-    const request = () => {
-      void dispatcher.request().catch(error => {
-        const message = error instanceof Error ? error.message : String(error)
-        if (!/Connection closed|Client disconnected|transport|socket/.test(message)) {
-          console.error('[FreeFormInput] Failed to resume pending plan execution:', error)
-        }
-      })
-    }
-    const handleCompactionComplete = (event: Event) => {
-      if ((event as CustomEvent<{ sessionId?: string }>).detail?.sessionId === sessionId) request()
-    }
-    requestPendingPlanRef.current = request
-    window.addEventListener('craft:compaction-complete', handleCompactionComplete)
-    request()
-    return () => {
-      window.removeEventListener('craft:compaction-complete', handleCompactionComplete)
-      if (requestPendingPlanRef.current === request) requestPendingPlanRef.current = null
-      dispatcher.dispose()
-    }
-  }, [sessionId, onSubmit])
+    const handleApprovePlanWithCompact = async (e: CustomEvent<PlanApprovalEventDetail>) => {
+      // Only handle if this event is for our session
+      if (e.detail?.sessionId && e.detail.sessionId !== sessionId) {
+        return
+      }
 
-  // Completion may be published while the host is finishing the current turn.
-  // Its idle transition is a second wakeup, not a timing-based guess.
-  React.useEffect(() => {
-    if (!isProcessing) requestPendingPlanRef.current?.()
-  }, [isProcessing, sessionId])
+      const planPath = e.detail?.planPath
+      const shouldIncludeDraft = e.detail?.includeDraftInput !== false
+      const draftInputSnapshot = shouldIncludeDraft ? consumeInputDraftSnapshot() : ''
 
-  React.useEffect(() => {
-    if (!sessionId) return
-    let preparing = false
-    const handleApprovePlanWithCompact = async (event: CustomEvent<PlanApprovalEventDetail>) => {
-      if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId: event.detail?.sessionId })) return
-      if (preparing || processingRef.current) return
-      preparing = true
-      try {
-        const draftInputSnapshot = event.detail?.includeDraftInput !== false ? consumeInputDraftSnapshot() : ''
-        if (permissionMode === 'safe') onPermissionModeChange?.(planExecutionMode(previousPermissionMode))
-        // Persist first. Only actual successful manual compaction changes this
-        // readiness; failure/automatic compaction events never authorize a send.
+      // Same as plain plan approval: elevate only to Smart Approval.
+      if (permissionMode === 'safe') {
+        onPermissionModeChange?.('ask')
+      }
+
+      // Persist the pending plan execution state BEFORE sending /compact.
+      // This allows reload recovery if CMD+R happens during compaction.
+      if (sessionId) {
         await window.electronAPI.sessionCommand(sessionId, {
           type: 'setPendingPlanExecution',
-          planPath: event.detail?.planPath ?? '',
+          planPath: planPath ?? '',
           draftInputSnapshot,
         })
-        onSubmit('/compact', undefined)
-      } catch (error) {
-        console.error('[FreeFormInput] Failed to start plan compaction:', error)
-      } finally {
-        preparing = false
       }
+
+      // Send /compact to trigger compaction
+      onSubmit('/compact', undefined)
+
+      // Set up a one-time listener for compaction complete.
+      // This handles the normal case (no reload during compaction).
+      const handleCompactionComplete = async (compactEvent: CustomEvent<{ sessionId?: string }>) => {
+        // Only handle if this is for our session
+        if (compactEvent.detail?.sessionId !== sessionId) {
+          return
+        }
+
+        // Remove the listener (one-time use)
+        window.removeEventListener('craft:compaction-complete', handleCompactionComplete as unknown as EventListener)
+
+        const executionMessage = buildPlanApprovalMessage({
+          planPath,
+          draftInput: draftInputSnapshot,
+        })
+        onSubmit(executionMessage, undefined)
+
+        // Clear the pending state since we just sent the execution message
+        if (sessionId) {
+          await window.electronAPI.sessionCommand(sessionId, {
+            type: 'clearPendingPlanExecution',
+          })
+        }
+      }
+
+      window.addEventListener('craft:compaction-complete', handleCompactionComplete as unknown as EventListener)
     }
+
     window.addEventListener('craft:approve-plan-with-compact', handleApprovePlanWithCompact as unknown as EventListener)
     return () => window.removeEventListener('craft:approve-plan-with-compact', handleApprovePlanWithCompact as unknown as EventListener)
-  }, [sessionId, isFocusedPanel, permissionMode, previousPermissionMode, onPermissionModeChange, onSubmit, consumeInputDraftSnapshot])
+  }, [sessionId, permissionMode, onPermissionModeChange, onSubmit, consumeInputDraftSnapshot])
+
+  // Reload recovery: Check for pending plan execution on mount.
+  // If the page reloaded after compaction completed (awaitingCompaction = false),
+  // we need to send the plan execution message that was interrupted by the reload.
+  // Also listen for compaction-complete in case CMD+R happened during compaction.
+  React.useEffect(() => {
+    if (!sessionId) return
+
+    let hasExecuted = false
+
+    const isExpectedReconnectError = (error: unknown): boolean => {
+      const message = error instanceof Error ? error.message : String(error)
+      return message.includes('Connection closed')
+        || message.includes('Client disconnected')
+        || message.includes('transport')
+        || message.includes('socket')
+    }
+
+    const executePendingPlan = async () => {
+      if (hasExecuted) return
+
+      try {
+        const pending = await window.electronAPI.getPendingPlanExecution(sessionId)
+        if (!pending || pending.awaitingCompaction || pending.executionDispatched) return
+
+        // Mark dispatched before sending so reload recovery does not double-submit
+        // the same plan if onSubmit succeeds but cleanup fails during a reconnect.
+        await window.electronAPI.sessionCommand(sessionId, {
+          type: 'markPendingPlanExecutionDispatched',
+        })
+
+        // Compaction completed but we never sent the execution message (page reloaded).
+        // Send it now and clear the pending state.
+        hasExecuted = true
+        const executionMessage = buildPlanApprovalMessage({
+          planPath: pending.planPath,
+          draftInput: pending.draftInputSnapshot,
+        })
+        onSubmit(executionMessage, undefined)
+
+        await window.electronAPI.sessionCommand(sessionId, {
+          type: 'clearPendingPlanExecution',
+        })
+      } catch (error) {
+        if (!isExpectedReconnectError(error)) {
+          console.error('[FreeFormInput] Failed to resume pending plan execution:', error)
+        }
+      }
+    }
+
+    // Check immediately on mount (handles case where compaction already completed)
+    executePendingPlan()
+
+    // Also listen for compaction-complete in case CMD+R happened during compaction.
+    // When compaction finishes after reload, this listener will trigger execution.
+    const handleCompactionComplete = async (e: CustomEvent<{ sessionId: string }>) => {
+      if (e.detail?.sessionId !== sessionId) return
+      // Small delay to ensure markCompactionComplete has been called
+      await new Promise(resolve => setTimeout(resolve, 100))
+      executePendingPlan()
+    }
+
+    window.addEventListener('craft:compaction-complete', handleCompactionComplete as unknown as EventListener)
+    return () => {
+      window.removeEventListener('craft:compaction-complete', handleCompactionComplete as unknown as EventListener)
+    }
+  }, [sessionId, onSubmit])
 
   // Listen for craft:focus-input events (restore focus after popover/dropdown closes)
   React.useEffect(() => {
@@ -858,13 +1215,8 @@ export function FreeFormInput({
       })
 
       for (let i = 0; i < files.length; i++) {
-        const file = files[i]!
-        if (refuseOversizedAttachment({ name: fileNames[i]!, size: file.size, type: file.type.startsWith('image/') ? 'image' : undefined })) {
-          setLoadingCount(prev => prev - 1)
-          continue
-        }
         try {
-          const attachment = await readFileAsAttachment(file, fileNames[i])
+          const attachment = await readFileAsAttachment(files[i], fileNames[i])
           if (attachment) {
             setAttachments(prev => [...prev, attachment])
           }
@@ -880,21 +1232,23 @@ export function FreeFormInput({
 
     window.addEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
     return () => window.removeEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
-  }, [disabled, sessionId, isFocusedPanel, richInputRef, refuseOversizedAttachment])
+  }, [disabled, sessionId, isFocusedPanel, richInputRef])
 
   // Build active commands list for slash command menu
   const activeCommands = React.useMemo(() => {
     const active: SlashCommandId[] = []
     // Add the currently active permission mode
-    if (permissionMode) active.push(permissionMode)
+    if (permissionMode === 'safe') active.push('safe')
+    else if (permissionMode === 'ask') active.push('ask')
+    else if (permissionMode === 'allow-all') active.push('allow-all')
     return active
   }, [permissionMode])
 
-  // Handle slash command selection (mode/feature commands)
+  // Handle slash command selection (feature commands — modes use the badge UI / Shift+Tab)
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
-    if (isPermissionMode(commandId)) onPermissionModeChange?.(commandId)
-    else if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
-  }, [onPermissionModeChange, isProcessing, onSubmit])
+    if (commandId === 'office-edit' && !isProcessing) onSubmit('/office-edit', undefined)
+    if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
+  }, [isProcessing, onSubmit])
 
   // Handle folder selection from slash command menu
   const handleSlashFolderSelect = React.useCallback((path: string) => {
@@ -915,61 +1269,32 @@ export function FreeFormInput({
     })
   }, [workspaceId])
 
-  // Inline slash command hook (modes, features, and folders); Guarded only while it is offered
-  const availableModes = useAvailablePermissionModes(permissionMode)
-
-  // Coding mode is about a folder's code: turning it on asks for one (the chip's popover offers a new
-  // worktree or an existing folder; "existing" opens this picker)
-  const codingFolderPicker = useDirectoryPicker(React.useCallback((path: string) => {
-    onWorkingDirectoryChange?.(path)
-  }, [onWorkingDirectoryChange]))
-  const { pickDirectory: pickCodingFolder } = codingFolderPicker
-  const hasWorkingFolder = !!workingDirectory && workingDirectory !== sessionFolderPath
-  const handleCodingModeToggle = React.useCallback((enabled: boolean) => {
-    onCodingModeChange?.(enabled)
-  }, [onCodingModeChange])
-  const codingWorkspaceSetup = React.useMemo(() => (onWorkingDirectoryChange ? {
-    workspaceId,
-    sessionId,
-    currentFolder: hasWorkingFolder ? workingDirectory : undefined,
-    onUseExistingFolder: pickCodingFolder,
-    onWorktreeCreated: onWorkingDirectoryChange,
-  } : undefined), [onWorkingDirectoryChange, workspaceId, sessionId, hasWorkingFolder, workingDirectory, pickCodingFolder])
+  // Inline slash command hook (skills, commands, folders — modes use the badge UI)
   const inlineSlash = useInlineSlashCommand({
     inputRef: richInputRef,
-    modes: availableModes,
     onSelectCommand: handleSlashCommand,
     onSelectFolder: handleSlashFolderSelect,
     activeCommands,
-    recentFolders,
+    // A project conversation cannot switch folders. Omit the recent-folder
+    // section so "/" does not offer a change that would be ignored.
+    recentFolders: workingDirectoryLocked ? NO_SLASH_FOLDERS : recentFolders,
     homeDir,
-  })
-
-  // Handle mention selection (sources, skills, files)
-  const handleMentionSelect = React.useCallback((item: MentionItem) => {
-    // For sources: enable the source immediately
-    if (item.type === 'source' && item.source && onSourcesChange) {
-      const slug = item.source.config.slug
-      if (!optimisticSourceSlugs.includes(slug)) {
-        const newSlugs = [...optimisticSourceSlugs, slug]
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-
-    // Files via @ mention in text are sufficient context for the agent.
-    // Skills also don't need special handling beyond text insertion.
-  }, [optimisticSourceSlugs, onSourcesChange])
-
-  // Inline mention hook (for skills, sources, and files)
-  const inlineMention = useInlineMention({
-    inputRef: richInputRef,
     skills,
-    sources,
-    basePath: workingDirectory,
-    onSelect: handleMentionSelect,
     // Use workspace slug (not UUID) for SDK skill qualification
     workspaceId: workspaceSlug,
+    swarmAgentsEnabled,
+  })
+
+  // Handle mention selection (files only)
+  const handleMentionSelect = React.useCallback((_item: MentionItem) => {
+    // Files via @ mention in text are sufficient context for the agent.
+  }, [])
+
+  // Inline mention hook — files only (@). Skills are under `/`.
+  const inlineMention = useInlineMention({
+    inputRef: richInputRef,
+    basePath: workingDirectory,
+    onSelect: handleMentionSelect,
   })
 
   // Inline label menu hook (for #labels)
@@ -978,6 +1303,7 @@ export function FreeFormInput({
   }, [onLabelAdd])
 
   const inlineLabel = useInlineLabelMenu({
+    enabled: false,
     inputRef: richInputRef,
     labels,
     sessionLabels,
@@ -1017,6 +1343,9 @@ export function FreeFormInput({
   React.useLayoutEffect(() => {
     if (!onHeightChange || !containerRef.current) return
 
+    // Initialize before paint; ResizeObserver delivers its first entry later.
+    onHeightChange(containerRef.current.getBoundingClientRect().height)
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         onHeightChange(entry.contentRect.height)
@@ -1044,10 +1373,6 @@ export function FreeFormInput({
 
   // Shared helper: read a File, add as attachment, decrement loading count
   const processFileAttachment = async (file: File, overrideName?: string) => {
-    if (refuseOversizedAttachment({ name: overrideName || file.name, size: file.size, type: file.type.startsWith('image/') ? 'image' : undefined })) {
-      setLoadingCount(prev => prev - 1)
-      return
-    }
     try {
       const attachment = await readFileAsAttachment(file, overrideName)
       if (attachment) {
@@ -1059,7 +1384,8 @@ export function FreeFormInput({
     setLoadingCount(prev => prev - 1)
   }
 
-  // File attachment handlers
+  // File attachment handlers. Click the input before any blur: an open Office
+  // preview iframe otherwise takes focus and Chromium drops the file dialog.
   const handleAttachClick = () => {
     if (disabled) return
     fileInputRef.current?.click()
@@ -1070,6 +1396,9 @@ export function FreeFormInput({
     if (!files || files.length === 0) return
 
     const fileList = Array.from(files)
+    // Restore typing immediately; attachment decoding may continue in the
+    // background for large files.
+    focusComposerAfterPicker()
     setLoadingCount(prev => prev + fileList.length)
 
     for (const file of fileList) {
@@ -1079,6 +1408,15 @@ export function FreeFormInput({
     // Reset input so re-selecting the same file triggers onChange again
     e.target.value = ''
   }
+
+  React.useEffect(() => {
+    const fileInput = fileInputRef.current
+    if (!fileInput) return
+
+    const handleCancel = () => focusComposerAfterPicker()
+    fileInput.addEventListener('cancel', handleCancel)
+    return () => fileInput.removeEventListener('cancel', handleCancel)
+  }, [focusComposerAfterPicker])
 
   const handleRemoveAttachment = (index: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== index))
@@ -1110,6 +1448,11 @@ export function FreeFormInput({
 
   // Helper to read a File using FileReader API
   const readFileAsAttachment = async (file: File, overrideName?: string): Promise<FileAttachment | null> => {
+    const tooLarge = findAttachmentSizeProblem([{ name: overrideName || file.name, size: file.size, type: file.type }])
+    if (tooLarge) {
+      toast.warning(formatAttachmentSizeProblem(tooLarge, t))
+      return null
+    }
     // Capture the absolute OS path at attach time. Works for <input type="file"> and
     // OS drag-drop; returns null for clipboard paste and web-drag (no disk origin).
     // When null, the draft layer falls back to persisting content inline (Track C).
@@ -1174,13 +1517,11 @@ export function FreeFormInput({
   const handlePaste = async (e: React.ClipboardEvent) => {
     if (disabled) return
 
-    const clipboardItems = e.clipboardData?.files
-    if (!clipboardItems || clipboardItems.length === 0) return
+    const files = clipboardFiles(e.clipboardData)
+    if (files.length === 0) return
 
     // We have files to process - prevent default text paste behavior
     e.preventDefault()
-
-    const files = Array.from(clipboardItems)
     setLoadingCount(prev => prev + files.length)
 
     // Pre-assign sequential names using ref to avoid race conditions
@@ -1198,12 +1539,6 @@ export function FreeFormInput({
     }
   }
 
-  // Text pastes go in as usual; a console snippet also gets a "Run in background" offer
-  const handleTextPaste = React.useCallback((text: string) => {
-    const command = consoleSnippetCommand(text)
-    if (command) onConsoleSnippetPaste?.({ command, text })
-  }, [onConsoleSnippetPaste])
-
   // Handle long text paste - convert to file attachment
   const handleLongTextPaste = React.useCallback((text: string) => {
     const nextNum = getNextPastedNumber('text', attachmentsRef.current)
@@ -1216,11 +1551,10 @@ export function FreeFormInput({
       text: text,
       size: new Blob([text]).size,
     }
-    if (refuseOversizedAttachment(attachment)) return
     setAttachments(prev => [...prev, attachment])
     // Focus input after adding attachment
     richInputRef.current?.focus()
-  }, [refuseOversizedAttachment])
+  }, []) // No deps needed - uses ref
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -1238,19 +1572,34 @@ export function FreeFormInput({
   }
 
   // Submit message - backend handles queueing and interruption
-  const submitMessage = React.useCallback(() => {
+  const submitMessage = React.useCallback(async () => {
     const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-    if (!hasContent || disabled) return false
+    if (!hasContent || disabled || submitLockRef.current || showVisionWarning) return false
+
+    // `/delegate` is an explicit authorization envelope, not a task by itself.
+    // Keep the draft intact until the user adds a non-empty task.
+    const delegateSubmission = assessDelegateCommandSubmission(input, isProcessing, swarmAgentsEnabled)
+    if (!delegateSubmission.allowed) {
+      toast.warning(delegateSubmission.reason === 'empty-task'
+        ? t('chat.delegateTaskRequired', 'Add a task after /delegate')
+        : delegateSubmission.reason === 'swarm-disabled'
+          ? t('chat.delegateDisabled', 'Turn on Swarm agents in Advanced settings before delegating')
+          : t('chat.delegateWaitForIdle', 'Finish or stop the current response before delegating'))
+      return false
+    }
 
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
 
-    // Too much to send in one message: say so and keep the draft (the send would drop the connection)
-    const sizeProblem = checkAttachmentSizes(attachments, maxMessageBytesRef.current)
-    if (sizeProblem) {
-      showAttachmentSizeProblem(sizeProblem)
-      return false
+    if (attachments.length > 0) {
+      const tooLarge = findAttachmentSizeProblem(attachments)
+      if (tooLarge) {
+        toast.warning(formatAttachmentSizeProblem(tooLarge, t))
+        return false
+      }
     }
+
+    submitLockRef.current = true
 
     // Parse all @mentions (skills, sources, folders)
     const skillSlugs = skills.map(s => s.slug)
@@ -1267,19 +1616,39 @@ export function FreeFormInput({
     }
 
     const attachmentSnapshot = attachments
+    // Sending can navigate/unmount before onSubmit resolves. Persist the edit
+    // now so cleanup cannot overwrite the parent's accepted-send clear.
+    draftSync.flush()
 
-    onSubmit(
-      input.trim(),
-      attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
-      mentions.skills.length > 0 ? mentions.skills : undefined
-    )
+    try {
+      const admitted = await onSubmit(
+        input.trim(),
+        attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
+        mentions.skills.length > 0 ? mentions.skills : undefined
+      )
+      if (admitted === false) {
+        submitLockRef.current = false
+        return false
+      }
+    } catch (error) {
+      submitLockRef.current = false
+      throw error
+    }
     setInput('')
     setAttachments([])
+    setPptRequest(undefined)
     // Clear draft immediately (cancel any pending debounced sync)
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+    draftSync.cancel()
     onInputChange?.('')
     onAttachmentsChange?.([])
     prevInputValueRef.current = ''
+
+    // Release after the current browser task. Unlike requestAnimationFrame,
+    // this still runs while the window is backgrounded, so the composer cannot
+    // remain permanently locked when a submit happens just before hiding it.
+    queueMicrotask(() => {
+      submitLockRef.current = false
+    })
 
     // Restore focus after state updates
     requestAnimationFrame(() => {
@@ -1287,14 +1656,14 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
+  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t, setPptRequest, draftSync])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
     const handleSubmitInput = (e: CustomEvent<{ sessionId?: string }>) => {
       const targetSessionId = e.detail?.sessionId
       if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId })) return
-      submitMessage()
+      void submitMessage()
     }
 
     window.addEventListener('craft:submit-input', handleSubmitInput as EventListener)
@@ -1303,7 +1672,7 @@ export function FreeFormInput({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    submitMessage()
+    await submitMessage()
   }
 
   const handleStop = (silent = false) => {
@@ -1356,8 +1725,9 @@ export function FreeFormInput({
       }
     }
 
-    // Plain Arrow Up with no draft content cancels the running turn and recalls
-    // its prompt through ChatDisplay.handleStop. The pure guard deliberately
+    // Plain Arrow Up with no draft content cancels the running turn. The prompt
+    // stays in the transcript; ChatDisplay.handleStop does not copy it back.
+    // The pure guard deliberately
     // treats whitespace, attachments, loading files, and follow-up chips as draft
     // content so normal editing is never hijacked.
     if (shouldRecallPromptOnArrowUp({
@@ -1389,18 +1759,18 @@ export function FreeFormInput({
       // Enter sends, Shift+Enter adds newline
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
       // Also allow Cmd/Ctrl+Enter to send (power user shortcut)
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
     } else {
       // cmd-enter mode: ⌘/Ctrl+Enter sends, plain Enter adds newline
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
       // Plain Enter is allowed to pass through (adds newline)
     }
@@ -1420,6 +1790,7 @@ export function FreeFormInput({
     const nextValue = coerceInputText(value)
     // Get previous input value before updating state
     const prevValue = inputRef.current
+    if (nextValue !== prevValue) typingEnergy.current = Math.min(1.2, typingEnergy.current + 0.18)
 
     setInput(nextValue)
     syncToParent(nextValue) // Debounced sync to parent for draft persistence
@@ -1440,7 +1811,7 @@ export function FreeFormInput({
         onSourcesChange(newSlugs)
       }
     }
-  }, [syncToParent, sources, optimisticSourceSlugs, onSourcesChange])
+  }, [syncToParent, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange])
 
   // Handle input with cursor position (for menu detection)
   const handleRichInput = React.useCallback((value: string, cursorPosition: number) => {
@@ -1455,39 +1826,34 @@ export function FreeFormInput({
     // Update inline label state (for #labels)
     inlineLabel.handleInputChange(nextValue, cursorPosition)
 
-    // Auto-capitalize first letter (but not for slash commands, @mentions, or #labels)
-    // Only if autoCapitalisation setting is enabled
-    let newValue = nextValue
-    if (autoCapitalisation && nextValue.length > 0 && nextValue.charAt(0) !== '/' && nextValue.charAt(0) !== '@' && nextValue.charAt(0) !== '#') {
-      const capitalizedFirst = nextValue.charAt(0).toUpperCase()
-      if (capitalizedFirst !== nextValue.charAt(0)) {
-        newValue = capitalizedFirst + nextValue.slice(1)
-        // Set cursor position BEFORE state update so it's used when useEffect syncs the value
-        richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
-        setInput(newValue)
-        syncToParent(newValue)
-        return
-      }
-    }
-
     // Apply smart typography (-> to →, etc.)
     const typography = applySmartTypography(nextValue, cursorPosition)
     if (typography.replaced) {
-      newValue = typography.text
       // Set cursor position BEFORE state update so it's used when useEffect syncs the value
       richInputRef.current?.setSelectionRange(typography.cursor, typography.cursor)
-      setInput(newValue)
-      syncToParent(newValue)
+      setInput(typography.text)
+      syncToParent(typography.text)
     }
-  }, [inlineSlash, inlineMention, inlineLabel, syncToParent, autoCapitalisation])
+  }, [inlineSlash, inlineMention, inlineLabel, syncToParent])
 
-  // Handle inline slash command selection (removes the /command text)
+  // Handle inline slash command selection. Delegate remains visible as an
+  // authorization prefix; immediate commands such as compact are removed.
   const handleInlineSlashCommandSelect = React.useCallback((commandId: SlashCommandId) => {
-    const newValue = inlineSlash.handleSelectCommand(commandId)
+    const remainingInput = inlineSlash.handleSelectCommand(commandId)
+    const newValue = commandId === 'delegate'
+      ? buildDelegateCommandDraft(remainingInput)
+      : remainingInput
     setInput(newValue)
     syncToParent(newValue)
-    richInputRef.current?.focus()
-  }, [inlineSlash, syncToParent])
+    if (commandId === 'delegate') {
+      setTimeout(() => {
+        richInputRef.current?.focus()
+        richInputRef.current?.setSelectionRange(newValue.length, newValue.length)
+      }, 0)
+    } else {
+      richInputRef.current?.focus()
+    }
+  }, [inlineSlash, syncToParent, richInputRef])
 
   // Handle inline slash folder selection (inserts a directory badge)
   const handleInlineSlashFolderSelect = React.useCallback((path: string) => {
@@ -1497,7 +1863,18 @@ export function FreeFormInput({
     richInputRef.current?.focus()
   }, [inlineSlash, syncToParent])
 
-  // Handle inline mention selection (inserts appropriate mention text)
+  // Handle inline slash skill selection (inserts [skill:…] mention)
+  const handleInlineSlashSkillSelect = React.useCallback((skill: LoadedSkill) => {
+    const { value: newValue, cursorPosition } = inlineSlash.handleSelectSkill(skill)
+    setInput(newValue)
+    syncToParent(newValue)
+    setTimeout(() => {
+      richInputRef.current?.focus()
+      richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
+    }, 0)
+  }, [inlineSlash, syncToParent])
+
+  // Handle inline mention selection (inserts file/folder mention text)
   const handleInlineMentionSelect = React.useCallback((item: MentionItem) => {
     const { value: newValue, cursorPosition } = inlineMention.handleSelect(item)
     setInput(newValue)
@@ -1556,53 +1933,45 @@ export function FreeFormInput({
   }, [followUpLayoutKey])
 
   const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-
-  // Pre-flight image-support check: warn when staged images would be silently
-  // stripped by Pi SDK because the active custom-endpoint model is text-only.
-  // Gate on pi_compat — built-in catalogs (anthropic/pi) are owned by the SDK
-  // and we can't repair them from the UI here.
-  const hasStagedImages = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
-  const showVisionWarning =
-    hasStagedImages
-    && !!effectiveConnectionDetails
-    && isCompatProvider(effectiveConnectionDetails.providerType)
-    && !modelSupportsImages(effectiveConnectionDetails, currentModel)
-  const contextDisplay = getContextDisplay(contextStatus, getModelContextWindow(currentModel))
-  const contextLabels = getContextDisplayLabels(contextDisplay, t)
-
-  React.useLayoutEffect(() => {
-    if (contentScrollRef.current) scrollFocusedCaretIntoView(contentScrollRef.current)
-  }, [composerMaxHeight, attachments, followUpItems, showVisionWarning, isCollapsedInCompact])
-
-  const handleToggleSourceSlug = (slug: string) => {
-    const isEnabled = optimisticSourceSlugs.includes(slug)
-    const newSlugs = isEnabled
-      ? optimisticSourceSlugs.filter(currentSlug => currentSlug !== slug)
-      : [...optimisticSourceSlugs, slug]
-    setOptimisticSourceSlugs(newSlugs)
-    onSourcesChange?.(newSlugs)
-  }
+  const fastControl = onFastModeChange && fastSupported ? (
+    <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu />
+  ) : null
+  const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && thinkingUnavailable !== 'unsupported' && (thinkingUnavailable === 'always-on' || availableThinkingLevels.length > 0) ? (
+    <PromptThinkingSettings
+      value={thinkingLevel}
+      levels={availableThinkingLevels}
+      workMode={workMode}
+      disabled={disabled || thinkingDisabled}
+      unavailable={thinkingUnavailable}
+      binary={thinkingCapability.binary}
+      headingAction={fastControl}
+      onChange={onThinkingLevelChange}
+    />
+  ) : null
+  const currentPickerPage = pickerPageShowsCurrentConnection(pickerMode, browsedConnection?.slug, effectiveConnection)
+  const fastInThinkingHeading = !!promptThinkingSettings && currentPickerPage
 
   return (
     <form onSubmit={handleSubmit}>
       <div
         ref={containerRef}
         className={cn(
-          // Own the panel query boundary: standalone/playground composers must collapse chips
-          // at the input's width too, not depend on an AppShell ancestor being present.
-          '@container/panel flex flex-col min-h-0 overflow-hidden transition-colors',
+          'overflow-hidden transition-all',
+          usePromptAppearance && 'prompt-field',
           // Container styling - only when not wrapped by InputContainer
-          !unstyled && 'rounded-xl bg-raised shadow-elev-2',
-          // Drop target: inset focus ring + accent tint (never clipped by the card)
-          isDraggingOver && 'ring-2 ring-inset ring-focus bg-accent-tint'
+          !unstyled && 'rounded-[16px] shadow-middle',
+          !unstyled && 'bg-background',
+          isDraggingOver && 'ring-2 ring-foreground ring-offset-2 ring-offset-background bg-foreground/5'
         )}
-        style={{ maxHeight: composerMaxHeight }}
+        data-max={promptMaxed || undefined}
+        data-work-mode={workMode}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        {/* Inline Slash Command Autocomplete */}
+        {usePromptAppearance && <PromptSparks active={promptMaxed && !disabled && !isProcessing} energy={typingEnergy} />}
+        {/* Inline Slash Command Autocomplete (skills, commands, folders) */}
         <InlineSlashCommand
           open={inlineSlash.isOpen}
           onOpenChange={(open) => !open && inlineSlash.close()}
@@ -1610,11 +1979,13 @@ export function FreeFormInput({
           activeCommands={activeCommands}
           onSelectCommand={handleInlineSlashCommandSelect}
           onSelectFolder={handleInlineSlashFolderSelect}
+          onSelectSkill={handleInlineSlashSkillSelect}
           filter={inlineSlash.filter}
           position={inlineSlash.position}
+          workspaceId={workspaceSlug}
         />
 
-        {/* Inline Mention Autocomplete (skills, sources, files) */}
+        {/* Inline Mention Autocomplete (files only) */}
         <InlineMentionMenu
           open={inlineMention.isOpen}
           onOpenChange={(open) => !open && inlineMention.close()}
@@ -1665,21 +2036,15 @@ export function FreeFormInput({
           />
         )}
 
-        {/* Text and ancillary content share one scroll region. Keeping actions
-            outside it reserves their measured flex height, even with many chips. */}
-        <div ref={contentScrollRef} className="min-h-0 overflow-y-auto overscroll-contain" data-composer-content>
-        {/* Pre-flight image-support warning — only for pi_compat connections
-            where the renderer can both detect text-only models and offer to
-            flip the per-model supportsImages override on the spot. */}
-        {showVisionWarning && effectiveConnectionDetails && (
-          <ImageSupportWarningBanner
-            modelName={currentModelDisplayName}
-            onEnable={() => handleToggleModelVision(effectiveConnectionDetails.slug, currentModel, true)}
-          />
+        {showVisionWarning && (
+          <ImageSupportWarningBanner modelName={currentModelDisplayName} />
         )}
 
         {/* Attachment Preview */}
         <AttachmentPreview
+          pptComposerKey={pptComposerKey}
+          hasPptTemplate={!!pptOverride?.templateId}
+          hasOfficeCase={!!attachedOfficeCase(officeCase)}
           attachments={attachments}
           onRemove={handleRemoveAttachment}
           disabled={disabled}
@@ -1687,12 +2052,88 @@ export function FreeFormInput({
         />
 
         {/* Follow-up context chips */}
-        <FollowUpChips
-          items={followUpItems}
-          animateLayout={animateFollowUpLayout}
-          onItemClick={onFollowUpClick}
-          onIndexClick={onFollowUpIndexClick}
-        />
+        <AnimatePresence initial={false}>
+          {followUpItems.length > 0 && (
+            <motion.div
+              key="follow-up-chips"
+              layout={animateFollowUpLayout}
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.18, ease: [0.2, 0, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <motion.div layout={animateFollowUpLayout} className="px-3 pt-3.5 pb-0">
+                <motion.div layout={animateFollowUpLayout} className="flex flex-wrap gap-1">
+                  <AnimatePresence initial={false}>
+                    {followUpItems.map((item, idx) => {
+                      const chipIndex = item.index ?? idx + 1
+                      const tooltipText = item.selectedText.trim() || t('chat.selectedText')
+                      const selectedExcerpt = formatFollowUpChipText(item.selectedText, t('chat.selectedText'), 50)
+                      const noteExcerpt = formatFollowUpChipText(item.noteLabel, t('chat.followUp'), 50)
+
+                      return (
+                        <motion.button
+                          key={item.id}
+                          type="button"
+                          layout={animateFollowUpLayout}
+                          initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                          transition={{ duration: 0.16, ease: [0.2, 0, 0.2, 1] }}
+                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          onClick={(event) => {
+                            const rect = event.currentTarget.getBoundingClientRect()
+                            onFollowUpClick?.(item, {
+                              x: rect.left + rect.width / 2,
+                              y: rect.top - 8,
+                            })
+                          }}
+                        >
+                          <Tooltip delayDuration={250}>
+                            <TooltipTrigger asChild>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className="inline-flex h-4 min-w-4 cursor-pointer items-center justify-center rounded-[4px] bg-background px-0.5 text-[10px] font-medium text-foreground shadow-minimal focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                onMouseDown={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                }}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  onFollowUpIndexClick?.(item)
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    onFollowUpIndexClick?.(item)
+                                  }
+                                }}
+                              >
+                                {chipIndex}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[420px] break-words text-xs">
+                              {tooltipText}
+                            </TooltipContent>
+                          </Tooltip>
+                          <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left">
+                            <span className="italic text-foreground/60">{selectedExcerpt}</span>
+                            <span className="mx-1 text-foreground/40">·</span>
+                            <span>{noteExcerpt}</span>
+                          </span>
+                        </motion.button>
+                      )
+                    })}
+                  </AnimatePresence>
+                </motion.div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Rich Text Input with inline mention badges */}
         {/* In compact mode, hide input while the agent is processing — until the
@@ -1706,7 +2147,6 @@ export function FreeFormInput({
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onLongTextPaste={handleLongTextPaste}
-          onTextPaste={handleTextPaste}
           onFocus={() => { setIsFocused(true); onFocusChange?.(true) }}
           onBlur={() => {
             // Save caret position before losing focus (for restoration via craft:focus-input)
@@ -1719,111 +2159,285 @@ export function FreeFormInput({
           skills={skills}
           sources={sources}
           workspaceId={workspaceSlug}
-          // Copy type (15/24; 16/26 in compact so iOS never zooms), placeholder in tertiary.
-          // Narrow panels reserve two lines so a wrapped rotating tip is never clipped.
-          className={cn(
-            'px-3.5 pt-3.5 pb-3.5',
-            compactMode ? 'text-copy-lg min-h-[80px]' : 'text-copy @max-panel-medium/panel:min-h-[76px]',
-          )}
-          style={{ lineHeight: compactMode ? 'var(--lh-copy-lg)' : 'var(--lh-copy)' }}
+          className={cn('overflow-y-auto', usePromptAppearance ? 'px-4 pt-4 pb-2 min-h-[60px]' : 'pl-5 pr-4 pt-4 pb-3 min-h-[88px]')}
+          style={{ maxHeight: inputMaxHeight }}
           data-tutorial="chat-input"
           spellCheck={spellCheck}
         />
         )}
 
-        </div>
-
-        {/* Bottom Row: Controls - never shrinks into the scrolling draft region. */}
-        <div className="relative shrink-0" data-composer-actions>
+        {/* Bottom Row: Controls - wrapped in relative container for status slot overlay */}
+        <div className="relative">
           {/* Status slot overlay - escape interrupt (highest priority), browser status, etc. */}
           <ToolbarStatusSlot
             showEscapeOverlay={isProcessing && showEscapeOverlay}
             sessionId={sessionId}
           />
 
-          {/* Toolbar (mockup `.cx-bar`): attach · sources · folder · spacer · mode · model · context · send */}
-          {/* The first icon's glyph lines up with the draft text (card-pad, 14px): 28px desktop
-              buttons pad 6px, 36px compact ones 10px, so the row insets 8px / 4px. */}
-          <div className={cn("flex items-center gap-1 pb-1.5", compactMode ? "px-1" : "px-2", isCollapsedInCompact && "pt-1.5")}>
+          <div className={cn("flex flex-wrap items-center gap-1 px-2 py-2", !compactMode && !usePromptAppearance && "border-t border-border/50")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            className="hidden"
+            data-testid="composer-file-input"
+            tabIndex={-1}
+            className="sr-only"
             onChange={handleFileInputChange}
           />
-
-          {/* Left: attach, sources, working folder. Compact, and desktop panels under 32rem, show
-              the chips icon-only (their names stay in tooltips/aria-labels) so the model keeps its
-              name. Desktop keeps the three icons (96px) while the row still leaves 11rem for mode ·
-              model · context · Send; in a narrower row that floor gives way so Send is never pushed
-              out. overflow-hidden is safe — popovers/drawers portal. */}
-          <div className={cn(
-            "flex items-center gap-1",
-            compactMode
-              ? "shrink-0 [&_[data-badge-label]]:hidden"
-              : "min-w-[clamp(0px,calc(100%-11rem),6rem)] shrink overflow-hidden @max-[32rem]/panel:[&_[data-badge-label]]:hidden"
-          )}>
-          <IconButton
-            aria-label={attachments.length > 0
-              ? t("chat.filesCount", { count: attachments.length })
-              : t("chat.attachFiles")
-            }
-            tooltip={t("chat.attachFilesTooltip")}
-            icon={<Paperclip />}
-            onClick={handleAttachClick}
-            disabled={disabled}
-            className="input-toolbar-btn"
-          />
-
-          {/* Source selector chip - only show if onSourcesChange is provided */}
-          {onSourcesChange && (
-            <ComposerSourcesChip
-              compact={compactMode}
-              sources={sources}
-              selectedSlugs={optimisticSourceSlugs}
-              onToggleSlug={handleToggleSourceSlug}
-              open={sourceDropdownOpen}
-              setOpen={setSourceDropdownOpen}
-              isEmptySession={isEmptySession}
-              disabled={disabled}
-              buttonRef={sourceButtonRef}
+          {/* Compact mode: permission mode drawer + standard icon badges for attach/sources/working dir.
+              Wrapper absorbs all squeeze so the model label truncates first and the send button stays
+              anchored to the right (craft-agents-oss#798). overflow-hidden is safe — Radix Drawer /
+              dropdowns inside render via portals, so they aren't clipped. */}
+          {compactMode && (
+          <div className={cn("flex items-center gap-1 min-w-0 shrink overflow-hidden", workMode === 'PRO' && "gap-0.5")}>
+          {onPermissionModeChange && (
+            <CompactPermissionModeSelector
+              permissionMode={permissionMode}
+              onPermissionModeChange={onPermissionModeChange}
             />
           )}
-
-          {/* Working directory chip */}
-          {onWorkingDirectoryChange && (compactMode ? (
-            <CompactWorkingDirectorySelector
+          {enableCompactModelPicker && (
+            <CompactModelSelector
+              open={modelDropdownOpen}
+              onOpenChange={handleModelDropdownOpenChange}
+              onCloseAutoFocus={(event) => {
+                keepComposerFocusOnPickerClose(event)
+                focusComposerAfterPicker()
+              }}
+              currentModel={currentModel}
+              currentConnection={currentConnection}
+              onModelChange={onModelChange}
+              onConnectionChange={onConnectionChange}
+              fastMode={fastMode}
+              onFastModeChange={onFastModeChange}
+              workMode={workMode}
+              isProcessing={isProcessing}
+              thinkingLevel={thinkingLevel}
+              onThinkingLevelChange={onThinkingLevelChange}
+              isEmptySession={isEmptySession}
+              connectionUnavailable={connectionUnavailable}
+            />
+          )}
+          <FreeFormInputContextBadge
+            icon={<Paperclip className="h-4 w-4" />}
+            label={attachments.length > 0
+              ? t("chat.filesCount", { count: attachments.length })
+              : t("chat.attach")
+            }
+            isExpanded={false}
+            hasSelection={attachments.length > 0}
+            selectionChrome={false}
+            showChevron={false}
+            data-testid="composer-attach"
+            onMouseDown={event => event.preventDefault()}
+            onClick={handleAttachClick}
+            tooltip={t("chat.attachFilesTooltip")}
+            disabled={disabled}
+          />
+          {onSourcesChange && (
+            <div className="relative shrink min-w-0">
+              <FreeFormInputContextBadge
+                buttonRef={sourceButtonRef}
+                icon={
+                  optimisticSourceSlugs.length === 0 ? (
+                    <DatabaseZap className="h-4 w-4" />
+                  ) : (
+                    <div className="flex items-center -ml-0.5">
+                      {(() => {
+                        const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
+                        const displaySources = enabledSources.slice(0, 3)
+                        const remainingCount = enabledSources.length - 3
+                        return (
+                          <>
+                            {displaySources.map((source, index) => (
+                              <div
+                                key={source.config.slug}
+                                className={cn("relative h-5 w-5 flex items-center justify-center", index > 0 && "-ml-1")}
+                                style={{ zIndex: index + 1 }}
+                              >
+                                <SourceAvatar source={source} size="xs" chromeless />
+                              </div>
+                            ))}
+                            {remainingCount > 0 && (
+                              <div
+                                className="-ml-1 h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center text-[8px] font-medium text-muted-foreground"
+                                style={{ zIndex: displaySources.length + 1 }}
+                              >
+                                +{remainingCount}
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )
+                }
+                label={
+                  optimisticSourceSlugs.length === 0
+                    ? t("chat.sourcesTooltip")
+                    : (() => {
+                        const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
+                        if (enabledSources.length === 1) return resolveSourceTitle(enabledSources[0])
+                        return t("chat.sourcesCount", { count: enabledSources.length })
+                      })()
+                }
+                isExpanded={false}
+                hasSelection={optimisticSourceSlugs.length > 0}
+                showChevron={false}
+                isOpen={sourceDropdownOpen}
+                disabled={disabled}
+                onClick={() => handleSourceDropdownOpenChange(!sourceDropdownOpen)}
+                tooltip={t("chat.sourcesTooltip")}
+              />
+              <CompactSourceSelector
+                open={sourceDropdownOpen}
+                onOpenChange={handleSourceDropdownOpenChange}
+                sources={sources}
+                selectedSlugs={optimisticSourceSlugs}
+                onToggleSlug={(slug) => {
+                  const isEnabled = optimisticSourceSlugs.includes(slug)
+                  const newSlugs = isEnabled
+                    ? optimisticSourceSlugs.filter(currentSlug => currentSlug !== slug)
+                    : [...optimisticSourceSlugs, slug]
+                  setOptimisticSourceSlugs(newSlugs)
+                  onSourcesChange?.(newSlugs)
+                }}
+              />
+            </div>
+          )}
+          {workingDirectoryLocked ? (
+            <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} />
+          ) : onWorkingDirectoryChange && (
+            <ChatWorkingDirectoryControl
+              key={sourceSelectionKey ?? sessionId ?? workspaceId}
+              disabled={disabled || isProcessing}
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
               isEmptySession={false}
               workspaceId={workspaceId}
             />
-          ) : (
-            <WorkingDirectoryBadge
+          )}
+          </div>
+          )}
+
+          {/* Desktop: full badges row with labels and working directory */}
+          {!compactMode && (
+          <div className="flex w-max max-w-full flex-wrap items-center gap-1">
+          {/* 1. Attach Files Badge */}
+          <FreeFormInputContextBadge
+            icon={<Paperclip className="h-4 w-4" />}
+            label={attachments.length > 0
+              ? t("chat.filesCount", { count: attachments.length })
+              : t("chat.attachFiles")
+            }
+            isExpanded={isEmptySession}
+            hasSelection={attachments.length > 0}
+            selectionChrome={false}
+            showChevron={false}
+            data-testid="composer-attach"
+            onMouseDown={event => event.preventDefault()}
+            onClick={handleAttachClick}
+            tooltip={t("chat.attachFilesTooltip")}
+            disabled={disabled}
+          />
+
+          {/* 2. Source Selector Badge - only show if onSourcesChange is provided */}
+          {onSourcesChange && (
+            <div className="relative shrink min-w-0 overflow-hidden">
+              <FreeFormInputContextBadge
+                buttonRef={sourceButtonRef}
+                icon={
+                  optimisticSourceSlugs.length === 0 ? (
+                    <DatabaseZap className="h-4 w-4" />
+                  ) : (
+                    <div className="flex items-center -ml-0.5">
+                      {(() => {
+                        const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
+                        const displaySources = enabledSources.slice(0, 3)
+                        const remainingCount = enabledSources.length - 3
+                        return (
+                          <>
+                            {displaySources.map((source, index) => (
+                              <div
+                                key={source.config.slug}
+                                className={cn("relative h-5 w-5 flex items-center justify-center", index > 0 && "-ml-1")}
+                                style={{ zIndex: index + 1 }}
+                              >
+                                <SourceAvatar source={source} size="xs" chromeless />
+                              </div>
+                            ))}
+                            {remainingCount > 0 && (
+                              <div
+                                className="-ml-1 h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center text-[8px] font-medium text-muted-foreground"
+                                style={{ zIndex: displaySources.length + 1 }}
+                              >
+                                +{remainingCount}
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )
+                }
+                label={
+                  optimisticSourceSlugs.length === 0
+                    ? t("chat.chooseSources")
+                    : (() => {
+                        const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
+                        if (enabledSources.length === 1) return resolveSourceTitle(enabledSources[0])
+                        if (enabledSources.length === 2) return enabledSources.map(s => resolveSourceTitle(s)).join(', ')
+                        return t("chat.sourcesCount", { count: enabledSources.length })
+                      })()
+                }
+                isExpanded={isEmptySession}
+                hasSelection={optimisticSourceSlugs.length > 0}
+                showChevron={true}
+                isOpen={sourceDropdownOpen}
+                disabled={disabled}
+                data-tutorial="source-selector-button"
+                onClick={() => handleSourceDropdownOpenChange(!sourceDropdownOpen)}
+                tooltip={t("chat.sourcesTooltip")}
+              />
+
+              <SourceSelectorPopover
+                open={sourceDropdownOpen}
+                onOpenChange={handleSourceDropdownOpenChange}
+                anchorRef={sourceButtonRef}
+                sources={sources}
+                selectedSlugs={optimisticSourceSlugs}
+                onToggleSlug={(slug) => {
+                  const isEnabled = optimisticSourceSlugs.includes(slug)
+                  const newSlugs = isEnabled
+                    ? optimisticSourceSlugs.filter(currentSlug => currentSlug !== slug)
+                    : [...optimisticSourceSlugs, slug]
+                  setOptimisticSourceSlugs(newSlugs)
+                  onSourcesChange?.(newSlugs)
+                }}
+              />
+            </div>
+          )}
+
+          {/* 3. Working Directory Selector Badge */}
+          {workingDirectoryLocked ? (
+            <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} isEmptySession={isEmptySession} />
+          ) : onWorkingDirectoryChange && (
+            <ChatWorkingDirectoryControl
+              key={sourceSelectionKey ?? sessionId ?? workspaceId}
+              disabled={disabled || isProcessing}
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
               isEmptySession={isEmptySession}
               workspaceId={workspaceId}
             />
-          ))}
-
-          {/* Coding mode chip — next to the folder: the mode is about the folder's code */}
-          {onCodingModeChange && onContinueWithCodingMode && (
-            <ComposerCodingChip
-              enabled={codingMode}
-              locked={!isEmptySession}
-              compact={compactMode}
-              disabled={disabled}
-              onToggle={handleCodingModeToggle}
-              onContinueInNewSession={onContinueWithCodingMode}
-              workspaceSetup={codingWorkspaceSetup}
-            />
           )}
           </div>
+          )}
+
+          {!pptMode && <SessionModeBadge mode={workMode} />}
 
           {/* Spacer — doubles as a tap / hover target while the input is
               collapsed during processing in compact mode, so the user can
@@ -1834,156 +2448,329 @@ export function FreeFormInput({
               onClick={onRequestExpand}
               onMouseEnter={onRequestExpand}
               aria-label={t('chat.tapToType')}
-              className="motion-press mx-1 flex h-control min-w-0 flex-1 cursor-pointer items-center justify-center rounded-md text-tertiary hover:bg-fill-hover hover:text-secondary"
+              className="flex-1 h-7 mx-1 flex items-center justify-center text-foreground/30 hover:text-foreground/60 transition-colors cursor-pointer rounded-[6px] hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <ChevronUp className="h-4 w-4" />
             </button>
-          ) : (
-            <div className="flex-1" />
+          ) : null}
+
+          {/* Right side: Model + Send. ml-auto keeps them at the end, and the row wraps instead of overlapping. */}
+          <div className={cn('ml-auto flex max-w-full min-w-0 items-center', usePromptAppearance ? 'shrink' : 'shrink-0')}>
+          {/* 5. Model/Connection Selector - Hidden in compact mode (EditPopover embedding) */}
+          {!compactMode && (
+          <DropdownMenu open={modelDropdownOpen} onOpenChange={handleModelDropdownOpenChange}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    ref={modelTriggerRef}
+                    disabled={disabled}
+                    className={cn(
+                      "input-toolbar-btn inline-flex min-w-0 max-w-[12rem] items-center h-7 px-1.5 gap-0.5 text-[13px] rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
+                      usePromptAppearance ? 'shrink' : 'shrink-0',
+                      modelDropdownOpen && "bg-foreground/5",
+                      connectionUnavailable && "text-destructive",
+                    )}
+                  >
+                    {connectionUnavailable ? (
+                      <>
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        {t('common.unavailable')}
+                      </>
+                    ) : (
+                      <>
+                        {effectiveConnectionDetails && llmConnections.length > 1 && storage.get(storage.KEYS.showConnectionIcons, true) && <ConnectionIcon connection={effectiveConnectionDetails} size={14} showTooltip />}
+                        <span className="truncate">{currentModelDisplayName}</span>
+                        <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
+                      </>
+                    )}
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {t('common.model')}
+              </TooltipContent>
+            </Tooltip>
+            <StyledDropdownMenuContent
+              side={modelMenuPlacement.side}
+              align="end"
+              sideOffset={8}
+              style={{ maxHeight: `min(24rem, ${modelMenuPlacement.maxHeight}px)` }}
+              ref={modelMenuRef}
+              className="prompt-model-picker relative min-w-[min(260px,calc(100vw-24px))] max-w-[calc(100vw-24px)] max-h-[min(24rem,70vh)] flex flex-col overflow-hidden"
+              onKeyDown={event => {
+                if (event.key !== 'ArrowLeft' || !browsedConnection) return
+                if ((event.target as HTMLElement).closest('input, [role="slider"]')) return
+                event.preventDefault()
+                navigateModelPicker(null)
+              }}
+              // Radix hands focus back to the trigger when the exit animation
+              // unmounts this menu - after focusComposerAfterPicker already moved
+              // the caret, so the late focus would pull typing out of the input
+              // (#26) and re-open the trigger tooltip with no pointer event left to
+              // close it (#332).
+              onCloseAutoFocus={keepComposerFocusOnPickerClose}
+              onOpenAutoFocus={(event) => {
+                if (pickerMode !== 'flat' || !showModelSearch) return
+                event.preventDefault()
+                modelSearchInputRef.current?.focus()
+              }}
+            >
+              <AnimatePresence initial={false} mode="popLayout" custom={modelPickerMotion}>
+              <motion.div
+                key={browsedConnectionSlug ?? pickerMode}
+                className="model-picker-page flex min-h-0 min-w-0 flex-col gap-0.5"
+                data-direction={modelPickerPage.direction ?? undefined}
+                custom={modelPickerMotion}
+                variants={MODEL_PICKER_VARIANTS}
+                initial="enter"
+                animate="visible"
+                exit="exit"
+                transition={{
+                  duration: modelPickerReducedMotion ? 0.08 : MODEL_PICKER_DURATION,
+                  ease: MODEL_PICKER_EASE,
+                }}
+              >
+                <ModelPickerPageContent>
+                <div
+                  className={pickerMode === 'switcher' && browsedConnection ? 'contents' : 'min-h-0 overflow-y-auto'}
+                  data-model-picker-list={pickerMode === 'switcher' && browsedConnection ? undefined : true}
+                >
+                {/* Connection unavailable message */}
+                {pickerMode === 'unavailable' ? (
+                  <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+                    <AlertCircle className="h-8 w-8 text-destructive mb-2" />
+                    <div className="font-medium text-sm mb-1">{t('chat.connectionUnavailable')}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {t('chat.connectionUnavailableDescription')}
+                    </div>
+                  </div>
+                ) : pickerMode === 'switcher' ? (
+                  browsedConnection ? (
+                    <SwitcherConnectionModels
+                      key={browsedConnection.slug}
+                      conn={browsedConnection}
+                      liveOpenRouterModels={liveOpenRouterModels}
+                      currentModel={currentModel}
+                      isCurrentConnection={effectiveConnection === browsedConnection.slug}
+                      thinkingSettings={effectiveConnection === browsedConnection.slug ? promptThinkingSettings : undefined}
+                      onBack={() => navigateModelPicker(null)}
+                      onPick={(modelId, connectionSlug) => {
+                        if (effectiveConnection !== connectionSlug || !isPickerModelSelected(currentModel, modelId)) rememberModelPickerBounds('model')
+                        onModelChange(modelId, connectionSlug)
+                      }}
+                    />
+                  ) : connectionsByProvider.map(([providerName, connections], index) => (
+                    <React.Fragment key={providerName}>
+                      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide select-none">
+                        {providerName}
+                      </div>
+                      {connections.map(conn => (
+                        <StyledDropdownMenuItem
+                          key={conn.slug}
+                          disabled={!conn.isAuthenticated}
+                          onSelect={event => {
+                            event.preventDefault()
+                            navigateModelPicker(conn.slug)
+                          }}
+                          className={cn(
+                            'flex items-center justify-between px-2 py-2 rounded-lg',
+                            effectiveConnection === conn.slug && 'bg-foreground/5',
+                          )}
+                        >
+                          <div className="min-w-0 text-left flex-1">
+                            <div className="font-medium text-sm flex items-center gap-1.5">
+                              <ConnectionIcon connection={conn} size={14} />
+                              <span className="truncate">{conn.name}</span>
+                              {effectiveConnection === conn.slug && <Check className="h-3 w-3 shrink-0 text-foreground" />}
+                            </div>
+                            {!conn.isAuthenticated && (
+                              <div className="text-xs text-muted-foreground">{t('settings.ai.notAuthenticated')}</div>
+                            )}
+                          </div>
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0 ml-3 text-muted-foreground" />
+                        </StyledDropdownMenuItem>
+                      ))}
+                      {index < connectionsByProvider.length - 1 && (
+                        <StyledDropdownMenuSeparator className="my-1" />
+                      )}
+                    </React.Fragment>
+                  ))
+                ) : (
+                  /* Flat model list (single connection or session started) */
+                  <>
+                    {/* Indicator showing which connection is being used */}
+                    {!isEmptySession && currentConnectionDetails && llmConnections.length > 1 && (
+                      <>
+                        <div className="flex items-center gap-2 px-2 py-1.5 text-xs select-none text-muted-foreground">
+                          <span>{t('chat.usingConnection', { name: currentConnectionDetails.name })}</span>
+                        </div>
+                        <StyledDropdownMenuSeparator className="my-1" />
+                      </>
+                    )}
+                    {showModelSearch && (
+                      <ModelPickerSearchField
+                        value={modelSearchQuery}
+                        onChange={setModelSearchQuery}
+                        inputRef={modelSearchInputRef}
+                        className="px-1 pt-1"
+                      />
+                    )}
+                    {visibleCatalog.visible.length === 0 ? (
+                      <ModelPickerEmptyResults />
+                    ) : (
+                      visibleCatalog.visible.map((model) => {
+                      const modelId = pickerModelId(model)
+                      const modelName = typeof model === 'string'
+                        ? stripPiPrefixForDisplay(getModelShortName(model))
+                        : (model.name ?? stripPiPrefixForDisplay(model.id))
+                      const isSelected = isPickerModelSelected(currentModel, modelId)
+                      const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
+                      const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
+                      const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
+                      const limitCaption = pickerModelLimitCaption(model, t)
+                      const secondary = unavailable
+                        ? t('chat.modelPicker.unavailable')
+                        : [description, limitCaption].filter(Boolean).join(' · ')
+                      return (
+                        <StyledDropdownMenuItem
+                          key={modelId}
+                          onSelect={(event) => {
+                            event.preventDefault()
+                            const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
+                            if (next === undefined) return
+                            if (!isPickerModelSelected(currentModel, modelId)) rememberModelPickerBounds('model')
+                            onModelChange(next, effectiveConnection)
+                          }}
+                          className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+                        >
+                          <div className="text-left">
+                            <div className="font-medium text-sm">{modelName}</div>
+                            {secondary && (
+                              <div className={cn(
+                                'text-xs',
+                                unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                              )}>
+                                {secondary}
+                              </div>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
+                          )}
+                        </StyledDropdownMenuItem>
+                      )
+                    })
+                    )}
+                    <ModelPickerOverflowHint
+                      hiddenCount={visibleCatalog.hiddenCount}
+                      searching={modelSearchQuery.trim().length > 0}
+                    />
+                  </>
+                )}
+
+                </div>
+                {fastControl && currentPickerPage && !fastInThinkingHeading && (
+                  <div className="shrink-0">
+                    <StyledDropdownMenuSeparator className="my-1" />
+                    <div className="flex justify-end px-3 py-2">{fastControl}</div>
+                  </div>
+                )}
+                {pickerMode === 'flat' && promptThinkingSettings && (
+                  <div className="prompt-thinking-reveal shrink-0">
+                    <StyledDropdownMenuSeparator className="my-1" />
+                    {promptThinkingSettings}
+                  </div>
+                )}
+
+                {/* Thinking level selector — only shown when thinking levels are available
+                    (Claude supports extended thinking, OpenAI backends may not) */}
+                {thinkingUnavailable === 'always-on' && (!usePromptAppearance || !onThinkingLevelChange) && (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">
+                    {t('thinking.alwaysOn')}
+                  </div>
+                )}
+                {availableThinkingLevels.length > 0 && (!usePromptAppearance || !onThinkingLevelChange) && (
+                  <>
+                    <StyledDropdownMenuSeparator className="my-1" />
+
+                    <DropdownMenuSub>
+                      <StyledDropdownMenuSubTrigger disabled={thinkingDisabled} className={cn("flex items-center justify-between px-2 py-2 rounded-lg", thinkingDisabled && "opacity-50 cursor-not-allowed")}>
+                        <div className="text-left flex-1">
+                          <div className="font-medium text-sm">{t(getThinkingLevelNameKey(thinkingLevel))}</div>
+                          <div className="text-xs text-muted-foreground">{availableThinkingLevels.length === 1 ? t('thinking.alwaysOn') : t('thinking.extendedDesc')}</div>
+                        </div>
+                      </StyledDropdownMenuSubTrigger>
+                      <StyledDropdownMenuSubContent className="min-w-[220px]">
+                        {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
+                          const isSelected = thinkingLevel === id
+                          return (
+                            <StyledDropdownMenuItem
+                              key={id}
+                              onSelect={(event) => {
+                                event.preventDefault()
+                                onThinkingLevelChange?.(id)
+                              }}
+                              className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+                            >
+                              <div className="text-left">
+                                <div className="font-medium text-sm">{t(nameKey)}</div>
+                                <div className="text-xs text-muted-foreground">{t(descriptionKey)}</div>
+                              </div>
+                              {isSelected && (
+                                <Check className="h-3 w-3 text-foreground shrink-0 ml-3" />
+                              )}
+                            </StyledDropdownMenuItem>
+                          )
+                        })}
+                      </StyledDropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </>
+                )}
+                </ModelPickerPageContent>
+              </motion.div>
+              </AnimatePresence>
+            </StyledDropdownMenuContent>
+          </DropdownMenu>
           )}
 
-          {/* Right: mode · model absorb the squeeze — the model label truncates, and in narrow
-              panels the mode chip folds to its icon. Context and Send sit outside this group and
-              never shrink, so Send stays inside the card (craft-agents-oss#798). The 4px inset
-              keeps focus rings visible inside the clipping group. */}
-          <div className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
-          {compactMode
-            ? onPermissionModeChange && (
-              <CompactPermissionModeSelector
-                permissionMode={permissionMode}
-                onPermissionModeChange={onPermissionModeChange}
-              />
-            )
-            : showPermissionModeChip && (
-              <ComposerModeChip
-                permissionMode={permissionMode}
-                onPermissionModeChange={onPermissionModeChange}
-                sessionId={sessionId}
-              />
-            )}
+          <ContextUsageIndicator
+            contextStatus={contextStatus}
+            compact={compactMode}
+            sessionId={sessionId}
+          />
 
-          {/* Model/Connection selector — drawer in compact (when enabled), dropdown on desktop */}
-          {compactMode ? (
-            enableCompactModelPicker && (
-              <CompactModelSelector
-                currentModel={currentModel}
-                currentConnection={currentConnection}
-                onModelChange={onModelChange}
-                onConnectionChange={onConnectionChange}
-                thinkingLevel={thinkingLevel}
-                onThinkingLevelChange={onThinkingLevelChange}
-                isEmptySession={isEmptySession}
-                connectionUnavailable={connectionUnavailable}
-                contextStatus={contextStatus}
-              />
-            )
-          ) : (
-            <ComposerModelMenu
-              open={modelDropdownOpen}
-              onOpenChange={setModelDropdownOpen}
-              connectionUnavailable={connectionUnavailable}
-              llmConnections={llmConnections}
-              effectiveConnection={effectiveConnection}
-              effectiveConnectionDetails={effectiveConnectionDetails}
-              currentConnectionDetails={currentConnectionDetails}
-              connectionsByProvider={connectionsByProvider}
-              connectionDefaultModel={connectionDefaultModel}
-              pickerMode={pickerMode}
-              currentModel={currentModel}
-              currentModelDisplayName={currentModelDisplayName}
-              availableModels={availableModels}
-              isEmptySession={isEmptySession}
-              onModelChange={onModelChange}
-              onConnectionChange={onConnectionChange}
-              onToggleVision={handleToggleModelVision}
-              thinkingLevel={thinkingLevel}
-              thinkingDisabled={thinkingDisabled}
-              onThinkingLevelChange={onThinkingLevelChange}
-              contextDisplay={contextDisplay}
-              contextLabels={contextLabels}
-              isCompacting={contextStatus?.isCompacting}
-            />
-          )}
-
+          {/* 6. Send/Stop Button - Always show stop when processing */}
+          <Button
+            type={isProcessing ? 'button' : 'submit'}
+            size="icon"
+            variant={isProcessing ? 'secondary' : 'default'}
+            aria-label={isProcessing ? t('chat.stopResponse') : t('shortcuts.sendMessage')}
+            className={cn('send-btn h-7 w-7 rounded-full shrink-0 ml-2', isProcessing && 'hover:bg-foreground/15 active:bg-foreground/20')}
+            disabled={!isProcessing && (!hasContent || disabled || disableSend || showVisionWarning)}
+            data-tutorial={isProcessing ? undefined : 'send-button'}
+            onClick={isProcessing ? () => handleStop(false) : undefined}
+          >
+            <span className="relative flex h-4 w-4 items-center justify-center" aria-hidden="true">
+              <AnimatePresence initial={false} mode="sync">
+                <motion.span
+                  key={isProcessing ? 'stop' : 'send'}
+                  className="absolute inset-0 flex items-center justify-center"
+                  initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.65 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.65 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.18, ease: 'easeOut' }}
+                >
+                  {isProcessing ? <Square className="h-3 w-3 fill-current" /> : <ArrowUp className="h-4 w-4" />}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+          </Button>
           </div>
-
-          {/* Context usage meter. Percent text is truthful and may exceed 100%; action requires explicit canCompact. */}
-          <ContextUsageChip
-            display={contextDisplay}
-            labels={contextLabels}
-            isProcessing={isProcessing}
-            showMeter={!compactMode}
-            onCompact={() => onSubmit('/compact', [])}
-          />
-
-          {/* Send/Stop Button - Always show stop when processing */}
-          <SendButton
-            isProcessing={isProcessing}
-            disabled={!hasContent || disabled || disableSend}
-            onStop={() => handleStop(false)}
-          />
           </div>
         </div>
       </div>
-      {/* Remote servers: folder browser for the coding-mode folder prompt (local uses the native dialog) */}
-      <ServerDirectoryBrowser
-        open={codingFolderPicker.showServerBrowser}
-        mode={codingFolderPicker.serverBrowserMode}
-        onSelect={codingFolderPicker.confirmServerBrowser}
-        onCancel={codingFolderPicker.cancelServerBrowser}
-      />
     </form>
-  )
-}
-
-/**
- * WorkingDirectoryBadge - chat-input trigger for the shared WorkingDirectorySelector.
- *
- * Renders the context-badge trigger; the picker popover + folder state machine
- * live in {@link WorkingDirectorySelector} so the Tasks editor reuses the same
- * picker (and can supply its own trigger).
- */
-function WorkingDirectoryBadge({
-  workingDirectory,
-  onWorkingDirectoryChange,
-  sessionFolderPath,
-  isEmptySession = false,
-  workspaceId,
-}: {
-  workingDirectory?: string
-  onWorkingDirectoryChange: (path: string) => void
-  sessionFolderPath?: string
-  isEmptySession?: boolean
-  workspaceId?: string
-}) {
-  const { t } = useTranslation()
-  return (
-    <WorkingDirectorySelector
-      workingDirectory={workingDirectory}
-      onWorkingDirectoryChange={onWorkingDirectoryChange}
-      sessionFolderPath={sessionFolderPath}
-      workspaceId={workspaceId}
-      renderTrigger={({ open, hasFolder, folderName, workingDirectory: wd, homeDir, gitBranch }) => (
-        <span className="shrink min-w-0 overflow-hidden">
-          <FreeFormInputContextBadge
-            icon={<Icon_Home className="h-4 w-4" />}
-            label={folderName ?? t('chat.workInFolder')}
-            isExpanded={isEmptySession}
-            hasSelection={hasFolder}
-            showChevron={true}
-            isOpen={open}
-            tooltip={
-              hasFolder ? (
-                <span className="flex flex-col gap-0.5">
-                  <span className="font-medium">{t("chat.workingDirectory")}</span>
-                  <span className="text-label-sm text-secondary">{formatPathForDisplay(wd, homeDir)}</span>
-                  {gitBranch && <span className="text-label-sm text-secondary">{t("chat.onBranch", { branch: gitBranch })}</span>}
-                </span>
-              ) : t("chat.chooseWorkingDirectory")
-            }
-          />
-        </span>
-      )}
-    />
   )
 }

@@ -27,7 +27,7 @@ function createServer(opts?: {
   })
 }
 
-function handshake(url: string, token: string): Promise<{ ws: WebSocket; clientId: string; ack: Record<string, unknown> }> {
+function handshake(url: string, token: string): Promise<{ ws: WebSocket; clientId: string; maxMessageBytes?: number }> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url)
     const timeout = setTimeout(() => {
@@ -47,7 +47,7 @@ function handshake(url: string, token: string): Promise<{ ws: WebSocket; clientI
       const msg = JSON.parse(data.toString())
       if (msg.type === 'handshake_ack') {
         clearTimeout(timeout)
-        resolve({ ws, clientId: msg.clientId, ack: msg })
+        resolve({ ws, clientId: msg.clientId, maxMessageBytes: msg.maxMessageBytes })
       } else if (msg.type === 'error') {
         clearTimeout(timeout)
         reject(new Error(`Auth error: ${msg.error?.message}`))
@@ -95,13 +95,12 @@ describe('WsRpcServer lifecycle', () => {
     expect(server.getConnectedClientCount()).toBe(1)
   })
 
-  it('advertises its message limit in handshake_ack (Bun ignores maxPayload)', async () => {
+  it('advertises the runtime message limit on handshake', async () => {
     server = createServer()
     await server.listen()
-    const { ws, ack } = await handshake(`ws://127.0.0.1:${server.port}`, TEST_TOKEN)
+    const { ws, maxMessageBytes } = await handshake(`ws://127.0.0.1:${server.port}`, TEST_TOKEN)
     openSockets.push(ws)
-
-    expect(ack.maxMessageBytes).toBe(runtimeMaxMessageBytes())
+    expect(maxMessageBytes).toBe(runtimeMaxMessageBytes())
   })
 
   it('rejects invalid token with 4005', async () => {

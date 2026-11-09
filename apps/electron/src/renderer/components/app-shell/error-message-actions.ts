@@ -12,6 +12,16 @@ export interface HandleErrorMessageActionOptions {
   onRetry?: () => void
 }
 
+export function canRetryErrorInPlace(messages: Message[], errorMessageId: string): boolean {
+  const errorIndex = messages.findIndex(message => message.id === errorMessageId)
+  if (errorIndex === -1) return false
+
+  const userIndex = messages.findLastIndex((message, index) => (
+    index < errorIndex && message.role === 'user' && !message.hidden
+  ))
+  return userIndex !== -1 && userIndex === messages.findLastIndex(message => message.role === 'user')
+}
+
 /**
  * Execute an error-message action using the app's canonical handlers.
  *

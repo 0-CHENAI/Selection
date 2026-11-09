@@ -15,16 +15,14 @@
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../../utils/files.ts';
 import type { ThinkingLevel } from '../thinking-levels.ts';
-import type { AgentProfile } from '@craft-agent/session-tools-core';
 import type { PermissionMode } from '../mode-manager.ts';
 import type { LoadedSource } from '../../sources/types.ts';
+import type { LoadedSkill } from '../../skills/types.ts';
 import type { AuthRequest } from '../session-scoped-tools.ts';
 import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig as Session } from '../../sessions/storage.ts';
 import type { SourceManager } from '../core/source-manager.ts';
-import type { GuardedModeCheck } from '../core/guarded-mode.ts';
-import type { SubagentModelPicker } from '../core/subagent-model.ts';
 
 // Import AbortReason and RecoveryMessage from core module (single source of truth)
 import { AbortReason, type RecoveryMessage } from '../core/index.ts';
@@ -33,7 +31,7 @@ export { AbortReason, type RecoveryMessage };
 import type { ModelProvider } from '../../config/models.ts';
 
 // Import LLM connection types for auth
-import type { CustomEndpointConfig, LlmAuthType, LlmProviderType } from '../../config/llm-connections.ts';
+import type { LlmAuthType, LlmProviderType } from '../../config/llm-connections.ts';
 export type { LlmAuthType, LlmProviderType } from '../../config/llm-connections.ts';
 
 export interface BackendRuntimeUpdate {
@@ -43,12 +41,17 @@ export interface BackendRuntimeUpdate {
   runtime?: {
     baseUrl?: string;
     piAuthProvider?: string;
-    customEndpoint?: CustomEndpointConfig;
-    customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
+    customEndpoint?: { api: string; supportsImages?: boolean };
+    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
+    imagePixelBudget?: number;
+    imageMaxBytes?: number;
+    imageMaxDimension?: number;
+    imageTokenFamily?: string;
+    vlHighResolutionImages?: boolean;
+    imageMaxPixels?: number;
     [key: string]: unknown;
   };
 }
-import type { AutomationSystem } from '../../automations/index.ts';
 
 /**
  * Provider identifier for AI backends.
@@ -83,8 +86,6 @@ export type PermissionCallback = (request: {
   rememberForMinutes?: number;
   commandHash?: string;
   approvalTtlSeconds?: number;
-  /** `false` when "Always Allow" would remember nothing (e.g. Guarded-mode prompts). */
-  canRemember?: boolean;
 }) => void;
 
 /**
@@ -129,6 +130,27 @@ export interface PostInitResult {
 }
 
 /**
+ * Context for applying bridge/config updates mid-session.
+ * Used when sources change, tokens refresh, or auth completes.
+ */
+export interface BridgeUpdateContext {
+  /** Path to the session folder */
+  sessionPath: string;
+  /** Currently enabled sources */
+  enabledSources: LoadedSource[];
+  /** Pre-built MCP server configs */
+  mcpServers: Record<string, SdkMcpServerConfig>;
+  /** Session ID */
+  sessionId: string;
+  /** Workspace root path */
+  workspaceRootPath: string;
+  /** Descriptive context for logging (e.g., 'token refresh', 'source enable') */
+  context: string;
+  /** URL of the McpPoolServer HTTP endpoint */
+  poolServerUrl?: string;
+}
+
+/**
  * Host runtime context passed from the application shell (Electron/CLI/etc.).
  * This is intentionally provider-agnostic metadata; backend drivers resolve
  * provider-specific paths from this context internally.
@@ -150,7 +172,39 @@ export interface BackendHostRuntimeContext {
  * Provider-agnostic backend configuration used by the session layer.
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
+export interface AnswerSubmission {
+  markdown: string;
+  artifactVersionTitle?: string;
+  toolCallId: string;
+  sdkMessageId: string;
+  sdkTurnAnchor: string;
+}
+export interface AnswerDeliveryControl {
+  runId: string;
+  recovery: boolean;
+  /** Host-owned internal scheduling turn; it must not deliver a user answer. */
+  coordinationOnly?: boolean;
+  isActive: () => boolean;
+  submit: (submission: AnswerSubmission) => Promise<void>;
+}
+
 export interface CoreBackendConfig {
+  /** Host-only shared model quota. Never supplied by model/tool arguments. */
+  modelRequestLimiter?: (quota: string, owner: string, signal?: AbortSignal) => Promise<import('../../model-request-gate').ModelRequestLease>;
+  /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
+  isolatedShellDirectory?: string;
+  /** Candidate whose resident changes must be flushed before each Shell returns. */
+  isolatedOfficeDocumentPath?: string;
+  denyExternalBrowsers?: boolean;
+
+  /** Host-validated original project directory; document navigation reads it without changing the worker's write directory. */
+  documentSourceDirectory?: string;
+  /** Trusted runtime-only recovery data; never provided by model arguments. */
+  toolResultRecovery?: import('./pi/file-operation-receipts').ToolResultRecoveryPlan;
+  explicitAnswerDelivery?: boolean;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Isolated utility backend: skip execution-session/tool initialization. */
+  queryOnly?: boolean;
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -165,6 +219,7 @@ export interface CoreBackendConfig {
 
   /** Initial thinking level */
   thinkingLevel?: ThinkingLevel;
+  fastMode?: boolean;
 
   /** Headless mode flag (disables interactive tools) */
   isHeadless?: boolean;
@@ -180,15 +235,6 @@ export interface CoreBackendConfig {
 
   /** System prompt preset ('default' | 'mini' | custom string) */
   systemPromptPreset?: 'default' | 'mini' | string;
-
-  /**
-   * Agent profile: `coding` = coding mode (lean system prompt, coding per-message context, coding
-   * session-tool set). Undefined/`default` keeps the full Craft Agent prompt and tools unchanged.
-   */
-  agentProfile?: AgentProfile;
-
-  /** Workspace-level automation system for user-defined automations (automations.json) */
-  automationSystem?: AutomationSystem;
 
   /**
    * Per-session environment variable overrides for the SDK subprocess.
@@ -210,6 +256,24 @@ export interface CoreBackendConfig {
 
   /** Callback when SDK session ID is captured/updated */
   onSdkSessionIdUpdate?: (sdkSessionId: string) => void;
+
+  /**
+   * A provider rejected a thinking effort. `levels` is the set to keep offering.
+   * The main process caches it and the renderer hides the rejected stop.
+   */
+  /**
+   * Auto mode learned that this model rejected image input.
+   * The host persists `learnedSupportsImages: false` for the connection.
+   */
+  onImageSupportLearned?: (modelId: string) => void;
+
+  onThinkingProbe?: (probe: {
+    modelId: string
+    provider?: string
+    mode: 'unsupported' | 'always-on' | 'levels'
+    levels: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>
+    level?: string
+  }) => void;
 
   /** Callback when SDK session ID is cleared (e.g., after failed resume) */
   onSdkSessionIdCleared?: () => void;
@@ -262,12 +326,6 @@ export interface CoreBackendConfig {
    */
   onImageResize?: (filePath: string, maxSizeBytes: number) => Promise<string | null>;
 
-  /** Enable 1M context window for current Opus models. Default: true. Set false to use 200K and conserve usage limits. */
-  enable1MContext?: boolean;
-
-  /** Auto-compact window in tokens (config.json `autoCompactWindow`), honored by Claude and Pi. Unset: each SDK's default (near the model's full window). */
-  autoCompactWindow?: number;
-
   /**
    * Pre-computed source configurations for initial setup.
    * Passed at construction so backends can set up sources in postInit().
@@ -290,20 +348,17 @@ export interface CoreBackendConfig {
 export interface ChatOptions {
   /** Retry flag (internal use for session recovery) */
   isRetry?: boolean;
+  /** Internal continuation of the same user-authored task (source/auth retry). */
+  continueUserTask?: boolean;
+  /** Original user request for restoring explicitly selected skills during a continuation. */
+  userTaskMessage?: string;
   /** Override thinking level for this message only */
   thinkingOverride?: ThinkingLevel;
   /**
-   * Context about the session, on the turns the host picks (a task session's spec: once, and
-   * again after it changes). The model sees it before the message; like `turnContext` it is not
-   * part of the stored message or of the resend after a source activation.
+   * When true, inject a model-only interruption reminder into the prompt.
+   * Must NOT be embedded in the stored/displayed user message content.
    */
-  sessionContext?: string;
-  /**
-   * Transient host guidance for this turn only (an interruption notice, a
-   * decision-model suggestion). The model sees it after the message; it is not
-   * part of the stored message or of the resend after a source activation.
-   */
-  turnContext?: string;
+  previousResponseInterrupted?: boolean;
 }
 
 /**
@@ -339,16 +394,12 @@ export type SdkMcpServerConfig =
  * 3. Support streaming via AsyncGenerator
  * 4. Allow capability-based UI adaptation
  */
-/** Identity is optional for callers using the legacy text-only redirect path. */
-export interface RedirectMetadata {
-  messageId?: string;
-}
-
-export interface PendingSteer extends RedirectMetadata {
-  message: string;
-}
-
 export interface AgentBackend {
+  queryLlm?(request: import('../llm-tool').LLMQueryRequest, signal?: AbortSignal): Promise<import('../llm-tool').LLMQueryResult>;
+  /** Current model image capability, when this backend can resolve it. */
+  currentModelSupportsImages?(): boolean;
+  /** Interrupt only the current model request; resolves after SDK abort drains. */
+  interruptForProgress?(): Promise<void>;
   // ============================================================
   // Chat & Lifecycle
   // ============================================================
@@ -384,25 +435,11 @@ export interface AgentBackend {
   forceAbort(reason: AbortReason): void;
 
   /**
-   * Stop the running turn but keep the session's background work (background agents, Workflows,
-   * shells) alive, like Esc in Claude Code. Returns false when the backend can't (no live
-   * keep-alive turn); the caller then hard-stops with forceAbort.
-   */
-  stopTurn?(): boolean;
-
-  /**
    * WS2: register a sink for background task events that arrive BETWEEN turns
    * (when no chat() generator is being consumed) under keep-alive mode. Backends
    * without a persistent cross-turn query may leave this unimplemented.
    */
   setBackgroundEventSink?(sink: ((event: AgentEvent) => void) | null): void;
-
-  /**
-   * Stop one background task (shell, agent or workflow) by its task id. Resolves false when there is
-   * no live query to ask, so the task cannot still be running. Backends without background tasks
-   * leave it unimplemented.
-   */
-  stopBackgroundTask?(taskId: string): Promise<boolean>;
 
   /**
    * Interrupt the current turn because control is being handed to the UI.
@@ -430,25 +467,14 @@ export interface AgentBackend {
    * @returns true if steered (events flow through existing stream),
    *          false if aborted (session layer must queue + re-send)
    */
-  redirect(message: string, metadata?: RedirectMetadata): boolean;
+  redirect(message: string): boolean;
 
   /**
-   * Whether a manual context compaction owns the current turn.
-   *
-   * While true there is no agent loop consuming steers, so a mid-stream text
-   * message must be queued for replay after `complete` instead of handed to
-   * redirect() (OSS #1058). Optional: backends without the concept report false.
+   * Whether {@link redirect} can inject into the live turn without aborting.
+   * Pi returns true while a subprocess query is running. Backends that only
+   * implement redirect-as-abort should leave this unimplemented / false.
    */
-  isCompactionInFlight?(): boolean;
-
-  /**
-   * Whether redirect() would deliver into a live turn right now, without its
-   * abort fallback. Optional: backends without it are treated as "no".
-   */
-  canSteerNow?(): boolean;
-
-  /** Transfer undelivered text steers to the host before handoff/teardown. */
-  takePendingSteers?(): PendingSteer[];
+  canRedirect?(): boolean;
 
   /**
    * Run a simple text completion using the backend's auth infrastructure.
@@ -474,6 +500,16 @@ export interface AgentBackend {
   postInit(): Promise<PostInitResult>;
 
   /**
+   * Apply bridge/config updates mid-session.
+   * Called when sources change, tokens refresh, or auth completes.
+   * Each backend implements its own strategy:
+   * - Codex: regenerates config.toml and queues reconnect
+   * - Copilot: writes bridge-config.json and credential cache
+   * - Claude/Pi: no-op (they don't use bridge-mcp-server)
+   */
+  applyBridgeUpdates(context: BridgeUpdateContext): Promise<void>;
+
+  /**
    * Ensure branch sessions are backend-ready before first user message.
    * Called at branch creation time to avoid creating "fake branches" that have
    * copied transcript history but no actual backend branch context.
@@ -481,6 +517,8 @@ export interface AgentBackend {
    * Default behavior can be a no-op for providers that don't need preflight.
    */
   ensureBranchReady(): Promise<void>;
+  /** Reconcile saved tool results before starting another model request. */
+  prepareExecutionRecovery?(): Promise<void>;
 
   /**
    * Check if currently processing a query.
@@ -515,15 +553,7 @@ export interface AgentBackend {
 
   /** Set thinking level */
   setThinkingLevel(level: ThinkingLevel): void;
-
-  /** Get the agent profile (`default` or `coding`) */
-  getAgentProfile(): AgentProfile;
-
-  /**
-   * Set the agent profile. Read when the next query/subprocess is built, so it only takes effect
-   * before the conversation starts (SessionManager enforces that).
-   */
-  setAgentProfile(profile: AgentProfile): void;
+  setFastMode?(enabled: boolean): void;
 
   // ============================================================
   // Permission Mode
@@ -564,7 +594,7 @@ export interface AgentBackend {
     mcpServers: Record<string, SdkMcpServerConfig>,
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
-  ): void | Promise<void>;
+  ): void | Promise<void | string[]>;
 
   /**
    * Get currently active source slugs.
@@ -651,22 +681,24 @@ export interface AgentBackend {
   // ============================================================
 
   /** Called when a tool requires permission */
+  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
   onPermissionRequest: PermissionCallback | null;
-
-  /** Guarded-mode risk check (decision model): may turn an allowed call into a permission prompt, never the reverse */
-  guardedModeCheck: GuardedModeCheck | null;
-
-  /** Subagent model choice (decision model): Claude asks it for Agent calls that name no model; other backends ignore it */
-  subagentModelPicker: SubagentModelPicker | null;
 
   /** Called when agent submits a plan */
   onPlanSubmitted: PlanCallback | null;
+  /** Called when the agent asks the user to clarify. The host may reject over the round cap. */
+  onClarifyRequest: ((ask: import('@craft-agent/session-tools-core').ClarificationAsk) => import('@craft-agent/session-tools-core').ClarificationGate) | null;
+  configureAnswerDelivery?: (control: AnswerDeliveryControl | undefined) => void;
+  configurePresentationProtocol?: (protocol: 'native' | 'marker-v1' | 'legacy') => void;
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;
 
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;
+
+  /** Called when the available skill list changes */
+  onSkillsListChange: ((skills: LoadedSkill[]) => void) | null;
 
   /** Called when permission mode changes */
   onPermissionModeChange: ((mode: PermissionMode) => void) | null;
@@ -727,9 +759,6 @@ export interface BackendConfig extends CoreBackendConfig {
    * Used to read/write credentials under the correct key.
    */
   connectionSlug?: string;
-
-  /** Workspace-level automation system for user-defined SDK hooks (automations.json) */
-  automationSystem?: AutomationSystem;
 
   /**
    * Opaque runtime payload resolved by backend drivers.

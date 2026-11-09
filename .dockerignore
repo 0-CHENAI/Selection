@@ -42,10 +42,7 @@ Thumbs.db
 
 # Top-level docs (not resource docs used by server)
 /docs/
-# Exclude the docs site content but keep its package.json — it is a workspace
-# member, and Dockerfile.server needs it for `bun install --frozen-lockfile`.
-apps/docs-site/
-!apps/docs-site/package.json
+apps/online-docs/
 README*.md
 CONTRIBUTING*.md
 CHANGELOG*.md

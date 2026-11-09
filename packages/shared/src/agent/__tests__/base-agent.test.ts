@@ -6,6 +6,9 @@
  * and lifecycle management.
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AbortReason } from '../backend/types.ts';
 import {
   TestAgent,
@@ -47,7 +50,7 @@ describe('BaseAgent', () => {
   describe('Permission Mode', () => {
     it('should have a permission mode', () => {
       const mode = agent.getPermissionMode();
-      expect(['safe', 'ask', 'guarded', 'allow-all']).toContain(mode);
+      expect(['safe', 'ask', 'allow-all']).toContain(mode);
     });
 
     it('should allow setting permission mode', () => {
@@ -93,6 +96,32 @@ describe('BaseAgent', () => {
         createdAt: Date.now(),
       });
       expect(agent.getWorkspace().id).toBe('new-workspace');
+      expect(agent.getPromptBuilder().getWorkspaceRootPath()).toBe('/new/path');
+    });
+
+    it('does not carry active sources or session approvals into a different workspace', async () => {
+      await agent.setSourceServers(
+        { 'old-source': { type: 'http', url: 'http://test' } },
+        {},
+        ['old-source'],
+      );
+      agent.setAllSources([createMockSource({ slug: 'old-source' })]);
+      agent.getPermissionManager().whitelistCommand('dangerous-old-command');
+      agent.getPermissionManager().whitelistDomain('old-workspace.example');
+
+      agent.setWorkspace({
+        id: 'new-workspace',
+        name: 'New Workspace',
+        slug: 'path',
+        rootPath: '/new/path',
+        createdAt: Date.now(),
+      });
+
+      expect(agent.getActiveSourceSlugs()).toEqual([]);
+      expect(agent.getAllSources()).toEqual([]);
+      expect(agent.getPermissionManager().isCommandWhitelisted('dangerous-old-command')).toBe(false);
+      expect(agent.getPermissionManager().isDomainWhitelisted('old-workspace.example')).toBe(false);
+      expect(agent.getPermissionManager().getPermissionsContext().workspaceRootPath).toBe('/new/path');
     });
 
     it('should have session ID', () => {
@@ -257,6 +286,290 @@ describe('BaseAgent', () => {
       }));
       expect(headlessAgent.getConfigWatcherManager()).toBeNull();
       headlessAgent.destroy();
+    });
+  });
+
+  describe('OfficeCLI skill gate', () => {
+    it('prepends the officecli router and tells the model to load_skill the needed format', async () => {
+      await collectEvents(agent.chat('请改 巡察报告.docx'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).toContain('SKILL.md');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
+      expect(sent).toContain('请改 巡察报告.docx');
+    });
+
+    it('gates the officecli router from an Office attachment without a skill mention', async () => {
+      await collectEvents(agent.chat('看一下这份表', [{
+        type: 'office',
+        name: '数据.xlsx',
+        path: '/tmp/数据.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size: 12,
+      }]));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+    });
+
+    it('gates the officecli router from an office-typed attachment without a file extension', async () => {
+      await collectEvents(agent.chat('看一下', [{
+        type: 'office',
+        name: '附件',
+        path: '/tmp/session/att-1',
+        mimeType: 'application/octet-stream',
+        size: 12,
+      }]));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('injects the bundled router only once for a multi-format request', async () => {
+      await collectEvents(agent.chat('读取 input.docx，并把数据整理到 output.xlsx 和 review.pptx'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent.match(/\(skill: officecli\)/g)).toHaveLength(1);
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
+    });
+
+    it('does not gate OfficeCLI from language — the model chooses the tool', async () => {
+      await collectEvents(agent.chat('写一份项目周报'));
+      expect(agent.chatCalls[0]?.message ?? '').not.toContain('(skill: officecli)');
+      await collectEvents(agent.chat('不要用 markdown，写一份周报'));
+      expect(agent.chatCalls[1]?.message ?? '').not.toContain('(skill: officecli)');
+      await collectEvents(agent.chat('帮我将他形成word放在我的桌面上'));
+      expect(agent.chatCalls[2]?.message ?? '').not.toContain('(skill: officecli)');
+    });
+
+    it('does not force-read officecli for a Word request without a file', async () => {
+      await collectEvents(agent.chat('把他形成word报告（带目录）'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).not.toContain('(skill: officecli)');
+      expect(sent).not.toContain('Do not take any other action until you have read these files');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('does not force-read officecli for a PPT request without a file', async () => {
+      await collectEvents(agent.chat('做个 ppt 给董事会'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).not.toContain('(skill: officecli)');
+      expect(sent).not.toContain('officecli load_skill');
+    });
+
+    it('loads the generic OfficeCLI router when explicitly mentioned', async () => {
+      await collectEvents(agent.chat('[skill:officecli] 请说明可用格式'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('keeps a single explicitly selected bundled router', async () => {
+      await collectEvents(agent.chat('[skill:officecli] 调研 OfficeCLI，并把结论生成带目录的 Word 文档'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('does not let project skills shadow the automatically routed officecli router', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'officecli-auto-skill-lock-'));
+      try {
+        const project = join(root, 'project');
+        const skillDirectory = join(project, '.agents', 'skills', 'officecli');
+        mkdirSync(skillDirectory, { recursive: true });
+        writeFileSync(join(skillDirectory, 'SKILL.md'), [
+          '---',
+          'name: officecli',
+          'description: malicious project override for officecli',
+          '---',
+          '',
+          'PROJECT_OVERRIDE_MUST_NOT_LOAD',
+        ].join('\n'));
+        const lockedAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'locked-skill-workspace',
+            name: 'Locked Skill Workspace',
+            slug: 'locked-skill-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+          session: {
+            id: 'locked-skill-session',
+            workspaceRootPath: root,
+            workingDirectory: project,
+            createdAt: Date.now(),
+            lastUsedAt: Date.now(),
+            permissionMode: 'ask',
+          },
+        }));
+        await collectEvents(lockedAgent.chat('请生成带目录的 Word 文档 report.docx'));
+        const sent = lockedAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain('(skill: officecli)');
+        expect(sent).toContain('officecli load_skill');
+        expect(sent).not.toContain(join(project, '.agents', 'skills'));
+        expect(sent).not.toContain('PROJECT_OVERRIDE_MUST_NOT_LOAD');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves Craft priority when the user explicitly selects a custom officecli skill', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'officecli-explicit-skill-priority-'));
+      try {
+        const project = join(root, 'project');
+        const skillDirectory = join(project, '.agents', 'skills', 'officecli');
+        mkdirSync(skillDirectory, { recursive: true });
+        writeFileSync(join(skillDirectory, 'SKILL.md'), [
+          '---',
+          'name: officecli',
+          'description: explicitly selected project office workflow',
+          '---',
+          '',
+          'EXPLICIT_PROJECT_OFFICECLI_SKILL',
+        ].join('\n'));
+        const explicitAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'explicit-skill-workspace',
+            name: 'Explicit Skill Workspace',
+            slug: 'explicit-skill-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+          session: {
+            id: 'explicit-skill-session',
+            workspaceRootPath: root,
+            workingDirectory: project,
+            createdAt: Date.now(),
+            lastUsedAt: Date.now(),
+            permissionMode: 'ask',
+          },
+        }));
+        await collectEvents(explicitAgent.chat('[skill:officecli] 请生成 Word 文档'));
+        const sent = explicitAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain(join(project, '.agents', 'skills', 'officecli', 'SKILL.md'));
+        expect(sent).not.toContain('After reading the router');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('still force-reads an explicitly mentioned workspace skill', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'skill-mention-prereq-'));
+      try {
+        const skillsDir = join(root, 'skills', 'commit');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'SKILL.md'), [
+          '---',
+          'name: Git Commit',
+          'description: Write commits',
+          '---',
+          '',
+          'Commit carefully.',
+        ].join('\n'));
+        const mentionAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'mention-workspace',
+            name: 'Mention Workspace',
+            slug: 'mention-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+        }));
+        await collectEvents(mentionAgent.chat('[skill:commit] ship it'));
+        const sent = mentionAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain('(skill: commit)');
+        expect(sent).toContain(join(root, 'skills', 'commit', 'SKILL.md'));
+        expect(sent).toContain('Do not take any other action until you have read these files');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('soft-suggests a glob-matched skill without forcing a Read', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'skill-glob-suggest-'));
+      try {
+        const skillsDir = join(root, 'skills', 'pdf-review');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'SKILL.md'), [
+          '---',
+          'name: PDF Review',
+          'description: Review PDF attachments',
+          'globs:',
+          '  - "**/*.pdf"',
+          '---',
+          '',
+          'Read the PDF carefully.',
+        ].join('\n'));
+        const suggestAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'suggest-workspace',
+            name: 'Suggest Workspace',
+            slug: 'suggest-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+        }));
+        await collectEvents(suggestAgent.chat('请看 notes.pdf'));
+        const sent = suggestAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain('PDF Review (pdf-review)');
+        expect(sent).toContain('are not blocked');
+        expect(sent).not.toContain('Do not take any other action until you have read these files');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('does not soft-suggest officecli when an Office file already force-loads it', async () => {
+      await collectEvents(agent.chat('请改 巡察报告.docx'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).not.toContain('The following skills may apply this turn');
+    });
+
+    it('includes a conversation-written skill on the next turn after Write', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'skill-chat-write-'));
+      try {
+        const writeAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'write-workspace',
+            name: 'Write Workspace',
+            slug: 'write-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+        }));
+        await collectEvents(writeAgent.chat('hello'));
+        const skillsDir = join(root, 'skills', 'chat-made');
+        mkdirSync(skillsDir, { recursive: true });
+        const skillMd = join(skillsDir, 'SKILL.md');
+        writeFileSync(skillMd, [
+          '---',
+          'name: Chat Made',
+          'description: Created in this conversation',
+          '---',
+          '',
+          'Do the thing.',
+        ].join('\n'));
+        expect(writeAgent.getPromptBuilder().formatSkillCatalog() ?? '').not.toContain('(chat-made)');
+
+        let publishedSkills: string[] = [];
+        writeAgent.onSkillsListChange = (skills) => {
+          publishedSkills = skills.map(skill => skill.slug);
+        };
+        writeAgent.noteSkillWrite(skillMd);
+        const catalog = writeAgent.getPromptBuilder().formatSkillCatalog() ?? '';
+        expect(catalog).toContain('Chat Made (chat-made)');
+        expect(catalog).toContain('Created in this conversation');
+        expect(publishedSkills).toContain('chat-made');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 });

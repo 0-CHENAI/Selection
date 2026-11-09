@@ -1,13 +1,17 @@
 import log from 'electron-log/main'
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-// Leaf import: the logger initializes before the rest of shared config is loaded.
-import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { homedir } from 'node:os'
 import type {
   MessagingLogContext,
   MessagingLogMeta,
   MessagingLogger,
 } from '@craft-agent/messaging-gateway'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { setElectronMainLogSink } from '@craft-agent/shared/utils/debug'
+
+// Shared utilities stay browser-safe; only this process owns Node log transports.
+setElectronMainLogSink(message => log.info(message))
 
 /**
  * Resolve debug mode deterministically across runtimes.

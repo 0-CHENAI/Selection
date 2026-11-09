@@ -5,12 +5,19 @@ import { cn } from "@/lib/utils"
 interface ScrollAreaProps extends React.ComponentProps<typeof ScrollAreaPrimitive.Root> {
   /** Ref to the scrollable viewport element */
   viewportRef?: React.RefObject<HTMLDivElement>
+  /**
+   * Keep Radix's intrinsic `display: table` content wrapper pinned to the
+   * viewport width. Use for vertical-only lists whose children must truncate
+   * against the visible panel edge instead of expanding the scroll content.
+   */
+  constrainContentWidth?: boolean
 }
 
 function ScrollArea({
   className,
   children,
   viewportRef,
+  constrainContentWidth = false,
   ...props
 }: ScrollAreaProps) {
   return (
@@ -21,7 +28,10 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
-        className="h-full w-full rounded-[inherit]"
+        className={cn(
+          "h-full w-full rounded-[inherit]",
+          constrainContentWidth && "[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0",
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
@@ -41,8 +51,7 @@ function ScrollBar({
       data-slot="scroll-bar"
       orientation={orientation}
       className={cn(
-        // z-scrollbar: sticky content in the viewport (list group headers) must not paint over the thumb
-        "z-scrollbar flex touch-none select-none",
+        "flex touch-none select-none transition-colors",
         orientation === "vertical" &&
           "h-full w-2 border-l border-l-transparent p-[1px]",
         orientation === "horizontal" &&
@@ -51,7 +60,7 @@ function ScrollBar({
       )}
       {...props}
     >
-      <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-[var(--border-strong)] hover:bg-[var(--border-control)]" />
+      <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
   )
 }

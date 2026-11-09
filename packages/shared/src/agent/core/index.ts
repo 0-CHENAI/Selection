@@ -146,7 +146,3 @@ export type {
 
 // Re-export skill plugin constant (used by renderer for mention qualification)
 export { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
-
-// RTK detector
-export { getRtkPath, getRtkStatus, getRtkGain, resetRtkPathCache, RTK_MIN_SAFE_VERSION, RTK_UPDATE_COMMAND } from './rtk-detector.ts';
-export type { RtkStatus, RtkGainStats } from './rtk-detector.ts';

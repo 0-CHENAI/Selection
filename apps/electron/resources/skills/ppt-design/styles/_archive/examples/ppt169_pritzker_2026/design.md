@@ -1,0 +1,482 @@
+# Pritzker 2026
+- 来源示例：`ppt169_pritzker_2026`（ppt-master-examples，MIT，Copyright (c) 2025-2026 Hugo He）
+- 画布：16:9
+- 分类：创意
+- 上游风格名：Architecture Editorial
+- 图片与素材：- Runtime: Default Generate (Strategist → Image_Generator → Executor) from a WeChat article on the eight 2026 Pritzker-laureate buildings - Visual style: Architecture editorial (magazine layout led by building photography); this deck predates the mode / visual-style catalogs, so `spec_lock.md` carries no `mode` or `visual_style` section - Image system: 20 photographs from the source article (18 JPEG, 2 PNG with alpha), one clipPath crop, four gradients - `images/`: RGB PNGs converted to JPEG (quality 82) and unreferenced files dropped; every `href` and spec reference updated
+页面由 `svg_final` 转入 selection-deck。图表在能表达为柱、条、折线、饼、环、瀑布时用原生图表，其余图形保持形状。
+## design_spec
+
+# pritzker_2026_test_20260516 - Design Spec
+
+## I. Project Information
+
+| Item | Value |
+| ---- | ----- |
+| **Project Name** | pritzker_2026_test_20260516 |
+| **Canvas Format** | PPT 16:9 (1280×720) |
+| **Page Count** | 11 |
+| **Design Style** | A) General Versatile + 编辑设计 / 杂志感 / 建筑摄影主导 |
+| **Target Audience** | 建筑/设计爱好者、设计行业从业者、文化媒体读者 |
+| **Use Case** | 行业分享、设计课堂、自媒体长图、读书会演讲 |
+| **Created Date** | 2026-05-16 |
+
+---
+
+## II. Canvas Specification
+
+| Property | Value |
+| -------- | ----- |
+| **Format** | PPT 16:9 |
+| **Dimensions** | 1280×720 |
+| **viewBox** | `0 0 1280 720` |
+| **Margins** | 左右 60px / 上下 50px |
+| **Content Area** | 1160×620 |
+
+---
+
+## III. Visual Theme
+
+### Theme Style
+
+- **Style**: 编辑杂志感 + 建筑摄影主导
+- **Theme**: Light theme
+- **Tone**: 克制、克难、克重——大图说话，文字点题；混凝土质感的米白底色 + 墨黑文字 + 暖金强调
+
+### Color Scheme
+
+| Role | HEX | Purpose |
+| ---- | --- | ------- |
+| **Background** | `#F5F2EC` | 米白宣纸底（主背景） |
+| **Secondary bg** | `#EDE8DE` | 卡片/侧栏 |
+| **Primary** | `#1C1C1C` | 标题、正文 |
+| **Accent** | `#B8935A` | 编号、分隔线、强调 |
+| **Body text** | `#1C1C1C` | 正文主色 |
+| **Secondary text** | `#5C5852` | 副文、图注 |
+| **Tertiary text** | `#8B8680` | 混凝土灰，页脚、辅助 |
+| **Border/divider** | `#D4CFC4` | 分隔线 |
+
+---
+
+## IV. Typography System
+
+### Font Plan
+
+**Typography direction**: editorial CJK — 西文衬线 × 中文黑体，杂志专栏感
+
+| Role | Chinese | English | Fallback tail |
+| ---- | ------- | ------- | ------------- |
+| **Title** | `"Microsoft YaHei", "PingFang SC"` | `Georgia` | `serif` |
+| **Body** | `"Microsoft YaHei", "PingFang SC"` | `Arial` | `sans-serif` |
+| **Emphasis** | `KaiTi` | `Georgia` | `serif` |
+| **Code** | — | `Consolas, "Courier New"` | `monospace` |
+
+**Per-role font stacks**:
+
+- Title: `Georgia, "Microsoft YaHei", "PingFang SC", serif`
+- Body: `"Microsoft YaHei", "PingFang SC", Arial, sans-serif`
+- Emphasis: `KaiTi, Georgia, "Microsoft YaHei", serif`
+- Code: `Consolas, "Courier New", monospace`
+
+### Font Size Hierarchy
+
+**Baseline**: Body = 22px (中等密度)
+
+| Purpose | Ratio | Project value | Weight |
+| ------- | ----- | ------------- | ------ |
+| Cover title | 3.3x | 72px | Bold |
+| Chapter / section opener | 2.2x | 48px | Bold |
+| Page title | 1.6-1.8x | 36-40px | Bold |
+| Project number (01-08 大编号) | 4x | 88px | Light Italic (Georgia) |
+| Subtitle | 1.3x | 28px | SemiBold |
+| **Body** | **1x** | **22px** | Regular |
+| Annotation / caption | 0.7x | 15px | Regular |
+| Page number / footnote | 0.55x | 12px | Regular |
+
+---
+
+## V. Layout Principles
+
+### Page Structure
+
+- **Header area**: 50-100px（编号 + 章节锚标）
+- **Content area**: ~520px（图文主体）
+- **Footer area**: 30-40px（页码、来源、品牌锚）
+
+### Layout Pattern Library
+
+不预设主导 pattern。每页按内容性格挑节奏（详见 §VIII 表中 `Layout pattern` 列），原则：
+1. 相邻两页不重复 pattern
+2. 同一 pattern 全 deck 不超过 2 次
+3. 图比例驱动方向（横图优先 hero/上下带，方图优先并置，竖图优先左右带）
+4. 同主题多图合并到一页（多图组合）而非拆页
+
+### Spacing Specification
+
+**Universal**:
+
+| Element | Range | Project |
+| ------- | ----- | ------- |
+| Safe margin | 40-60px | 60px |
+| Content block gap | 24-40px | 32px |
+| Icon-text gap | 8-16px | 12px |
+
+**Non-card containers** (大量 breathing/hero 页):
+
+- 行高 1.5×
+- 全幅大图采用 `xMidYMid slice`；hero 文字浮层有 35-55% 半透明黑底 scrim
+- 不强求等宽栏；文字宽度按可读性（每行 24-32 汉字）
+
+---
+
+## VI. Icon Usage Specification
+
+### Source
+
+- **Built-in icon library**: `tabler-outline`（描边 1.5px）
+- 仅用于章节编号点缀、地理标识、年份徽章；不强加于每页
+
+### Recommended Icon List
+
+| Purpose | Icon Path | Page |
+| ------- | --------- | ---- |
+| 地点定位 | `tabler-outline/map-pin` | P03-P10（每页右上） |
+| 时间/年份 | `tabler-outline/calendar` | P02（总览） |
+| 建筑师章 | `tabler-outline/blockquote` | P11（结语） |
+| 翻页指示 | `tabler-outline/arrow-right` | P02 |
+
+---
+
+## VII. Visualization Reference List
+
+无数据可视化页。本 deck 完全图文叙事驱动，无图表。
+
+---
+
+## VIII. Image Resource List
+
+> Layout pattern 全部 verbatim from `references/image-layout-patterns.md`。覆盖 Group A / C / D / E 至少 4 组；同组内 id 轮换；相邻页不重复。
+
+| Filename | Dimensions | Ratio | Purpose | Type | Layout pattern | Acquire Via | Status | Reference |
+| -------- | --------- | ----- | ------- | ---- | -------------- | ----------- | ------ | --------- |
+| ando_h_rooftop.jpg | 685×514 | 1.33 | P01 封面背景（混凝土水景） | Photography | #1 full-bleed background with floating title | user | Existing | 安藤忠雄 H+ 美术馆屋顶水景 |
+| ando_h_exterior.jpg | 1080×810 | 1.33 | P03 安藤代表作主图 | Photography | #41 background image with native callout cards floating over | user | Existing | H+ 美术馆临河外观 |
+| ando_h_interior.jpg | 667×937 | 0.71 | P03 安藤副图（竖图） | Photography | (同上多图组合) | user | Existing | H+ 美术馆室内空间 |
+| chipperfield_milan_exterior.jpg | 1080×810 | 1.33 | P04 奇普菲尔德主图 | Photography | #48 side-by-side comparison (古罗马 vs 当代) | user | Existing | 米兰冰球馆外观 |
+| chipperfield_roman_amphitheater.jpg | 800×533 | 1.50 | P04 古罗马参照 | Photography | (与主图并置) | user | Existing | 古罗马圆形剧场 |
+| chipperfield_milan_facade.png | 1024×1365 | 0.75 | P04 立面细节（竖图） | Photography | (副图条带) | user | Existing | 场馆立面金属环带 |
+| zaha_tamkang_bridge.jpg | 960×640 | 1.50 | P05 扎哈大桥主视觉 | Photography | #15 multi-image montage with bold text spanning across | user | Existing | 淡江大桥流线姿态 |
+| zaha_tamkang_structure.jpg | 960×640 | 1.50 | P05 大桥结构 | Photography | (蒙太奇成员) | user | Existing | 大桥单塔斜拉结构 |
+| zaha_tamkang_full.jpg | 831×554 | 1.50 | P05 大桥远景 | Photography | (蒙太奇成员) | user | Existing | 大桥跨江全景 |
+| foster_shanghai_exterior.jpg | 1080×652 | 1.66 | P06 福斯特大图 | Photography | #12 faded image as backdrop with oversized overlay text | user | Existing | 上海嘉艺术外观全景 |
+| foster_shanghai_petal.jpg | 1080×1368 | 0.79 | P06 花瓣细节 | Photography | (浮层旁置小图框) | user | Existing | 花瓣立面细节 |
+| oma_new_museum_before.jpg | 1080×809 | 1.33 | P07 OMA 扩建前后 (前) | Photography | #50 before/after slider-style side-by-side | user | Existing | 纽约新美术馆扩建前 |
+| oma_new_museum_after.jpg | 1080×921 | 1.17 | P07 OMA 扩建前后 (后) | Photography | (#50 配对) | user | Existing | 纽约新美术馆扩建后 |
+| oma_new_museum_massing.jpg | 1080×608 | 1.78 | P07 体块模型条带 | Photography | (#50 下方副条) | user | Existing | OMA 体块模型 |
+| oma_new_museum_interior.png | 1080×896 | 1.21 | P07 室内（备用） | Photography | (内嵌副图框) | user | Existing | 美术馆内部 |
+| zumthor_lacma_exterior.jpg | 1080×608 | 1.78 | P08 卒姆托主图 | Photography | #14 horizontal banner strip cutting through mid-section | user | Existing | LACMA 大卫·格芬画廊横幅 |
+| zumthor_lacma_underside.png | 1080×720 | 1.50 | P08 底部公共空间 | Photography | (mid-section 横条之下副图) | user | Existing | 悬浮架空底部空间 |
+| zumthor_lacma_interior.png | 1080×608 | 1.78 | P08 内部（备用） | Photography | (右上小景) | user | Existing | LACMA 室内 |
+| gehry_abu_dhabi_render1.jpg | 1080×608 | 1.78 | P09 盖里渲染主图 | Photography | #19 image floating in whitespace with thin frame and caption | user | Existing | 阿布扎比古根海姆主渲染 |
+| gehry_abu_dhabi_render2.png | 1080×607 | 1.78 | P09 渲染辅图 | Photography | (#19 第二浮层框) | user | Existing | 第二角度渲染 |
+| gehry_abu_dhabi_render3.png | 1000×1000 | 1.00 | P09 方图辅 | Photography | (#19 第三浮层) | user | Existing | 鸟瞰渲染 |
+| kere_senegal_exterior.jpg | 818×546 | 1.50 | P10 凯雷主图（土砖外观） | Photography | #38 background image + annotation cards | user | Existing | 塞内加尔歌德学院外观 |
+| kere_senegal_courtyard.jpg | 630×944 | 0.67 | P10 院落（竖图） | Photography | (annotation 中嵌入小图) | user | Existing | 猴面包树核心院落 |
+| kere_senegal_interior.jpg | 980×654 | 1.50 | P10 内部 | Photography | (annotation 中嵌入小图) | user | Existing | 学院内部空间 |
+
+**Layout pattern 覆盖审计**:
+- Group A (容器): #1 cover, #12 faded backdrop, #14 mid-section banner, #15 montage with text → 4 patterns
+- Group C (overlay): #19 floating frame → 1 pattern
+- Group D (image-as-canvas): #38 background + cards, #41 background + callouts → **2 patterns，满足 Group D 覆盖硬约束**
+- Group E (multi-image): #48 side-by-side, #50 before/after → 2 patterns
+- 共 9 个不同 pattern 跨 4 组，无任何 pattern 使用 >2 次，相邻页无重复
+
+---
+
+## IX. Content Outline
+
+### Part 1: 开篇
+
+#### Slide 01 - 封面
+
+- **Audience move**: 只知道“普利兹克奖”是个大奖 → 意识到 2026 是八座大师新作集中揭幕的一年
+- **Relationships**: 主标题与副标题为 parent;“8 座新作 · 8 种深耕”与来源署名 link 于同一篇原文;其余 none
+
+- **Layout**: #1 Full-bleed background + floating title（混凝土水景为视觉锚）
+- **Title**: 2026 普利兹克奖大师季
+- **Subtitle**: 8 座新作，8 种深耕
+- **Info**: 从苏州河畔到沙漠腹地·读懂顶级建筑师的思考与坚守 / 来源：公众号孙琬童 / 2026
+
+#### Slide 02 - 8 位大师总览
+
+- **Audience move**: 记不清 2026 年有哪些大师作品落成 → 能按编号说出八位大师、八座建筑与所在城市
+- **Relationships**: 八张卡片之间为 order(01–08);八者 membership 于“2026 普利兹克大师新作季”;四大洲分布为 contrast
+
+- **Layout**: Negative-space-driven + 8 卡（4×2 方阵），每卡只放编号 + 大师名 + 一行项目名 + 地理标识
+- **Title**: 八位大师，八种坚守
+- **Content**:
+  - 01 安藤忠雄 · 苏州 H+ 美术馆 · 中国苏州
+  - 02 戴卫·奇普菲尔德 · 米兰圣朱利亚冰球馆 · 意大利米兰
+  - 03 扎哈·哈迪德（遗作）· 淡江大桥 · 中国台北
+  - 04 诺曼·福斯特 · 上海嘉艺术 · 中国上海
+  - 05 OMA + SANAA · 纽约新美术馆扩建 · 美国纽约
+  - 06 彼得·卒姆托 · LACMA 大卫·格芬画廊 · 美国洛杉矶
+  - 07 弗兰克·盖里（遗作）· 阿布扎比古根海姆博物馆 · 阿联酋阿布扎比
+  - 08 迪埃贝多·凯雷 · 塞内加尔歌德学院 · 塞内加尔达喀尔
+
+### Part 2: 8 座新作逐一深耕
+
+#### Slide 03 - 01 安藤忠雄 · 苏州 H+ 美术馆
+
+- **Audience move**: 把安藤忠雄等同于“清水混凝土” → 理解他在苏州用回游性和立体园林回应江南记忆
+- **Relationships**: 建筑师与作品为 parent;“立体园林 · 回游性”两条核心理念 membership 于 CORE CONCEPT;三张实景图 link 于同一座美术馆
+
+- **Layout**: #41 image-as-canvas + 浮层 annotation cards（横图为底，左侧浮一张卡片承载文字，竖图作为右上小内嵌图）
+- **Title**: 在江南园林里写一首混凝土诗
+- **Subtitle**: 安藤忠雄 · 1995 年普利兹克奖 · 2026.1 开馆
+- **Content**:
+  - 设计理念：立体园林—回游性，从苏州土地记忆中汲取园林精髓
+  - 材质语言：清水混凝土肌理，摒弃装饰，几何线条 × 光影留白
+  - 空间叙事：屋顶以水为主题，回游中抵达面向天空与水的场所
+  - 核心理念："让建筑归于自然，让艺术治愈人心"
+
+#### Slide 04 - 02 戴卫·奇普菲尔德 · 米兰圣朱利亚冰球馆
+
+- **Audience move**: 以为冬奥场馆只是功能建筑 → 看到奇普菲尔德如何用古罗马竞技场做当代回应
+- **Relationships**: 古罗马圆形剧场(PRECEDENT)与冰球馆(新作)为 contrast;“三道金属环带 / 玻璃腰线 / LED 灯带”membership 于立面语言
+
+- **Layout**: #48 side-by-side comparison（左侧主图当代场馆，右侧古罗马剧场参照，下方副图横向立面条带）
+- **Title**: 千年罗马竞技场的现代回响
+- **Subtitle**: 戴卫·奇普菲尔德 · 2023 年普利兹克奖 · 2026 冬奥会场馆
+- **Content**:
+  - 容量：16,000 名观众，本届冬奥唯一新建永久场馆
+  - 造型源流：呼应米兰古罗马圆形剧场椭圆形态
+  - 立面：三道金属环带 + 玻璃腰线 + LED 灯带
+  - 设计精神：极致克制与精确，公共建筑服务于人
+
+#### Slide 05 - 03 扎哈·哈迪德（遗作）· 淡江大桥
+
+- **Audience move**: 知道扎哈已逝 → 理解淡江大桥是遗作按理想方案 100% 还原的意义
+- **Relationships**: “920 米”与“全球同类型最长跨度”为 parent;“100%”与“多次方案攻坚”为 link(因果);扎哈生平与作品 order
+
+- **Layout**: #15 multi-image montage + 上方半透明深色横幅承载大标题（三张图横向蒙太奇拼贴）
+- **Title**: 跨越江河的流动态势
+- **Subtitle**: 扎哈·哈迪德 · 2004 年普利兹克奖 · 2026.5.12 通车
+- **Content**:
+  - 全长 920 米，全球同类型最长跨度单塔不对称斜拉桥
+  - 100% 还原扎哈生前理想化设计
+  - 工程力学 × 先锋美学的完美融合
+  - "永不设限"——大师已逝，思想延续
+
+#### Slide 06 - 04 诺曼·福斯特 · 上海嘉艺术
+
+- **Audience move**: 把美术馆想成白盒子 → 理解福斯特“城市中缓慢生长的生命体”
+- **Relationships**: 整体外观与花瓣立面细节为 parent(整体→局部);“观展 · 观景 · 观城”三者 membership 于同一空间体验
+
+- **Layout**: #12 faded image as backdrop + 巨号叠加文字（横图压暗作底纹，巨号"04"和短标题压上，右侧细长竖图作小框）
+- **Title**: 苏州河畔绽放的钢铁花瓣
+- **Subtitle**: 诺曼·福斯特 · 1999 年普利兹克奖 · 2026.4 开放
+- **Content**:
+  - 不是白盒子，是城市中缓慢生长的生命体
+  - 仿花朵扎根地面、向天空延展的生长轨迹
+  - 三重体验：观展、观景、观城
+  - 高技派外壳之下，古典人文精神通过现代材料重获新生
+
+#### Slide 07 - 05 OMA + SANAA · 纽约新美术馆扩建
+
+- **Audience move**: 把扩建当作加建 → 理解 OMA 与 SANAA 新旧共生的双强联动
+- **Relationships**: BEFORE 与 AFTER 为 contrast;OMA 新翼与 SANAA 主楼 link(共生);投资额与面积 membership 于项目事实
+
+- **Layout**: #50 before/after side-by-side（上方左右并置扩建前/后，下方加体块模型横条）
+- **Title**: 双强联动，新旧艺术共生
+- **Subtitle**: OMA (库哈斯, 2000) × SANAA (妹岛+西泽, 2010) · 2026.3.21 开放
+- **Content**:
+  - 投资 8200 万美元，新增 5,574 ㎡
+  - OMA 先锋解构 × SANAA 轻盈通透的碰撞
+  - 通透立面 + 错落空间 + 开放布局，让城市街景与艺术空间相互渗透
+  - "迭代更新、兼容并蓄"——百年美术馆获新活力
+
+#### Slide 08 - 06 彼得·卒姆托 · LACMA 大卫·格芬画廊
+
+- **Audience move**: 只看到造价 → 理解二十年打磨与悬浮方舟背后的极简耐心
+- **Relationships**: “20 年”与“$724M / 3 万㎡”membership 于 SCALE;“悬浮方舟”与七座亭子为 parent;时间与耐心为 link
+
+- **Layout**: #14 horizontal banner strip 中段贯穿（顶部留标题，中段横幅大图，底部承载叙事文字）
+- **Title**: 20 年打磨的诗意艺术方舟
+- **Subtitle**: 彼得·卒姆托 · 2009 年普利兹克奖 · 2026.5.4 开放
+- **Content**:
+  - 耗资 7.24 亿美元，32,293 ㎡，历时 20 年
+  - 七座极简混凝土亭子横跨威尔希尔大道之上
+  - 摒弃艺术品等级化，古典与当代平等共生
+  - "建筑是场所的诗意容器"
+
+#### Slide 09 - 07 弗兰克·盖里（遗作）· 阿布扎比古根海姆博物馆
+
+- **Audience move**: 把阿布扎比古根海姆看作又一座解构主义地标 → 意识到这是盖里的绝唱
+- **Relationships**: 效果图主视角与第二角度为 parent(同一对象两视角);“1929 — 2025”与“2026 开幕”为 contrast(逝世与揭幕)
+
+- **Layout**: #19 image floating in whitespace + 多浮层细框（三张渲染图错落浮于米白底，细框 + 小图注，文字以负空间承载）
+- **Title**: 沙漠中的"解构主义绝唱"
+- **Subtitle**: 弗兰克·盖里（1929-2025）· 1989 年普利兹克奖 · 2026 开幕
+- **Content**:
+  - 大师生命尾声 20 年心血，金属外立面随日光变换肌理
+  - 不规则曲面 + 灵动褶皱 + 极致冲击的几何
+  - 针对沙漠极端气候的先进遮阳与隔热系统
+  - "建筑无边界、创意无极限"——解构主义大师的收官终篇
+
+#### Slide 10 - 08 迪埃贝多·凯雷 · 塞内加尔歌德学院
+
+- **Audience move**: 觉得非洲项目是“低技术” → 理解凯雷顺应自然的设计哲学与土砖体系
+- **Relationships**: DESIGN PHILOSOPHY 为 parent;“土砖主体 / 自然通风 / 摆脱空调 / 适配气候”四条 membership 于顺应自然
+
+- **Layout**: #38 background image + annotation cards（横图作底，2-3 张半透明信息卡浮上，竖图与内部图嵌入卡内）
+- **Title**: 夯土砖"屏风"，扎根乡土的温暖建筑
+- **Subtitle**: 迪埃贝多·凯雷 · 2022 年普利兹克奖 · 2026.4 开幕
+- **Content**:
+  - 核心院落置入猴面包树（生命象征）
+  - 本土压制土砖 + 自然通风系统，摆脱空调依赖
+  - "顺应自然，而非与之对抗"
+  - 全球建筑同质化时代，凯雷再证：顶级建筑扎根土地、温暖人心
+
+### Part 3: 收束
+
+#### Slide 11 - 结语：所有传世，皆源于深耕
+
+- **Audience move**: 看完八座各自独立的建筑 → 抓住“耐心 / 扎根 / 突破”三种共同坚守
+- **Relationships**: “耐心 / 扎根 / 突破”三者 contrast(三种路径);每一种 link 回前文对应的建筑师;结语与封面为 order(首尾呼应)
+
+- **Layout**: Negative-space-driven 单元素 + 暖金强调引语（无大图，文字为主，留白为主）
+- **Title**: 所有传世的经典，皆源于日复一日的坚守
+- **Content**:
+  - 有人耗时二十年打磨一座场馆 — 卒姆托
+  - 有人坚守本土人文，让建筑扎根土地 — 凯雷
+  - 有人突破边界、颠覆常规 — 扎哈、盖里
+  - 收束语：对空间、自然、人文的极致敬畏与深度思考
+- **Footer**: 资料来源：公众号"孙琬童" / 致敬 8 位大师 / 2026
+
+---
+
+## X. Speaker Notes Requirements
+
+- **Filename**: 与 SVG 同名（`01_cover.svg` → `notes/01_cover.md`）
+- **Total duration**: 约 12 分钟
+- **Notes style**: 文化随笔式，叙述温度优先于技术参数
+- **Purpose**: inform + inspire
+
+---
+
+## XI. Technical Constraints Reminder
+
+1. viewBox: `0 0 1280 720`
+2. `<rect>` 背景，`<tspan>` 文本换行
+3. 透明度默认用 `fill-opacity` / `stroke-opacity`；`rgba()` 保持转换兼容
+4. 禁用：`mask`, `<style>`, `class`, `foreignObject`, `textPath`, `<animate*>`, `<script>`
+   - `<g opacity>` 可转换但会产生近似保真 warning，默认改用子元素透明度
+5. 字符：`—` `·` `→` 等用原生 Unicode，禁用 HTML named entities
+6. 全幅图用 `preserveAspectRatio="xMidYMid slice"`；半透明 scrim 用 `<rect fill-opacity>`
+
+## spec_lock
+
+# Execution Lock
+
+## canvas
+- viewBox: 0 0 1280 720
+- format: PPT 16:9
+
+## communication
+- primary_language: zh-CN
+- audience: 建筑/设计爱好者、设计行业从业者、文化媒体读者
+- objective: 带读者按八站走完 2026 年集中揭幕的八座普利兹克大师新作，每站交出建筑师、作品、地点与一条核心理念，最后归纳出耐心、扎根、突破三种坚守
+- core_message: 2026 年八位普利兹克大师的新作不是网红建筑，而是岁月沉淀的匠心深耕
+- consumption_mode: balanced
+
+## colors
+- bg: #F5F2EC
+- secondary_bg: #EDE8DE
+- primary: #1C1C1C
+- accent: #B8935A
+- text: #1C1C1C
+- text_secondary: #5C5852
+- text_tertiary: #8B8680
+- border: #D4CFC4
+- accent_light: #E8C788
+- scrim: #0A0A0A
+
+## typography
+- font_family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif
+- title_family: Georgia, "Microsoft YaHei", "PingFang SC", serif
+- body_family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif
+- emphasis_family: KaiTi, Georgia, "Microsoft YaHei", serif
+- title_alt_family: Georgia, "Microsoft YaHei", serif
+- label_family: Georgia, serif
+- caption_family: "Microsoft YaHei", sans-serif
+- kai_short_family: KaiTi, "Microsoft YaHei", serif
+- kai_serif_family: KaiTi, Georgia, serif
+- kai_family: KaiTi, serif
+- code_family: Consolas, "Courier New", monospace
+- body: 22
+- title: 40
+- subtitle: 28
+- annotation: 15
+- cover_title: 72
+- project_number: 88
+- page_number: 12
+- giant_number: 280
+- caption: 18
+- lead: 32
+- section_title: 44
+- architect_name: 56
+
+## icons
+- library: tabler-outline
+- stroke_width: 1.5
+- inventory: map-pin, calendar, blockquote, arrow-right
+
+## images
+- ando_h_rooftop: images/ando_h_rooftop.jpg
+- ando_h_exterior: images/ando_h_exterior.jpg
+- ando_h_interior: images/ando_h_interior.jpg
+- chipperfield_milan_exterior: images/chipperfield_milan_exterior.jpg
+- chipperfield_roman_amphitheater: images/chipperfield_roman_amphitheater.jpg
+- chipperfield_milan_facade: images/chipperfield_milan_facade.png
+- zaha_tamkang_bridge: images/zaha_tamkang_bridge.jpg
+- zaha_tamkang_structure: images/zaha_tamkang_structure.jpg
+- zaha_tamkang_full: images/zaha_tamkang_full.jpg
+- foster_shanghai_exterior: images/foster_shanghai_exterior.jpg
+- foster_shanghai_petal: images/foster_shanghai_petal.jpg
+- oma_new_museum_before: images/oma_new_museum_before.jpg
+- oma_new_museum_after: images/oma_new_museum_after.jpg
+- oma_new_museum_massing: images/oma_new_museum_massing.jpg
+- oma_new_museum_interior: images/oma_new_museum_interior.png
+- zumthor_lacma_exterior: images/zumthor_lacma_exterior.jpg
+- zumthor_lacma_underside: images/zumthor_lacma_underside.png
+- zumthor_lacma_interior: images/zumthor_lacma_interior.png
+- gehry_abu_dhabi_render1: images/gehry_abu_dhabi_render1.jpg
+- gehry_abu_dhabi_render2: images/gehry_abu_dhabi_render2.png
+- gehry_abu_dhabi_render3: images/gehry_abu_dhabi_render3.png
+- kere_senegal_exterior: images/kere_senegal_exterior.jpg
+- kere_senegal_courtyard: images/kere_senegal_courtyard.jpg
+- kere_senegal_interior: images/kere_senegal_interior.jpg
+
+## page_rhythm
+- P01: anchor
+- P02: anchor
+- P03: dense
+- P04: dense
+- P05: breathing
+- P06: breathing
+- P07: dense
+- P08: breathing
+- P09: breathing
+- P10: dense
+- P11: anchor
+
+## page_charts
+
+## pptx_structure
+- mode: flat
+
+## forbidden
+- Mixing icon libraries
+- `<style>`, `class`, `<foreignObject>`, `textPath`, `@font-face`, `<animate*>`, `<script>`, `<iframe>`, `<symbol>`+`<use>`
+- HTML named entities in text — write as raw Unicode

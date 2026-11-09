@@ -115,6 +115,10 @@ export class TestAgent extends BaseAgent {
     super(config, 'test-model', 100_000);
   }
 
+  noteSkillWrite(filePath?: string, command?: string): void {
+    this.noteSkillMarkdownMutation(filePath, command);
+  }
+
   protected async *chatImpl(
     message: string,
     attachments?: unknown[],

@@ -11,11 +11,11 @@
 
 import * as React from 'react'
 import { Globe, HardDrive, Mail, Plug } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { EntityIcon, type IconComponent } from '@/components/ui/entity-icon'
 import { useEntityIcon, logoUrlCache } from '@/lib/icon-cache'
 import { McpIcon } from '@/components/icons/McpIcon'
 import type { LoadedSource } from '@craft-agent/shared/sources/types'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type { IconSize, ResolvedEntityIcon } from '@craft-agent/shared/icons'
 import { SourceStatusIndicator, deriveConnectionStatus } from './source-status-indicator'
 
@@ -36,6 +36,8 @@ interface SourceAvatarProps {
   showStatus?: boolean
   /** Additional className overrides */
   className?: string
+  /** Render without background, ring, or rounded container chrome. */
+  chromeless?: boolean
 }
 
 // ============================================================================
@@ -56,17 +58,6 @@ const SOURCE_FALLBACKS: Record<string, IconComponent> = {
 export function getSourceFallbackIcon(type: SourceType): IconComponent {
   return SOURCE_FALLBACKS[type] ?? Plug
 }
-
-// ============================================================================
-// Brand tile
-// ============================================================================
-
-/**
- * Brand marks sit on a tile with a hairline ring (design spec §7.11) so dark brand colors
- * (GitHub #24292f) stay visible on dark surfaces. --border-strong is a 16% foreground hairline:
- * light on dark surfaces, dark on light ones.
- */
-const BRAND_TILE_CLASS = 'rounded-xs ring-1 ring-[var(--border-strong)]'
 
 // ============================================================================
 // Status Indicator Size Mapping
@@ -154,7 +145,7 @@ function useFaviconFallback(
 // Component
 // ============================================================================
 
-export function SourceAvatar({ source, size = 'md', fluid, showStatus, className }: SourceAvatarProps) {
+export function SourceAvatar({ source, size = 'md', fluid, showStatus, className, chromeless }: SourceAvatarProps) {
   const icon = useEntityIcon({
     workspaceId: source.workspaceId,
     entityType: 'source',
@@ -178,9 +169,10 @@ export function SourceAvatar({ source, size = 'md', fluid, showStatus, className
       icon={finalIcon}
       size={size}
       fallbackIcon={FallbackIcon}
-      alt={source.config.name}
-      className={cn(BRAND_TILE_CLASS, className)}
+      alt={resolveSourceTitle(source)}
+      className={className}
       containerClassName={fluid ? 'h-full w-full' : undefined}
+      chromeless={chromeless}
     />
   )
 

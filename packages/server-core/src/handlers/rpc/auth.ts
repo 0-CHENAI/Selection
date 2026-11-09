@@ -1,11 +1,12 @@
 import { unlink } from 'fs/promises'
 import { join } from 'path'
-import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { homedir } from 'os'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientConfirmDialog } from '@craft-agent/server-core/transport'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.auth.LOGOUT,
@@ -18,6 +19,7 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
   // Show logout confirmation dialog (routed to client)
   server.handle(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async (ctx) => {
     const result = await requestClientConfirmDialog(server, ctx.clientId, {
+      kind: 'logout',
       type: 'warning',
       buttons: ['Cancel', 'Log Out'],
       defaultId: 0,
@@ -34,6 +36,8 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
   // Show delete session confirmation dialog (routed to client)
   server.handle(RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION, async (ctx, name: string) => {
     const result = await requestClientConfirmDialog(server, ctx.clientId, {
+      kind: 'deleteSession',
+      name,
       type: 'warning',
       buttons: ['Cancel', 'Delete'],
       defaultId: 0,

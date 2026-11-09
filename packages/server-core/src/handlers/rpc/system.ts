@@ -3,13 +3,17 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { execSync } from 'child_process'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getWorkspaceByNameOrId, getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/shared/config'
+import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { isUsableGitBashPath, validateGitBashPath } from '@craft-agent/server-core/services'
-import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
+import {
+  assertLocalWorkspace,
+  normalizeAccessibleFilePath,
+  resolveWorkspaceIdForFileAccess,
+  validateWorkspaceFilePath,
+} from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { runGit } from '../../services/git'
 import {
   requestClientOpenExternal,
   requestClientOpenPath,
@@ -134,13 +138,6 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
   return null
 }
 
-/** Guard: reject filesystem-path actions on remote workspaces where local paths are meaningless. */
-function assertLocalWorkspace(ctx: { workspaceId: string | null }, action: string): void {
-  const ws = getWorkspaceByNameOrId(ctx.workspaceId ?? '')
-  if (ws?.remoteServer) {
-    throw new Error(`${action} is not available for remote workspaces`)
-  }
-}
 
 export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps): void {
   const windowManager = deps.windowManager
@@ -180,10 +177,19 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
     return getLatestReleaseVersion()
   })
 
-  // Current branch of a directory: null outside a repo, on a detached HEAD, or without git.
-  // Async: a slow git (large repo, cold disk) must not block the server.
+  // Get git branch for a directory (returns null if not a git repo or git unavailable)
   server.handle(RPC_CHANNELS.git.GET_BRANCH, async (_ctx, dirPath: string) => {
-    return runGit(dirPath, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    try {
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: dirPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      }).trim()
+      return branch || null
+    } catch {
+      return null
+    }
   })
 
   // Git Bash detection and configuration (Windows only)
@@ -322,12 +328,14 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
   })
 
   server.handle(RPC_CHANNELS.shell.OPEN_FILE, async (ctx, path: string) => {
-    assertLocalWorkspace(ctx, 'Open file')
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, windowManager)
+    assertLocalWorkspace({ workspaceId }, 'Open file')
     try {
       // Expand ~ before resolve() — resolve() treats ~ as a literal path component
-      const expanded = path.startsWith('~') ? path.replace(/^~/, homedir()) : path
-      const absolutePath = resolve(expanded)
-      const safePath = await validateFilePath(absolutePath, getWorkspaceAllowedDirs(ctx.workspaceId))
+      const expanded = normalizeAccessibleFilePath(path)
+      const withHome = expanded.startsWith('~') ? expanded.replace(/^~/, homedir()) : expanded
+      const absolutePath = resolve(withHome)
+      const safePath = await validateWorkspaceFilePath(absolutePath, workspaceId)
       const result = await requestClientOpenPath(server, ctx.clientId, safePath)
       if (result.error) throw new Error(result.error)
     } catch (error) {
@@ -338,11 +346,13 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
   })
 
   server.handle(RPC_CHANNELS.shell.SHOW_IN_FOLDER, async (ctx, path: string) => {
-    assertLocalWorkspace(ctx, 'Show in folder')
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, windowManager)
+    assertLocalWorkspace({ workspaceId }, 'Show in folder')
     try {
-      const expanded = path.startsWith('~') ? path.replace(/^~/, homedir()) : path
-      const absolutePath = resolve(expanded)
-      const safePath = await validateFilePath(absolutePath, getWorkspaceAllowedDirs(ctx.workspaceId))
+      const expanded = normalizeAccessibleFilePath(path)
+      const withHome = expanded.startsWith('~') ? expanded.replace(/^~/, homedir()) : expanded
+      const absolutePath = resolve(withHome)
+      const safePath = await validateWorkspaceFilePath(absolutePath, workspaceId)
       await requestClientShowInFolder(server, ctx.clientId, safePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'

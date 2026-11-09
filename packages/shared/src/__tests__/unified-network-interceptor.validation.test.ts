@@ -4,6 +4,8 @@ let validateOpenAiChatBody: typeof import('../unified-network-interceptor.ts').v
 let validateOpenAiResponsesBody: typeof import('../unified-network-interceptor.ts').validateOpenAiResponsesBody;
 let MalformedBodyError: typeof import('../unified-network-interceptor.ts').MalformedBodyError;
 let sanitizeOpenAiHistoryInPlace: typeof import('../unified-network-interceptor.ts').sanitizeOpenAiHistoryInPlace;
+let rewriteDeveloperRolesToSystem: typeof import('../unified-network-interceptor.ts').rewriteDeveloperRolesToSystem;
+let preferAnthropicBearerAuth: typeof import('../unified-network-interceptor.ts').preferAnthropicBearerAuth;
 
 describe('unified-network-interceptor validators (#613)', () => {
   beforeAll(async () => {
@@ -13,6 +15,85 @@ describe('unified-network-interceptor validators (#613)', () => {
     validateOpenAiResponsesBody = mod.validateOpenAiResponsesBody;
     MalformedBodyError = mod.MalformedBodyError;
     sanitizeOpenAiHistoryInPlace = mod.sanitizeOpenAiHistoryInPlace;
+    rewriteDeveloperRolesToSystem = mod.rewriteDeveloperRolesToSystem;
+    preferAnthropicBearerAuth = mod.preferAnthropicBearerAuth;
+  });
+
+  describe('Anthropic auth headers', () => {
+    it('drops x-api-key when a non-official Messages host already has Authorization Bearer', () => {
+      // Official Kimi Code is Chat Completions and never reaches this helper.
+      // A custom Anthropic host, including a Messages URL on api.kimi.com, still
+      // drops x-api-key when Bearer is already present.
+      const headers = preferAnthropicBearerAuth('https://api.kimi.com/coding/v1/messages', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(headers).toEqual({
+        Authorization: 'Bearer secret-key',
+        'anthropic-version': '2023-06-01',
+      });
+    });
+
+    it('sends only x-api-key and anthropic-version to the official Anthropic host', () => {
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com/v1/messages', {
+        'x-api-key': 'sk-ant',
+        Authorization: 'Bearer sk-ant',
+      })).toEqual({
+        'x-api-key': 'sk-ant',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com/v1/messages', {
+        Authorization: 'Bearer sk-from-bearer',
+        'anthropic-version': '2023-06-01',
+      })).toEqual({
+        'x-api-key': 'sk-from-bearer',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(preferAnthropicBearerAuth('https://api.minimax.io/anthropic/v1/messages', {
+        'X-Api-Key': 'sk-mini',
+      })).toEqual({ 'X-Api-Key': 'sk-mini' });
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com.evil.example/v1/messages', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      })).toEqual({
+        Authorization: 'Bearer secret-key',
+      });
+      expect(preferAnthropicBearerAuth('https://example.com/v1/tools', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      })).toEqual({
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      });
+    });
+
+    it('leaves Chat Completions headers unchanged, including official Kimi Code', () => {
+      const headers = {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer kimi-access-token',
+      };
+      expect(preferAnthropicBearerAuth('https://api.kimi.com/coding/v1/chat/completions', headers)).toBe(headers);
+      expect(preferAnthropicBearerAuth('http://127.0.0.1:9/v1/chat/completions', headers)).toBe(headers);
+    });
+  });
+
+  describe('developer role rewrite', () => {
+    it('rewrites chat and responses instruction roles to system', () => {
+      const body = {
+        messages: [
+          { role: 'developer', content: 'system prompt' },
+          { role: 'user', content: 'hi' },
+        ],
+        input: [
+          { role: 'developer', content: 'system prompt' },
+          { role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+        ],
+      };
+      rewriteDeveloperRolesToSystem(body);
+      expect(body.messages.map(message => message.role)).toEqual(['system', 'user']);
+      expect(body.input.map(message => message.role)).toEqual(['system', 'user']);
+    });
   });
 
   describe('OpenAI Chat Completions', () => {

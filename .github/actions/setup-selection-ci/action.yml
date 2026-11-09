@@ -1,0 +1,120 @@
+name: Setup Selection CI
+description: Install Bun, cache the Bun download cache, and optionally uv / Linux bubblewrap.
+
+inputs:
+  bun-version:
+    description: Pinned Bun version. Keep in sync with the other workflows.
+    required: false
+    default: "1.3.10"
+  install-dependencies:
+    description: Run bun install --frozen-lockfile after setup.
+    required: false
+    default: "true"
+  install-uv:
+    description: Install uv for document-tool Python tests.
+    required: false
+    default: "false"
+  install-bwrap:
+    description: Install bubblewrap and enable a narrow userns profile on Linux.
+    required: false
+    default: "false"
+  cache-officecli-runtime:
+    description: Cache the downloaded per-platform OfficeCLI binary under resources/bin.
+    required: false
+    default: "false"
+  github-token:
+    description: Token for bun install of GitHub-hosted packages. Do not invent other secrets.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    # Cache the Bun package download cache, not node_modules. Cross-OS node_modules
+    # reuse is a common source of false reds; bun install from this cache is enough.
+    - name: Cache Bun install downloads
+      uses: actions/cache@v5
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+        restore-keys: |
+          bun-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Cache OfficeCLI platform runtime
+      if: ${{ inputs.cache-officecli-runtime == 'true' }}
+      uses: actions/cache@v5
+      with:
+        path: |
+          apps/electron/resources/bin/linux-x64
+          apps/electron/resources/bin/linux-arm64
+          apps/electron/resources/bin/darwin-arm64
+          apps/electron/resources/bin/darwin-x64
+          apps/electron/resources/bin/win32-x64
+          apps/electron/resources/bin/win32-arm64
+        key: officecli-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/electron/resources/officecli/officecli-manifest.json') }}
+
+    # uv's own cache was previously removed as invalid in this repo. Keep the
+    # tool pinned, but do not re-enable that cache without a separate proof.
+    - name: Install uv
+      if: ${{ inputs.install-uv == 'true' }}
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        enable-cache: false
+
+    - name: Install Linux bubblewrap confinement
+      if: ${{ inputs.install-bwrap == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap apparmor-utils || \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap
+
+        # Prefer a narrow AppArmor exception for /usr/bin/bwrap only, so the
+        # runner-wide userns restriction stays in place (see docs/plans/task-reliability-audit.md).
+        profile=/etc/apparmor.d/selection-bwrap
+        if command -v apparmor_parser >/dev/null 2>&1; then
+          printf '%s\n' \
+            'abi <abi/4.0>,' \
+            'include <tunables/global>' \
+            '' \
+            'profile selection-bwrap /usr/bin/bwrap flags=(unconfined) {' \
+            '  userns,' \
+            '}' \
+            | sudo tee "$profile" >/dev/null
+          sudo apparmor_parser -r "$profile" || echo "::notice::AppArmor profile for bwrap did not load; will try sysctl fallback if the probe fails."
+        fi
+
+        probe() {
+          bwrap --die-with-parent --new-session --unshare-all --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /bin/true
+        }
+
+        if ! probe; then
+          echo "::notice::Narrow AppArmor profile was not enough; falling back to disabling apparmor_restrict_unprivileged_userns on this disposable runner."
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+        fi
+
+        if ! probe; then
+          echo "::error::Infra: bubblewrap cannot create a user namespace on this Ubuntu runner. This is not a product test failure. See docs/ci.md."
+          sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
+          sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
+          bwrap --version || true
+          exit 1
+        fi
+        echo "Linux native confinement (bwrap) is usable on this runner."
+
+    - name: Install JavaScript dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        HUSKY: "0"
+      run: bun install --frozen-lockfile

@@ -1,4 +1,4 @@
-import { Menu, app, shell, BrowserWindow } from 'electron'
+import { Menu, app, BrowserWindow } from 'electron'
 import { i18n } from '@craft-agent/shared/i18n'
 import { RPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
 import { EDIT_MENU, VIEW_MENU, WINDOW_MENU } from '../shared/menu-schema'
@@ -6,7 +6,6 @@ import type { MenuItem } from '../shared/menu-schema'
 import type { WindowManager } from './window-manager'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import { mainLog, isDebugMode } from './logger'
-import { resetZoomOfFocusedWindow } from './zoom'
 
 type ClientResolver = (webContentsId: number) => string | undefined
 
@@ -17,7 +16,7 @@ let cachedClientResolver: ClientResolver | null = null
 
 /**
  * Creates and sets the application menu for macOS.
- * Includes only relevant items for the Craft Agents app.
+ * Includes only relevant items for the Selection app.
  *
  * Call rebuildMenu() when update state changes to refresh the menu.
  */
@@ -80,7 +79,7 @@ export async function rebuildMenu(): Promise<void> {
   const template: Electron.MenuItemConstructorOptions[] = [
     // App menu (macOS only)
     ...(isMac ? [{
-      label: 'Craft Agents',
+      label: 'Selection',
       submenu: [
         { role: 'about' as const, label: i18n.t('menu.aboutCraftAgents') },
         updateMenuItem,
@@ -229,14 +228,10 @@ export async function rebuildMenu(): Promise<void> {
       ]
     }] : []),
 
-    // Help menu
+    // Help menu (keyboard shortcuts only — external docs links removed)
     {
       label: i18n.t("menu.help"),
       submenu: [
-        {
-          label: i18n.t("menu.helpAndDocs"),
-          click: () => shell.openExternal('https://thecraftagents.com/docs')
-        },
         {
           label: i18n.t("menu.keyboardShortcuts"),
           accelerator: 'CmdOrCtrl+/',
@@ -277,10 +272,6 @@ function toElectronMenuItem(item: MenuItem): Electron.MenuItemConstructorOptions
   }
 
   if (item.type === 'role') {
-    // The resetZoom role goes to 100%; Reset Zoom returns to the default zoom (Settings → Appearance)
-    if (item.role === 'resetZoom') {
-      return { label: i18n.t(item.labelKey), accelerator: 'CmdOrCtrl+0', click: resetZoomOfFocusedWindow }
-    }
     // Use Electron's built-in role - it handles accelerators automatically
     return { role: item.role as Electron.MenuItemConstructorOptions['role'] }
   }

@@ -65,7 +65,7 @@ export interface ViewEvaluationContext {
   sessionStatus: string;
   /** @deprecated Use `sessionStatus` instead. Kept for backward compatibility with existing view expressions. */
   todoState: string;
-  /** Permission mode (canonical: 'explore'|'ask'|'guarded'|'execute'; internal: 'safe'|'ask'|'guarded'|'allow-all') */
+  /** Permission mode (canonical: 'explore'|'ask'|'execute'; internal: 'safe'|'ask'|'allow-all') */
   permissionMode: string;
   /** Model override string */
   model: string;

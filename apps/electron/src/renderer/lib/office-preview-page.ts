@@ -1,0 +1,102 @@
+export const OFFICE_PREVIEW_SHOW_PAGE = 'selection-office-show-page'
+export const OFFICE_PREVIEW_REVEAL = 'selection-office-reveal'
+export const OFFICE_PREVIEW_OPEN_CASE = 'selection-office-open-case'
+export const OFFICE_PREVIEW_CLOSE_CASE = 'selection-office-close-case'
+
+export interface OfficeCasePreviewRequest {
+  caseId: string
+  /** The chat that asks. Omit on the empty Office home. */
+  sessionId?: string
+}
+
+/** Open a bundled case sample, read-only, in the Office 协同 panel. The host picks the file. */
+export function requestOfficeCasePreview(request: OfficeCasePreviewRequest): void {
+  if (!request.caseId) return
+  window.dispatchEvent(new CustomEvent(OFFICE_PREVIEW_OPEN_CASE, { detail: request }))
+}
+
+/** Close a case sample opened from the empty home when the home goes away. */
+export function closeOfficeCasePreview(): void {
+  window.dispatchEvent(new Event(OFFICE_PREVIEW_CLOSE_CASE))
+}
+
+export interface OfficePreviewPageRequest {
+  sessionId: string
+  path: string
+  page: number
+}
+
+export interface PinnedOfficePage {
+  path: string
+  page: number
+}
+
+export function requestOfficePreviewPage(request: OfficePreviewPageRequest): void {
+  if (!Number.isInteger(request.page) || request.page < 1 || request.page > 500 || !request.path) return
+  window.dispatchEvent(new CustomEvent(OFFICE_PREVIEW_SHOW_PAGE, { detail: request }))
+}
+
+/** Open the right panel on a slide, or show the waiting panel when the pptx is not on disk yet. */
+export function requestOfficePreviewReveal(request: { sessionId: string; path?: string; page?: number }): void {
+  if (!request.sessionId) return
+  if (request.path) {
+    const page = request.page
+    requestOfficePreviewPage({
+      sessionId: request.sessionId,
+      path: request.path,
+      page: typeof page === 'number' && Number.isInteger(page) && page >= 1 && page <= 500 ? page : 1,
+    })
+    return
+  }
+  window.dispatchEvent(new CustomEvent(OFFICE_PREVIEW_REVEAL, { detail: { sessionId: request.sessionId } }))
+}
+
+export function slideNumberFromOfficePath(path: string | undefined): number | undefined {
+  const match = /^\/slide\[(\d+)\]/.exec(path ?? '')
+  if (!match) return undefined
+  const page = Number(match[1])
+  return page >= 1 && page <= 500 ? page : undefined
+}
+
+/** Drop the pin once the person scrolls to a different slide. */
+export function pinnedPageAfterScroll(pin: PinnedOfficePage | undefined, anchorPath: string | undefined): PinnedOfficePage | undefined {
+  if (!pin) return undefined
+  const visible = slideNumberFromOfficePath(anchorPath)
+  if (visible && visible !== pin.page) return undefined
+  return pin
+}
+
+export function previewDocumentPage(pin: PinnedOfficePage | undefined, path: string | undefined): number | undefined {
+  if (!pin || !path || pin.path !== path) return undefined
+  return pin.page
+}
+
+/** Iframe bridge. Queues a page until the first scroll restore, then reveals `.main > .slide-container`. */
+export function officePreviewPageBridge(page: number | null): string {
+  const requested = page != null && Number.isInteger(page) && page >= 1 && page <= 500 ? String(page) : 'null'
+  return `const requestedPage = ${requested};
+  let queuedPage = requestedPage;
+  const revealPage = (page) => {
+    const n = Number(page);
+    if (!Number.isInteger(n) || n < 1 || n > 500) return;
+    const main = document.querySelector('.main');
+    let slide = null;
+    if (main) {
+      for (const el of main.children) {
+        if (el.classList && el.classList.contains('slide-container') && el.getAttribute('data-slide') === String(n)) { slide = el; break; }
+      }
+    }
+    if (!slide) slide = document.querySelector('[data-path="/slide[' + n + ']"]');
+    if (!slide) {
+      const prefix = '/slide[' + n + ']/';
+      slide = [...document.querySelectorAll('[data-path]')].find(el => (el.getAttribute('data-path') || '').startsWith(prefix)) || null;
+    }
+    if (slide && slide.scrollIntoView) slide.scrollIntoView({ block: 'start', inline: 'nearest' });
+  };
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || data.type !== '${OFFICE_PREVIEW_SHOW_PAGE}') return;
+    if (!restored) { queuedPage = data.page; return; }
+    revealPage(data.page);
+  });`
+}

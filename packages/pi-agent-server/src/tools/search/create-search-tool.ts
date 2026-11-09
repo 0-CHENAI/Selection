@@ -5,10 +5,9 @@
  * so the model doesn't need to know which backend is used.
  */
 
-import { Type } from '@earendil-works/pi-ai';
+import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { WebSearchProvider, WebSearchResult } from './types.ts';
-import { DDGSearchProvider } from './providers/ddg.ts';
 
 const schema = Type.Object({
   query: Type.String({ description: 'The search query' }),
@@ -35,12 +34,13 @@ function formatResults(
     .join('\n\n');
 
   const noteText = note ? `${note}\n\n` : '';
+  const resultText = formatted || 'No relevant results found.';
 
   return {
     content: [
       {
         type: 'text' as const,
-        text: `${noteText}Search results for "${query}" (via ${providerName}):\n\n${formatted}`,
+        text: `${noteText}Search results for "${query}" (via ${providerName}):\n\n${resultText}`,
       },
     ],
     details: {},
@@ -55,7 +55,8 @@ function formatErrorSnippet(message: string, max = 180): string {
 
 export function createSearchTool(
   provider: WebSearchProvider,
-  fallbackProvider: WebSearchProvider = new DDGSearchProvider(),
+  fallbackProvider?: WebSearchProvider,
+  resolveOrderedProviders?: (signal?: AbortSignal) => Promise<WebSearchProvider[] | null>,
 ): ToolDefinition<typeof schema> {
   return {
     name: 'web_search',
@@ -65,37 +66,62 @@ export function createSearchTool(
     promptSnippet:
       'Use web_search for up-to-date information, documentation lookups, or fact-checking. Returns titles, URLs, and snippets. Accepts a query string and optional count (1-10).',
     parameters: schema,
-    async execute(toolCallId, params) {
+    async execute(toolCallId, params, signal) {
       const { query } = params;
       const count = Math.max(1, Math.min(10, params.count ?? 5));
+      const providerName = provider.name;
 
+      let ordered: WebSearchProvider[] | null | undefined;
+      try { ordered = await resolveOrderedProviders?.(signal); }
+      catch (error) {
+        if (signal?.aborted) throw error;
+        return { content: [{ type: 'text' as const, text: 'Search settings are unavailable. Please retry.' }], details: { isError: true } };
+      }
       try {
-        const results = await provider.search(query, count);
-        return formatResults(query, provider.name, results);
+        signal?.throwIfAborted();
+        if (ordered) {
+          const failed: string[] = [];
+          for (const candidate of ordered) {
+            signal?.throwIfAborted();
+            try {
+              const results = await candidate.search(query, count, signal);
+              return formatResults(query, candidate.name, results, failed.length
+                ? `Search providers unavailable: ${failed.join(', ')}. Used ${candidate.name}.` : undefined);
+            } catch (error) {
+              if (signal?.aborted) throw error;
+              failed.push(candidate.name);
+            }
+          }
+          return { content: [{ type: 'text' as const, text: ordered.length
+            ? `Search failed: all enabled providers were unavailable (${failed.join(', ')}).`
+            : 'Search failed: no search providers are enabled.' }], details: { isError: true } };
+        }
+        const results = await provider.search(query, count, signal);
+        return formatResults(query, providerName, results);
       } catch (err) {
+        if (signal?.aborted) throw err;
         const primaryMsg = err instanceof Error ? err.message : String(err);
 
-        const canFallback = provider.name !== fallbackProvider.name;
-        if (canFallback) {
+        if (fallbackProvider && providerName !== fallbackProvider.name) {
           try {
-            const fallbackResults = await fallbackProvider.search(query, count);
+            const fallbackResults = await fallbackProvider.search(query, count, signal);
             return formatResults(
               query,
               fallbackProvider.name,
               fallbackResults,
-              `Primary search provider (${provider.name}) failed (${formatErrorSnippet(primaryMsg)}), automatically fell back to ${fallbackProvider.name}.`,
+              `Primary search provider (${providerName}) failed (${formatErrorSnippet(primaryMsg)}), automatically fell back to ${fallbackProvider.name}.`,
             );
           } catch (fallbackErr) {
+            if (signal?.aborted) throw fallbackErr;
             const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
             return {
               content: [
                 {
                   type: 'text' as const,
-                  text: `Search failed for "${query}": primary (${provider.name}) failed with "${formatErrorSnippet(primaryMsg, 400)}"; fallback (${fallbackProvider.name}) failed with "${formatErrorSnippet(fallbackMsg, 400)}"`,
+                  text: `Search failed for "${query}": primary (${providerName}) failed with "${primaryMsg}"; fallback (${fallbackProvider.name}) failed with "${fallbackMsg}"`,
                 },
               ],
-              details: {},
-              isError: true,
+              details: { isError: true },
             };
           }
         }
@@ -104,11 +130,10 @@ export function createSearchTool(
           content: [
             {
               type: 'text' as const,
-              text: `Search failed for "${query}": ${formatErrorSnippet(primaryMsg, 400)}`,
+              text: `Search failed for "${query}": ${primaryMsg}`,
             },
           ],
-          details: {},
-          isError: true,
+          details: { isError: true },
         };
       }
     },

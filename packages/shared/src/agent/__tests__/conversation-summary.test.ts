@@ -48,7 +48,7 @@ describe('conversation-summary helpers', () => {
 
   it('formats transferred-session context as a hidden one-shot block', () => {
     expect(buildTransferredSessionContext('Keep the remote workspace aligned.')).toBe(`<session_transfer_summary>
-This session continues an earlier conversation from another session or workspace, which was summarized for the handoff.
+This session was transferred from another workspace. The original conversation was summarized before transfer.
 Use the summary below as prior context for the next turn.
 
 Keep the remote workspace aligned.

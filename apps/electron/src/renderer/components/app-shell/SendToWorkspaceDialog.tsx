@@ -14,7 +14,7 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Send } from 'lucide-react'
+import { Cloud, CloudOff, Laptop, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -25,8 +25,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { WorkspaceAvatar } from '@/components/ui/workspace-avatar'
 import { useWorkspaceIcons } from '@/hooks/useWorkspaceIcon'
-import { WorkspaceTargetList, type RemoteHealth } from './WorkspaceTargetList'
+import { cn } from '@/lib/utils'
 import type { Workspace } from '../../../shared/types'
 import { getTransferTargets } from './transfer-targets'
 
@@ -75,7 +76,7 @@ export function SendToWorkspaceDialog({
   }, [isTransferring])
 
   // Health check results for remote workspaces (checked on dialog open)
-  const [remoteHealthMap, setRemoteHealthMap] = useState<Map<string, RemoteHealth>>(new Map())
+  const [remoteHealthMap, setRemoteHealthMap] = useState<Map<string, 'ok' | 'error' | 'checking'>>(new Map())
   const healthCheckAbort = useRef<AbortController | null>(null)
 
   // Every other workspace is a valid target; only remote ones need a health check
@@ -174,7 +175,7 @@ export function SendToWorkspaceDialog({
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Send className="size-4 text-tertiary" />
+            <Send className="h-4 w-4" />
             {t("sendToWorkspace.title")}
           </DialogTitle>
           <DialogDescription>
@@ -183,23 +184,63 @@ export function SendToWorkspaceDialog({
         </DialogHeader>
 
         {/* Workspace list — every other workspace; locals are always selectable */}
-        <WorkspaceTargetList
-          workspaces={targetWorkspaces}
-          selectedId={selectedWorkspaceId}
-          onSelect={setSelectedWorkspaceId}
-          disabled={isTransferring}
-          remoteHealth={remoteHealthMap}
-          iconById={workspaceIconMap}
-          emptyLabel={t("sendToWorkspace.noRemoteWorkspaces")}
-        />
+        <div className="flex flex-col gap-1 max-h-64 overflow-y-auto py-1">
+          {targetWorkspaces.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-2 py-4 text-center">
+              {t("sendToWorkspace.noRemoteWorkspaces")}
+            </p>
+          ) : (
+            targetWorkspaces.map(workspace => {
+              const isRemote = !!workspace.remoteServer
+              const isSelected = selectedWorkspaceId === workspace.id
+              const healthStatus = isRemote ? remoteHealthMap.get(workspace.id) : undefined
+              const isDisconnected = healthStatus === 'error'
+              const isChecking = healthStatus === 'checking'
+
+              return (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  disabled={isTransferring || isDisconnected}
+                  onClick={() => setSelectedWorkspaceId(workspace.id)}
+                  className={cn(
+                    'flex items-center gap-2 w-full px-2 py-2 rounded-md text-left text-sm transition-colors',
+                    'hover:bg-foreground/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    isSelected && 'bg-foreground/10 ring-1 ring-foreground/15',
+                    isDisconnected && 'opacity-50 cursor-not-allowed hover:bg-transparent',
+                  )}
+                >
+                  <WorkspaceAvatar
+                    workspaceId={workspace.id}
+                    workspaceName={workspace.name}
+                    src={workspaceIconMap.get(workspace.id)}
+                    className="h-5 w-5 rounded-full ring-1 ring-border/50 shrink-0"
+                    fallbackClassName="rounded-full"
+                  />
+                  <span className="flex-1 truncate">{workspace.name}</span>
+                  {!isRemote ? (
+                    <Laptop className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  ) : isDisconnected ? (
+                    <CloudOff className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+                  ) : (
+                    <Cloud className={cn(
+                      'h-3.5 w-3.5 shrink-0',
+                      isChecking ? 'text-muted-foreground/30 animate-pulse' : 'text-muted-foreground',
+                    )} />
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
 
         <DialogFooter>
           <Button
-            variant="ghost"
+            variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isTransferring}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <TransferButton
             onClick={handleTransfer}
@@ -213,7 +254,7 @@ export function SendToWorkspaceDialog({
   )
 }
 
-/** Send button with an accent progress stroke that traces around it during transfer */
+/** Send button with an accent border that traces around it during transfer */
 function TransferButton({ onClick, disabled, isTransferring, progress }: {
   onClick: () => void
   disabled: boolean
@@ -232,7 +273,7 @@ function TransferButton({ onClick, disabled, isTransferring, progress }: {
 
   return (
     <div ref={wrapperRef} className="relative">
-      <Button variant="primary" onClick={onClick} disabled={disabled}>
+      <Button onClick={onClick} disabled={disabled}>
         {isTransferring ? 'Sending...' : 'Send'}
       </Button>
       {isTransferring && (
@@ -249,7 +290,10 @@ function TransferButton({ onClick, disabled, isTransferring, progress }: {
             stroke="var(--accent)"
             strokeWidth="2"
             strokeDasharray={perim > 0 ? `${progress * perim} ${perim}` : '0 999'}
-            style={{ transition: 'stroke-dasharray var(--dur-base) var(--ease-out)' }}
+            style={{
+              transition: 'stroke-dasharray 0.2s ease-out',
+              filter: 'drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 30%, transparent))',
+            }}
           />
         </svg>
       )}

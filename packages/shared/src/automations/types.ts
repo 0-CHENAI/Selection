@@ -21,40 +21,29 @@ export type AppEvent =
   | 'SessionStatusChange'
   | 'SchedulerTick';
 
-/** Agent events - passed to Claude SDK */
-export type AgentEvent =
-  | 'PreToolUse'
-  | 'PostToolUse'
-  | 'PostToolUseFailure'
-  | 'Notification'
-  | 'UserPromptSubmit'
-  | 'SessionStart'
-  | 'SessionEnd'
-  | 'Stop'
-  | 'SubagentStart'
-  | 'SubagentStop'
-  | 'PreCompact'
-  | 'PermissionRequest'
-  | 'Setup';
-
-export type AutomationEvent = AppEvent | AgentEvent;
+export type AutomationEvent = AppEvent;
 
 export const APP_EVENTS: AppEvent[] = [
   'LabelAdd', 'LabelRemove', 'LabelConfigChange',
   'PermissionModeChange', 'FlagChange', 'SessionStatusChange', 'SchedulerTick'
 ];
 
-export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
-  'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
-  'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
-];
+/** Execution-history status for automation actions */
+export type AutomationHistoryStatus =
+  | 'matched'
+  | 'scheduled'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'rate-limited'
+  | 'suppressed'
+  | 'blocked';
 
 // ============================================================================
 // Action Definitions
 // ============================================================================
 
-/** A prompt action - sends a prompt to Craft Agent */
+/** A prompt action - sends a prompt to Selection */
 export interface PromptAction {
   type: 'prompt';
   prompt: string;
@@ -99,39 +88,7 @@ export interface WebhookAction {
   auth?: WebhookAuth;
 }
 
-/** Runtime a script action executes under (resolved via resolveScriptRuntime) */
-export type ScriptActionRuntime = 'bun' | 'node' | 'python3';
-
-/**
- * A script action — spawns a workspace-local script via argv (never a shell).
- *
- * Security model (locked design):
- * - The script path is workspace-relative and must stay within the workspace
- *   (symlink-aware check at execution time).
- * - argv spawn through resolveScriptRuntime — no shell interpretation.
- * - The child env contains ONLY CRAFT_* variables (event context + workspace
- *   paths + pass-through of the user's CRAFT_* exports), never full process.env.
- * - Runs of the same matcher never overlap (per-matcher concurrency lock).
- */
-export interface ScriptAction {
-  type: 'script';
-  /** Script path relative to the workspace root */
-  script: string;
-  /** Extra argv appended after the script path */
-  args?: string[];
-  /** Script runtime (default: 'bun') */
-  runtime?: ScriptActionRuntime;
-  /** Per-run timeout in ms (default 60_000, clamped to [1_000, 900_000]) */
-  timeoutMs?: number;
-  /**
-   * Page slug this script refreshes. When set, the executor injects
-   * CRAFT_PAGE_* env vars and records the outcome on the page's page.json
-   * (the completion marker the config watcher turns into `pages:changed`).
-   */
-  page?: string;
-}
-
-export type AutomationAction = PromptAction | WebhookAction | ScriptAction;
+export type AutomationAction = PromptAction | WebhookAction;
 
 // ============================================================================
 // Condition Types
@@ -161,7 +118,7 @@ export interface StateCondition {
   from?: unknown;
   /** Transition: new value (mapped via TRANSITION_FIELDS) */
   to?: unknown;
-  /** Array membership check */
+  /** Array membership, or substring match when the field is a string */
   contains?: string;
   /** Negation: matches anything except this value */
   not_value?: unknown;
@@ -175,18 +132,6 @@ export interface LogicalCondition {
 
 /** Union of all condition types */
 export type AutomationCondition = TimeCondition | StateCondition | LogicalCondition;
-
-/**
- * Yes/no question the decision model answers before a prompt action starts a
- * session (Settings > AI > Decision model, toggle `automationConditions`). The
- * run is skipped when the "yes" probability is below `threshold` (default 0.5).
- * Inert when the decision model is off or unavailable: the automation runs as
- * it would without the condition.
- */
-export interface SemanticCondition {
-  question: string;
-  threshold?: number;
-}
 
 // ============================================================================
 // Matcher Definition
@@ -211,20 +156,6 @@ export interface AutomationMatcher {
   enabled?: boolean;
   /** Optional conditions that must all pass (AND) after matcher matches, before actions fire */
   conditions?: AutomationCondition[];
-  /** Optional decision-model condition checked before prompt actions start a session */
-  semanticCondition?: SemanticCondition;
-  /**
-   * Optional Telegram forum-topic name. When set, sessions spawned by this
-   * matcher are bound to a forum topic of this name in the workspace's paired
-   * supergroup. The topic is created on first use and reused thereafter.
-   * Multiple matchers using the same value share one topic.
-   *
-   * Silently ignored when:
-   *   - No supergroup is paired in Settings → Messaging → Telegram
-   *   - The Telegram bot is not connected
-   *   - The bot lacks "Manage Topics" permission in the supergroup
-   */
-  telegramTopic?: string;
   actions: AutomationAction[];
 }
 
@@ -275,31 +206,7 @@ export interface WebhookActionResult {
   responseBody?: string;
 }
 
-/** Result of a script action */
-export interface ScriptActionResult {
-  type: 'script';
-  /** Workspace-relative script path as configured */
-  script: string;
-  /** Whether the run completed with exit code 0 */
-  success: boolean;
-  /** Exit code, or null when the process was killed (timeout) or never spawned */
-  exitCode: number | null;
-  /** True when the run was rejected before spawning (path/runtime violation) */
-  blocked?: boolean;
-  /** True when the run was skipped because the matcher was still running */
-  skipped?: boolean;
-  /** True when the process was killed after exceeding its timeout */
-  timedOut?: boolean;
-  /** Captured stdout (capped) */
-  stdout: string;
-  /** Captured stderr, or the block/spawn error (capped) */
-  stderr: string;
-  durationMs: number;
-  /** Page slug when this run refreshed a page */
-  page?: string;
-}
-
-export type ActionExecutionResult = PromptActionResult | WebhookActionResult | ScriptActionResult;
+export type ActionExecutionResult = PromptActionResult | WebhookActionResult;
 
 /** A pending prompt with its metadata */
 export interface PendingPrompt {
@@ -326,21 +233,13 @@ export interface PendingPrompt {
   model?: string;
   /** Thinking level for the created session (falls back to workspace default when omitted) */
   thinkingLevel?: ThinkingLevel;
-  /** Forum-topic name to bind the new session to (Telegram supergroup, when paired). */
-  telegramTopic?: string;
-  /** Decision-model condition from the matcher, with the event it is judged against. */
-  semanticCondition?: SemanticCondition;
-  /** Event that fired the matcher (for `semanticCondition`). */
-  event?: string;
-  /** Event payload (for `semanticCondition`). */
-  eventPayload?: Record<string, unknown>;
 }
 
 export interface AutomationResult {
   event: string;
   matched: number;
   results: ActionExecutionResult[];
-  /** Prompts that should be executed by Craft Agent (with metadata) */
+  /** Prompts that should be executed by Selection (with metadata) */
   pendingPrompts: PendingPrompt[];
 }
 
@@ -354,76 +253,6 @@ export type AutomationsValidationResult = {
   errors: string[];
   config: AutomationsConfig | null;
 };
-
-/**
- * Something in automations.json that will not run, and why. Produced by
- * loadAutomationsConfigLenient; the Automations screen shows these.
- *
- * `event` + `index` locate the matcher in the RAW file (before deprecated
- * aliases are merged), so the UI can mark the row it lists. Without `event`
- * the issue is about the whole file (e.g. not valid JSON).
- */
-export interface AutomationLoadIssue {
-  event?: string;
-  index?: number;
-  id?: string;
-  name?: string;
-  messages: string[];
-}
-
-/** Result of the lenient runtime load: every valid matcher, plus what was not loaded. */
-export interface AutomationsLenientLoadResult {
-  config: AutomationsConfig;
-  issues: AutomationLoadIssue[];
-}
-
-// ============================================================================
-// SDK Types
-// ============================================================================
-
-/**
- * SDK automation input type - union of all possible SDK event inputs
- */
-export interface SdkAutomationInput {
-  hook_event_name: string;
-  // Tool events
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  tool_response?: string;
-  tool_use_id?: string;
-  // Session events
-  source?: string;  // startup, resume, clear, compact
-  model?: string;
-  // Subagent events
-  agent_id?: string;
-  agent_type?: string;
-  // User prompt events
-  prompt?: string;
-  // Notification events
-  message?: string;
-  title?: string;
-  // Error events
-  error?: string;
-}
-
-/**
- * SDK automation callback signature (matches Claude SDK HookCallback type)
- */
-export type SdkAutomationCallback = (
-  input: SdkAutomationInput,
-  toolUseId: string,
-  options: { signal?: AbortSignal }
-) => Promise<{ continue: boolean; reason?: string }>;
-
-/**
- * SDK automation matcher format (matches Claude SDK HookCallbackMatcher type)
- * Note: The `hooks` field name is kept as-is to match the Claude SDK interface.
- */
-export interface SdkAutomationCallbackMatcher {
-  matcher?: string;
-  timeout?: number;
-  hooks: SdkAutomationCallback[];
-}
 
 // ============================================================================
 // Session Metadata

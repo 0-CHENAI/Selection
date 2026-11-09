@@ -11,8 +11,9 @@ import {
   ANTHROPIC_MODELS,
   getModelIdByShortName,
   normalizeDeprecatedModelId,
-  isAdaptiveThinkingAlwaysOnModel,
-  getDefaultSummarizationModel,
+  resolveKnownRegistryModelId,
+  compactionTriggerTokens,
+  COMPACTION_RESERVE_TOKENS,
 } from '../src/config/models.ts';
 
 describe('isClaudeModel', () => {
@@ -99,31 +100,22 @@ describe('getModelShortName', () => {
 });
 
 describe('Opus registry', () => {
-  it('lists Opus 5.5 first, then Opus 5, 4.8, 4.7 and 4.6', () => {
-    const opusIds = ANTHROPIC_MODELS.map(m => m.id).filter(id => id.startsWith('claude-opus-'));
-    expect(opusIds).toEqual(['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6']);
+  it('includes Opus 4.8 and keeps Opus 4.7 and Opus 4.6', () => {
+    const ids = ANTHROPIC_MODELS.map(m => m.id);
+    expect(ids).toContain('claude-opus-4-8');
+    expect(ids).toContain('claude-opus-4-7');
+    expect(ids).toContain('claude-opus-4-6');
   });
 
-  it('resolves "Opus" shortName to 5.5 (the default for new connections)', () => {
-    expect(getModelIdByShortName('Opus')).toBe('claude-opus-5-5');
+  it('resolves "Opus" shortName to 4.8', () => {
+    expect(getModelIdByShortName('Opus')).toBe('claude-opus-4-8');
   });
 
-  it('exposes Opus 5.5 and Opus 5 metadata', () => {
-    expect(getModelDisplayName('claude-opus-5-5')).toBe('Opus 5.5');
-    expect(getModelShortName('claude-opus-5-5')).toBe('Opus');
-    expect(getModelContextWindow('claude-opus-5-5')).toBe(1_000_000);
-    expect(getModelById('claude-opus-5-5')?.thinkingAlwaysOn).toBe(true);
-    expect(getModelDisplayName('claude-opus-5')).toBe('Opus 5');
-    expect(getModelContextWindow('claude-opus-5')).toBe(1_000_000);
-    expect(getModelById('claude-opus-5')?.thinkingAlwaysOn).toBeUndefined();
-    expect(getModelById('claude-opus-4-8')?.thinkingAlwaysOn).toBeUndefined();
-  });
-
-  it('maps Bedrock Opus 5.5 / Opus 5 IDs back to the bare IDs without cross-mapping', () => {
-    expect(getModelById('us.anthropic.claude-opus-5-5')?.id).toBe('claude-opus-5-5');
-    expect(getModelById('eu.anthropic.claude-opus-5-5')?.id).toBe('claude-opus-5-5');
-    expect(getModelById('anthropic.claude-opus-5')?.id).toBe('claude-opus-5');
-    expect(getModelById('global.anthropic.claude-opus-5')?.id).toBe('claude-opus-5');
+  it('does not rewrite family aliases to Claude ids', () => {
+    expect(resolveKnownRegistryModelId('Opus')).toBeUndefined();
+    expect(resolveKnownRegistryModelId('Laufry')).toBeUndefined();
+    expect(resolveKnownRegistryModelId('claude-opus-4-8')).toBe('claude-opus-4-8');
+    expect(resolveKnownRegistryModelId('claude-opus-4-7')).toBe('claude-opus-4-7');
   });
 
   it('normalizes deprecated Opus IDs to Opus 4.8 without migrating Opus 4.7 or 4.6', () => {
@@ -132,13 +124,6 @@ describe('Opus registry', () => {
     expect(normalizeDeprecatedModelId('claude-opus-4-6')).toBe('claude-opus-4-6');
     expect(normalizeDeprecatedModelId('pi/claude-opus-4-6')).toBe('pi/claude-opus-4-6');
     expect(normalizeDeprecatedModelId('us.anthropic.claude-opus-4-6-v1')).toBe('us.anthropic.claude-opus-4-6-v1');
-  });
-
-  it('migrates the retired DeepSeek v4 Flash aliases to deepseek-flash (pi 0.86+ catalog)', () => {
-    expect(normalizeDeprecatedModelId('deepseek-v4-flash')).toBe('deepseek-flash');
-    expect(normalizeDeprecatedModelId('pi/deepseek-v4-flash')).toBe('pi/deepseek-flash');
-    expect(normalizeDeprecatedModelId('pi/deepseek-v4-flash-vision-exp')).toBe('pi/deepseek-flash');
-    expect(normalizeDeprecatedModelId('deepseek-v4-pro')).toBe('deepseek-v4-pro');
   });
 });
 
@@ -149,25 +134,8 @@ describe('Sonnet registry', () => {
     expect(ids).toContain('claude-sonnet-4-6');
   });
 
-  it('resolves "Sonnet" shortName to Sonnet 5.5', () => {
-    expect(getModelIdByShortName('Sonnet')).toBe('claude-sonnet-5-5');
-  });
-
-  it('registers the 5.5 Sonnet and Haiku as adaptive-only, 1M-context models', () => {
-    for (const id of ['claude-sonnet-5-5', 'claude-haiku-5-5']) {
-      expect(getModelContextWindow(id)).toBe(1_000_000);
-      expect(isAdaptiveThinkingAlwaysOnModel(id)).toBe(true);
-      expect(isAdaptiveThinkingAlwaysOnModel(`pi/${id}`)).toBe(true);
-      expect(isAdaptiveThinkingAlwaysOnModel(`us.anthropic.${id}`)).toBe(true);
-    }
-    expect(getModelDisplayName('claude-haiku-5-5')).toBe('Haiku 5.5');
-    // Previous generations keep accepting `thinking: disabled`.
-    expect(isAdaptiveThinkingAlwaysOnModel('claude-sonnet-5')).toBe(false);
-    expect(isAdaptiveThinkingAlwaysOnModel('claude-haiku-4-5-20251001')).toBe(false);
-  });
-
-  it('makes Haiku 5.5 the default summarization model', () => {
-    expect(getDefaultSummarizationModel()).toBe('claude-haiku-5-5');
+  it('resolves "Sonnet" shortName to Sonnet 5', () => {
+    expect(getModelIdByShortName('Sonnet')).toBe('claude-sonnet-5');
   });
 
   it('exposes Sonnet 5 metadata', () => {
@@ -182,46 +150,14 @@ describe('Sonnet registry', () => {
   });
 });
 
-describe('isAdaptiveThinkingAlwaysOnModel', () => {
-  it('flags the registered always-on models in every id form', () => {
-    for (const id of [
-      'claude-opus-5-5', 'pi/claude-opus-5-5',
-      'us.anthropic.claude-opus-5-5', 'eu.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5',
-      // Region prefixes the Bedrock tables do not list still resolve by suffix.
-      'au.anthropic.claude-opus-5-5', 'pi/jp.anthropic.claude-opus-5-5',
-      'claude-fable-5-1', 'claude-fable-5', 'pi/claude-fable-5-1',
-    ]) {
-      expect(isAdaptiveThinkingAlwaysOnModel(id)).toBe(true);
-    }
+describe('compactionTriggerTokens', () => {
+  it('reserves the Pi default 16k from the model window', () => {
+    expect(compactionTriggerTokens(131_072)).toBe(131_072 - COMPACTION_RESERVE_TOKENS);
+    expect(compactionTriggerTokens(1_000_000)).toBe(1_000_000 - COMPACTION_RESERVE_TOKENS);
   });
 
-  it('keeps the Fable/Mythos family regex as a fallback for unregistered ids', () => {
-    expect(isAdaptiveThinkingAlwaysOnModel('claude-mythos-5-1')).toBe(true);
-    expect(isAdaptiveThinkingAlwaysOnModel('anthropic/claude-mythos-5')).toBe(true);
-  });
-
-  it('covers unregistered Opus 5.5 variants by pattern (dated snapshots, provider prefixes)', () => {
-    for (const id of [
-      // A dated snapshot surfaced by /v1/models before the registry knows it.
-      'claude-opus-5-5-20260922', 'pi/claude-opus-5-5-20260922',
-      // Bedrock-style dated id that the suffix match cannot resolve.
-      'us.anthropic.claude-opus-5-5-20260922-v1:0',
-      // Provider-prefixed form (OpenRouter-style).
-      'anthropic/claude-opus-5-5',
-    ]) {
-      expect(isAdaptiveThinkingAlwaysOnModel(id)).toBe(true);
-    }
-  });
-
-  it('leaves models that still accept thinking.type disabled alone', () => {
-    for (const id of [
-      'claude-opus-5', 'us.anthropic.claude-opus-5', 'pi/claude-opus-5',
-      // A dated Opus 5 snapshot must not be caught by the Opus 5.5 pattern.
-      'claude-opus-5-20260601', 'us.anthropic.claude-opus-5-20260601-v1:0',
-      'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-5', 'claude-haiku-4-5-20251001',
-      'gpt-6-astra',
-    ]) {
-      expect(isAdaptiveThinkingAlwaysOnModel(id)).toBe(false);
-    }
+  it('never returns a non-positive trigger for a valid window', () => {
+    expect(compactionTriggerTokens(8_192)).toBe(1);
+    expect(compactionTriggerTokens(0)).toBe(0);
   });
 });

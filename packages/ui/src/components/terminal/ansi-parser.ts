@@ -121,6 +121,54 @@ export function stripAnsi(input: string): string {
   return input.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
+function luminance(hex: string): number | undefined {
+  const raw = hex.trim().replace('#', '')
+  const full = raw.length === 3 ? raw.split('').map(ch => ch + ch).join('') : raw
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return undefined
+  const channel = (start: number) => parseInt(full.slice(start, start + 2), 16) / 255
+  const encode = (value: number) => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  const red = encode(channel(0))
+  const green = encode(channel(2))
+  const blue = encode(channel(4))
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+function contrast(left: number, right: number): number {
+  const [hi, lo] = left > right ? [left, right] : [right, left]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/**
+ * Lift a foreground that would disappear on the terminal canvas.
+ * An explicit background that already contrasts is left alone.
+ */
+export function readableAnsiForeground(fg: string | undefined, bg: string | undefined, theme: 'light' | 'dark'): string | undefined {
+  if (!fg) return fg
+  const fgLum = luminance(fg)
+  if (fgLum === undefined) return fg
+  const bgLum = bg ? luminance(bg) : undefined
+  if (bgLum !== undefined && contrast(fgLum, bgLum) >= 3) return fg
+  const canvas = theme === 'dark' ? luminance('#1a1a1a')! : luminance('#ffffff')!
+  const surface = bgLum ?? canvas
+  if (contrast(fgLum, surface) >= 3) return fg
+  return surface < 0.4 ? '#e4e4e4' : '#1a1a1a'
+}
+
+/** Binary or replacement-character dumps are not a log. Hide them instead of painting noise. */
+export function isUnreadableTerminalText(input: string): boolean {
+  const text = stripAnsi(input)
+  if (!text) return false
+  let bad = 0
+  let total = 0
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0
+    if (code === 0x09 || code === 0x0a || code === 0x0d || code === 0x20) continue
+    total += 1
+    if (code === 0xfffd || code < 0x20 || (code >= 0x7f && code < 0xa0)) bad += 1
+  }
+  return total > 0 && bad / total > 0.3
+}
+
 /**
  * Check if output looks like grep content output (with line numbers)
  * Pattern: starts with lines like "123:" (match) or "123-" (context)

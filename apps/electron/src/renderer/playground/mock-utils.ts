@@ -3,201 +3,36 @@ import type {
   LoadedSource,
   PermissionMode,
   MessagingPlatformRuntimeInfo,
-  TaskGetResult,
-  TaskRunSnapshotDto,
-  WhatsAppUiEvent,
+  MessagingPlatformOwnerInfo,
+  MessagingPendingSenderInfo,
+  MessagingPlatformAccessMode,
+  MessagingBindingAccessMode,
 } from '../../shared/types'
 import type { MessagingBinding } from '../atoms/messaging'
-import type {
-  BindingAccess,
-  PendingSender,
-  PlatformAccessMode,
-  PlatformOwner,
-} from '../components/messaging/access/types'
-import { TASK_SPEC_SAMPLES } from './registry/samples/task-specs'
 
-// ============================================================================
-// Messaging mock state + control handle
-// ============================================================================
-//
-// The real messaging flow is driven by IPC push events (platform status,
-// binding changes, WhatsApp pairing phases). To make the messaging UI
-// previewable, we replace those IPC calls with an in-memory event bus and
-// expose a `window.__playgroundMessaging` handle so variant/preview wrappers
-// can flip state (connected ↔ disconnected, WhatsApp phase, bindings) without
-// remounting the component.
-
-type PlatformStatusListener = (
-  workspaceId: string,
-  platform: string,
-  status: MessagingPlatformRuntimeInfo,
-) => void
-type BindingListener = (workspaceId: string) => void
-type WhatsAppEventListener = (payload: { workspaceId: string; event: WhatsAppUiEvent }) => void
-
-const PLAYGROUND_WORKSPACE_ID = 'playground-workspace'
-
-type AllowListPlatform = 'telegram' | 'whatsapp' | 'lark'
-
-interface AllowListState {
-  accessMode: PlatformAccessMode
-  owners: PlatformOwner[]
-  pending: PendingSender[]
-  /** Per-binding access. Keyed by bindingId. */
-  bindings: Record<string, BindingAccess>
-}
-
-interface MessagingMockState {
+const playgroundMessagingState = {
   runtime: {
-    telegram: MessagingPlatformRuntimeInfo
-    whatsapp: MessagingPlatformRuntimeInfo
-  }
-  bindings: MessagingBinding[]
-  /** Workspace-level allow-list state per platform (Phase 1 mock surface). */
-  allowList: Record<AllowListPlatform, AllowListState>
-  platformStatusListeners: Set<PlatformStatusListener>
-  bindingListeners: Set<BindingListener>
-  waEventListeners: Set<WhatsAppEventListener>
-}
-
-function defaultRuntime(platform: 'telegram' | 'whatsapp'): MessagingPlatformRuntimeInfo {
-  return {
-    platform,
+    platform: 'lark',
     configured: false,
     connected: false,
     state: 'disconnected',
     updatedAt: Date.now(),
-  }
+  } as MessagingPlatformRuntimeInfo,
+  bindings: [] as MessagingBinding[],
+  owners: [] as MessagingPlatformOwnerInfo[],
+  pending: [] as MessagingPendingSenderInfo[],
+  accessMode: 'open' as MessagingPlatformAccessMode,
+  bindingAccess: {} as Record<string, { mode: MessagingBindingAccessMode; allowedSenderIds: string[] }>,
+  bindingListeners: new Set<(workspaceId: string) => void>(),
+  platformListeners: new Set<(workspaceId: string, platform: string, status: MessagingPlatformRuntimeInfo) => void>(),
 }
 
-function defaultAllowList(): AllowListState {
-  return { accessMode: 'open', owners: [], pending: [], bindings: {} }
-}
-
-const messagingMockState: MessagingMockState = {
-  runtime: {
-    telegram: defaultRuntime('telegram'),
-    whatsapp: defaultRuntime('whatsapp'),
-  },
-  bindings: [],
-  allowList: {
-    telegram: defaultAllowList(),
-    whatsapp: defaultAllowList(),
-    lark: defaultAllowList(),
-  },
-  platformStatusListeners: new Set(),
-  bindingListeners: new Set(),
-  waEventListeners: new Set(),
-}
-
-function emitPlatformStatus(platform: 'telegram' | 'whatsapp') {
-  const status = messagingMockState.runtime[platform]
-  for (const listener of messagingMockState.platformStatusListeners) {
-    try { listener(PLAYGROUND_WORKSPACE_ID, platform, status) } catch (err) { console.error(err) }
-  }
-}
+const PLAYGROUND_WORKSPACE_ID = 'playground-workspace'
 
 function emitBindingChanged() {
-  for (const listener of messagingMockState.bindingListeners) {
-    try { listener(PLAYGROUND_WORKSPACE_ID) } catch (err) { console.error(err) }
+  for (const listener of playgroundMessagingState.bindingListeners) {
+    listener(PLAYGROUND_WORKSPACE_ID)
   }
-}
-
-function emitWhatsAppEvent(event: WhatsAppUiEvent) {
-  for (const listener of messagingMockState.waEventListeners) {
-    try { listener({ workspaceId: PLAYGROUND_WORKSPACE_ID, event }) } catch (err) { console.error(err) }
-  }
-}
-
-export interface PlaygroundMessagingHandle {
-  /** Snapshot of current state (for debugging from DevTools). */
-  state: MessagingMockState
-  setTelegramConnected: (connected: boolean, identity?: string) => void
-  setWhatsAppConnected: (connected: boolean, identity?: string) => void
-  setBindings: (bindings: MessagingBinding[]) => void
-  fireWAEvent: (event: WhatsAppUiEvent) => void
-  reset: () => void
-}
-
-/**
- * Allow-list mock control. Lets AllowListPreview drive the workspace-level
- * owners / pending / per-binding-access mock state without going through the
- * IPC mocks. Phase 3 wiring will read the same state via electronAPI.
- */
-export interface PlaygroundAllowListHandle {
-  setAccessMode: (platform: AllowListPlatform, mode: PlatformAccessMode) => void
-  setOwners: (platform: AllowListPlatform, owners: PlatformOwner[]) => void
-  setPending: (platform: AllowListPlatform, pending: PendingSender[]) => void
-  setBindingAccess: (
-    platform: AllowListPlatform,
-    bindingId: string,
-    access: BindingAccess,
-  ) => void
-  reset: () => void
-}
-
-export const playgroundMessagingHandle: PlaygroundMessagingHandle = {
-  state: messagingMockState,
-  setTelegramConnected(connected, identity) {
-    messagingMockState.runtime.telegram = {
-      platform: 'telegram',
-      configured: connected,
-      connected,
-      state: connected ? 'connected' : 'disconnected',
-      identity,
-      updatedAt: Date.now(),
-    }
-    emitPlatformStatus('telegram')
-  },
-  setWhatsAppConnected(connected, identity) {
-    messagingMockState.runtime.whatsapp = {
-      platform: 'whatsapp',
-      configured: connected,
-      connected,
-      state: connected ? 'connected' : 'disconnected',
-      identity,
-      updatedAt: Date.now(),
-    }
-    emitPlatformStatus('whatsapp')
-  },
-  setBindings(bindings) {
-    messagingMockState.bindings = bindings
-    emitBindingChanged()
-  },
-  fireWAEvent(event) {
-    emitWhatsAppEvent(event)
-  },
-  reset() {
-    messagingMockState.runtime.telegram = defaultRuntime('telegram')
-    messagingMockState.runtime.whatsapp = defaultRuntime('whatsapp')
-    messagingMockState.bindings = []
-    messagingMockState.allowList.telegram = defaultAllowList()
-    messagingMockState.allowList.whatsapp = defaultAllowList()
-    messagingMockState.allowList.lark = defaultAllowList()
-    emitPlatformStatus('telegram')
-    emitPlatformStatus('whatsapp')
-    emitBindingChanged()
-  },
-}
-
-export const playgroundAllowListHandle: PlaygroundAllowListHandle = {
-  setAccessMode(platform, mode) {
-    messagingMockState.allowList[platform].accessMode = mode
-  },
-  setOwners(platform, owners) {
-    messagingMockState.allowList[platform].owners = owners
-  },
-  setPending(platform, pending) {
-    messagingMockState.allowList[platform].pending = pending
-  },
-  setBindingAccess(platform, bindingId, access) {
-    messagingMockState.allowList[platform].bindings[bindingId] = access
-  },
-  reset() {
-    messagingMockState.allowList.telegram = defaultAllowList()
-    messagingMockState.allowList.whatsapp = defaultAllowList()
-    messagingMockState.allowList.lark = defaultAllowList()
-  },
 }
 
 // ============================================================================
@@ -205,10 +40,14 @@ export const playgroundAllowListHandle: PlaygroundAllowListHandle = {
 // ============================================================================
 
 export const mockElectronAPI = {
+  getWindowFocusState: async () => true,
+  onWindowFocusChange: () => () => {},
+  getDefaultThinkingLevel: async () => 'medium' as const,
+  getWorkspaceSettings: async () => ({ permissionMode: 'safe' as const }),
+  getAdvancedSettings: async () => ({ dagOrchestrationEnabled: false, swarmAgentsEnabled: false, anySearchApiKeyConfigured: false }),
   isDebugMode: async () => true,
-
-  // useInlineMention logs every keystroke through this
-  debugLog: (..._args: unknown[]) => {},
+  isChannelAvailable: (channel: string) => channel === 'artifacts:preview',
+  previewArtifactVersion: async () => '/documents/hello.docx',
 
   // Called at module-load time by SessionFilesSection.tsx (and others) to
   // branch between Electron and web-UI rendering. Must be synchronous.
@@ -234,72 +73,9 @@ export const mockElectronAPI = {
     return null
   },
 
-  // Coding mode worktree picker: a bare-layout repo from a recent folder, a plain clone in the
-  // workspace folder, and two GitHub-only repos. Creating fails for a branch named "taken".
-  listCodingRepos: async (workspaceId: string, recentDirs: string[]) => {
-    console.log('[Playground] listCodingRepos called:', workspaceId, recentDirs)
-    await new Promise(resolve => setTimeout(resolve, 500))
-    return {
-      local: [
-        { kind: 'local' as const, name: 'craft-agents', nameWithOwner: 'craft-ai-agents/craft-agents', gitDir: '/Users/demo/Workspace/CraftAgentsDev/.bare', worktreeParent: '/Users/demo/Workspace/CraftAgentsDev', worktrees: 31, origin: 'recent' as const },
-        { kind: 'local' as const, name: 'blurhash-rs', nameWithOwner: 'demo/blurhash-rs', gitDir: '/Users/demo/Workspace/blurhash-rs/.git', worktreeParent: '/Users/demo/Workspace', worktrees: 1, origin: 'workspace' as const },
-      ],
-      github: [
-        { kind: 'github' as const, nameWithOwner: 'demo/embercourt', description: 'Card game server', isPrivate: true, updatedAt: Date.now() - 86_400_000 },
-        { kind: 'github' as const, nameWithOwner: 'demo/gyul.ai', isPrivate: false, updatedAt: Date.now() - 3 * 86_400_000 },
-      ],
-      cloneRoot: '/Users/demo/Workspace',
-    }
-  },
-
-  createCodingWorktree: async (workspaceId: string, request: { gitDir?: string; cloneNameWithOwner?: string; branch: string }) => {
-    console.log('[Playground] createCodingWorktree called:', workspaceId, request)
-    await new Promise(resolve => setTimeout(resolve, request.cloneNameWithOwner ? 1800 : 900))
-    if (request.branch.endsWith('taken')) throw new Error(`a branch named '${request.branch}' already exists`)
-    const slug = request.branch.split('/').pop()
-    const path = request.gitDir?.endsWith('/.bare')
-      ? `/Users/demo/Workspace/CraftAgentsDev/${slug}`
-      : `/Users/demo/Workspace/${(request.cloneNameWithOwner ?? request.gitDir ?? 'repo').split('/').filter(p => p && p !== '.git').pop()}-${slug}`
-    return { path, branch: request.branch, base: 'origin/main', cloned: !!request.cloneNameWithOwner }
-  },
-
-  getBackgroundTaskOutput: async (sessionId: string, taskId: string) => {
-    console.log('[Playground] getBackgroundTaskOutput called:', sessionId, taskId)
-    if (taskId.startsWith('agent-')) {
-      const done = taskId.includes('done')
-      return {
-        kind: 'agent' as const,
-        message: done
-          ? '**Radix popovers trap focus while open.** Hand focus back after unmount in a `requestAnimationFrame`, and pass `onCloseAutoFocus` when the trigger unmounts with the content.\n\n- `forwardRef` on portal children, or exit animations cannot run.'
-          : 'Starting with the evaluator: `newAutoLabelEntries` is only called from SessionManager, so the merge rules hold.',
-        steps: [
-          { tool: 'Read', label: 'evaluator.ts' },
-          { tool: 'Grep', label: 'newAutoLabelEntries' },
-          { tool: 'Bash', label: 'Run label tests' },
-          { tool: 'mcp__github__search_code', label: 'Search Code' },
-        ],
-        truncated: false,
-      }
-    }
-    if (taskId.includes('fail')) {
-      return { kind: 'text' as const, text: '$ eslint src\nsrc/a.ts\n  12:7  error  Unexpected any  @typescript-eslint/no-explicit-any\n\n✖ 1 problem (1 error, 0 warnings)\n', truncated: false }
-    }
-    return { kind: 'text' as const, text: `bun test v1.3.10\n\nsrc/labels/values.test.ts:\n✓ LabelEntrySet > a plain entry is present [0.02ms]\n✓ LabelEntrySet > values keep everything [0.01ms]\n\n 89 pass\n 0 fail\nRan 89 tests across 9 files. [150.00ms]\n\nWatching for file changes…\n`, truncated: false }
-  },
-
-  stopBackgroundTask: async (sessionId: string, taskId: string) => {
-    console.log('[Playground] stopBackgroundTask called:', sessionId, taskId)
-    return { success: true }
-  },
-
-  // Transport reconnects: SessionFilesSection re-reads the folder on reconnect (returns an unsubscribe)
-  onReconnected: (_callback: () => void) => () => {},
-
-  // Session actions from the chat header (share, regenerate title, show in Finder, …). No `openUrl`
-  // mock: the Browser UI demo copies to the clipboard when it is absent.
-  sessionCommand: async (sessionId: string, command: { type: string }) => {
-    console.log('[Playground] sessionCommand called:', sessionId, command.type)
-    return { success: false, error: 'Not available in the playground' }
+  getTaskOutput: async (taskId: string) => {
+    console.log('[Playground] getTaskOutput called:', taskId)
+    return `Output for task ${taskId}:\n\nThis is a mock output in the playground.\nIn the real app, this would show the actual task output.`
   },
 
   // Session files API used by SessionFilesSection (Info popover)
@@ -326,6 +102,7 @@ export const mockElectronAPI = {
   },
 
   browserPane: {
+    openHtmlFile: async () => 'mock-html-browser',
     focus: async (instanceId: string) => {
       console.log('[Playground] browserPane.focus called:', instanceId)
     },
@@ -341,24 +118,9 @@ export const mockElectronAPI = {
     alert(`Would reveal in file manager:\n${path}`)
   },
 
-  getHomeDir: async () => '/Users/you',
-
-  testRemoteConnection: async (_url: string, _token: string) => ({ ok: true }),
-
-  removeWorkspace: async (workspaceId: string) => {
-    console.log('[Playground] removeWorkspace called:', workspaceId)
-    return true
-  },
-
   // NavigationProvider subscribes to deep-link IPC on mount; in the playground
   // there is no main process firing these events, so the listener is a no-op.
   onDeepLinkNavigate: (_callback: unknown) => {
-    void _callback
-    return () => {}
-  },
-
-  // useLabels/useViews subscribe on mount (mobile WebUI demos); labels never change in the playground.
-  onLabelsChanged: (_callback: (workspaceId: string) => void) => {
     void _callback
     return () => {}
   },
@@ -382,8 +144,6 @@ export const mockElectronAPI = {
   },
 
   // FreeFormInput required mocks
-  getAutoCapitalisation: async () => false,
-
   getPendingPlanExecution: async (sessionId: string) => {
     console.log('[Playground] getPendingPlanExecution called:', sessionId)
     return null
@@ -400,6 +160,20 @@ export const mockElectronAPI = {
     { key: 'deepseek', label: 'DeepSeek', placeholder: 'sk-...' },
   ],
   getPiProviderBaseUrl: async () => '',
+  fetchCustomEndpointModels: async () => {
+    // Playground stand-in for the main-process catalog. Do not log the key.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return {
+      ok: true as const,
+      source: 'anthropic' as const,
+      models: [
+        { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', contextWindow: 200_000 },
+        { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', contextWindow: 200_000 },
+        { id: 'kimi-k2', name: 'Kimi K2', contextWindow: 262_144 },
+        { id: 'moonshot-v1-128k', name: 'Moonshot v1 128K', contextWindow: 131_072 },
+      ],
+    }
+  },
   getPiProviderModels: async (provider: string) => {
     const MOCK_MODELS: Record<string, Array<{ id: string; name: string; costInput: number; costOutput: number; contextWindow: number; reasoning: boolean }>> = {
       'openrouter': [
@@ -439,7 +213,7 @@ export const mockElectronAPI = {
       ],
       'deepseek': [
         { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', costInput: 0.56, costOutput: 1.68, contextWindow: 128000, reasoning: true },
-        { id: 'deepseek-flash', name: 'DeepSeek V4 Flash', costInput: 0.14, costOutput: 0.42, contextWindow: 128000, reasoning: true },
+        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', costInput: 0.14, costOutput: 0.42, contextWindow: 128000, reasoning: true },
       ],
       'xai': [
         { id: 'grok-4', name: 'Grok 4', costInput: 6, costOutput: 18, contextWindow: 256000, reasoning: true },
@@ -485,21 +259,15 @@ export const mockElectronAPI = {
   },
 
   // ------------------------------------------------------------------
-  // Messaging Gateway (Telegram + WhatsApp)
+  // Messaging gateway
   // ------------------------------------------------------------------
 
   getMessagingConfig: async () => {
     console.log('[Playground] getMessagingConfig called')
     return {
       enabled: true,
-      platforms: {
-        telegram: { enabled: true },
-        whatsapp: { enabled: true },
-      },
-      runtime: {
-        telegram: messagingMockState.runtime.telegram,
-        whatsapp: messagingMockState.runtime.whatsapp,
-      },
+      platforms: { lark: { enabled: playgroundMessagingState.runtime.configured } },
+      runtime: { lark: playgroundMessagingState.runtime },
     }
   },
 
@@ -507,39 +275,24 @@ export const mockElectronAPI = {
     console.log('[Playground] updateMessagingConfig called:', config)
   },
 
-  testTelegramToken: async (token: string) => {
-    console.log('[Playground] testTelegramToken called')
-    if (token.includes(':') && token.length > 10) {
-      return { success: true, botName: 'Playground Bot', botUsername: 'playground_bot' }
-    }
-    return { success: false, error: 'Invalid token format (expected 1234567:ABC...)' }
-  },
-
-  saveTelegramToken: async (token: string) => {
-    console.log('[Playground] saveTelegramToken called')
-    void token
-    playgroundMessagingHandle.setTelegramConnected(true, 'Playground Bot')
-  },
-
   disconnectMessagingPlatform: async (platform: string) => {
     console.log('[Playground] disconnectMessagingPlatform called:', platform)
-    if (platform === 'telegram') playgroundMessagingHandle.setTelegramConnected(false)
-    if (platform === 'whatsapp') playgroundMessagingHandle.setWhatsAppConnected(false)
+    playgroundMessagingState.runtime = {
+      platform: 'lark', configured: false, connected: false,
+      state: 'disconnected', updatedAt: Date.now(),
+    }
   },
 
   forgetMessagingPlatform: async (platform: string) => {
     console.log('[Playground] forgetMessagingPlatform called:', platform)
-    if (platform === 'telegram') playgroundMessagingHandle.setTelegramConnected(false)
-    if (platform === 'whatsapp') playgroundMessagingHandle.setWhatsAppConnected(false)
-    // Drop bindings for that platform
-    playgroundMessagingHandle.setBindings(
-      messagingMockState.bindings.filter((b) => b.platform !== platform),
-    )
+    playgroundMessagingState.bindings = playgroundMessagingState.bindings
+      .filter((binding) => binding.platform !== platform)
+    emitBindingChanged()
   },
 
   getMessagingBindings: async () => {
     console.log('[Playground] getMessagingBindings called')
-    return messagingMockState.bindings
+    return playgroundMessagingState.bindings
   },
 
   generateMessagingPairingCode: async (sessionId: string, platform: string) => {
@@ -547,26 +300,24 @@ export const mockElectronAPI = {
     return {
       code: '482193',
       expiresAt: Date.now() + 5 * 60_000,
-      botUsername: platform === 'telegram' ? 'playground_bot' : undefined,
     }
   },
 
   unbindMessagingSession: async (sessionId: string, platform?: string) => {
     console.log('[Playground] unbindMessagingSession called:', { sessionId, platform })
-    playgroundMessagingHandle.setBindings(
-      messagingMockState.bindings.filter((b) => {
+    playgroundMessagingState.bindings = playgroundMessagingState.bindings.filter((b) => {
         if (b.sessionId !== sessionId) return true
         if (platform && b.platform !== platform) return true
         return false
-      }),
-    )
+      })
+    emitBindingChanged()
   },
 
   unbindMessagingBinding: async (bindingId: string) => {
     console.log('[Playground] unbindMessagingBinding called:', bindingId)
-    playgroundMessagingHandle.setBindings(
-      messagingMockState.bindings.filter((b) => b.id !== bindingId),
-    )
+    playgroundMessagingState.bindings = playgroundMessagingState.bindings
+      .filter((binding) => binding.id !== bindingId)
+    emitBindingChanged()
     return { success: true }
   },
 
@@ -574,70 +325,62 @@ export const mockElectronAPI = {
   // Messaging access control (mirrors the production ElectronAPI surface)
   // ------------------------------------------------------------------
 
-  getMessagingPlatformOwners: async (platform: AllowListPlatform): Promise<PlatformOwner[]> => {
+  getMessagingPlatformOwners: async (platform: string): Promise<MessagingPlatformOwnerInfo[]> => {
     console.log('[Playground] getMessagingPlatformOwners called:', platform)
-    return [...messagingMockState.allowList[platform].owners]
+    return [...playgroundMessagingState.owners]
   },
 
   setMessagingPlatformOwners: async (
-    platform: AllowListPlatform,
-    owners: PlatformOwner[],
-  ): Promise<PlatformOwner[]> => {
+    platform: string,
+    owners: MessagingPlatformOwnerInfo[],
+  ): Promise<MessagingPlatformOwnerInfo[]> => {
     console.log('[Playground] setMessagingPlatformOwners called:', platform, owners.length)
-    playgroundAllowListHandle.setOwners(platform, owners)
+    playgroundMessagingState.owners = [...owners]
     return [...owners]
   },
 
-  getMessagingPlatformAccessMode: async (platform: AllowListPlatform): Promise<PlatformAccessMode> => {
+  getMessagingPlatformAccessMode: async (platform: string): Promise<MessagingPlatformAccessMode> => {
     console.log('[Playground] getMessagingPlatformAccessMode called:', platform)
-    return messagingMockState.allowList[platform].accessMode
+    return playgroundMessagingState.accessMode
   },
 
   setMessagingPlatformAccessMode: async (
-    platform: AllowListPlatform,
-    mode: PlatformAccessMode,
+    platform: string,
+    mode: MessagingPlatformAccessMode,
   ) => {
     console.log('[Playground] setMessagingPlatformAccessMode called:', platform, mode)
-    playgroundAllowListHandle.setAccessMode(platform, mode)
+    playgroundMessagingState.accessMode = mode
     return { success: true }
   },
 
-  getMessagingPendingSenders: async (platform?: AllowListPlatform): Promise<PendingSender[]> => {
+  getMessagingPendingSenders: async (platform?: string): Promise<MessagingPendingSenderInfo[]> => {
     console.log('[Playground] getMessagingPendingSenders called:', platform)
-    if (!platform) {
-      return [
-        ...messagingMockState.allowList.telegram.pending,
-        ...messagingMockState.allowList.whatsapp.pending,
-        ...messagingMockState.allowList.lark.pending,
-      ]
-    }
-    return [...messagingMockState.allowList[platform].pending]
+    return playgroundMessagingState.pending.filter((sender) => !platform || sender.platform === platform)
   },
 
   dismissMessagingPendingSender: async (
-    platform: AllowListPlatform,
+    platform: string,
     userId: string,
     opts?: { reason?: string; bindingId?: string },
   ) => {
     console.log('[Playground] dismissMessagingPendingSender called:', platform, userId, opts)
-    const next = messagingMockState.allowList[platform].pending.filter((s) => {
+    const next = playgroundMessagingState.pending.filter((s) => {
       if (s.userId !== userId) return true
       if (opts?.reason !== undefined && (s.reason ?? 'not-owner') !== opts.reason) return true
       if (opts?.bindingId !== undefined && s.bindingId !== opts.bindingId) return true
       return false
     })
-    playgroundAllowListHandle.setPending(platform, next)
+    playgroundMessagingState.pending = next
     return { success: true }
   },
 
   allowMessagingPendingSender: async (
-    platform: AllowListPlatform,
+    platform: string,
     userId: string,
     entryKey?: { reason?: string; bindingId?: string },
-  ): Promise<{ owners: PlatformOwner[]; bindingId?: string }> => {
+  ): Promise<{ owners: MessagingPlatformOwnerInfo[]; bindingId?: string }> => {
     console.log('[Playground] allowMessagingPendingSender called:', platform, userId, entryKey)
-    const state = messagingMockState.allowList[platform]
-    const match = state.pending.find((p) =>
+    const match = playgroundMessagingState.pending.find((p) =>
       p.userId === userId &&
       (entryKey?.reason === undefined || (p.reason ?? 'not-owner') === entryKey.reason) &&
       (entryKey?.bindingId === undefined || p.bindingId === entryKey.bindingId),
@@ -647,7 +390,7 @@ export const mockElectronAPI = {
     const reason = match.reason ?? 'not-owner'
     if (reason === 'not-on-binding-allowlist' && match.bindingId) {
       // Binding-scoped allow — don't promote to workspace owner.
-      const access = state.bindings[match.bindingId] ?? {
+      const access = playgroundMessagingState.bindingAccess[match.bindingId] ?? {
         mode: 'allow-list' as const,
         allowedSenderIds: [],
       }
@@ -655,41 +398,32 @@ export const mockElectronAPI = {
         mode: 'allow-list' as const,
         allowedSenderIds: Array.from(new Set([...access.allowedSenderIds, userId])),
       }
-      playgroundAllowListHandle.setBindingAccess(platform, match.bindingId, next)
-      playgroundAllowListHandle.setPending(
-        platform,
-        state.pending.filter(
-          (p) => !(p.userId === userId && p.bindingId === match.bindingId),
-        ),
+      playgroundMessagingState.bindingAccess[match.bindingId] = next
+      playgroundMessagingState.pending = playgroundMessagingState.pending.filter(
+        (p) => !(p.userId === userId && p.bindingId === match.bindingId),
       )
-      return { owners: [...state.owners], bindingId: match.bindingId }
+      return { owners: [...playgroundMessagingState.owners], bindingId: match.bindingId }
     }
 
     // 'not-owner' branch: promote to workspace owner.
-    const owner: PlatformOwner = {
+    const owner: MessagingPlatformOwnerInfo = {
       userId: match.userId,
       ...(match.displayName ? { displayName: match.displayName } : {}),
       ...(match.username ? { username: match.username } : {}),
       addedAt: Date.now(),
     }
-    const nextOwners = [...state.owners.filter((o) => o.userId !== userId), owner]
-    playgroundAllowListHandle.setOwners(platform, nextOwners)
-    playgroundAllowListHandle.setPending(
-      platform,
-      state.pending.filter((p) => p.userId !== userId),
-    )
+    const nextOwners = [...playgroundMessagingState.owners.filter((o) => o.userId !== userId), owner]
+    playgroundMessagingState.owners = nextOwners
+    playgroundMessagingState.pending = playgroundMessagingState.pending.filter((p) => p.userId !== userId)
     return { owners: nextOwners }
   },
 
   setMessagingBindingAccess: async (
     bindingId: string,
-    access: BindingAccess,
+    access: { mode: MessagingBindingAccessMode; allowedSenderIds: string[] },
   ) => {
     console.log('[Playground] setMessagingBindingAccess called:', bindingId)
-    // Playground stores binding access keyed under telegram by default —
-    // production records the binding's platform server-side, so the mock
-    // doesn't need to be platform-aware to exercise the UI.
-    playgroundAllowListHandle.setBindingAccess('telegram', bindingId, access)
+    playgroundMessagingState.bindingAccess[bindingId] = access
     return { success: true }
   },
 
@@ -699,9 +433,9 @@ export const mockElectronAPI = {
   },
 
   onMessagingBindingChanged: (callback: (workspaceId: string) => void) => {
-    messagingMockState.bindingListeners.add(callback)
+    playgroundMessagingState.bindingListeners.add(callback)
     return () => {
-      messagingMockState.bindingListeners.delete(callback)
+      playgroundMessagingState.bindingListeners.delete(callback)
     }
   },
 
@@ -712,56 +446,10 @@ export const mockElectronAPI = {
       status: MessagingPlatformRuntimeInfo,
     ) => void,
   ) => {
-    messagingMockState.platformStatusListeners.add(callback)
+    playgroundMessagingState.platformListeners.add(callback)
     return () => {
-      messagingMockState.platformStatusListeners.delete(callback)
+      playgroundMessagingState.platformListeners.delete(callback)
     }
-  },
-
-  // WhatsApp subprocess-based pairing — we fire a synthetic QR after a short
-  // delay so the "show_qr" phase is visible by default, but variants can
-  // override this by calling __playgroundMessaging.fireWAEvent().
-  startWhatsAppConnect: async () => {
-    console.log('[Playground] startWhatsAppConnect called')
-    setTimeout(() => {
-      emitWhatsAppEvent({
-        type: 'qr',
-        qr: 'playground://whatsapp/qr/' + Math.random().toString(36).slice(2),
-      })
-    }, 400)
-    return { success: true }
-  },
-
-  submitWhatsAppPhone: async (phoneNumber: string) => {
-    console.log('[Playground] submitWhatsAppPhone called:', phoneNumber)
-    return { success: true }
-  },
-
-  onWhatsAppEvent: (
-    callback: (payload: { workspaceId: string; event: WhatsAppUiEvent }) => void,
-  ) => {
-    messagingMockState.waEventListeners.add(callback)
-    return () => {
-      messagingMockState.waEventListeners.delete(callback)
-    }
-  },
-
-  // Task specs for the task brief demos (registry/samples/task-specs.ts), keyed by slug
-  getTask: async (_workspaceId: string, slug: string): Promise<TaskGetResult> => {
-    const spec = (TASK_SPEC_SAMPLES as Record<string, unknown>)[slug]
-    if (!spec) {
-      return { slug, validation: { valid: false, errors: [{ path: 'root', message: `Task "${slug}" not found`, severity: 'error' }], warnings: [] }, run: null }
-    }
-    return { slug, validation: { valid: true, errors: [], warnings: [] }, spec, run: null }
-  },
-
-  runTask: async (_workspaceId: string, req: { slug: string; orchestratorSessionId?: string }): Promise<TaskRunSnapshotDto> => {
-    console.log('[Playground] runTask', req)
-    await new Promise(resolve => setTimeout(resolve, 800))
-    if (req.slug === 'already-running') {
-      throw new Error(`Task "${req.slug}" already has an active run (run-1) on this orchestrator; stop it before starting another.`)
-    }
-    return { slug: req.slug, runId: 'run-1', taskId: req.slug, status: 'running', orchestratorSessionId: req.orchestratorSessionId, nodes: [], tokensUsed: 0 }
   },
 }
 
@@ -782,14 +470,6 @@ export function ensureMockElectronAPI() {
   if (!window.electronAPI) {
     ;(window as any).electronAPI = mockElectronAPI
     console.log('[Playground] Injected mock electronAPI')
-  }
-  if (!(window as any).__playgroundMessaging) {
-    ;(window as any).__playgroundMessaging = playgroundMessagingHandle
-    console.log('[Playground] Exposed __playgroundMessaging handle')
-  }
-  if (!(window as any).__playgroundAllowList) {
-    ;(window as any).__playgroundAllowList = playgroundAllowListHandle
-    console.log('[Playground] Exposed __playgroundAllowList handle')
   }
 }
 
@@ -936,3 +616,8 @@ export const mockAttachmentCallbacks = {
   },
 }
 
+export const mockBackgroundTaskCallbacks = {
+  onKillTask: (taskId: string) => {
+    console.log('[Playground] Kill task:', taskId)
+  },
+}

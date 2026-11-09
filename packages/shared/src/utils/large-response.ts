@@ -7,10 +7,13 @@
  * Callers orchestrate via their agent's runMiniCompletion() for summarization.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { createHash } from 'crypto';
-import { basename, join, relative } from 'path';
+import { existsSync, mkdirSync, writeFileSync, lstatSync } from 'fs';
+import { createHash, randomUUID } from 'crypto';
+import { join, relative } from 'path';
+import { fileFingerprint } from './files.ts';
 import { debug } from './debug.ts';
+import { estimateTokensDensityAware } from './token-estimate.ts';
+export { estimateTokensDensityAware } from './token-estimate.ts';
 import {
   looksLikeBinary,
   extractBase64Binary,
@@ -70,57 +73,6 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * Threshold above which base64-density correction kicks in. Below this size
- * the correction doesn't matter — the result fits anyway.
- */
-const DENSITY_AWARE_MIN_LENGTH = 20_000;
-
-/** Minimum run length for a base64-dense span to count. Set to 60 to catch
- *  the common wrapping styles for line-broken base64 in the wild — RFC 2045
- *  MIME wraps at 76, PEM at 64, custom encoders sometimes 60. Short
- *  alphanumeric runs (URLs without `:/?&`, UUIDs, identifiers) sit below
- *  this threshold so the false-positive rate stays low.
- *
- *  Hex digests (SHA-256 = 64 chars, SHA-512 = 128) and JWTs do match — both
- *  are token-dense in real tokenizers, so a tool result dominated by them
- *  should spill anyway. */
-const BASE64_RUN_MIN = 60;
-
-/** Fraction of total characters that must be inside long base64-style runs
- *  before the density correction applies. */
-const BASE64_DENSITY_THRESHOLD = 0.70;
-
-/** Effective chars-per-token for base64 in real tokenizers (Anthropic, GPT,
- *  Llama all land in the 1.3–1.7 range for base64-heavy content). */
-const BASE64_CHARS_PER_TOKEN = 1.5;
-
-/**
- * Density-aware token estimate. Mirrors {@link estimateTokens} for normal
- * text but corrects for base64-heavy content (email MIME bodies, JSON with
- * embedded binary, dumped certs, etc.) where the 4-chars/token heuristic
- * underestimates by ~2.5x.
- *
- * Trigger conditions (all must hold):
- *  - text length ≥ {@link DENSITY_AWARE_MIN_LENGTH}
- *  - ≥ {@link BASE64_DENSITY_THRESHOLD} of chars are inside unbroken
- *    base64-charset runs of length ≥ {@link BASE64_RUN_MIN}
- *
- * When triggered, returns `text.length / 1.5` instead of `text.length / 4`.
- */
-export function estimateTokensDensityAware(text: string): number {
-  if (text.length < DENSITY_AWARE_MIN_LENGTH) return estimateTokens(text);
-  const runRegex = new RegExp(`[A-Za-z0-9+/=]{${BASE64_RUN_MIN},}`, 'g');
-  let denseChars = 0;
-  for (const match of text.matchAll(runRegex)) {
-    denseChars += match[0].length;
-  }
-  if (denseChars / text.length >= BASE64_DENSITY_THRESHOLD) {
-    return Math.ceil(text.length / BASE64_CHARS_PER_TOKEN);
-  }
-  return estimateTokens(text);
-}
-
-/**
  * Per-result summarization threshold scaled to the active model's context
  * window. A 200k-window model returns the {@link TOKEN_LIMIT} cap (12k);
  * a 64k-window model returns 6_400; below ~20k window the floor (2_000)
@@ -170,10 +122,10 @@ export function saveLargeResponse(
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const safeLabel = label.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-    const filename = `${timestamp}_${toolName}_${safeLabel}.txt`;
+    const filename = `${timestamp}_${sanitizeFilename(toolName)}_${safeLabel}_${randomUUID()}.txt`;
     const absolutePath = join(responsesDir, filename);
 
-    writeFileSync(absolutePath, content, 'utf-8');
+    writeFileSync(absolutePath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
 
     const relativePath = relative(sessionPath, absolutePath);
 
@@ -222,9 +174,9 @@ function saveJsonArtifact(
     mkdirSync(responsesDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const safeTool = sanitizeFilename(toolName || 'tool_result');
-    const filename = `${timestamp}_${safeTool}_${suffix}.json`;
+    const filename = `${timestamp}_${safeTool}_${suffix}_${randomUUID()}.json`;
     const absolutePath = join(responsesDir, filename);
-    writeFileSync(absolutePath, content, 'utf-8');
+    writeFileSync(absolutePath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
     return {
       absolutePath,
       relativePath: relative(sessionPath, absolutePath),
@@ -266,10 +218,16 @@ function saveExtractedAsset(
     const safeTool = sanitizeFilename(toolName || 'tool_result');
     const safeExt = ext.startsWith('.') ? ext : `.${ext || 'bin'}`;
     const filename = `${safeTool}_${sha256.slice(0, 16)}${safeExt}`;
-    const absolutePath = join(assetsDir, filename);
-
-    if (!existsSync(absolutePath)) {
-      writeFileSync(absolutePath, buffer, { flag: 'wx' });
+    let absolutePath = join(assetsDir, filename);
+    // Reuse only complete bytes; an interrupted save or external edit is not a cache hit.
+    const cached = existsSync(absolutePath) ? lstatSync(absolutePath) : undefined;
+    const fingerprint = cached?.isFile() && cached.size === buffer.length ? fileFingerprint(absolutePath) : undefined;
+    if (fingerprint?.hash !== sha256 || fingerprint.size !== buffer.length) {
+      const saved = saveBinaryResponse(sessionPath, join('assets', filename), buffer, mimeType);
+      if (saved.type !== 'file_download') return null;
+      absolutePath = saved.path;
+      const confirmed = fileFingerprint(absolutePath);
+      if (confirmed?.hash !== sha256 || confirmed.size !== buffer.length) return null;
     }
 
     return {
@@ -472,8 +430,6 @@ export interface FormatOptions {
   absolutePath: string;
   /** Summary from runMiniCompletion (if available) */
   summary?: string;
-  /** Parts kept by relevance to the agent's intent (host filter), instead of a summary */
-  excerpt?: LargeResultExcerpt & { intent: string };
   /** Fallback preview when no summary (first N chars of response) */
   preview?: string;
 }
@@ -483,7 +439,7 @@ export interface FormatOptions {
  * Includes file references for both Read/Grep and transform_data access.
  */
 export function formatLargeResponseMessage(opts: FormatOptions): string {
-  const { estimatedTokens, relativePath, absolutePath, summary, excerpt, preview } = opts;
+  const { estimatedTokens, relativePath, absolutePath, summary, preview } = opts;
 
   const fileRef = [
     `Full data saved to: ${absolutePath}`,
@@ -493,10 +449,6 @@ export function formatLargeResponseMessage(opts: FormatOptions): string {
 
   if (summary) {
     return `[Large response (~${estimatedTokens} tokens) summarized]\n\n${fileRef}\n\n${summary}`;
-  }
-
-  if (excerpt) {
-    return `[Large response (~${estimatedTokens} tokens): ${excerpt.kept} of ${excerpt.total} parts kept as relevant to "${excerpt.intent.slice(0, 200)}"]\n\n${fileRef}\n\n${excerpt.text}`;
   }
 
   if (preview) {
@@ -510,49 +462,6 @@ export function formatLargeResponseMessage(opts: FormatOptions): string {
 // High-level Pipeline (orchestrates save + summarize + format)
 // ============================================================
 
-/**
- * Optional host hook (decision model, toggle `largeResults`): instead of a summary, keep
- * the parts of a large result that the agent's stated intent needs. `null` means no answer
- * or no useful cut, and the result is summarized as before. Registered once per process by
- * the host (the Pi subprocess registers one that asks the main process); unset means
- * "always summarize".
- */
-export type LargeResultFilter = (input: {
-  text: string;
-  context: SummarizationContext;
-  /** Characters the kept parts may use. */
-  budgetChars: number;
-  /** Where the full result was saved. */
-  filePath: string;
-  /** Session the result belongs to (for the decision record). */
-  sessionId?: string;
-}) => Promise<LargeResultExcerpt | null>;
-
-export interface LargeResultExcerpt {
-  /** The kept parts in their original order, with the gaps marked. */
-  text: string;
-  kept: number;
-  total: number;
-}
-
-let largeResultFilter: LargeResultFilter | null = null;
-
-/** Install (or clear with `null`) the process-wide filter. */
-export function setLargeResultFilter(filter: LargeResultFilter | null): void {
-  largeResultFilter = filter;
-}
-
-/** Ask the installed filter; `null` without one or when it fails. Also answers for the Pi subprocess. */
-export async function askLargeResultFilter(input: Parameters<LargeResultFilter>[0]): Promise<LargeResultExcerpt | null> {
-  if (!largeResultFilter) return null;
-  try {
-    return await largeResultFilter(input);
-  } catch (error) {
-    debug('large-response', `Large-result filter failed, summarizing: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
-}
-
 export interface HandleLargeResponseOptions {
   /** Full response text */
   text: string;
@@ -560,6 +469,8 @@ export interface HandleLargeResponseOptions {
   sessionPath: string;
   /** Context about the tool call */
   context: SummarizationContext;
+  /** Optional stricter per-result input budget. */
+  tokenLimit?: number;
   /** Optional summarize callback — typically agent.runMiniCompletion.bind(agent) */
   summarize?: (prompt: string) => Promise<string | null>;
   /** Active model's context window — see {@link guardLargeResult}. */
@@ -610,12 +521,12 @@ export async function guardLargeResult(
     const ext = detectExtensionFromMagic(buffer) || '.bin';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeName = sanitizeFilename(opts.toolName);
-    const filename = `${safeName}_${timestamp}${ext}`;
+    const filename = `${safeName}_${timestamp}_${randomUUID()}${ext}`;
     const result = saveBinaryResponse(opts.sessionPath, filename, buffer, null);
     if (result.type === 'file_download') {
       return `[Binary content detected and saved]\n\nFile: ${result.path}\nSize: ${result.sizeHuman}\nType: ${ext.slice(1).toUpperCase() || 'unknown'}\n\nUse the Read tool or reference this path to work with the file.`;
     }
-    return `[Binary content detected but save failed: ${result.error}]`;
+    return null;
   }
 
   // 2. Convert to string (no-op if already string, toString if Buffer that passed binary check)
@@ -635,12 +546,12 @@ export async function guardLargeResult(
     debug('large-response', `${opts.toolName}: ${base64Result.source} binary detected (${base64Result.buffer.length} decoded bytes)`);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeName = sanitizeFilename(opts.toolName);
-    const filename = `${safeName}_${timestamp}${base64Result.ext}`;
+    const filename = `${safeName}_${timestamp}_${randomUUID()}${base64Result.ext}`;
     const result = saveBinaryResponse(opts.sessionPath, filename, base64Result.buffer, base64Result.mimeType);
     if (result.type === 'file_download') {
       return `[Base64-encoded binary detected and saved]\n\nFile: ${result.path}\nSize: ${result.sizeHuman}\nType: ${base64Result.ext.slice(1).toUpperCase() || 'unknown'}\n\nThe tool result contained base64-encoded binary data which has been decoded and saved.`;
     }
-    return `[Base64-encoded binary detected but save failed: ${result.error}]`;
+    return null;
   }
 
   // 3. Existing size check + summarize flow (model-aware when contextWindow provided).
@@ -672,7 +583,7 @@ export async function handleLargeResponse(
   const { text, sessionPath, context, summarize, contextWindow } = opts;
   const estimatedTokens = estimateTokensDensityAware(text);
 
-  if (estimatedTokens <= tokenLimitFor(contextWindow)) {
+  if (estimatedTokens <= Math.min(opts.tokenLimit ?? Infinity, tokenLimitFor(contextWindow))) {
     return null; // Not large enough — caller should return as-is
   }
 
@@ -687,36 +598,24 @@ export async function handleLargeResponse(
   );
 
   if (!saveResult) {
-    // File save failed — return preview without file references
-    const preview = text.substring(0, 2000);
-    return {
-      message: `[Response too large (~${estimatedTokens} tokens)]\n\nPreview:\n${preview}...`,
-      filePath: '',
-      wasSummarized: false,
-    };
+    // Never discard the only copy. The caller retains the complete tool result;
+    // the request preflight can then pause if it cannot fit safely.
+    return null;
   }
 
   const { absolutePath, relativePath } = saveResult;
 
-  // 2. With the agent's stated intent, the host's filter may keep just the parts it needs
-  //    (no summarization call, at most half the per-result limit); otherwise summarize if
-  //    within limits and a callback is provided.
-  let excerpt: LargeResultExcerpt | null = null;
+  // 2. Try summarization if within limits and callback provided
   let summary: string | undefined;
   if (summarize && estimatedTokens <= MAX_SUMMARIZATION_INPUT) {
-    if (context.intent) {
-      excerpt = await askLargeResultFilter({ text, context, budgetChars: tokenLimitFor(contextWindow) * 2, filePath: absolutePath, sessionId: basename(sessionPath) });
-    }
-    if (!excerpt) {
-      try {
-        const prompt = buildSummarizationPrompt(text, context);
-        const result = await summarize(prompt);
-        if (result) {
-          summary = result;
-        }
-      } catch (error) {
-        debug('large-response', `Summarization failed: ${error instanceof Error ? error.message : String(error)}`);
+    try {
+      const prompt = buildSummarizationPrompt(text, context);
+      const result = await summarize(prompt);
+      if (result) {
+        summary = result;
       }
+    } catch (error) {
+      debug('large-response', `Summarization failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -726,8 +625,7 @@ export async function handleLargeResponse(
     relativePath,
     absolutePath,
     summary,
-    excerpt: excerpt && context.intent ? { ...excerpt, intent: context.intent } : undefined,
-    preview: summary || excerpt ? undefined : text.substring(0, 2000),
+    preview: summary ? undefined : text.length <= 2000 ? text : `${text.slice(0, 1000)}\n[… middle omitted; read the saved file …]\n${text.slice(-1000)}`,
   });
 
   return { message, filePath: absolutePath, wasSummarized: !!summary };

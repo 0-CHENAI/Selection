@@ -9,7 +9,6 @@
 import type { LoadedSource } from '../../sources/types.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig } from '../../sessions/storage.ts';
-import type { McpSourceFeatures } from '../../mcp/mcp-pool.ts';
 
 // Re-export common types from mode-types for convenience
 // These are the types needed by permission evaluation
@@ -76,11 +75,6 @@ export interface ToolPermissionResult {
 export interface SourceManagerConfig {
   /** Debug callback for logging */
   onDebug?: (message: string) => void;
-  /**
-   * What a connected MCP source offers beyond tools (resources, prompts, server
-   * instructions), read from the session's MCP pool when formatting source state.
-   */
-  getSourceFeatures?: (slug: string) => McpSourceFeatures | undefined;
 }
 
 /**
@@ -100,8 +94,6 @@ export interface PromptBuilderConfig {
   systemPromptPreset?: 'default' | 'mini' | string;
   /** Whether running in headless mode */
   isHeadless?: boolean;
-  /** Agent profile; `coding` trims the per-message context (see PromptBuilder) */
-  agentProfile?: import('@craft-agent/session-tools-core').AgentProfile;
   /** Optional pre-resolved project snapshot for prompt injection (lets tests pin a value) */
   project?: import('../../projects/types.ts').ProjectPromptContext;
 }
@@ -122,6 +114,8 @@ export interface ContextBlockOptions {
   inactiveSources?: LoadedSource[];
   /** Whether local MCP is enabled */
   localMcpEnabled?: boolean;
+  /** Current model can accept images. Omitted when unresolved. */
+  imageInput?: boolean;
 }
 
 /**

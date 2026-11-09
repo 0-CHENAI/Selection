@@ -1,3 +1,12 @@
+import { parseTokenCount, formatTokenInput } from './token-count-input'
+import { MIN_CUSTOM_CONTEXT_WINDOW, MAX_CUSTOM_CONTEXT_WINDOW, MIN_CUSTOM_MAX_TOKENS, MAX_CUSTOM_MAX_TOKENS, connectionModelIdsMatch, type ImageSupportMode } from '@config/model-image-support'
+import {
+  CUSTOM_MODEL_FETCH_DEBOUNCE_MS,
+  customEndpointModelsBlockSave,
+  customModelFieldMode,
+  selectionAfterAutoFetch,
+} from '@config/custom-endpoint-models'
+import { THINKING_LEVELS, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 /**
  * ApiKeyInput - Reusable API key entry form control
  *
@@ -10,39 +19,100 @@
  * Used in: Onboarding CredentialsStep, Settings API dialog
  */
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
-import { Command as CommandPrimitive } from "cmdk"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import { cn } from "@/lib/utils"
 import { Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react"
-import { pickTierDefaults, resolveTierModels, type PiModelInfo } from "./tier-models"
+import type { PiModelInfo } from "./tier-models"
+import { PresetBrandMark } from "./PresetBrandMark"
+import { ImageSupportModeControl } from "./ImageSupportModeControl"
+import { buildPiApiKeyModels, piCatalogToRemoteModels } from "./pi-model-submission"
 import {
+  ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS,
+  DEFAULT_ENDPOINT_PROVIDERS,
+  OPENAI_COMPAT_CUSTOM_URL_PRESETS,
+  getPresetForUrl,
+  getPresetsForProvider,
+  presetBrandSlug,
+  sortNamedPresets,
+  type Preset,
+} from "./provider-presets"
+import {
+  buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
+  shouldAutoProbeModelCatalog,
+  showCustomFormatPicker,
+  bedrockModelFieldMode,
+  orderModelFieldMode,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
+  showsEndpointModelLimits,
   type PresetKey,
 } from "./submit-helpers"
+import { RemoteModelsPicker } from "./RemoteModelsPicker"
+import {
+  DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+  DEFAULT_MODEL_MAX_OUTPUT_PRESET,
+  fetchOpenAiCompatibleModels,
+  findRemoteModel,
+  lookupRecordByModelId,
+  parseSelectedModels,
+  persistCustomContextWindow,
+  persistCustomMaxTokens,
+  isValidModelLimitCombination,
+  resolveCatalogOrOverrideLimit,
+  resolveModelLimitSource,
+  resolveModelLimitsStatus,
+  setHasModelId,
+  toggleSelectedModel,
+  type ModelLimitSource,
+  type RemoteModel,
+} from "./fetch-openai-models.ts"
 
-import type { CustomEndpointApi, CustomEndpointConfig } from '@config/llm-connections'
-import { CLOUDFLARE_AI_GATEWAY_PROVIDER, CLOUDFLARE_AI_GATEWAY_URL_EXAMPLE, parseCloudflareGatewayUrl } from '@config/cloudflare-gateway'
+import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  type CustomEndpointApi,
+  type CustomEndpointConfig,
+} from '@config/llm-connections'
 
 export type ApiKeyStatus = 'idle' | 'validating' | 'success' | 'error'
 
 export type { CustomEndpointApi }
 
+export type SubmittedConnectionModel = string | {
+  id: string
+  name?: string
+  shortName?: string
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  supportsImages?: boolean
+  imageSupport?: 'auto' | 'on' | 'off'
+  learnedSupportsImages?: boolean
+  contextWindow?: number
+  maxTokens?: number
+}
+
 export interface ApiKeySubmitData {
   apiKey: string
   baseUrl?: string
   connectionDefaultModel?: string
-  models?: string[]
+  models?: SubmittedConnectionModel[]
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
   /** Custom endpoint protocol — set when user configures an arbitrary API endpoint */
@@ -59,6 +129,17 @@ export interface ApiKeySubmitData {
   bedrockAuthMethod?: 'iam_credentials' | 'environment'
 }
 
+/** OAuth-based setup methods that can be reached from the endpoint dropdown. */
+export type OAuthSetupMethod = 'pi_chatgpt_oauth' | 'pi_copilot_oauth' | 'pi_kimi_oauth' | 'pi_xai_oauth'
+
+/** Account sign-in providers shown in the endpoint dropdown's OAuth section. */
+export const OAUTH_PROVIDER_OPTIONS: ReadonlyArray<{ method: OAuthSetupMethod; label: string }> = [
+  { method: 'pi_chatgpt_oauth', label: 'ChatGPT' },
+  { method: 'pi_copilot_oauth', label: 'GitHub Copilot' },
+  { method: 'pi_kimi_oauth', label: 'Kimi Code' },
+  { method: 'pi_xai_oauth', label: 'SuperGrok / X Premium' },
+]
+
 export interface ApiKeyInputProps {
   /** Current validation status */
   status: ApiKeyStatus
@@ -72,6 +153,14 @@ export interface ApiKeyInputProps {
   disabled?: boolean
   /** Provider type determines which presets and placeholders to show */
   providerType?: 'anthropic' | 'openai' | 'pi' | 'google' | 'pi_api_key'
+  /** Limit the endpoint dropdown (ORDER onboarding: Anthropic / OpenAI compatible only) */
+  presetFilter?: 'order'
+  /**
+   * When provided, the endpoint dropdown also lists account sign-in (OAuth)
+   * providers. Selecting one hands control back to the parent so it can switch
+   * to the matching OAuth flow instead of API-key entry.
+   */
+  onSelectOAuthMethod?: (method: OAuthSetupMethod) => void
   /** Pre-fill values when editing an existing connection */
   initialValues?: {
     apiKey?: string
@@ -79,103 +168,91 @@ export interface ApiKeyInputProps {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, ImageSupportMode>
+    /** Learned "this model rejected images" flags. Only meaningful while the mode is auto. */
+    modelImageLearned?: Record<string, boolean>
+    modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelThinkingModes?: Record<string, 'unsupported' | 'always-on' | 'levels'>
+    modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     /** Pre-fill the protocol toggle for custom endpoints */
     customApi?: CustomEndpointApi
   }
 }
 
-interface Preset {
-  key: PresetKey
-  label: string
-  url: string
-  placeholder?: string
-  /** Requires the Pi SDK for authentication (e.g. OpenAI-compatible-only endpoint) — hidden in Anthropic API Key mode. */
-  piOnly?: boolean
-  /** Hint for the base URL field when the user must enter a tenant-specific endpoint. */
-  urlPlaceholder?: string
-}
-
-// Anthropic provider presets - for Claude Code backend
-// Also used by Pi API key flow (same providers, routed via Pi SDK)
-const ANTHROPIC_PRESETS: Preset[] = [
-  { key: 'anthropic', label: 'Anthropic', url: 'https://api.anthropic.com', placeholder: 'sk-ant-...' },
-  { key: 'openai', label: 'OpenAI', url: 'https://api.openai.com/v1', placeholder: 'sk-...' },
-  { key: 'openai-eu', label: 'OpenAI EU', url: 'https://eu.api.openai.com/v1', placeholder: 'sk-...' },
-  { key: 'openai-us', label: 'OpenAI US', url: 'https://us.api.openai.com/v1', placeholder: 'sk-...' },
-  { key: 'google', label: 'Google AI Studio', url: 'https://generativelanguage.googleapis.com/v1beta', placeholder: 'AIza...' },
-  { key: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/api/v1', placeholder: 'sk-or-...' },
-  { key: 'azure-openai-responses', label: 'Azure OpenAI', url: '', placeholder: 'Paste your key here...', urlPlaceholder: 'https://<resource>.openai.azure.com/openai/v1' },
-  { key: 'amazon-bedrock', label: 'Amazon Bedrock', url: 'https://bedrock-runtime.us-east-1.amazonaws.com', placeholder: 'AKIA...' },
-  { key: 'groq', label: 'Groq', url: 'https://api.groq.com/openai/v1', placeholder: 'gsk_...' },
-  { key: 'mistral', label: 'Mistral', url: 'https://api.mistral.ai/v1', placeholder: 'Paste your key here...' },
-  { key: 'deepseek', label: 'DeepSeek', url: 'https://api.deepseek.com', placeholder: 'sk-...' },
-  { key: 'xai', label: 'xAI (Grok)', url: 'https://api.x.ai/v1', placeholder: 'xai-...' },
-  { key: 'cerebras', label: 'Cerebras', url: 'https://api.cerebras.ai/v1', placeholder: 'csk-...' },
-  { key: 'zai', label: 'z.ai (GLM)', url: 'https://api.z.ai/api/coding/paas/v4', placeholder: 'Paste your key here...' },
-  { key: 'huggingface', label: 'Hugging Face', url: 'https://router.huggingface.co/v1', placeholder: 'hf_...' },
-  { key: 'minimax-global', label: 'Minimax Global', url: 'https://api.minimax.io/anthropic', placeholder: 'Paste your key here...', piOnly: true },
-  { key: 'minimax-cn', label: 'Minimax CN', url: 'https://api.minimaxi.com/anthropic', placeholder: 'Paste your key here...', piOnly: true },
-  { key: 'kimi-coding', label: 'Kimi (Coding)', url: 'https://api.kimi.com/coding', placeholder: 'sk-kimi-...' },
-  { key: 'moonshotai', label: 'Moonshot AI', url: 'https://api.moonshot.ai/v1', placeholder: 'sk-...', piOnly: true },
-  { key: 'moonshotai-cn', label: 'Moonshot AI (CN)', url: 'https://api.moonshot.cn/v1', placeholder: 'sk-...', piOnly: true },
-  { key: 'vercel-ai-gateway', label: 'Vercel AI Gateway', url: 'https://ai-gateway.vercel.sh', placeholder: 'Paste your key here...' },
-  // The gateway URL carries the account and gateway ids the Pi SDK needs (cloudflare-gateway.ts).
-  { key: CLOUDFLARE_AI_GATEWAY_PROVIDER, label: 'Cloudflare AI Gateway', url: '', placeholder: 'Cloudflare API token', urlPlaceholder: CLOUDFLARE_AI_GATEWAY_URL_EXAMPLE, piOnly: true },
-  { key: 'manifest', label: 'Manifest', url: 'https://app.manifest.build/v1', placeholder: 'mnfst_...' },
-  { key: 'opencode-go', label: 'OpenCode Go', url: 'https://opencode.ai/zen/go/v1', placeholder: 'Paste your key here...' },
-  { key: 'custom', label: 'Custom', url: '', placeholder: 'Paste your key here...' },
-]
-
-/**
- * Presets without a Pi SDK provider entry that nonetheless expose a known
- * OpenAI-compatible protocol. They behave like 'custom' on submit (customEndpoint
- * gets pinned to openai-completions) but stay branded in the dropdown.
- */
-const OPENAI_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set(['manifest', 'opencode-go'])
-
-// OpenAI provider presets - for Codex backend
-// Only direct OpenAI is supported; 3PP providers (OpenRouter, Vercel, Ollama) should be
-// configured via the Anthropic/Claude connection which routes through the Claude Agent SDK.
-const OPENAI_PRESETS: Preset[] = [
-  { key: 'openai', label: 'OpenAI', url: '' },
-]
-
-// Pi provider presets - unified API for 20+ LLM providers
-const PI_PRESETS: Preset[] = [
-  { key: 'pi', label: 'Craft Agents Backend (Direct)', url: '' },
-  { key: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/api' },
-  { key: 'custom', label: 'Custom', url: '' },
-]
-
-// Google AI Studio preset - single endpoint, no custom URL needed
-const GOOGLE_PRESETS: Preset[] = [
-  { key: 'google', label: 'Google AI Studio', url: '' },
-]
-
-const COMPAT_ANTHROPIC_DEFAULTS = 'claude-opus-5-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5'
+const COMPAT_ANTHROPIC_DEFAULTS = 'claude-opus-4-8, claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5'
 const COMPAT_OPENAI_DEFAULTS = 'openai/gpt-5.2-codex, openai/gpt-5.1-codex-mini'
 const COMPAT_MINIMAX_DEFAULTS = 'MiniMax-M2.5, MiniMax-M2.5-highspeed'
-const COMPAT_KIMI_DEFAULTS = 'k3, kimi-for-coding, kimi-for-coding-highspeed'
-
-function getPresetsForProvider(providerType: 'anthropic' | 'openai' | 'pi' | 'google' | 'pi_api_key'): Preset[] {
-  if (providerType === 'pi_api_key') return ANTHROPIC_PRESETS
-  if (providerType === 'google') return GOOGLE_PRESETS
-  if (providerType === 'pi') return PI_PRESETS
-  if (providerType === 'openai') return OPENAI_PRESETS
-  // Anthropic mode: exclude presets that only work via Pi SDK
-  return ANTHROPIC_PRESETS.filter(p => !p.piOnly)
-}
-
-function getPresetForUrl(url: string, presets: Preset[]): PresetKey {
-  const match = presets.find(p => p.key !== 'custom' && p.url === url)
-  return match?.key ?? 'custom'
-}
+const COMPAT_KIMI_DEFAULTS = 'k3, k3.1-pro, k3.1-pro-highspeed, kimi-for-coding, kimi-for-coding-highspeed'
 
 function parseModelList(value: string): string[] {
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+  return parseSelectedModels(value)
+}
+
+function ModelLimitSourceChip({ source }: { source: ModelLimitSource }) {
+  const { t } = useTranslation()
+  return (
+    <span
+      className={cn(
+        'inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-medium',
+        source === 'catalog' && 'bg-success/12 text-success',
+        source === 'manual' && 'bg-foreground/10 text-foreground/75',
+        source === 'default' && 'bg-foreground/5 text-foreground/40',
+      )}
+    >
+      {t(`apiSetup.modelLimitSource.${source}`)}
+    </span>
+  )
+}
+
+function ModelLimitInput({ id, label, value, source, upperExclusive, invalid, disabled, onChange }: {
+  id: string
+  label: string
+  value: number
+  source: ModelLimitSource
+  upperExclusive?: number
+  invalid?: boolean
+  disabled?: boolean
+  onChange: (next: number) => void
+}) {
+  const { t } = useTranslation()
+  const [draft, setDraft] = useState(() => formatTokenInput(value))
+  const lastEmitted = useRef(value)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (value !== lastEmitted.current) setDraft(formatTokenInput(value))
+    lastEmitted.current = value
+  }, [value])
+  const parsed = parseTokenCount(draft)
+  const minimum = upperExclusive ? MIN_CUSTOM_MAX_TOKENS : MIN_CUSTOM_CONTEXT_WINDOW
+  const maximum = upperExclusive ? Math.min(upperExclusive - 1, MAX_CUSTOM_MAX_TOKENS) : MAX_CUSTOM_CONTEXT_WINDOW
+  const valid = parsed !== undefined && parsed >= minimum && parsed <= maximum
+  const error = t('apiSetup.tokenInputError', { min: minimum.toLocaleString(), max: maximum.toLocaleString() })
+  useEffect(() => { inputRef.current?.setCustomValidity(valid ? '' : error) }, [valid, error])
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="flex items-center gap-1.5 text-muted-foreground font-normal text-xs">
+        {label}<ModelLimitSourceChip source={source} />
+      </Label>
+      <input ref={inputRef} id={id} type="text" required value={draft} disabled={disabled}
+        onInvalid={event => {
+          let container = event.currentTarget.closest('details')
+          while (container) { container.open = true; container = container.parentElement?.closest('details') ?? null }
+        }}
+        placeholder="128K" aria-invalid={!valid || invalid || undefined} aria-describedby={!valid ? `${id}-hint` : undefined}
+        className={cn('h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring', !valid && 'border-destructive')}
+        onChange={event => {
+          const text = event.currentTarget.value
+          setDraft(text)
+          const next = parseTokenCount(text)
+          const accepted = next !== undefined && next >= minimum && next <= maximum
+          event.currentTarget.setCustomValidity(accepted ? '' : error)
+          if (accepted) { lastEmitted.current = next; onChange(next) }
+        }} />
+      {!valid && <p id={`${id}-hint`} className="text-[11px] text-destructive">{error}</p>}
+    </div>
+  )
 }
 
 // ============================================================
@@ -188,11 +265,13 @@ export function ApiKeyInput({
   onSubmit,
   formId = "api-key-form",
   disabled,
-  providerType = 'anthropic',
+  providerType = 'pi_api_key',
+  presetFilter,
+  onSelectOAuthMethod,
   initialValues,
 }: ApiKeyInputProps) {
   // Get presets based on provider type
-  const presets = getPresetsForProvider(providerType)
+  const presets = getPresetsForProvider(providerType, presetFilter)
   const defaultPreset = presets[0]
 
   // Compute initial preset: explicit (Pi piAuthProvider), derived from URL, or default
@@ -201,14 +280,19 @@ export function ApiKeyInput({
 
   const { t } = useTranslation()
   const [apiKey, setApiKey] = useState(initialValues?.apiKey ?? '')
-  const [showValue, setShowValue] = useState(false)
+  const [showValue, setShowValue] = useState(!!initialValues?.apiKey)
   const [baseUrl, setBaseUrl] = useState(initialValues?.baseUrl ?? defaultPreset.url)
   const [activePreset, setActivePreset] = useState<PresetKey>(initialPreset)
   const [lastNonCustomPreset, setLastNonCustomPreset] = useState<PresetKey | null>(
     initialPreset !== 'custom' ? initialPreset : defaultPreset.key
   )
   const [connectionDefaultModel, setConnectionDefaultModel] = useState(initialValues?.connectionDefaultModel ?? '')
-  const [customApi, setCustomApi] = useState<CustomEndpointApi>(initialValues?.customApi ?? 'openai-completions')
+  const [customApi, setCustomApi] = useState<CustomEndpointApi>(() => {
+    if (initialValues?.customApi === 'anthropic-messages' || initialValues?.customApi === 'openai-completions') {
+      return initialValues.customApi
+    }
+    return 'openai-completions'
+  })
   const [modelError, setModelError] = useState<string | null>(null)
 
   // Bedrock auth state
@@ -218,38 +302,144 @@ export function ApiKeyInput({
   const [awsSessionToken, setAwsSessionToken] = useState('')
   const [awsRegion, setAwsRegion] = useState('us-east-1')
 
-  // Pi model tier state (for providers with many models like OpenRouter, Vercel)
   const [piModels, setPiModels] = useState<PiModelInfo[]>([])
   const [piModelsLoading, setPiModelsLoading] = useState(false)
-  const [bestModel, setBestModel] = useState('')
-  const [defaultModel, setDefaultModel] = useState('')
-  const [cheapModel, setCheapModel] = useState('')
-  const [openTier, setOpenTier] = useState<string | null>(null)
-  const [tierFilter, setTierFilter] = useState('')
-  const [tierDropdownPosition, setTierDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null)
-  const tierFilterInputRef = useRef<HTMLInputElement>(null)
-  const hydratedTierProviderRef = useRef<string | null>(null)
+  const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([])
+  const [remoteModelsLoading, setRemoteModelsLoading] = useState(false)
+  const [remoteModelsError, setRemoteModelsError] = useState<string | null>(null)
+  const [remoteModelsFailed, setRemoteModelsFailed] = useState(false)
+  const [remoteModelsNonce, setRemoteModelsNonce] = useState(0)
+  const remoteModelsAbortRef = useRef<AbortController | null>(null)
+  const fetchModelsAbortRef = useRef<AbortController | null>(null)
+  const fetchRequestSignatureRef = useRef('')
+  const modelsEditedRef = useRef(false)
+  const [modelsEdited, setModelsEdited] = useState(() => Boolean(initialValues?.connectionDefaultModel?.trim()))
+  const [fetchModelsPhase, setFetchModelsPhase] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle')
+  const [modelFetchNonce, setModelFetchNonce] = useState(0)
+  modelsEditedRef.current = modelsEdited
+  const [modelImageModes, setModelImageModes] = useState<Record<string, ImageSupportMode>>(() => {
+    const modes: Record<string, ImageSupportMode> = { ...initialValues?.modelImageModes }
+    for (const [id, value] of Object.entries(initialValues?.modelImageCaps ?? {})) {
+      if (modes[id] === undefined && typeof value === 'boolean') modes[id] = value ? 'on' : 'off'
+    }
+    return modes
+  })
+  const [modelImageLearned, setModelImageLearned] = useState<Record<string, boolean>>(
+    () => ({ ...initialValues?.modelImageLearned }),
+  )
+  const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, ThinkingLevel[]>>(() => ({ ...initialValues?.modelThinkingLevels }))
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelContextWindows }),
+  )
+  const [modelMaxTokens, setModelMaxTokens] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelMaxTokens }),
+  )
+  const [editedContextIds, setEditedContextIds] = useState<Set<string>>(() => new Set())
+  const [editedMaxTokenIds, setEditedMaxTokenIds] = useState<Set<string>>(() => new Set())
+  const [limitError, setLimitError] = useState<string | null>(null)
 
   const isDisabled = disabled || status === 'validating'
 
+  function clearLearnedImageSupport(id: string) {
+    setModelImageLearned((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const key of Object.keys(next)) {
+        if (connectionModelIdsMatch(key, id)) {
+          delete next[key]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }
+
+  function imagePayload(id: string): {
+    imageSupport?: ImageSupportMode
+    supportsImages?: boolean
+    learnedSupportsImages?: false
+  } {
+    const mode = lookupRecordByModelId(modelImageModes, id) ?? 'auto'
+    if (mode === 'on' || mode === 'off') {
+      return { imageSupport: mode, supportsImages: mode === 'on' }
+    }
+    if (lookupRecordByModelId(modelImageLearned, id) === false) {
+      return { imageSupport: 'auto', learnedSupportsImages: false }
+    }
+    return {}
+  }
+
+  function renderImageSupport(id: string, modelName: string) {
+    const mode = lookupRecordByModelId(modelImageModes, id) ?? 'auto'
+    return (
+      <ImageSupportModeControl
+        modelName={modelName}
+        value={mode}
+        learnedOff={mode === 'auto' && lookupRecordByModelId(modelImageLearned, id) === false}
+        disabled={isDisabled}
+        onChange={(next) => {
+          setModelImageModes((prev) => ({ ...prev, [id]: next }))
+          if (next !== 'auto') clearLearnedImageSupport(id)
+        }}
+        onResetLearned={() => {
+          setModelImageModes((prev) => ({ ...prev, [id]: 'auto' }))
+          clearLearnedImageSupport(id)
+        }}
+      />
+    )
+  }
+
   const isPiApiKeyFlow = providerType === 'pi_api_key'
+  const isOrderPreset = activePreset === 'order-openai'
+  const isCustomEndpointForm = (
+    activePreset === 'custom' || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+  ) && !!baseUrl.trim()
   const isBedrock = activePreset === 'amazon-bedrock'
   // Hide endpoint/model fields for providers with well-known endpoints handled by the SDK
-  const DEFAULT_ENDPOINT_PROVIDERS = new Set(['anthropic', 'openai', 'pi', 'google'])
   const isDefaultProviderPreset = DEFAULT_ENDPOINT_PROVIDERS.has(activePreset)
 
   // Provider-specific placeholders from the active preset
   const activePresetObj = presets.find(p => p.key === activePreset)
-  const apiKeyPlaceholder = activePresetObj?.placeholder
-    ?? (providerType === 'google' ? 'AIza...'
-    : providerType === 'pi' ? 'pi-...'
-    : providerType === 'openai' ? 'sk-...'
-    : 'Paste your key here...')
+  const apiKeyPlaceholder =
+    activePreset === 'order-openai'
+      ? t('apiSetup.pasteOrderKey')
+      : (activePresetObj?.placeholder && !activePresetObj.placeholder.toLowerCase().startsWith('paste')
+        ? activePresetObj.placeholder
+        : providerType === 'google' ? 'AIza...'
+        : providerType === 'pi' ? 'pi-...'
+        : providerType === 'openai' ? 'sk-...'
+        : t('apiSetup.pasteKey'))
 
-  // Fetch Pi SDK models when a provider is selected in pi_api_key flow.
-  // Returns all models sorted by cost (expensive-first) for the searchable tier dropdowns.
+  const presetDisplayLabel = (preset: Preset) => {
+    if (preset.key === 'order-openai') {
+      return presetFilter === 'order'
+        ? t('apiSetup.format.openaiCompatible')
+        : t('apiSetup.preset.orderOpenai')
+    }
+    if (preset.key === 'custom') return t('apiSetup.preset.custom')
+    return preset.label
+  }
+
+  const sortedPresets = useMemo(
+    () => sortNamedPresets(presets.map((preset) => ({ ...preset, label: presetDisplayLabel(preset) }))),
+    // presetDisplayLabel closes over the active locale via t().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [presets, presetFilter, t],
+  )
+  const oauthOptions = useMemo(
+    () => sortNamedPresets(OAUTH_PROVIDER_OPTIONS.map((option) => ({ ...option, key: option.method }))),
+    [],
+  )
+
   const loadPiModels = useCallback(async (provider: string) => {
-    if (!isPiApiKeyFlow || !provider || provider === 'custom' || DEFAULT_ENDPOINT_PROVIDERS.has(provider) || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(provider)) {
+    if (
+      !isPiApiKeyFlow
+      || !provider
+      || provider === 'custom'
+      || DEFAULT_ENDPOINT_PROVIDERS.has(provider)
+      || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(provider)
+      || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(provider)
+    ) {
       setPiModels([])
       return
     }
@@ -257,14 +447,6 @@ export function ApiKeyInput({
     try {
       const result = await window.electronAPI.getPiProviderModels(provider)
       setPiModels(result.models)
-
-      if (hydratedTierProviderRef.current !== provider) {
-        const tiers = resolveTierModels(result.models, provider === initialPreset ? initialValues?.models : undefined)
-        setBestModel(tiers.best)
-        setDefaultModel(tiers.default_)
-        setCheapModel(tiers.cheap)
-        hydratedTierProviderRef.current = provider
-      }
     } catch (err) {
       console.error('[ApiKeyInput] Failed to load models for', provider, err)
       setPiModels([])
@@ -277,8 +459,83 @@ export function ApiKeyInput({
     loadPiModels(activePreset)
   }, [activePreset, loadPiModels])
 
-  // Whether to show 3 tier dropdowns instead of text input
-  const hasPiModels = isPiApiKeyFlow && piModels.length > 0 && !isDefaultProviderPreset && activePreset !== 'custom' && !isBedrock
+  // Branded OpenAI presets still read /v1/models after the key is pasted.
+  // Custom endpoints use the debounced server fetch below.
+  useEffect(() => {
+    if (activePreset === 'custom') return
+
+    if (!isCustomEndpointForm || !shouldAutoProbeModelCatalog(activePreset, customApi)) {
+      remoteModelsAbortRef.current?.abort()
+      setRemoteModels([])
+      setRemoteModelsError(null)
+      setRemoteModelsFailed(false)
+      setRemoteModelsLoading(false)
+      setFetchModelsPhase('idle')
+      return
+    }
+
+    const key = apiKey.trim()
+    const endpoint = baseUrl.trim()
+    if (key.length < 8 || !endpoint) {
+      remoteModelsAbortRef.current?.abort()
+      setRemoteModels([])
+      setRemoteModelsError(null)
+      setRemoteModelsFailed(false)
+      setRemoteModelsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    remoteModelsAbortRef.current?.abort()
+    remoteModelsAbortRef.current = controller
+    setRemoteModelsLoading(true)
+    setRemoteModelsError(null)
+    setRemoteModelsFailed(false)
+
+    const timer = setTimeout(() => {
+      fetchOpenAiCompatibleModels(endpoint, key, controller.signal)
+        .then((models) => {
+          if (controller.signal.aborted) return
+          setRemoteModels(piCatalogToRemoteModels(models))
+          setRemoteModelsFailed(false)
+          setRemoteModelsError(isOrderPreset && models.length === 0 ? t('apiSetup.noModels') : null)
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return
+          console.error('[ApiKeyInput] /v1/models failed', err)
+          setRemoteModels([])
+          setRemoteModelsFailed(true)
+          // Custom URLs often lack this route — keep defaults editable instead of blocking.
+          setRemoteModelsError(isOrderPreset ? t('apiSetup.fetchModelsFailed') : null)
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setRemoteModelsLoading(false)
+        })
+    }, 400)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [activePreset, isCustomEndpointForm, customApi, isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
+
+  const usesPiModelPicker = isPiApiKeyFlow
+    && !isDefaultProviderPreset
+    && activePreset !== 'custom'
+    && !isBedrock
+    && !OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+    && !ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+  const showBedrockCatalogPicker = isBedrock && bedrockModelFieldMode({
+    loading: piModelsLoading,
+    catalogCount: piModels.length,
+  }) === 'picker'
+  const showPiCatalogPicker = usesPiModelPicker && (piModelsLoading || piModels.length > 0)
+  const orderFieldMode = orderModelFieldMode({
+    remoteModelsLoading,
+    remoteModelCount: remoteModels.length,
+    apiKeyLength: apiKey.trim().length,
+  })
+  const piRemoteModels = useMemo(() => piCatalogToRemoteModels(piModels), [piModels])
 
   const handlePresetSelect = (preset: Preset) => {
     setActivePreset(preset.key)
@@ -287,10 +544,22 @@ export function ApiKeyInput({
     }
     if (preset.key === 'custom') {
       setBaseUrl('')
+      setModelsEdited(false)
+      setConnectionDefaultModel('')
+      setRemoteModels([])
+      setRemoteModelsError(null)
+      setRemoteModelsFailed(false)
+      setFetchModelsPhase('idle')
+      fetchRequestSignatureRef.current = ''
     } else {
       setBaseUrl(preset.url)
     }
+    // Pin protocol for branded ORDER / Manifest-style gateways
+    if (OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key) || preset.key === 'custom') {
+      setCustomApi('openai-completions')
+    }
     setModelError(null)
+    setLimitError(null)
     // Pre-fill recommended model for Ollama; clear for all others
     // (Default provider presets hide the field entirely, others default to provider model IDs when empty)
     if (preset.key === 'ollama') {
@@ -303,8 +572,20 @@ export function ApiKeyInput({
       setConnectionDefaultModel(COMPAT_KIMI_DEFAULTS)
     } else if (preset.key === 'manifest') {
       setConnectionDefaultModel('auto')
-    } else if (preset.key === 'custom' || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)) {
-      setConnectionDefaultModel(providerType === 'openai' ? COMPAT_OPENAI_DEFAULTS : COMPAT_ANTHROPIC_DEFAULTS)
+    } else if (preset.key === 'order-openai') {
+      // Same hint for both ORDER endpoints — user fills Opus / Laufry / Maylo etc.
+      setConnectionDefaultModel('')
+    } else if (preset.key === 'custom') {
+      setConnectionDefaultModel('')
+    } else if (
+      OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
+      || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
+    ) {
+      setConnectionDefaultModel(
+        OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key) || providerType === 'openai'
+          ? COMPAT_OPENAI_DEFAULTS
+          : COMPAT_ANTHROPIC_DEFAULTS,
+      )
     } else {
       setConnectionDefaultModel('')
     }
@@ -332,9 +613,137 @@ export function ApiKeyInput({
         setConnectionDefaultModel(COMPAT_MINIMAX_DEFAULTS)
       } else if (presetKey === 'kimi-coding') {
         setConnectionDefaultModel(COMPAT_KIMI_DEFAULTS)
-      } else if (presetKey === 'openrouter' || presetKey === 'vercel-ai-gateway' || presetKey === 'custom' || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(presetKey)) {
+      } else if (presetKey === 'openrouter' || presetKey === 'vercel-ai-gateway') {
         setConnectionDefaultModel(providerType === 'openai' ? COMPAT_OPENAI_DEFAULTS : COMPAT_ANTHROPIC_DEFAULTS)
       }
+    }
+  }
+
+  const handleFetchModels = useCallback(async (controller: AbortController) => {
+    const endpoint = baseUrl.trim()
+    const key = apiKey.trim()
+    if (!endpoint || !key) return
+    const signature = `${customApi}|${endpoint}|${key}`
+    fetchRequestSignatureRef.current = signature
+    setFetchModelsPhase('loading')
+    setRemoteModelsError(null)
+    setRemoteModelsFailed(false)
+    setRemoteModelsLoading(true)
+    try {
+      const fetchModels = window.electronAPI?.fetchCustomEndpointModels
+      if (!fetchModels) {
+        if (controller.signal.aborted || fetchRequestSignatureRef.current !== signature) return
+        setFetchModelsPhase('error')
+        setRemoteModelsFailed(true)
+        setRemoteModels([])
+        return
+      }
+      const result = await fetchModels({ baseUrl: endpoint, apiKey: key, api: customApi })
+      if (controller.signal.aborted || fetchRequestSignatureRef.current !== signature) return
+      if (!result.ok) {
+        setFetchModelsPhase('error')
+        setRemoteModelsFailed(true)
+        setRemoteModels([])
+        return
+      }
+      const models = piCatalogToRemoteModels(result.models)
+      setRemoteModels(models)
+      setRemoteModelsFailed(false)
+      if (models.length === 0) {
+        setFetchModelsPhase('empty')
+        return
+      }
+      setConnectionDefaultModel((prev) => selectionAfterAutoFetch({
+        current: prev,
+        fetchedIds: models.map((model) => model.id),
+        preserveExisting: modelsEditedRef.current,
+      }))
+      setModelError(null)
+      setFetchModelsPhase('ready')
+    } catch {
+      if (controller.signal.aborted || fetchRequestSignatureRef.current !== signature) return
+      setFetchModelsPhase('error')
+      setRemoteModelsFailed(true)
+      setRemoteModels([])
+    } finally {
+      if (!controller.signal.aborted && fetchRequestSignatureRef.current === signature) {
+        setRemoteModelsLoading(false)
+      }
+    }
+  }, [apiKey, baseUrl, customApi])
+
+  useEffect(() => {
+    if (activePreset !== 'custom') return
+    const endpoint = baseUrl.trim()
+    const key = apiKey.trim()
+    if (!endpoint || !key) {
+      fetchModelsAbortRef.current?.abort()
+      fetchRequestSignatureRef.current = ''
+      setFetchModelsPhase('idle')
+      setRemoteModelsLoading(false)
+      setRemoteModels([])
+      setRemoteModelsFailed(false)
+      setRemoteModelsError(null)
+      if (!modelsEditedRef.current) setConnectionDefaultModel('')
+      return
+    }
+    setFetchModelsPhase('loading')
+    setRemoteModels([])
+    setRemoteModelsFailed(false)
+    setRemoteModelsError(null)
+    if (!modelsEditedRef.current) setConnectionDefaultModel('')
+    const controller = new AbortController()
+    fetchModelsAbortRef.current?.abort()
+    fetchModelsAbortRef.current = controller
+    const timer = setTimeout(() => {
+      void handleFetchModels(controller)
+    }, CUSTOM_MODEL_FETCH_DEBOUNCE_MS)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [activePreset, apiKey, baseUrl, customApi, handleFetchModels, modelFetchNonce])
+
+  const resolveEditableLimits = (id: string) => {
+    const remote = findRemoteModel(remoteModels, id)
+    const contextOverride = lookupRecordByModelId(modelContextWindows, id)
+      ?? lookupRecordByModelId(initialValues?.modelContextWindows, id)
+    const maxOverride = lookupRecordByModelId(modelMaxTokens, id)
+      ?? lookupRecordByModelId(initialValues?.modelMaxTokens, id)
+    const contextWindow = resolveCatalogOrOverrideLimit({
+      edited: setHasModelId(editedContextIds, id),
+      override: contextOverride,
+      catalog: remote?.contextWindow,
+      fallback: DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+      fallbackAliases: [DEFAULT_CUSTOM_CONTEXT_WINDOW],
+    })
+    const maxTokens = resolveCatalogOrOverrideLimit({
+      edited: setHasModelId(editedMaxTokenIds, id),
+      override: maxOverride,
+      catalog: remote?.maxTokens,
+      fallback: DEFAULT_MODEL_MAX_OUTPUT_PRESET,
+      fallbackAliases: [DEFAULT_CUSTOM_MAX_TOKENS],
+    })
+    return {
+      remote,
+      contextWindow,
+      maxTokens,
+      contextSource: resolveModelLimitSource({
+        edited: setHasModelId(editedContextIds, id),
+        override: contextOverride,
+        catalog: remote?.contextWindow,
+        displayed: contextWindow,
+        fallback: DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+        fallbackAliases: [DEFAULT_CUSTOM_CONTEXT_WINDOW],
+      }),
+      maxSource: resolveModelLimitSource({
+        edited: setHasModelId(editedMaxTokenIds, id),
+        override: maxOverride,
+        catalog: remote?.maxTokens,
+        displayed: maxTokens,
+        fallback: DEFAULT_MODEL_MAX_OUTPUT_PRESET,
+        fallbackAliases: [DEFAULT_CUSTOM_MAX_TOKENS],
+      }),
     }
   }
 
@@ -345,23 +754,23 @@ export function ApiKeyInput({
       ? resolvePiAuthProviderForSubmit(activePreset, lastNonCustomPreset)
       : undefined
 
-    if (activePreset === CLOUDFLARE_AI_GATEWAY_PROVIDER && !parseCloudflareGatewayUrl(baseUrl)) {
-      setModelError(`Enter your gateway URL: ${CLOUDFLARE_AI_GATEWAY_URL_EXAMPLE}`)
-      return
-    }
-
-    // Pi API key flow with tier dropdowns — submit selected models
-    if (hasPiModels) {
-      if (!bestModel || !defaultModel || !cheapModel) {
-        setModelError('Please select a model for each tier.')
+    // Pi API key providers: the checked catalog models are the enabled set.
+    // The first checked id is the default. Summaries still prefer a
+    // mini/flash/haiku model inside that set.
+    if (usesPiModelPicker && piModels.length > 0) {
+      const selected = parseModelList(connectionDefaultModel)
+      if (selected.length === 0) {
+        setModelError(t('apiSetup.defaultModelRequired'))
         return
       }
-      const models: string[] = [bestModel, defaultModel, cheapModel]
       onSubmit({
         apiKey: apiKey.trim(),
         baseUrl: baseUrl.trim() || undefined,
-        connectionDefaultModel: bestModel,
-        models,
+        connectionDefaultModel: selected[0],
+        models: buildPiApiKeyModels(selected, piModels, {
+          contextWindows: modelContextWindows,
+          maxTokens: modelMaxTokens,
+        }).map((model) => ({ ...model, ...imagePayload(model.id) })),
         piAuthProvider: effectivePiAuthProvider,
         modelSelectionMode: 'userDefined3Tier',
       })
@@ -372,14 +781,24 @@ export function ApiKeyInput({
     // Submit with auth method and optional IAM credentials.
     if (isBedrock) {
       if (bedrockAuthMethod === 'iam_credentials' && !awsAccessKeyId.trim()) {
-        setModelError('Access Key ID is required for IAM authentication.')
+        setModelError(t('apiSetup.accessKeyRequired'))
         return
       }
       if (bedrockAuthMethod === 'iam_credentials' && !awsSecretAccessKey.trim()) {
-        setModelError('Secret Access Key is required for IAM authentication.')
+        setModelError(t('apiSetup.secretKeyRequired'))
         return
       }
       const parsedModels = parseModelList(connectionDefaultModel)
+      if (piModels.length > 0 && parsedModels.length === 0) {
+        setModelError(t('apiSetup.defaultModelRequired'))
+        return
+      }
+      const catalogModels = piModels.length > 0
+        ? buildPiApiKeyModels(parsedModels, piModels, {
+          contextWindows: modelContextWindows,
+          maxTokens: modelMaxTokens,
+        }).map((model) => ({ ...model, ...imagePayload(model.id) }))
+        : undefined
       onSubmit({
         apiKey: '',
         piAuthProvider: effectivePiAuthProvider,
@@ -393,7 +812,13 @@ export function ApiKeyInput({
           },
         } : {}),
         connectionDefaultModel: parsedModels[0],
-        models: parsedModels.length > 0 ? parsedModels : undefined,
+        models: catalogModels ?? (parsedModels.length > 0
+          ? parsedModels.map((id) => {
+            const image = imagePayload(id)
+            return Object.keys(image).length > 0 ? { id, ...image } : id
+          })
+          : undefined),
+        ...(catalogModels ? { modelSelectionMode: 'userDefined3Tier' as const } : {}),
       })
       return
     }
@@ -401,11 +826,50 @@ export function ApiKeyInput({
     const effectiveBaseUrl = baseUrl.trim()
 
     const parsedModels = parseModelList(connectionDefaultModel)
+    if (selectedLimitRows.some((row) => (
+      !isValidModelLimitCombination(row.maxTokens, row.contextWindow)
+    ))) {
+      setLimitError(t('apiSetup.modelLimitInvalid'))
+      return
+    }
+    const submittedModels = (isCustomEndpointForm && parsedModels.length > 0)
+      ? parsedModels.map((id) => {
+        const { remote, contextWindow: rawContextWindow, maxTokens: rawMaxTokens } = resolveEditableLimits(id)
+        const contextWindow = persistCustomContextWindow(rawContextWindow)
+        const maxTokens = persistCustomMaxTokens(rawMaxTokens, contextWindow)
+        const image = imagePayload(id)
+        return buildCustomEndpointModelSubmission({
+          id,
+          name: remote?.name,
+          includeDisplayNames: isOrderPreset,
+          imageSupport: image.imageSupport,
+          supportsImages: image.supportsImages,
+          learnedSupportsImages: image.learnedSupportsImages,
+          supportedThinkingLevels: modelThinkingLevels[id],
+          thinkingMode: initialValues?.modelThinkingModes?.[id],
+          contextWindow,
+          maxTokens,
+        })
+      })
+      : parsedModels
 
     const isUsingDefaultEndpoint = isDefaultProviderPreset || !effectiveBaseUrl
     const requiresModel = !isDefaultProviderPreset && !!effectiveBaseUrl
-    if (requiresModel && parsedModels.length === 0) {
-      setModelError('Default model is required for custom endpoints.')
+    if (activePreset === 'custom' && effectiveBaseUrl) {
+      const block = customEndpointModelsBlockSave({
+        hasSelection: parsedModels.length > 0,
+        phase: fetchModelsPhase,
+      })
+      if (block === 'pending') {
+        setModelError(t('apiSetup.modelsAwaitingFetch'))
+        return
+      }
+      if (block === 'missing') {
+        setModelError(t('apiSetup.defaultModelRequired'))
+        return
+      }
+    } else if (requiresModel && parsedModels.length === 0) {
+      setModelError(t('apiSetup.defaultModelRequired'))
       return
     }
 
@@ -417,6 +881,7 @@ export function ApiKeyInput({
       baseUrl: effectiveBaseUrl,
       customApi,
       brandedOpenAiCompatPresets: OPENAI_COMPAT_CUSTOM_URL_PRESETS,
+      brandedAnthropicCompatPresets: ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS,
       fallbackPiAuthProvider: effectivePiAuthProvider,
     })
 
@@ -424,29 +889,49 @@ export function ApiKeyInput({
       apiKey: apiKey.trim(),
       baseUrl: isUsingDefaultEndpoint ? undefined : effectiveBaseUrl,
       connectionDefaultModel: parsedModels[0],
-      models: parsedModels.length > 0 ? parsedModels : undefined,
+      models: submittedModels.length > 0 ? submittedModels : undefined,
       piAuthProvider: resolvedPiAuthProvider,
       modelSelectionMode: isPiApiKeyFlow
         ? (parsedModels.length > 0 ? 'userDefined3Tier' : 'automaticallySyncedFromProvider')
-        : undefined,
+        : (isOrderPreset && parsedModels.length > 0 ? 'userDefined3Tier' : undefined),
       customEndpoint,
     })
   }
 
-  const tierConfigs = [
-    { label: 'Best', desc: 'most capable', value: bestModel, onChange: setBestModel },
-    { label: 'Balanced', desc: 'good for everyday use', value: defaultModel, onChange: setDefaultModel },
-    { label: 'Fast', desc: 'summarization & utility', value: cheapModel, onChange: setCheapModel },
-  ]
-  const activeTierConfig = openTier ? tierConfigs.find(t => t.label === openTier) : null
+  const selectedCustomModelIds = parseModelList(connectionDefaultModel)
+  const showCustomModelLimits = showsEndpointModelLimits({
+    isCustomEndpointForm,
+    isBedrock,
+    selectedModelCount: selectedCustomModelIds.length,
+  })
+  const selectedLimitRows = showCustomModelLimits
+    ? selectedCustomModelIds.map((id) => ({ id, ...resolveEditableLimits(id) }))
+    : []
+  const limitsStatusKey = {
+    detecting: 'apiSetup.modelLimitsDetecting',
+    detected: 'apiSetup.modelLimitsDetected',
+    unavailable: 'apiSetup.modelLimitsUnavailable',
+    defaults: 'apiSetup.modelLimitsUsingDefaults',
+    hint: 'apiSetup.modelLimitsHint',
+  }[resolveModelLimitsStatus({
+    loading: remoteModelsLoading,
+    catalogFilled: selectedLimitRows.some((row) => (
+      row.contextSource === 'catalog' || row.maxSource === 'catalog'
+    )),
+    fetchFailed: remoteModelsFailed,
+    hasKey: apiKey.trim().length >= 8,
+  })]
+
+  const activePresetForMenu = sortedPresets.find(preset => preset.key === activePreset) ?? sortedPresets[0]
 
   return (
     <form id={formId} onSubmit={handleSubmit} className="space-y-6">
       {/* API Key — hidden for Bedrock (uses IAM/Environment auth) */}
       {!isBedrock && (<div className="space-y-2">
-        <Label htmlFor="api-key">API Key</Label>
+        <Label htmlFor="api-key">{t('apiSetup.apiKey')}</Label>
         <div className={cn(
-          "field-surface relative rounded-md"
+          "relative rounded-md shadow-minimal transition-colors",
+          "bg-foreground-2 focus-within:bg-background"
         )}>
           <Input
             id="api-key"
@@ -464,9 +949,8 @@ export function ApiKeyInput({
           <button
             type="button"
             onClick={() => setShowValue(!showValue)}
-            className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center text-tertiary hover:text-foreground"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             tabIndex={-1}
-            aria-label={showValue ? t('common.hide') : t('common.show')}
           >
             {showValue ? (
               <EyeOff className="size-4" />
@@ -477,85 +961,109 @@ export function ApiKeyInput({
         </div>
       </div>)}
 
-      {/* Endpoint/Provider Preset Selector - hidden when only one preset (e.g. Codex/OpenAI direct) */}
-      {presets.length > 1 && (
+      {presetFilter !== 'order' && presets.length > 1 && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label htmlFor="base-url">Endpoint</Label>
+          <Label htmlFor="base-url">{t('apiSetup.endpoint')}</Label>
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={isDisabled}
-              className="motion-press flex h-control-sm items-center gap-1 rounded-full pl-2.5 pr-2 text-label-sm font-medium text-secondary ring-1 ring-inset ring-border hover:bg-fill-hover hover:text-foreground data-[state=open]:bg-fill-hover data-[state=open]:text-foreground"
+              className="flex h-6 items-center gap-1.5 rounded-[6px] bg-background shadow-minimal pl-1.5 pr-2 text-[12px] font-medium text-foreground/50 hover:bg-foreground/5 hover:text-foreground focus:outline-none"
             >
-              {presets.find(p => p.key === activePreset)?.label}
-              <ChevronDown className="size-2.5 text-tertiary" />
+              {activePresetForMenu && (
+                <PresetBrandMark
+                  slug={presetBrandSlug(activePresetForMenu.key)}
+                  label={activePresetForMenu.label}
+                />
+              )}
+              <span className="truncate">{activePresetForMenu?.label}</span>
+              <ChevronDown className="size-2.5 opacity-50" />
             </DropdownMenuTrigger>
             <StyledDropdownMenuContent align="end" className="z-floating-menu">
-              {presets.map((preset) => (
+              {sortedPresets.map((preset) => (
                 <StyledDropdownMenuItem
                   key={preset.key}
                   onClick={() => handlePresetSelect(preset)}
                   className="justify-between"
                 >
-                  {preset.label}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <PresetBrandMark slug={presetBrandSlug(preset.key)} label={preset.label} />
+                    <span className="truncate">{preset.label}</span>
+                  </span>
                   <Check className={cn("size-3", activePreset === preset.key ? "opacity-100" : "opacity-0")} />
                 </StyledDropdownMenuItem>
               ))}
+              {onSelectOAuthMethod && (
+                <>
+                  <StyledDropdownMenuSeparator />
+                  <div className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">
+                    {t('apiSetup.oauthSignIn')}
+                  </div>
+                  {oauthOptions.map((option) => (
+                    <StyledDropdownMenuItem
+                      key={option.method}
+                      onClick={() => onSelectOAuthMethod(option.method)}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <PresetBrandMark slug={presetBrandSlug(option.method)} label={option.label} />
+                        <span className="truncate">{option.label}</span>
+                      </span>
+                    </StyledDropdownMenuItem>
+                  ))}
+                </>
+              )}
             </StyledDropdownMenuContent>
           </DropdownMenu>
         </div>
         {/* Base URL input - hidden for default provider presets (Anthropic/OpenAI) and Bedrock */}
         {!isDefaultProviderPreset && !isBedrock && (
           <div className={cn(
-            "field-surface rounded-md"
+            "rounded-md shadow-minimal transition-colors",
+            "bg-foreground-2 focus-within:bg-background"
           )}>
             <Input
               id="base-url"
               type="text"
               value={baseUrl}
               onChange={(e) => handleBaseUrlChange(e.target.value)}
-              placeholder={activePresetObj?.urlPlaceholder ?? "https://your-api-endpoint.com"}
+              placeholder={t('apiSetup.endpointPlaceholder')}
               className="border-0 bg-transparent shadow-none"
               disabled={isDisabled}
             />
           </div>
         )}
-      </div>
-      )}
-
-      {/* Protocol Toggle — visible as soon as Custom preset is selected */}
-      {activePreset === 'custom' && !isDefaultProviderPreset && (
-        <div className="space-y-2">
-          <Label>Protocol</Label>
-          <div className={cn(
-            "flex gap-0.5 rounded-md bg-fill-hover p-0.5",
-            "bg-foreground-2",
-            isDisabled && "opacity-50 pointer-events-none"
-          )}>
-            {([
-              { value: 'openai-completions' as const, label: 'OpenAI Compatible' },
-              { value: 'anthropic-messages' as const, label: 'Anthropic Compatible' },
-            ]).map(({ value, label }) => (
-              <button
-                key={value}
-                type="button"
-                disabled={isDisabled}
-                onClick={() => setCustomApi(value)}
-                className={cn(
-                  "flex-1 rounded-sm py-1 text-label-sm font-medium transition-colors duration-micro ease-out-subtle hover:duration-instant",
-                  customApi === value
-                    ? "bg-raised text-foreground shadow-elev-1"
-                    : "text-secondary hover:text-foreground"
-                )}
-              >
-                {label}
-              </button>
-            ))}
+        {showCustomFormatPicker(activePreset) && (
+          <div className="space-y-1.5">
+            <Label>{t('apiSetup.protocol')}</Label>
+            <div className={cn(
+              "flex rounded-md shadow-minimal overflow-hidden bg-foreground-2",
+              isDisabled && "opacity-50 pointer-events-none",
+            )}>
+              {([
+                { value: 'openai-completions' as const, label: t('apiSetup.format.openaiCompatible') },
+                { value: 'anthropic-messages' as const, label: t('apiSetup.format.anthropicCompatible') },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={isDisabled}
+                  aria-pressed={customApi === value}
+                  onClick={() => setCustomApi(value)}
+                  className={cn(
+                    "flex-1 py-1.5 text-[12px] font-medium transition-colors",
+                    customApi === value
+                      ? "bg-background text-foreground shadow-minimal"
+                      : "text-foreground/50 hover:text-foreground/70",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] leading-snug text-muted-foreground">{t('apiSetup.protocolHint')}</p>
           </div>
-          <p className="text-label-sm text-tertiary">
-            Most third-party APIs (Ollama, vLLM, DashScope) use OpenAI Compatible.
-          </p>
-        </div>
+        )}
+      </div>
       )}
 
       {/* Bedrock Auth Section */}
@@ -563,15 +1071,15 @@ export function ApiKeyInput({
         <>
           {/* Auth Method Toggle */}
           <div className="space-y-2">
-            <Label>Authentication</Label>
+            <Label>{t('apiSetup.authentication')}</Label>
             <div className={cn(
-              "flex gap-0.5 rounded-md bg-fill-hover p-0.5",
+              "flex rounded-md shadow-minimal overflow-hidden",
               "bg-foreground-2",
               isDisabled && "opacity-50 pointer-events-none"
             )}>
               {([
-                { value: 'iam_credentials' as const, label: 'IAM Credentials' },
-                { value: 'environment' as const, label: 'Environment (AWS CLI)' },
+                { value: 'iam_credentials' as const, label: t('apiSetup.credentials.iam') },
+                { value: 'environment' as const, label: t('apiSetup.credentials.environment') },
               ]).map(({ value, label }) => (
                 <button
                   key={value}
@@ -579,10 +1087,10 @@ export function ApiKeyInput({
                   disabled={isDisabled}
                   onClick={() => setBedrockAuthMethod(value)}
                   className={cn(
-                    "flex-1 rounded-sm py-1 text-label-sm font-medium transition-colors duration-micro ease-out-subtle hover:duration-instant",
+                    "flex-1 py-1.5 text-[12px] font-medium transition-colors",
                     bedrockAuthMethod === value
-                      ? "bg-raised text-foreground shadow-elev-1"
-                      : "text-secondary hover:text-foreground"
+                      ? "bg-background text-foreground shadow-minimal"
+                      : "text-foreground/50 hover:text-foreground/70"
                   )}
                 >
                   {label}
@@ -595,10 +1103,10 @@ export function ApiKeyInput({
           {bedrockAuthMethod === 'iam_credentials' && (
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="aws-access-key-id" className="text-label-sm font-normal text-secondary">
-                  Access Key ID
+                <Label htmlFor="aws-access-key-id" className="text-muted-foreground font-normal text-xs">
+                  {t('apiSetup.accessKeyId')}
                 </Label>
-                <div className="field-surface rounded-md">
+                <div className={cn("rounded-md shadow-minimal transition-colors", "bg-foreground-2 focus-within:bg-background")}>
                   <Input
                     id="aws-access-key-id"
                     type="text"
@@ -612,10 +1120,10 @@ export function ApiKeyInput({
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="aws-secret-key" className="text-label-sm font-normal text-secondary">
-                  Secret Access Key
+                <Label htmlFor="aws-secret-key" className="text-muted-foreground font-normal text-xs">
+                  {t('apiSetup.secretAccessKeyLabel')}
                 </Label>
-                <div className="field-surface relative rounded-md">
+                <div className={cn("relative rounded-md shadow-minimal transition-colors", "bg-foreground-2 focus-within:bg-background")}>
                   <Input
                     id="aws-secret-key"
                     type={showValue ? 'text' : 'password'}
@@ -628,19 +1136,18 @@ export function ApiKeyInput({
                   <button
                     type="button"
                     onClick={() => setShowValue(!showValue)}
-                    className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center text-tertiary hover:text-foreground"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     tabIndex={-1}
-                    aria-label={showValue ? t('common.hide') : t('common.show')}
                   >
                     {showValue ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   </button>
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="aws-session-token" className="text-label-sm font-normal text-secondary">
-                  Session Token <span className="text-tertiary">· optional</span>
+                <Label htmlFor="aws-session-token" className="text-muted-foreground font-normal text-xs">
+                  {t('apiSetup.sessionToken')} <span className="text-foreground/30">· {t('common.optional')}</span>
                 </Label>
-                <div className="field-surface rounded-md">
+                <div className={cn("rounded-md shadow-minimal transition-colors", "bg-foreground-2 focus-within:bg-background")}>
                   <Input
                     id="aws-session-token"
                     type="text"
@@ -658,18 +1165,18 @@ export function ApiKeyInput({
           {/* Environment info */}
           {bedrockAuthMethod === 'environment' && (
             <div className="rounded-md bg-foreground-2 p-3">
-              <p className="text-label-sm text-tertiary">
-                Uses your existing AWS credential chain — <code className="text-secondary">~/.aws/credentials</code>, <code className="text-secondary">AWS_PROFILE</code>, IAM roles, SSO sessions, and environment variables.
+              <p className="text-xs text-foreground/50">
+                {t('apiSetup.awsEnvHint')}
               </p>
             </div>
           )}
 
           {/* AWS Region */}
           <div className="space-y-1.5">
-            <Label htmlFor="aws-region" className="text-label-sm font-normal text-secondary">
-              AWS Region
+            <Label htmlFor="aws-region" className="text-muted-foreground font-normal text-xs">
+              {t('apiSetup.awsRegion')}
             </Label>
-            <div className="field-surface rounded-md">
+            <div className={cn("rounded-md shadow-minimal transition-colors", "bg-foreground-2 focus-within:bg-background")}>
               <Input
                 id="aws-region"
                 type="text"
@@ -684,124 +1191,133 @@ export function ApiKeyInput({
         </>
       )}
 
-      {/* Model Selection — 3 tier dropdowns for Pi providers, text input for custom/compat */}
-      {hasPiModels ? (
-        <div className="space-y-3">
-          {piModelsLoading ? (
-            <div className="flex items-center gap-2 py-3 text-tertiary">
-              <Loader2 className="size-3.5 animate-spin" />
-              <span className="text-xs">{t("apiSetup.loadingModels")}</span>
-            </div>
-          ) : (
+      {/* Model selection — same multi-select as the OAuth / catalog picker */}
+      {(showPiCatalogPicker || showBedrockCatalogPicker) ? (
+        <div className="space-y-2">
+          <RemoteModelsPicker
+            models={piRemoteModels}
+            value={connectionDefaultModel}
+            loading={piModelsLoading}
+            disabled={isDisabled}
+            error={modelError}
+            hint={t('apiSetup.modelListHint')}
+            onToggle={(id) => {
+              setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
+              setModelError(null)
+              setLimitError(null)
+            }}
+          />
+        </div>
+      ) : isOrderPreset && orderFieldMode === 'picker' ? (
+        <RemoteModelsPicker
+          models={remoteModels}
+          value={connectionDefaultModel}
+          loading={remoteModelsLoading}
+          disabled={isDisabled}
+          error={remoteModelsError}
+          hint={t('apiSetup.orderModelHint')}
+          waitingForKey={apiKey.trim().length < 8}
+          onToggle={(id) => {
+            setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
+            setModelError(null)
+            setLimitError(null)
+          }}
+          onRetry={() => setRemoteModelsNonce((n) => n + 1)}
+        />
+      ) : !isDefaultProviderPreset && showCustomFormatPicker(activePreset) ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-muted-foreground font-normal">
+              {t('apiSetup.defaultModel')}{' '}
+              <span className="text-foreground/30">· {baseUrl.trim() ? t('apiSetup.required') : t('common.optional')}</span>
+            </Label>
+            <button
+              type="button"
+              onClick={() => setModelFetchNonce((n) => n + 1)}
+              disabled={isDisabled || fetchModelsPhase === 'loading' || !baseUrl.trim() || !apiKey.trim()}
+              aria-busy={fetchModelsPhase === 'loading'}
+              className={cn(
+                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] bg-background px-2.5 text-[12px] font-medium text-foreground shadow-minimal",
+                "hover:bg-foreground/5 disabled:pointer-events-none disabled:opacity-40",
+              )}
+            >
+              {fetchModelsPhase === 'loading' && <Loader2 className="size-3 animate-spin" />}
+              {fetchModelsPhase === 'loading' ? t('apiSetup.fetchingModels') : t('apiSetup.refetchModels')}
+            </button>
+          </div>
+          {customModelFieldMode(fetchModelsPhase, remoteModels.length) === 'picker' ? (
+            <RemoteModelsPicker
+              hideLabel
+              models={remoteModels}
+              value={connectionDefaultModel}
+              loading={false}
+              disabled={isDisabled}
+              hint={`${t('apiSetup.fetchModelsReady', { count: remoteModels.length })} ${t('apiSetup.modelListHint')}`}
+              onToggle={(id) => {
+                setModelsEdited(true)
+                setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
+                setModelError(null)
+                setLimitError(null)
+              }}
+            />
+          ) : customModelFieldMode(fetchModelsPhase, remoteModels.length) === 'manual' ? (
             <>
-              {tierConfigs.map(({ label, desc, value }) => (
-                <div key={label} className="space-y-1.5">
-                  <Label className="text-label-sm font-normal text-secondary">
-                    {label}{' '}
-                    <span className="text-tertiary">· {desc}</span>
-                  </Label>
-                  <button
-                    type="button"
-                    disabled={isDisabled}
-                    onClick={(e) => {
-                      if (openTier === label) {
-                        setOpenTier(null)
-                        setTierFilter('')
-                      } else {
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        setTierDropdownPosition({ top: rect.bottom + 4, left: rect.left, width: rect.width })
-                        setOpenTier(label)
-                        setTierFilter('')
-                        setTimeout(() => tierFilterInputRef.current?.focus(), 0)
-                      }
-                    }}
-                    className={cn(
-                      "field-surface flex h-9 w-full items-center justify-between rounded-md px-3 text-label",
-                      isDisabled && "opacity-50 pointer-events-none"
-                    )}
-                  >
-                    <span className="truncate text-foreground">
-                      {piModels.find(m => m.id === value)?.name ?? 'Select model...'}
-                    </span>
-                    <ChevronDown className="size-3 shrink-0 text-tertiary" />
-                  </button>
-                </div>
-              ))}
-              {activeTierConfig && tierDropdownPosition && (
-                <>
-                  <div
-                    className="fixed inset-0 z-floating-backdrop"
-                    onClick={() => { setOpenTier(null); setTierFilter('') }}
-                  />
-                  <div
-                    className="popover-styled fixed z-floating-menu min-w-[200px] overflow-hidden text-foreground"
-                    style={{
-                      top: tierDropdownPosition.top,
-                      left: tierDropdownPosition.left,
-                      width: tierDropdownPosition.width,
-                    }}
-                  >
-                    <CommandPrimitive
-                      className="min-w-[200px]"
-                      shouldFilter={false}
-                    >
-                      <div className="border-b border-subtle px-3 py-2">
-                        <CommandPrimitive.Input
-                          ref={tierFilterInputRef}
-                          value={tierFilter}
-                          onValueChange={setTierFilter}
-                          placeholder={t("apiSetup.searchModels")}
-                          autoFocus
-                          className="w-full bg-transparent text-label outline-none placeholder:text-tertiary placeholder:select-none"
-                        />
-                      </div>
-                      <CommandPrimitive.List className="max-h-[240px] overflow-y-auto p-1">
-                        {piModels
-                          .filter(m => m.name.toLowerCase().includes(tierFilter.toLowerCase()))
-                          .map((model) => (
-                            <CommandPrimitive.Item
-                              key={model.id}
-                              value={model.id}
-                              onSelect={() => {
-                                activeTierConfig.onChange(model.id)
-                                setOpenTier(null)
-                                setTierFilter('')
-                              }}
-                              className={cn(
-                                "flex min-h-row-menu cursor-pointer select-none items-center justify-between gap-3 rounded-md px-3 text-label",
-                                "outline-none data-[selected=true]:bg-fill-hover"
-                              )}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="truncate">{model.name}</span>
-                                {model.reasoning && (
-                                  <span className="shrink-0 text-caption text-tertiary">reasoning</span>
-                                )}
-                              </div>
-                              <Check className={cn("size-3 shrink-0", activeTierConfig.value === model.id ? "opacity-100" : "opacity-0")} />
-                            </CommandPrimitive.Item>
-                          ))}
-                      </CommandPrimitive.List>
-                    </CommandPrimitive>
-                  </div>
-                </>
-              )}
-              {modelError && (
-                <p className="text-xs text-destructive">{modelError}</p>
-              )}
+              <div className={cn(
+                "rounded-md shadow-minimal transition-colors",
+                "bg-foreground-2 focus-within:bg-background",
+                modelError && "ring-1 ring-destructive/40"
+              )}>
+                <Input
+                  id="connection-default-model"
+                  type="text"
+                  value={connectionDefaultModel}
+                  onChange={(e) => {
+                    setConnectionDefaultModel(e.target.value)
+                    setModelsEdited(true)
+                    setModelError(null)
+                    setLimitError(null)
+                  }}
+                  placeholder={t('apiSetup.modelListPlaceholder')}
+                  className="border-0 bg-transparent shadow-none"
+                  disabled={isDisabled}
+                />
+              </div>
+              <p className={cn(
+                "text-xs",
+                fetchModelsPhase === 'error' ? "text-destructive" : "text-muted-foreground",
+              )}>
+                {fetchModelsPhase === 'error' ? t('apiSetup.fetchModelsUnavailable') : t('apiSetup.fetchModelsEmpty')}
+              </p>
+              <p className="text-xs text-foreground/30">{t('apiSetup.modelListHint')}</p>
             </>
+          ) : (
+            <div className="flex min-h-9 items-center gap-2 rounded-md bg-foreground-2 px-3 text-muted-foreground shadow-minimal">
+              {fetchModelsPhase === 'loading' && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+              <span className="text-xs">
+                {fetchModelsPhase === 'loading'
+                  ? t('apiSetup.fetchingModels')
+                  : t('apiSetup.modelsAwaitingFetch')}
+              </span>
+            </div>
+          )}
+          {connectionDefaultModel.trim() && customModelFieldMode(fetchModelsPhase, remoteModels.length) === 'pending' && (
+            <p className="text-xs text-foreground/70">{connectionDefaultModel}</p>
+          )}
+          {modelError && (
+            <p className="text-xs text-destructive">{modelError}</p>
           )}
         </div>
       ) : !isDefaultProviderPreset && (
         <div className="space-y-2">
-          <Label htmlFor="connection-default-model" className="font-normal text-secondary">
-            Default Model{' '}
-            <span className="text-tertiary">
-              · {!isBedrock && baseUrl.trim() ? 'required' : 'optional'}
+          <Label htmlFor="connection-default-model" className="text-muted-foreground font-normal">
+            {t('apiSetup.defaultModel')}{' '}
+            <span className="text-foreground/30">
+              · {!isBedrock && baseUrl.trim() ? t('apiSetup.required') : t('common.optional')}
             </span>
           </Label>
           <div className={cn(
-            "field-surface rounded-md",
+            "rounded-md shadow-minimal transition-colors",
+            "bg-foreground-2 focus-within:bg-background",
             modelError && "ring-1 ring-destructive/40"
           )}>
             <Input
@@ -810,9 +1326,15 @@ export function ApiKeyInput({
               value={connectionDefaultModel}
               onChange={(e) => {
                 setConnectionDefaultModel(e.target.value)
+                setModelsEdited(true)
                 setModelError(null)
+                setLimitError(null)
               }}
-              placeholder="e.g. claude-opus-5-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5"
+              placeholder={
+                activePreset === 'order-openai'
+                  ? t('apiSetup.modelListPlaceholderOrder')
+                  : t('apiSetup.modelListPlaceholder')
+              }
               className="border-0 bg-transparent shadow-none"
               disabled={isDisabled}
             />
@@ -820,13 +1342,112 @@ export function ApiKeyInput({
           {modelError && (
             <p className="text-xs text-destructive">{modelError}</p>
           )}
-          <p className="text-label-sm text-tertiary">
-            Comma-separated list. The first model is the default. The last is used for summarization.
+          <p className="text-xs text-foreground/30">
+            {t('apiSetup.modelListHint')}
           </p>
-          {(activePreset === 'custom' || !activePreset) && (
-            <p className="text-label-sm text-tertiary">
-              Required for custom endpoints. Use the provider-specific model ID.
+          {!activePreset && (
+            <p className="text-xs text-foreground/30">
+              {t('apiSetup.customEndpointRequired')}
             </p>
+          )}
+        </div>
+      )}
+
+      {!showCustomModelLimits && selectedCustomModelIds.length > 0 && (
+        <div className="space-y-3">
+          {selectedCustomModelIds.map((id) => {
+            const listed = piModels.find((model) => connectionModelIdsMatch(model.id, id))
+              ?? remoteModels.find((model) => connectionModelIdsMatch(model.id, id))
+            const modelName = listed?.name ?? id
+            return (
+              <div key={id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                <span className="min-w-0 truncate text-sm font-medium" title={modelName}>{modelName}</span>
+                {renderImageSupport(id, modelName)}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {showCustomModelLimits && (
+        <div className="space-y-5">
+          <div className="space-y-1">
+            <Label className="text-muted-foreground font-normal">
+              {t('apiSetup.modelLimitsTitle')}
+            </Label>
+            <p className="flex items-center gap-1.5 text-xs text-foreground/40">
+              {remoteModelsLoading && (
+                <Loader2 className="size-3 shrink-0 animate-spin" />
+              )}
+              <span>{t(limitsStatusKey)}</span>
+            </p>
+          </div>
+          {selectedLimitRows.map(({ id, remote, contextWindow, maxTokens, contextSource, maxSource }) => {
+            const limitsInvalid = !isValidModelLimitCombination(maxTokens, contextWindow)
+            return (
+              <section key={id} className="rounded-xl border border-border bg-background p-4">
+                <header className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="min-w-0 truncate text-sm font-semibold" title={remote?.name ?? id}>{remote?.name ?? id}</h3>
+                  {renderImageSupport(id, remote?.name ?? id)}
+                </header>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <ModelLimitInput
+                      id={`context-window-${id}`}
+                      label={t('apiSetup.contextWindow')}
+                      value={contextWindow}
+                      source={contextSource}
+                      disabled={isDisabled}
+                      onChange={(next) => {
+                        setEditedContextIds((prev) => new Set(prev).add(id))
+                        setModelContextWindows((prev) => ({ ...prev, [id]: next }))
+                        // Do not mutate output capacity while the user is typing
+                        // a context limit. Validate both fields on submission.
+                        setLimitError(null)
+                      }}
+                    />
+                    <ModelLimitInput
+                      id={`max-tokens-${id}`}
+                      label={t('apiSetup.maxOutputTokens')}
+                      value={maxTokens}
+                      source={maxSource}
+                      upperExclusive={contextWindow}
+                      invalid={limitsInvalid}
+                      disabled={isDisabled}
+                      onChange={(next) => {
+                        setEditedMaxTokenIds((prev) => new Set(prev).add(id))
+                        setModelMaxTokens((prev) => ({ ...prev, [id]: next }))
+                        setLimitError(null)
+                      }}
+                    />
+                </div>
+                <details className="group/advanced mt-4 border-t border-border pt-3">
+                  <summary className="flex cursor-pointer list-none items-center justify-between rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <span>{t('apiSetup.advancedModelSettings')}</span>
+                    <ChevronDown className="size-3.5 transition-transform group-open/advanced:rotate-180" />
+                  </summary>
+                  <div className="space-y-4 pt-4">
+
+                  <fieldset className="space-y-2" disabled={isDisabled}>
+                    <legend className="text-xs">{t('apiSetup.supportedThinkingLevels')}</legend>
+                    <p className="text-xs text-muted-foreground">{t(modelThinkingLevels[id] === undefined ? (initialValues ? 'apiSetup.thinkingLevelsUnchangedHint' : 'apiSetup.thinkingLevelsAutoHint') : 'apiSetup.supportedThinkingLevelsHint')}</p>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {THINKING_LEVELS.map(level => <label key={level.id} className={cn("relative flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-xs transition-colors focus-within:ring-2 focus-within:ring-ring", modelThinkingLevels[id]?.includes(level.id) ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-foreground/5")}>
+                        <input type="checkbox" className="sr-only" checked={modelThinkingLevels[id]?.includes(level.id) ?? false}
+                          onChange={e => setModelThinkingLevels(prev => ({ ...prev, [id]: e.target.checked ? [...(prev[id] ?? []), level.id] : (prev[id] ?? []).filter(v => v !== level.id) }))} />
+                        <span className="min-w-0 flex-1"><span className="block font-medium">{t(level.nameKey, { lng: 'zh-Hans' })}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{t(level.nameKey, { lng: 'en' })}</span></span>
+                        <Check aria-hidden="true" className={cn("size-3.5 shrink-0", modelThinkingLevels[id]?.includes(level.id) ? "opacity-100" : "opacity-0")} />
+                      </label>)}
+                    </div>
+                  </fieldset>
+
+                  </div>
+                </details>
+              </section>
+            )
+          })}
+          {limitError && (
+            <p className="text-xs text-destructive" role="alert">{limitError}</p>
           )}
         </div>
       )}

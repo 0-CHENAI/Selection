@@ -2,6 +2,7 @@
  * SourceStatusIndicator - Shows connection status for sources
  *
  * A small colored dot that indicates the source's connection status:
+ * - Pulsing blue: Connecting or authenticating
  * - Green: Connected/tested successfully
  * - Yellow: Requires authentication
  * - Red: Failed to connect
@@ -37,6 +38,12 @@ const STATUS_CONFIG: Record<SourceConnectionStatus, {
   label: string
   description: string
 }> = {
+  connecting: {
+    color: 'bg-info',
+    pulseColor: 'bg-info/80',
+    label: 'Connecting',
+    description: 'Source connection is being verified',
+  },
   connected: {
     color: 'bg-success',
     pulseColor: 'bg-success/80',
@@ -99,11 +106,11 @@ export function SourceStatusIndicator({
             className
           )}
         >
-          {/* Pulse animation for connected status */}
-          {status === 'connected' && (
+          {/* A connecting source needs a live activity affordance. */}
+          {(status === 'connected' || status === 'connecting') && (
             <span
               className={cn(
-                'absolute inline-flex rounded-full opacity-75 animate-ping',
+                'absolute inline-flex rounded-full opacity-75 motion-safe:animate-ping',
                 config.pulseColor,
                 sizeClass
               )}
@@ -130,4 +137,52 @@ export function SourceStatusIndicator({
   )
 }
 
-export { deriveConnectionStatus } from './source-connection-status'
+/**
+ * Derive connection status from source config
+ * This is a convenience function to determine status from existing fields
+ *
+ * @param source - The source config
+ * @param localMcpEnabled - Whether local MCP servers are enabled (default: true)
+ */
+export function deriveConnectionStatus(source: {
+  config: {
+    isAuthenticated?: boolean
+    connectionStatus?: SourceConnectionStatus
+    type?: string
+    mcp?: { authType?: string; transport?: string }
+    api?: { authType?: string }
+  }
+}, localMcpEnabled = true): SourceConnectionStatus {
+  // Check if this is a stdio source and local MCP is disabled
+  const mcp = source.config.mcp
+  if (mcp?.transport === 'stdio' && !localMcpEnabled) {
+    return 'local_disabled'
+  }
+
+  // If explicit status is set, use it
+  if (source.config.connectionStatus) {
+    return source.config.connectionStatus
+  }
+
+  // Derive from auth state
+  const api = source.config.api
+  const authType = mcp?.authType ?? api?.authType
+  const isAuthenticated = authType === 'none' || authType === undefined
+    ? true
+    : source.config['isAuthenticated'] === true
+
+  if (!isAuthenticated) {
+    return 'needs_auth'
+  }
+
+  if (isAuthenticated) {
+    return 'connected'
+  }
+
+  // Local sources are always connected
+  if (source.config.type === 'local') {
+    return 'connected'
+  }
+
+  return 'untested'
+}

@@ -1,0 +1,20 @@
+{
+  "quick_ratio": null,
+  "quick_ratio_display": "\u221e",
+  "status": "EXCELLENT",
+  "interpretation": "No revenue loss - perfect retention with growth",
+  "components": {
+    "growth_mrr": 1000.0,
+    "lost_mrr": 0.0,
+    "new_mrr": 1000.0,
+    "expansion_mrr": 0,
+    "churned_mrr": 0.0,
+    "contraction_mrr": 0
+  },
+  "breakdown": {
+    "new_mrr_pct": 100.0,
+    "expansion_mrr_pct": 0.0,
+    "churned_mrr_pct": 0,
+    "contraction_mrr_pct": 0
+  }
+}

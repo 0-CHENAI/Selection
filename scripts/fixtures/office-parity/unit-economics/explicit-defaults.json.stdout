@@ -1,0 +1,143 @@
+{
+  "inputs": {
+    "starting_mrr": 50000.0,
+    "monthly_growth_pct": 10.0,
+    "monthly_churn_pct": 3.0,
+    "cac": 2000.0,
+    "gross_margin": 0.7,
+    "sm_spend_pct": 0.3
+  },
+  "projections": [
+    {
+      "month": 1,
+      "mrr": 50000.0,
+      "arr": 600000.0,
+      "monthly_revenue": 50000.0,
+      "gross_profit": 35000.0,
+      "sm_spend": 15000.0,
+      "net_profit": 20000.0,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 2,
+      "mrr": 53500.0,
+      "arr": 642000.0,
+      "monthly_revenue": 53500.0,
+      "gross_profit": 37450.0,
+      "sm_spend": 16050.0,
+      "net_profit": 21400.0,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 3,
+      "mrr": 57245.0,
+      "arr": 686940.0,
+      "monthly_revenue": 57245.0,
+      "gross_profit": 40071.5,
+      "sm_spend": 17173.5,
+      "net_profit": 22898.0,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 4,
+      "mrr": 61252.15,
+      "arr": 735025.8,
+      "monthly_revenue": 61252.15,
+      "gross_profit": 42876.5,
+      "sm_spend": 18375.65,
+      "net_profit": 24500.86,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 5,
+      "mrr": 65539.8,
+      "arr": 786477.61,
+      "monthly_revenue": 65539.8,
+      "gross_profit": 45877.86,
+      "sm_spend": 19661.94,
+      "net_profit": 26215.92,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 6,
+      "mrr": 70127.59,
+      "arr": 841531.04,
+      "monthly_revenue": 70127.59,
+      "gross_profit": 49089.31,
+      "sm_spend": 21038.28,
+      "net_profit": 28051.03,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 7,
+      "mrr": 75036.52,
+      "arr": 900438.21,
+      "monthly_revenue": 75036.52,
+      "gross_profit": 52525.56,
+      "sm_spend": 22510.96,
+      "net_profit": 30014.61,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 8,
+      "mrr": 80289.07,
+      "arr": 963468.89,
+      "monthly_revenue": 80289.07,
+      "gross_profit": 56202.35,
+      "sm_spend": 24086.72,
+      "net_profit": 32115.63,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 9,
+      "mrr": 85909.31,
+      "arr": 1030911.71,
+      "monthly_revenue": 85909.31,
+      "gross_profit": 60136.52,
+      "sm_spend": 25772.79,
+      "net_profit": 34363.72,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 10,
+      "mrr": 91922.96,
+      "arr": 1103075.53,
+      "monthly_revenue": 91922.96,
+      "gross_profit": 64346.07,
+      "sm_spend": 27576.89,
+      "net_profit": 36769.18,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 11,
+      "mrr": 98357.57,
+      "arr": 1180290.81,
+      "monthly_revenue": 98357.57,
+      "gross_profit": 68850.3,
+      "sm_spend": 29507.27,
+      "net_profit": 39343.03,
+      "growth_rate_pct": 7.0
+    },
+    {
+      "month": 12,
+      "mrr": 105242.6,
+      "arr": 1262911.17,
+      "monthly_revenue": 105242.6,
+      "gross_profit": 73669.82,
+      "sm_spend": 31572.78,
+      "net_profit": 42097.04,
+      "growth_rate_pct": 7.0
+    }
+  ],
+  "summary": {
+    "starting_mrr": 50000.0,
+    "ending_mrr": 105242.6,
+    "ending_arr": 1262911.17,
+    "mrr_growth_pct": 110.49,
+    "total_revenue_12m": 894422.57,
+    "total_gross_profit_12m": 626095.79,
+    "total_sm_spend_12m": 268326.77,
+    "total_net_profit_12m": 357769.02,
+    "avg_monthly_growth_pct": 7.0
+  }
+}

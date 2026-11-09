@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
+import { windowsCaptionEdgeStyle } from '@/lib/windows-caption-inset'
 import type { WorkspaceInfo } from '../../../shared/types'
 import {
   AddWorkspaceContainer,
@@ -54,6 +55,10 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-sidebar px-4">
+        <div
+          className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px]"
+          style={windowsCaptionEdgeStyle()}
+        />
         <AddWorkspaceContainer>
           <Spinner className="h-6 w-6" />
           <p className="mt-3 text-sm text-muted-foreground">{t("workspace.loadingWorkspaces")}</p>
@@ -64,6 +69,10 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
 
   return (
     <div className="flex h-screen items-center justify-center bg-sidebar px-4">
+      <div
+        className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px]"
+        style={windowsCaptionEdgeStyle()}
+      />
       <AddWorkspaceContainer>
         <AddWorkspaceStepHeader
           title={t("workspace.selectWorkspace")}

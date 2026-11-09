@@ -6,9 +6,9 @@
  * env var expansion, and retry logic so the two code paths can't diverge.
  */
 
-import type { WebhookAction, WebhookActionResult } from './types.ts';
-import { expandEnvVars, expandEnvVarsInJson } from './utils.ts';
-import { DEFAULT_WEBHOOK_METHOD, HISTORY_FIELD_MAX_LENGTH } from './constants.ts';
+import type { AutomationHistoryStatus, WebhookAction, WebhookActionResult } from './types.ts';
+import { expandEnvVars } from './utils.ts';
+import { DEFAULT_WEBHOOK_METHOD, HISTORY_FIELD_MAX_LENGTH, PROMPT_HISTORY_FINAL_TEXT_MAX_LENGTH } from './constants.ts';
 
 /**
  * Redact a URL for safe logging. Webhook URLs may contain secrets
@@ -39,11 +39,17 @@ export function createWebhookHistoryEntry(opts: {
   attempts?: number;
   error?: string;
   responseBody?: string;
+  status?: AutomationHistoryStatus;
+  event?: string;
+  sourceSessionId?: string;
 }): Record<string, unknown> {
   return {
     id: opts.matcherId,
     ts: Date.now(),
     ok: opts.ok,
+    status: opts.status ?? (opts.ok ? 'succeeded' : 'failed'),
+    ...(opts.event ? { event: opts.event } : {}),
+    ...(opts.sourceSessionId ? { sourceSessionId: opts.sourceSessionId } : {}),
     webhook: {
       method: opts.method ?? DEFAULT_WEBHOOK_METHOD,
       url: redactUrl(opts.url),
@@ -65,17 +71,26 @@ export function createPromptHistoryEntry(opts: {
   sessionId?: string;
   prompt?: string;
   error?: string;
-  /** Why the run was skipped (e.g. its semantic condition was not met); not an error. */
-  skipped?: string;
+  status?: AutomationHistoryStatus;
+  event?: string;
+  sourceSessionId?: string;
+  reason?: string;
+  finalText?: string;
+  durationMs?: number;
 }): Record<string, unknown> {
   return {
     id: opts.matcherId,
     ts: Date.now(),
     ok: opts.ok,
+    status: opts.status ?? (opts.ok ? 'succeeded' : 'failed'),
+    ...(opts.event ? { event: opts.event } : {}),
+    ...(opts.sourceSessionId ? { sourceSessionId: opts.sourceSessionId } : {}),
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts.prompt ? { prompt: opts.prompt.slice(0, HISTORY_FIELD_MAX_LENGTH) } : {}),
     ...(opts.error ? { error: opts.error.slice(0, HISTORY_FIELD_MAX_LENGTH) } : {}),
-    ...(opts.skipped ? { skipped: opts.skipped.slice(0, HISTORY_FIELD_MAX_LENGTH) } : {}),
+    ...(opts.reason ? { reason: opts.reason } : {}),
+    ...(opts.finalText ? { finalText: opts.finalText.slice(0, PROMPT_HISTORY_FINAL_TEXT_MAX_LENGTH) } : {}),
+    ...(opts.durationMs !== undefined ? { durationMs: opts.durationMs } : {}),
   };
 }
 
@@ -100,7 +115,7 @@ export function expandWebhookAction(action: WebhookAction, env: Record<string, s
   if (typeof action.body === 'string') {
     expanded.body = expandEnvVars(action.body, env);
   } else if (action.body !== undefined && typeof action.body === 'object' && action.body !== null) {
-    expanded.body = expandEnvVarsInJson(action.body, env);
+    expanded.body = JSON.parse(expandEnvVars(JSON.stringify(action.body), env));
   }
 
   if (action.auth) {
@@ -219,7 +234,8 @@ export async function executeWebhookRequest(
         if (typeof action.body === 'string') {
           requestBody = env ? expandEnvVars(action.body, env) : action.body;
         } else {
-          requestBody = JSON.stringify(env ? expandEnvVarsInJson(action.body, env) : action.body);
+          const raw = JSON.stringify(action.body);
+          requestBody = env ? expandEnvVars(raw, env) : raw;
         }
       } else if (bodyFormat === 'form') {
         if (!headers['Content-Type'] && !headers['content-type']) {

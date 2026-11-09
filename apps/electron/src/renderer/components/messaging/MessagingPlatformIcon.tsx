@@ -2,7 +2,7 @@
  * MessagingPlatformIcon
  *
  * Parallel of ConnectionIcon (for LLM providers) but for messaging platforms.
- * Renders the brand mark for Telegram / WhatsApp. Falls back to a colored
+ * Renders the Lark / Feishu brand mark. Falls back to a colored
  * platform-initial badge if the SVG import fails at runtime.
  *
  * SVGs in `assets/messaging-icons/` are shorthand brand marks tuned for a
@@ -10,21 +10,15 @@
  * platform's press kit.
  */
 
-import telegramIcon from '@/assets/messaging-icons/telegram.svg'
-import whatsappIcon from '@/assets/messaging-icons/whatsapp.svg'
 import larkIcon from '@/assets/messaging-icons/lark.svg'
 
-type MessagingPlatform = 'telegram' | 'whatsapp' | 'lark'
+type MessagingPlatform = 'lark'
 
 const platformIcons: Record<MessagingPlatform, string> = {
-  telegram: telegramIcon,
-  whatsapp: whatsappIcon,
   lark: larkIcon,
 }
 
 const platformFallback: Record<MessagingPlatform, { bg: string; initial: string }> = {
-  telegram: { bg: '#229ED9', initial: 'T' },
-  whatsapp: { bg: '#25D366', initial: 'W' },
   lark: { bg: '#00D6B9', initial: 'L' },
 }
 

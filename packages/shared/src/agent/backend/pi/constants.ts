@@ -12,11 +12,12 @@ import type { ThinkingLevel } from '../../thinking-levels.ts';
  * Map Craft's {@link ThinkingLevel} to Pi's `ThinkingLevel`.
  * All levels pass through 1:1 — Pi clamps per model internally
  * (`clampThinkingLevel` in pi-ai), so `max` degrades to the model's
- * ceiling on models without native max support (e.g. GPT-5.6 and GPT-6
- * accept it natively, older GPT-5.x fall back to xhigh).
+ * ceiling on models without native max support (e.g. GPT-5.6 accepts
+ * it natively, older GPT-5.x fall back to xhigh).
  */
 export const THINKING_TO_PI: Record<ThinkingLevel, PiThinkingLevel> = {
   off: 'off',
+  minimal: 'minimal',
   low: 'low',
   medium: 'medium',
   high: 'high',
@@ -47,3 +48,8 @@ export const PI_TOOL_NAME_MAP: Record<string, string> = {
   glob: 'Glob',
   task: 'Task',
 };
+
+/** Native identities only; callers must also require a registered read-only contract. */
+export function isNativeReadOnlyTool(name: string): boolean {
+  return ['Read', 'Grep', 'Glob', 'Find', 'Ls', 'document_index', 'document_read'].includes(PI_TOOL_NAME_MAP[name] ?? name);
+}

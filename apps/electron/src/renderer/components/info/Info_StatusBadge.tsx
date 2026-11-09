@@ -1,8 +1,7 @@
 /**
  * Info_StatusBadge
  *
- * Status badge for permission states using Info_Badge: a role-tint chip with a dot
- * (allowed → success, blocked → destructive, ask → info).
+ * Status badge for permission states using Info_Badge.
  */
 
 import * as React from 'react'
@@ -41,7 +40,7 @@ export function Info_StatusBadge({
   const displayLabel = label ?? t(statusI18nKeys[key])
 
   return (
-    <Info_Badge {...props} color={statusColors[key]} dot>
+    <Info_Badge {...props} color={statusColors[key]}>
       {displayLabel}
     </Info_Badge>
   )

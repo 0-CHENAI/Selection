@@ -11,6 +11,7 @@ import { successResponse, errorResponse } from '../response.ts';
 
 export interface SendDeveloperFeedbackArgs {
   message: string;
+  approvalToken?: string;
 }
 
 /**
@@ -32,6 +33,11 @@ export async function handleSendDeveloperFeedback(
     return errorResponse('Feedback message cannot be empty.');
   }
 
+  const approvalToken = args.approvalToken?.trim();
+  if (!approvalToken || !ctx.consumeDeveloperFeedbackApproval?.(approvalToken, message)) {
+    return errorResponse('Developer feedback requires explicit user approval for this exact message.');
+  }
+
   try {
     const now = Date.now();
     const shortId = Math.random().toString(36).slice(2, 8);
@@ -39,7 +45,6 @@ export async function handleSendDeveloperFeedback(
     const feedback: DeveloperFeedback = {
       id: `fb_${now}_${shortId}`,
       timestamp: new Date(now).toISOString(),
-      sessionId: ctx.sessionId,
       message,
     };
 

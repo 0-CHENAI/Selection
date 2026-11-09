@@ -25,17 +25,11 @@ let mockIsReadOnlyBashCommandWithConfig = mock(
 
 let mockEffectivePermissionMode: 'safe' | 'ask' | 'allow-all' = 'safe';
 
-// Minimal glob support for allowedWritePaths tests: `dir/**` prefix or exact path.
-let mockMatchesAllowedWritePath = mock((filePath: string, patterns: string[]) =>
-  patterns.some((p) => (p.endsWith('/**') ? filePath.startsWith(p.slice(0, -2)) : filePath === p))
-);
-
 // Paths resolve from THIS file's location (core/__tests__/)
 mock.module('../../mode-manager.ts', () => ({
   shouldAllowToolInMode: (a: any, b: any, c: any, d?: any) => mockShouldAllowToolInMode(a, b, c, d),
   isApiEndpointAllowed: (a: any, b: any, c?: any) => mockIsApiEndpointAllowed(a, b, c),
   isReadOnlyBashCommandWithConfig: (a: any, b: any) => mockIsReadOnlyBashCommandWithConfig(a, b),
-  matchesAllowedWritePath: (a: any, b: any) => mockMatchesAllowedWritePath(a, b),
   getPermissionModeDiagnostics: () => ({
     permissionMode: mockEffectivePermissionMode,
     modeVersion: 7,
@@ -44,15 +38,13 @@ mock.module('../../mode-manager.ts', () => ({
   }),
 }));
 
-// Mock permissionsConfigCache for read-only bash pattern and allowedWritePaths checks
+// Mock permissionsConfigCache for read-only bash pattern checks
 let mockReadOnlyBashPatterns: Array<{ regex: RegExp }> = [];
-let mockAllowedWritePaths: string[] = [];
 
 mock.module('../../permissions-config.ts', () => ({
   permissionsConfigCache: {
     getMergedConfig: () => ({
       readOnlyBashPatterns: mockReadOnlyBashPatterns,
-      allowedWritePaths: mockAllowedWritePaths,
     }),
   },
 }));
@@ -88,6 +80,21 @@ mock.module('../../../skills/types.ts', () => ({
 mock.module('../../../skills/storage.ts', () => ({
   GLOBAL_AGENT_SKILLS_DIR: '/Users/test/.agents/skills',
   PROJECT_AGENT_SKILLS_DIR: '.agents/skills',
+  getBundledSkillsDir: () => undefined,
+  getBundledSkillDirectories: () => [],
+  resolveBundledSkillMdPath: () => undefined,
+}));
+
+mock.module('../../../utils/officecli.ts', () => ({
+  resolveBundledOfficecliSkillRead: (requestedPath: string) => {
+    if (/officecli-docx|[/\\]docx[/\\]SKILL\.md/.test(requestedPath)) {
+      return '/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md';
+    }
+    if (/[/\\]officecli[/\\]SKILL\.md/.test(requestedPath) && !/officecli-/.test(requestedPath)) {
+      return '/bundled/skills/officecli/SKILL.md';
+    }
+    return undefined;
+  },
 }));
 
 let mockCraftAgentsCliFlag = false;
@@ -122,7 +129,9 @@ import {
 function createMockPermissionManager(overrides?: Partial<PermissionManagerLike>): PermissionManagerLike {
   return {
     isCommandWhitelisted: () => false,
+    isDangerousCommand: () => false,
     getBaseCommand: (cmd: string) => cmd.split(/\s+/)[0] || cmd,
+    extractDomainFromNetworkCommand: () => null,
     isDomainWhitelisted: () => false,
     ...overrides,
   };
@@ -131,7 +140,7 @@ function createMockPermissionManager(overrides?: Partial<PermissionManagerLike>)
 function createMockPrerequisiteManager(overrides?: Partial<PrerequisiteManagerLike>): PrerequisiteManagerLike {
   return {
     checkPrerequisites: () => ({ allowed: true }),
-    checkBashPrerequisites: () => ({ allowed: true }),
+    isPendingSkillReadCommand: () => false,
     ...overrides,
   };
 }
@@ -141,6 +150,7 @@ function createInput(overrides?: Partial<PreToolUseInput>): PreToolUseInput {
     toolName: 'Read',
     input: { file_path: '/test/file.ts' },
     sessionId: 'test-session',
+    executionSession: { id: 'test-session', workMode: 'PRO' },
     permissionMode: 'allow-all',
     workspaceRootPath: '/test/workspace',
     workspaceId: 'test-ws',
@@ -172,8 +182,38 @@ describe('runPreToolUseChecks', () => {
     mockValidateConfigFileContent.mockReset();
     mockValidateConfigFileContent.mockImplementation(() => null);
     mockReadOnlyBashPatterns = [];
-    mockAllowedWritePaths = [];
     mockCraftAgentsCliFlag = false;
+  });
+
+  describe('step 0: PPT visual QA rejects OCR before permission checks', () => {
+    it('blocks a Swift OCR pass over new slides', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: {
+          command: 'swift /tmp/ocr-pages.swift',
+          _displayName: 'Swift: OCR New Pages 1-4',
+          _intent: 'Check text coverage and wrapping after the layout change',
+        },
+      }));
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('imageInput');
+        expect(result.reason).toContain('image_capability_mismatch');
+        expect(result.reason).toContain('call_llm');
+      }
+    });
+
+    it('still intercepts call_llm when the attachments are slide images', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__session__call_llm',
+        input: {
+          prompt: 'Check layout, overlap, and contrast on this slide',
+          attachments: ['/tmp/slides/slide-01.png'],
+          _displayName: 'Read slide 1',
+        },
+      }));
+      expect(result.type).toBe('call_llm_intercept');
+    });
   });
 
   // ============================================================
@@ -196,7 +236,7 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('block');
       if (result.type === 'block') {
         expect(result.reason).toContain('Bash is not allowed in Explore mode');
-        expect(result.reason).toContain('Effective mode: Explore');
+        expect(result.reason).toContain('Effective mode: Read-only Explore');
         expect(result.reason).toContain('Last mode change: user at 2026-02-28T18:00:00.000Z (modeVersion=7)');
       }
     });
@@ -310,6 +350,17 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('call_llm_intercept');
     });
 
+    it('skips source check for built-in MCP servers (craft-agents-docs)', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__craft-agents-docs__search',
+        input: {},
+        activeSourceSlugs: [],
+      }));
+
+      // Should pass through (not source_activation_needed)
+      expect(result.type).toBe('allow');
+    });
+
     it('skips source check for non-MCP tools', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
@@ -363,6 +414,44 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
+    it('routes meaningful source guides to internal preparation instead of a user-visible block', () => {
+      const generations: Array<number | undefined> = [];
+      const prereqManager = createMockPrerequisiteManager({
+        checkPrerequisites: (_toolName, assistantGeneration) => {
+          generations.push(assistantGeneration);
+          return {
+            allowed: false,
+            sourceGuide: {
+              sourceSlug: 'linear',
+              filePath: '/test/workspace/sources/linear/guide.md',
+              content: 'Use the issue search endpoint.',
+              version: 'guide-version',
+              alreadyPreparedInGeneration: false,
+            },
+          };
+        },
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__linear__searchIssues',
+        input: {},
+        activeSourceSlugs: ['linear'],
+        allSourceSlugs: ['linear'],
+        assistantGeneration: 4,
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result).toEqual({
+        type: 'source_guide_required',
+        sourceSlug: 'linear',
+        guidePath: '/test/workspace/sources/linear/guide.md',
+        guideContent: 'Use the issue search endpoint.',
+        guideVersion: 'guide-version',
+        alreadyPreparedInGeneration: false,
+      });
+      expect(generations).toEqual([4]);
+    });
+
     it('skips when no prerequisiteManager provided', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'mcp__linear__createIssue',
@@ -373,45 +462,6 @@ describe('runPreToolUseChecks', () => {
       }));
 
       expect(result.type).toBe('allow');
-    });
-
-    it('sends Bash calls to checkBashPrerequisites with their command', () => {
-      const checkBashPrerequisites = mock((_command: string) => ({ allowed: true }));
-      const checkPrerequisites = mock((_toolName: string) => ({ allowed: true }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'cat ~/.craft-agent/docs/browser-tools.md' },
-        prerequisiteManager: createMockPrerequisiteManager({ checkBashPrerequisites, checkPrerequisites }),
-      }));
-
-      expect(result.type).toBe('allow');
-      expect(checkBashPrerequisites).toHaveBeenCalledWith('cat ~/.craft-agent/docs/browser-tools.md');
-      expect(checkPrerequisites).not.toHaveBeenCalled();
-    });
-
-    it('blocks a Bash call that checkBashPrerequisites holds back', () => {
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'ls' },
-        prerequisiteManager: createMockPrerequisiteManager({
-          checkBashPrerequisites: () => ({ allowed: false, blockReason: 'You must read the skill instruction files first.' }),
-        }),
-      }));
-
-      expect(result).toEqual({ type: 'block', reason: 'You must read the skill instruction files first.', source: 'prerequisite' });
-    });
-
-    it('passes an empty command when the Bash input has none', () => {
-      const checkBashPrerequisites = mock((_command: string) => ({ allowed: true }));
-
-      runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: {},
-        prerequisiteManager: createMockPrerequisiteManager({ checkBashPrerequisites }),
-      }));
-
-      expect(checkBashPrerequisites).toHaveBeenCalledWith('');
     });
   });
 
@@ -431,6 +481,54 @@ describe('runPreToolUseChecks', () => {
       if (result.type === 'call_llm_intercept') {
         expect(result.input).toEqual(input);
       }
+    });
+
+    it('intercepts the prompt-facing call_llm short name', () => {
+      const input = { model: 'haiku', prompt: 'summarize' };
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'call_llm',
+        input,
+      }));
+
+      expect(result.type).toBe('call_llm_intercept');
+    });
+
+    it('intercepts mcp__session__spawn_session', () => {
+      mockEffectivePermissionMode = 'allow-all';
+      const input = { prompt: 'research Kimi K3', name: 'Spawn Kimi K3 worker' };
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__session__spawn_session',
+        input,
+      }));
+
+      expect(result.type).toBe('spawn_session_intercept');
+      if (result.type === 'spawn_session_intercept') {
+        expect(result.input).toEqual(input);
+      }
+    });
+
+    it('intercepts the prompt-facing spawn_session short name', () => {
+      mockEffectivePermissionMode = 'allow-all';
+      const input = { prompt: 'research Kimi K3', name: 'Spawn Kimi K3 worker' };
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'spawn_session',
+        input,
+      }));
+
+      expect(result.type).toBe('spawn_session_intercept');
+      if (result.type === 'spawn_session_intercept') {
+        expect(result.input).toEqual(input);
+      }
+    });
+
+    it('intercepts session__spawn_session', () => {
+      mockEffectivePermissionMode = 'allow-all';
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'session__spawn_session',
+        input: { prompt: 'research' },
+      }));
+
+      expect(result.type).toBe('spawn_session_intercept');
     });
 
     it('does not intercept other session tools', () => {
@@ -473,6 +571,47 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
+    it('rewrites guessed officecli and Anthropic docx skill paths to the bundled skills', () => {
+      const docx = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/officecli-docx/SKILL.md' },
+      }));
+      expect(docx.type).toBe('modify');
+      if (docx.type === 'modify') {
+        expect(docx.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      }
+
+      const catalog = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/officecli/SKILL.md' },
+      }));
+      expect(catalog.type).toBe('modify');
+      if (catalog.type === 'modify') {
+        expect(catalog.input.file_path).toBe('/bundled/skills/officecli/SKILL.md');
+      }
+
+      const anthropic = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/docx/SKILL.md' },
+      }));
+      expect(anthropic.type).toBe('modify');
+      if (anthropic.type === 'modify') {
+        expect(anthropic.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      }
+    });
+
+    it.each(['report.docx', 'forecast.xlsx', 'roadmap.pptx'])(
+      'allows generic reads of %s so OfficeCLI skills can choose the reader',
+      (filePath) => {
+        const result = runPreToolUseChecks(createInput({
+          toolName: 'Read',
+          input: { file_path: `/test/workspace/${filePath}` },
+        }));
+
+        expect(result.type).toBe('allow');
+      },
+    );
+
     it('strips _intent and _displayName metadata', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'mcp__linear__createIssue',
@@ -486,36 +625,6 @@ describe('runPreToolUseChecks', () => {
         expect(result.input.title).toBe('Bug fix');
         expect(result.input._intent).toBeUndefined();
         expect(result.input._displayName).toBeUndefined();
-      }
-    });
-
-    it('keeps _intent on source tools when the backend asks (Claude source proxies require it)', () => {
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'mcp__slack__api_slack',
-        input: { path: '/conversations.replies', _intent: 'read thread', _displayName: 'Read Thread' },
-        activeSourceSlugs: ['slack'],
-        allSourceSlugs: ['slack'],
-        keepSourceToolIntent: true,
-      }));
-
-      expect(result.type).toBe('modify');
-      if (result.type === 'modify') {
-        expect(result.input.path).toBe('/conversations.replies');
-        expect(result.input._intent).toBe('read thread');
-        expect(result.input._displayName).toBeUndefined();
-      }
-    });
-
-    it('still strips _intent from non-source tools when keepSourceToolIntent is set', () => {
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Read',
-        input: { file_path: '/absolute/path/file.ts', _intent: 'reading a file' },
-        keepSourceToolIntent: true,
-      }));
-
-      expect(result.type).toBe('modify');
-      if (result.type === 'modify') {
-        expect(result.input._intent).toBeUndefined();
       }
     });
 
@@ -872,7 +981,7 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('block');
       if (result.type === 'block') {
         expect(result.reason).toContain('Not allowed');
-        expect(result.reason).toContain('Effective mode: Explore');
+        expect(result.reason).toContain('Effective mode: Read-only Explore');
       }
     });
 
@@ -917,6 +1026,48 @@ describe('runPreToolUseChecks', () => {
       }));
 
       expect(result.type).toBe('block');
+    });
+
+    it('activates requiredSources when Read targets a catalog SKILL.md', () => {
+      const prereqManager = createMockPrerequisiteManager({
+        findCatalogSkillForTool: (toolName, input) => {
+          if (toolName === 'Read' && input.file_path === '/ws/skills/vision/SKILL.md') {
+            return { requiredSources: ['qwen-mm', 'extra'] };
+          }
+          return null;
+        },
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/ws/skills/vision/SKILL.md' },
+        activeSourceSlugs: [],
+        allSourceSlugs: ['qwen-mm', 'extra'],
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result.type).toBe('source_activation_needed');
+      if (result.type === 'source_activation_needed') {
+        expect(result.sourceSlug).toBe('qwen-mm');
+        expect(result.sourceExists).toBe(true);
+        expect(result.additionalSourceSlugs).toEqual(['extra']);
+      }
+    });
+
+    it('does not activate sources for an arbitrary Read', () => {
+      const prereqManager = createMockPrerequisiteManager({
+        findCatalogSkillForTool: () => null,
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/tmp/notes.md' },
+        activeSourceSlugs: [],
+        allSourceSlugs: ['qwen-mm'],
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result.type).toBe('allow');
     });
 
     it('call_llm interception runs before transforms', () => {
@@ -995,7 +1146,6 @@ describe('shouldPromptInAskMode', () => {
     mockValidateConfigFileContent.mockReset();
     mockValidateConfigFileContent.mockImplementation(() => null);
     mockReadOnlyBashPatterns = [];
-    mockAllowedWritePaths = [];
     mockCraftAgentsCliFlag = false;
   });
 
@@ -1011,8 +1161,6 @@ describe('shouldPromptInAskMode', () => {
       expect(result).not.toBeNull();
       expect(result!.promptType).toBe('file_write');
       expect(result!.description).toContain('/test/file.ts');
-      // "Always Allow" remembers the folder the file is written into, never "any write".
-      expect(result!.remember).toEqual({ kind: 'command', key: 'write:/test' });
     });
 
     it('prompts for Edit tool', () => {
@@ -1046,58 +1194,33 @@ describe('shouldPromptInAskMode', () => {
       expect(result!.description).toContain('/test/nb.ipynb');
     });
 
-    // Regression for OSS #1065 (PR #1066 by ZerVisionGo): allowedWritePaths was
-    // honored by Explore mode only, so automations in Ask mode had to run Allow-All.
-    it('auto-allows writes to an allowedWritePaths glob (no prompt in ask mode)', () => {
-      mockAllowedWritePaths = ['/test/social/**'];
-      const result = shouldPromptInAskMode('Write', { file_path: '/test/social/x/thread.md', content: 'x' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-      expect(result).toBeNull();
-      expect(mockMatchesAllowedWritePath).toHaveBeenCalledWith('/test/social/x/thread.md', ['/test/social/**']);
-    });
-
-    it('still prompts for writes outside allowedWritePaths', () => {
-      mockAllowedWritePaths = ['/test/social/**'];
-      const result = shouldPromptInAskMode('Write', { file_path: '/test/secrets/key.txt', content: 'x' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-      expect(result).not.toBeNull();
-      expect(result!.promptType).toBe('file_write');
-    });
-
-    it('applies allowedWritePaths to notebook_path writes', () => {
-      mockAllowedWritePaths = ['/test/notebooks/**'];
-      const result = shouldPromptInAskMode('NotebookEdit', { notebook_path: '/test/notebooks/a.ipynb', new_source: 'x' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-      expect(result).toBeNull();
-    });
-
-    it('does not consult the allowlist when the tool input has no path', () => {
-      mockAllowedWritePaths = ['/test/**'];
-      mockMatchesAllowedWritePath.mockClear();
-      const result = shouldPromptInAskMode('Write', { content: 'x' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-      expect(result).not.toBeNull();
-      expect(mockMatchesAllowedWritePath).not.toHaveBeenCalled();
-    });
-
-    it('auto-allows writes into a folder approved with "Always Allow"', () => {
+    it('does not treat a tool-name whitelist as approval for every write', () => {
+      // "Always allow" used to be keyed by tool name, which would have approved
+      // writes anywhere. Approvals are now scoped to a directory.
       pm = createMockPermissionManager({
-        isCommandWhitelisted: (key) => key === 'write:/test',
+        isCommandWhitelisted: (cmd) => cmd === 'Write',
       });
 
-      const ctx = { workspaceRootPath: '/test', activeSourceSlugs: [] };
-      expect(shouldPromptInAskMode('Edit', { file_path: '/test/a.ts' }, pm, ctx)).toBeNull();
-      // Other folders, including the user's dotfiles, still prompt.
-      expect(shouldPromptInAskMode('Write', { file_path: '/Users/me/.ssh/authorized_keys' }, pm, ctx)).not.toBeNull();
-      expect(shouldPromptInAskMode('Write', { file_path: '/test/sub/b.ts' }, pm, ctx)).not.toBeNull();
+      const result = shouldPromptInAskMode('Write', { file_path: '/test/a.ts' }, pm, {
+        workspaceRootPath: '/test',
+        activeSourceSlugs: [],
+      });
+
+      expect(result).not.toBeNull();
+      expect(result!.rememberKey).toBe('write-dir:/test');
+    });
+
+    it('auto-allows writes under a remembered directory', () => {
+      pm = createMockPermissionManager({
+        isApprovalRemembered: (key) => key === 'write-dir:/test',
+      });
+
+      const result = shouldPromptInAskMode('Write', { file_path: '/test/sub/a.ts' }, pm, {
+        workspaceRootPath: '/test',
+        activeSourceSlugs: [],
+      });
+
+      expect(result).toBeNull();
     });
   });
 
@@ -1140,12 +1263,13 @@ describe('shouldPromptInAskMode', () => {
       expect(result!.command).toBe('cat /etc/hosts > /tmp/test');
     });
 
-    it('auto-allows a command whose key was approved', () => {
+    it('auto-allows a remembered exact command', () => {
       pm = createMockPermissionManager({
-        isCommandWhitelisted: (key) => key === 'npm test',
+        isApprovalRemembered: (key) => key === 'bash:npm run e2e',
+        getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
       });
 
-      const result = shouldPromptInAskMode('Bash', { command: 'npm test' }, pm, {
+      const result = shouldPromptInAskMode('Bash', { command: 'npm run e2e' }, pm, {
         workspaceRootPath: '/test',
         activeSourceSlugs: [],
       });
@@ -1153,46 +1277,26 @@ describe('shouldPromptInAskMode', () => {
       expect(result).toBeNull();
     });
 
-    it('offers the subcommand-level key for "Always Allow"', () => {
-      const result = shouldPromptInAskMode('Bash', { command: 'git commit -m "wip"' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-
-      expect(result!.remember).toEqual({ kind: 'command', key: 'git commit' });
-    });
-
-    it('does not let an approved subcommand cover a dangerous one', () => {
+    it('remembering one command does not approve others with the same base command', () => {
       pm = createMockPermissionManager({
-        isCommandWhitelisted: (key) => key === 'git commit' || key === 'git',
+        isApprovalRemembered: (key) => key === 'bash:npm run e2e',
+        getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
       });
 
-      const result = shouldPromptInAskMode('Bash', { command: 'git push --force origin main' }, pm, {
+      const result = shouldPromptInAskMode('Bash', { command: 'npm publish' }, pm, {
         workspaceRootPath: '/test',
         activeSourceSlugs: [],
       });
 
       expect(result).not.toBeNull();
-      expect(result!.remember).toBeUndefined();
+      expect(result!.rememberKey).toBe('bash:npm publish');
     });
 
-    it('does not auto-allow commands chained onto an approved one', () => {
+    it('still prompts for whitelisted dangerous commands', () => {
       pm = createMockPermissionManager({
-        isCommandWhitelisted: (key) => key === 'git commit' || key === 'git',
-      });
-
-      const result = shouldPromptInAskMode('Bash', { command: 'git commit -m x && rm -rf ~/Documents' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-
-      expect(result).not.toBeNull();
-      expect(result!.remember).toBeUndefined();
-    });
-
-    it('still prompts for dangerous commands even if the whitelist would match anything', () => {
-      pm = createMockPermissionManager({
-        isCommandWhitelisted: () => true,
+        isCommandWhitelisted: (cmd) => cmd === 'rm',
+        isDangerousCommand: (cmd) => cmd === 'rm',
+        getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
       });
 
       const result = shouldPromptInAskMode('Bash', { command: 'rm -rf /important' }, pm, {
@@ -1202,11 +1306,12 @@ describe('shouldPromptInAskMode', () => {
 
       expect(result).not.toBeNull();
       expect(result!.promptType).toBe('bash');
-      expect(result!.remember).toBeUndefined();
     });
 
-    it('auto-allows curl to whitelisted domain', () => {
+    it('prompts for curl even to a domain-whitelisted host (network commands can upload data)', () => {
       pm = createMockPermissionManager({
+        getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
+        extractDomainFromNetworkCommand: () => 'api.example.com',
         isDomainWhitelisted: (domain) => domain === 'api.example.com',
       });
 
@@ -1215,10 +1320,17 @@ describe('shouldPromptInAskMode', () => {
         activeSourceSlugs: [],
       });
 
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.promptType).toBe('bash');
     });
 
-    it('prompts for curl to non-whitelisted domain and offers to remember it', () => {
+    it('prompts for curl to non-whitelisted domain', () => {
+      pm = createMockPermissionManager({
+        getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
+        extractDomainFromNetworkCommand: () => 'evil.com',
+        isDomainWhitelisted: () => false,
+      });
+
       const result = shouldPromptInAskMode('Bash', { command: 'curl https://evil.com/data' }, pm, {
         workspaceRootPath: '/test',
         activeSourceSlugs: [],
@@ -1226,35 +1338,6 @@ describe('shouldPromptInAskMode', () => {
 
       expect(result).not.toBeNull();
       expect(result!.promptType).toBe('bash');
-      expect(result!.remember).toEqual({ kind: 'domains', domains: ['evil.com'] });
-    });
-
-    it('prompts when a curl call also contacts a non-whitelisted host', () => {
-      pm = createMockPermissionManager({
-        isDomainWhitelisted: (domain) => domain === 'api.example.com',
-      });
-
-      const result = shouldPromptInAskMode('Bash', { command: 'curl https://api.example.com/a https://evil.com/b' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-
-      expect(result).not.toBeNull();
-      expect(result!.remember).toEqual({ kind: 'domains', domains: ['api.example.com', 'evil.com'] });
-    });
-
-    it('prompts for a chained curl even when its domain is whitelisted', () => {
-      pm = createMockPermissionManager({
-        isDomainWhitelisted: (domain) => domain === 'api.example.com',
-      });
-
-      const result = shouldPromptInAskMode('Bash', { command: 'curl https://api.example.com/a && rm -rf ~' }, pm, {
-        workspaceRootPath: '/test',
-        activeSourceSlugs: [],
-      });
-
-      expect(result).not.toBeNull();
-      expect(result!.remember).toBeUndefined();
     });
   });
 
@@ -1275,10 +1358,6 @@ describe('shouldPromptInAskMode', () => {
       expect(result).not.toBeNull();
       expect(result!.promptType).toBe('mcp_mutation');
       expect(result!.description).toContain('linear');
-      expect(result!.remember).toEqual({ kind: 'command', key: 'mcp__linear__createIssue' });
-      // Classified with the workspace/source rules, like Explore mode (not the bare fallback).
-      const safeCall = mockShouldAllowToolInMode.mock.calls.find((call: unknown[]) => call[2] === 'safe');
-      expect((safeCall?.[3] as { permissionsContext?: unknown })?.permissionsContext).toEqual({ workspaceRootPath: '/test', activeSourceSlugs: ['linear'] });
     });
 
     it('auto-allows MCP read-only tools (not blocked in safe mode)', () => {
@@ -1323,8 +1402,6 @@ describe('shouldPromptInAskMode', () => {
       expect(result).not.toBeNull();
       expect(result!.promptType).toBe('api_mutation');
       expect(result!.description).toContain('POST');
-      // The whitelist check looks up the full description, so that is what gets remembered.
-      expect(result!.remember).toEqual({ kind: 'command', key: 'POST /repos' });
     });
 
     it('auto-allows GET API calls', () => {

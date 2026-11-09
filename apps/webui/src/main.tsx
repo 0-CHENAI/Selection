@@ -1,3 +1,4 @@
+import { ConfirmationHost } from '../../electron/src/renderer/components/ConfirmationHost'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { Provider as JotaiProvider, useAtomValue } from 'jotai'
@@ -10,7 +11,6 @@ import { initReactI18next } from 'react-i18next'
 import { useTranslation } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import './index.css'
-import { installViewportRoot } from './viewport'
 
 // Initialize i18n before any React rendering
 setupI18n([LanguageDetector, initReactI18next])
@@ -45,16 +45,13 @@ function Root() {
   return (
     <ThemeProvider activeWorkspaceId={workspaceId}>
       <App />
+      <ConfirmationHost />
       <Toaster />
     </ThemeProvider>
   )
 }
 
-const root = document.getElementById('root')!
-const cleanupViewport = installViewportRoot(root)
-if (import.meta.hot) import.meta.hot.dispose(cleanupViewport)
-
-ReactDOM.createRoot(root).render(
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <JotaiProvider>

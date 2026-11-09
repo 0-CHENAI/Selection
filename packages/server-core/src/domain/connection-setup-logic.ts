@@ -12,7 +12,25 @@ import {
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
   defaultMidStreamBehavior,
+  CHATGPT_OAUTH_CONNECTION_NAME,
+  isDefaultChatGptOAuthConnectionName,
+  isOrderGatewayUrl,
+  ORDER_CONNECTION_NAME,
+  providerConnectionLabel,
 } from '@craft-agent/shared/config'
+
+export function resolveChatGptOAuthDisplayName(
+  connection: Pick<LlmConnection, 'name' | 'providerType' | 'authType' | 'piAuthProvider'>,
+  plan?: string,
+): string {
+  const isChatGptOAuth = connection.providerType === 'pi'
+    && connection.authType === 'oauth'
+    && connection.piAuthProvider === 'openai-codex'
+  if (!plan || !isChatGptOAuth || !isDefaultChatGptOAuthConnectionName(connection.name)) {
+    return connection.name
+  }
+  return `ChatGPT ${plan}`
+}
 
 // ============================================================
 // Error Parsing
@@ -28,7 +46,7 @@ export function parseTestConnectionError(msg: string): string {
     return 'Cannot connect to API server. Check the URL and ensure the server is running.'
   }
   if (lower.includes('no api key found for')) {
-    return 'Provider mismatch during setup. Select a provider preset in Craft Agents Backend API Key mode, or use Anthropic API Key mode for arbitrary compatible endpoints.'
+    return 'Provider mismatch during setup. Select a provider preset in Selection Backend API Key mode, or use an OpenAI Compatible custom endpoint.'
   }
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('authentication')) {
     return 'Invalid API key'
@@ -57,11 +75,17 @@ export function validateSetupTestInput(params: {
   baseUrl?: string
   piAuthProvider?: string
 }): { valid: true } | { valid: false; error: string } {
+  if (params.provider === 'anthropic' || (params.piAuthProvider === 'anthropic' && !params.baseUrl?.trim())) {
+    return {
+      valid: false,
+      error: 'Anthropic official login and Claude Max are no longer supported. Use an Anthropic Messages custom endpoint, including api.anthropic.com with an API key, or another Selection Backend provider.',
+    }
+  }
   const hasCustomEndpoint = !!params.baseUrl?.trim()
   if (params.provider === 'pi' && hasCustomEndpoint && !params.piAuthProvider) {
     return {
       valid: false,
-      error: 'Custom endpoint in Craft Agents Backend mode requires selecting a provider preset. For arbitrary Anthropic-compatible endpoints, use Anthropic API Key mode.',
+      error: 'Custom endpoint requires selecting a provider preset or choosing OpenAI Compatible or Anthropic Compatible.',
     }
   }
 
@@ -93,59 +117,15 @@ export function setupTestRequiresApiKey(baseUrl?: string): boolean {
   return !isLoopbackBaseUrl(baseUrl)
 }
 
-/** Placeholder run that stands in for a stored API key in the edit form (GET_API_KEY). */
-export const API_KEY_MASK = '••••••••'
-
 /**
- * Mask a stored API key for display: provider prefix + mask + last four, or the
- * mask alone for short keys. The only producer of masked values.
+ * SETUP must not persist empty, whitespace, or masked GET_API_KEY placeholders.
+ * Returning null means "leave the stored credential unchanged".
  */
-export function maskApiKey(key: string): string {
-  return key.length > 15 ? key.slice(0, 7) + API_KEY_MASK + key.slice(-4) : API_KEY_MASK
-}
-
-/**
- * True for values produced by {@link maskApiKey}, i.e. the edit form echoing a
- * stored key back. Real keys never contain the bullet character.
- */
-export function isMaskedApiKey(value: string | null | undefined): boolean {
-  return typeof value === 'string' && value.includes('••')
-}
-
-export type SetupTestApiKeyResolution =
-  | { ok: true; apiKey: string; source: 'input' | 'stored' }
-  | { ok: false; error: string }
-
-/**
- * Decide which API key a setup test should use.
- *
- * The edit form shows the stored key as a masked placeholder; when the user
- * leaves it untouched and clicks Test, the placeholder arrives here. Testing
- * with the bullets always failed authentication (OSS #1048), so resolve it to
- * the stored credential by connection slug, and ask for the key when that is
- * not possible. Pure apart from the injected store lookup.
- */
-export async function resolveSetupTestApiKey(
-  input: { apiKey: string | undefined; connectionSlug?: string; allowEmptyApiKey: boolean },
-  getStoredApiKey: (slug: string) => Promise<string | null>,
-): Promise<SetupTestApiKeyResolution> {
-  const trimmed = input.apiKey?.trim() ?? ''
-
-  if (isMaskedApiKey(trimmed)) {
-    if (!input.connectionSlug) {
-      return { ok: false, error: 'Re-enter the API key to test this connection.' }
-    }
-    const stored = await getStoredApiKey(input.connectionSlug)
-    if (!stored) {
-      return { ok: false, error: 'No API key is stored for this connection. Re-enter the key to test it.' }
-    }
-    return { ok: true, apiKey: stored, source: 'stored' }
-  }
-
-  if (!trimmed && !input.allowEmptyApiKey) {
-    return { ok: false, error: 'API key is required' }
-  }
-  return { ok: true, apiKey: trimmed, source: 'input' }
+export function persistableLlmSetupCredential(credential: string | undefined): string | null {
+  const trimmed = credential?.trim() ?? ''
+  if (!trimmed) return null
+  if (trimmed.includes('••')) return null
+  return trimmed
 }
 
 /**
@@ -156,6 +136,8 @@ export async function resolveSetupTestApiKey(
  *   must be treated like a remote custom endpoint so `piAuthProvider` is set, otherwise
  *   `getPiAuth()` returns null at runtime and chat requests fail with 401 (#636).
  * - Remote URL → always keyed with provider hint for the correct icon.
+ * - Edit/re-save with no new credential must not downgrade a keyed connection to
+ *   keyless; an omitted key means "keep the stored one" (#6).
  *
  * Pure: caller spreads the result into the connection updates patch.
  */
@@ -163,12 +145,15 @@ export function resolveCustomEndpointSetup(input: {
   baseUrl: string | undefined
   credential: string | undefined
   customEndpointApi: CustomEndpointApi
+  /** Existing keyed connection: missing form credential must not become keyless. */
+  preserveExistingCredential?: boolean
 }): {
   authType: Extract<LlmConnection['authType'], 'none' | 'api_key_with_endpoint'>
   name?: 'Local Model'
   piAuthProvider?: 'openai' | 'anthropic'
 } {
-  const isKeylessLoopback = isLoopbackBaseUrl(input.baseUrl) && !input.credential
+  const persistable = persistableLlmSetupCredential(input.credential)
+  const isKeylessLoopback = isLoopbackBaseUrl(input.baseUrl) && !persistable && !input.preserveExistingCredential
   if (isKeylessLoopback) {
     return { authType: 'none', name: 'Local Model' }
   }
@@ -192,18 +177,8 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
   authType: LlmConnection['authType'] | ((hasCustomEndpoint: boolean) => LlmConnection['authType'])
   piAuthProvider?: string
 }> = {
-  'anthropic-api': {
-    name: (h) => h ? 'Custom Anthropic-Compatible' : 'Anthropic (API Key)',
-    providerType: (h) => h ? 'pi_compat' : 'anthropic',
-    authType: (h) => h ? 'api_key_with_endpoint' : 'api_key',
-  },
-  'claude-max': {
-    name: 'Claude Max',
-    providerType: 'anthropic',
-    authType: 'oauth',
-  },
   'chatgpt-plus': {
-    name: 'ChatGPT Plus',
+    name: CHATGPT_OAUTH_CONNECTION_NAME,
     providerType: 'pi',
     authType: 'oauth',
     piAuthProvider: 'openai-codex',
@@ -214,8 +189,20 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
     authType: 'oauth',
     piAuthProvider: 'github-copilot',
   },
+  'kimi-code': {
+    name: 'Kimi Code',
+    providerType: 'pi',
+    authType: 'oauth',
+    piAuthProvider: 'kimi-coding',
+  },
+  'supergrok': {
+    name: 'SuperGrok / X Premium',
+    providerType: 'pi',
+    authType: 'oauth',
+    piAuthProvider: 'xai',
+  },
   'pi-api-key': {
-    name: 'Craft Agents Backend (API Key)',
+    name: 'Selection Backend (API Key)',
     providerType: 'pi',
     authType: 'api_key',
     // piAuthProvider set dynamically from setup.piAuthProvider
@@ -226,30 +213,9 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
 // Pi Auth Provider Display Names
 // ============================================================
 
-const PI_AUTH_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  'openai-codex': 'OpenAI',
-  google: 'Google AI Studio',
-  openrouter: 'OpenRouter',
-  'azure-openai-responses': 'Azure OpenAI',
-  'cloudflare-ai-gateway': 'Cloudflare AI Gateway',
-  'amazon-bedrock': 'Amazon Bedrock',
-  groq: 'Groq',
-  mistral: 'Mistral',
-  xai: 'xAI',
-  cerebras: 'Cerebras',
-  zai: 'z.ai',
-  huggingface: 'Hugging Face',
-  minimax: 'Minimax',
-  'minimax-cn': 'Minimax CN',
-  'kimi-coding': 'Kimi (Coding)',
-  'vercel-ai-gateway': 'Vercel AI Gateway',
-}
-
 /** Get a human-readable display name for a Pi auth provider key */
 export function piAuthProviderDisplayName(piAuthProvider: string): string | null {
-  return PI_AUTH_PROVIDER_DISPLAY_NAMES[piAuthProvider] ?? null
+  return providerConnectionLabel(piAuthProvider)
 }
 
 // ============================================================
@@ -280,19 +246,25 @@ export function createBuiltInConnection(slug: string, baseUrl?: string | null): 
     ? template.name(hasCustomEndpoint)
     : template.name
 
+  if (isOrderGatewayUrl(baseUrl)) {
+    name = ORDER_CONNECTION_NAME
+  }
+
   // Append suffix number to name for derived connections (e.g. 'anthropic-api-2' → 'Anthropic (API Key) 2')
   const suffixMatch = slug.match(/-(\d+)$/)
   if (suffixMatch && !BUILT_IN_CONNECTION_TEMPLATES[slug]) {
     name = `${name} ${suffixMatch[1]}`
   }
 
+  const isCopilotOAuth = providerType === 'pi' && authType === 'oauth' && template.piAuthProvider === 'github-copilot'
+
   return {
     slug,
     name,
     providerType,
     authType,
-    models: getDefaultModelsForConnection(providerType, template.piAuthProvider),
-    defaultModel: getDefaultModelForConnection(providerType, template.piAuthProvider),
+    models: isCopilotOAuth ? [] : getDefaultModelsForConnection(providerType, template.piAuthProvider),
+    defaultModel: isCopilotOAuth ? '' : getDefaultModelForConnection(providerType, template.piAuthProvider),
     modelSelectionMode: providerType === 'pi' ? 'automaticallySyncedFromProvider' : undefined,
     piAuthProvider: template.piAuthProvider,
     midStreamBehavior: defaultMidStreamBehavior(providerType),
@@ -312,6 +284,14 @@ export function createBuiltInConnection(slug: string, baseUrl?: string | null): 
  * to fix a bug where Array.includes() compared strings against ModelDefinition
  * objects, always returning false for Pi connections.
  */
+/** Split a typed/joined model field. ASCII, fullwidth, and enumeration commas. */
+export function splitModelIdList(value: string): string[] {
+  return value
+    .split(/[,，、]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
 export function validateModelList(
   models: Array<ModelDefinition | string>,
   defaultModel: string | undefined,
@@ -323,6 +303,12 @@ export function validateModelList(
   const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
 
   if (defaultModel && !modelIds.includes(defaultModel)) {
+    // Multi-select forms used to submit the joined string as the default
+    // ("Opus, Laufry"). Recover the first listed id that is actually in models.
+    const fromList = splitModelIdList(defaultModel).find((id) => modelIds.includes(id))
+    if (fromList) {
+      return { valid: true, resolvedDefaultModel: fromList }
+    }
     return {
       valid: false,
       error: `Default model "${defaultModel}" is not in the provided model list.`,

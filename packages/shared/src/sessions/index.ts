@@ -1,3 +1,5 @@
+export * from './work-mode.ts';
+
 /**
  * Sessions Module
  *
@@ -12,16 +14,24 @@
 export type {
   SessionStatus,
   SessionTokenUsage,
+  SessionModelCallUsage,
+  SessionTurnUsageSnapshot,
+  SessionTurnUsage,
   StoredMessage,
   SessionConfig,
   StoredSession,
   SessionMetadata,
   SessionHeader,
   SessionPersistentField,
+  SwarmAggregationContract,
 } from './types.ts';
 
 // Field constants
-export { SESSION_PERSISTENT_FIELDS } from './types.ts';
+export {
+  SESSION_PERSISTENT_FIELDS,
+  isSharedProjectMemoryEnabled,
+  isSpawnedSwarmAgent,
+} from './types.ts';
 
 // Storage functions
 export {
@@ -41,7 +51,6 @@ export {
   saveSession,
   loadSession,
   listSessions,
-  listSessionsAsync,
   deleteSession,
   clearSessionMessages,
   getOrCreateLatestSession,
@@ -89,8 +98,6 @@ export {
 // JSONL helpers (for direct access if needed)
 export {
   readSessionHeader,
-  readSessionHeaderAsync,
-  SESSION_HEADER_READ_TIMEOUT_MS,
   readSessionJsonl,
   writeSessionJsonl,
   createSessionHeader,
@@ -129,5 +136,3 @@ export {
   validateBundle,
   MAX_BUNDLE_SIZE_BYTES,
 } from './bundle.ts';
-
-

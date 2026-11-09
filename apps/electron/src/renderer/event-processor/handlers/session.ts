@@ -12,7 +12,6 @@ import type {
   ErrorEvent,
   TypedErrorEvent,
   SourcesChangedEvent,
-  CodingModeChangedEvent,
   LabelsChangedEvent,
   ProjectIdChangedEvent,
   SessionStatusChangedEvent,
@@ -26,7 +25,6 @@ import type {
   CredentialRequestEvent,
   PlanSubmittedEvent,
   StatusEvent,
-  RetryEvent,
   InfoEvent,
   InterruptedEvent,
   TitleGeneratedEvent,
@@ -37,16 +35,32 @@ import type {
   SessionModelChangedEvent,
   LLMConnectionChangedEvent,
   UserMessageEvent,
+  QueueChangedEvent,
   MessageAnnotationsUpdatedEvent,
   SessionSharedEvent,
   SessionUnsharedEvent,
   AuthRequestEvent,
   AuthCompletedEvent,
   UsageUpdateEvent,
+  MessagesTruncatedEvent,
+  MessagesRestoredEvent,
+  RegenerateStartedEvent,
   Effect,
 } from '../types'
 import type { Message } from '../../../shared/types'
-import { generateMessageId, appendMessage, clearRetryStatus } from '../helpers'
+import { sessionHasLiveGeneration } from '../../lib/input-text'
+import {
+  generateMessageId,
+  appendMessage,
+  applySteerTranscriptBoundary,
+  collectOpenAssistantTurnIds,
+} from '../helpers'
+
+function removeTransientStatusMessages(messages: Message[]): Message[] {
+  return messages.some(message => message.role === 'status')
+    ? messages.filter(message => message.role !== 'status')
+    : messages
+}
 
 /**
  * Handle complete - agent loop finished
@@ -58,14 +72,24 @@ export function handleComplete(
   state: SessionState,
   event: CompleteEvent
 ): ProcessResult {
-  const session = clearRetryStatus(state.session)
+  const { session } = state
 
   // Fail-safe: mark any non-terminal tools as complete.
   // Catches 'executing' (normal) and 'backgrounded' (spurious — e.g. foreground Agent
   // whose result contained agentId:). Genuinely backgrounded tasks have isBackground=true
   // AND a taskId, so they're excluded — task_completed will finalize them.
   const TERMINAL_TOOL_STATUSES = new Set(['completed', 'error'])
-  let updatedMessages = session.messages
+  let updatedMessages = removeTransientStatusMessages(session.messages)
+  if (event.answerRoutingVersion === 1 && event.answerRunId) {
+    const ownerIndex = session.messages.findLastIndex(m => m.role === 'user' && !m.hidden && !m.isQueued)
+    const owner = session.messages[ownerIndex]
+    const latestRun = session.messages.slice(ownerIndex).findLast(m => m.answerRunId)?.answerRunId
+    const belongsToEarlierTurn = session.messages.slice(0, ownerIndex).some(m => m.answerRunId === event.answerRunId)
+    if (owner && !belongsToEarlierTurn && (!latestRun || latestRun === event.answerRunId)) {
+      updatedMessages = updatedMessages.map(m => m.id === owner.id
+        ? { ...m, answerProtocol: 'explicit-v1' as const, answerRoutingVersion: 1 as const, answerRunId: event.answerRunId } : m)
+    }
+  }
   const hasRunningTools = session.messages.some(
     m => m.role === 'tool'
       && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')
@@ -73,13 +97,13 @@ export function handleComplete(
   )
 
   if (hasRunningTools) {
-    updatedMessages = session.messages.map(m => {
+    updatedMessages = updatedMessages.map(m => {
       if (
         m.role === 'tool'
         && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')
         && !(m.isBackground && m.taskId)
       ) {
-        return { ...m, toolStatus: 'completed' as const, toolResult: m.toolResult ?? '' }
+        return { ...m, toolProgress: undefined, toolStatus: 'completed' as const, toolResult: m.toolResult ?? '' }
       }
       return m
     })
@@ -91,10 +115,16 @@ export function handleComplete(
   // the natural place to drop the indicator. Claude's queued path has already
   // cleared via the 'processing' status update before this fires; this is
   // a safe no-op for that case.
-  const hasQueuedUserBubbles = updatedMessages.some(m => m.role === 'user' && m.isQueued)
+  // Also drop queueId so a finished follow-up becomes a normal transcript
+  // anchor for the next generation.
+  const hasQueuedUserBubbles = updatedMessages.some(
+    m => m.role === 'user' && (m.isQueued || m.queueId),
+  )
   if (hasQueuedUserBubbles) {
     updatedMessages = updatedMessages.map(m =>
-      m.role === 'user' && m.isQueued ? { ...m, isQueued: false } : m
+      m.role === 'user' && (m.isQueued || m.queueId)
+        ? { ...m, isQueued: false, queueId: undefined }
+        : m
     )
   }
 
@@ -105,16 +135,13 @@ export function handleComplete(
         messages: updatedMessages,
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
         // Update tokenUsage from complete event (for real-time context counter updates)
-        tokenUsage: event.tokenUsage ? {
-          ...event.tokenUsage,
-          // Cumulative/legacy results may omit occupancy. Omission is not a
-          // context reset and must not erase a newer post-compaction snapshot.
-          contextUsage: event.tokenUsage.contextUsage ?? session.tokenUsage?.contextUsage,
-        } : session.tokenUsage,
+        tokenUsage: event.tokenUsage ?? session.tokenUsage,
         // Update hasUnread flag from main process (state machine for NEW badge)
         // Only update if explicitly provided - undefined means "don't change"
         ...(event.hasUnread !== undefined && { hasUnread: event.hasUnread }),
+        suppressedTurnIds: undefined,
       },
       streaming: null,
     },
@@ -129,12 +156,12 @@ export function handleError(
   state: SessionState,
   event: ErrorEvent
 ): ProcessResult {
-  const session = clearRetryStatus(state.session)
+  const { session } = state
 
   // Fail-safe: Mark any running tools as failed
-  const messagesWithFailedTools = session.messages.map(m =>
+  const messagesWithFailedTools = removeTransientStatusMessages(session.messages).map(m =>
     m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
-      ? { ...m, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
+      ? { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
       : m
   )
 
@@ -152,6 +179,8 @@ export function handleError(
         messages: [...messagesWithFailedTools, errorMessage],
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
+        suppressedTurnIds: undefined,
       },
       streaming: null,
     },
@@ -166,12 +195,12 @@ export function handleTypedError(
   state: SessionState,
   event: TypedErrorEvent
 ): ProcessResult {
-  const session = clearRetryStatus(state.session)
+  const { session } = state
 
   // Fail-safe: Mark any running tools as failed
-  const messagesWithFailedTools = session.messages.map(m =>
+  const messagesWithFailedTools = removeTransientStatusMessages(session.messages).map(m =>
     m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
-      ? { ...m, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
+      ? { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
       : m
   )
 
@@ -203,38 +232,10 @@ export function handleTypedError(
         messages: [...messagesWithFailedTools, errorMessage],
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
+        suppressedTurnIds: undefined,
       },
       streaming: null,
-    },
-    effects: [],
-  }
-}
-
-/**
- * Retry progress is transient, not transcript history. Only SDK lifecycle
- * events may end backoff — a delayed token/tool event is not proof of recovery.
- */
-export function handleRetry(state: SessionState, event: RetryEvent): ProcessResult {
-  const session = clearRetryStatus(state.session)
-  if (event.phase !== 'backoff') {
-    return { state: { session, streaming: state.streaming }, effects: [] }
-  }
-
-  // Replace prior progress rather than accumulating a running row per attempt.
-  const retryMessage: Message = {
-    id: generateMessageId(),
-    role: 'status',
-    statusType: 'retrying',
-    content: event.message,
-    timestamp: Date.now(),
-  }
-  return {
-    state: {
-      session: {
-        ...appendMessage(session, retryMessage),
-        currentStatus: { message: event.message, statusType: 'retrying' },
-      },
-      streaming: state.streaming,
     },
     effects: [],
   }
@@ -249,6 +250,28 @@ export function handleStatus(
   event: StatusEvent
 ): ProcessResult {
   const { session, streaming } = state
+
+  if (event.statusType === 'tool_arguments') {
+    if (!session.isProcessing || (!event.message && session.currentStatus?.statusType !== 'tool_arguments')) return { state, effects: [] }
+    return {
+      state: { session: { ...session, currentStatus: event.message ? { message: event.message, statusType: event.statusType } : undefined }, streaming },
+      effects: [],
+    }
+  }
+
+  // An empty status clears transient feedback after recovery, without adding
+  // an empty work-chain item to the transcript.
+  if (!event.message) return {
+    state: {
+      session: {
+        ...session,
+        messages: removeTransientStatusMessages(session.messages),
+        currentStatus: undefined,
+      },
+      streaming,
+    },
+    effects: [],
+  }
 
   const statusMessage: Message = {
     id: generateMessageId(),
@@ -287,16 +310,25 @@ export function handleInfo(
 
   // If this is a compaction complete, update the existing compacting message and clear currentStatus
   if (event.statusType === 'compaction_complete') {
-    const updatedMessages = session.messages.map(m =>
-      m.role === 'status' && m.statusType === 'compacting'
-        ? { ...m, role: 'info' as const, content: event.message, statusType: 'compaction_complete' as const, infoLevel: event.level }
-        : m
-    )
+    const hasCompacting = session.messages.some(m => m.role === 'status' && m.statusType === 'compacting')
+    const messages = hasCompacting
+      ? session.messages.map(m =>
+        m.role === 'status' && m.statusType === 'compacting'
+          ? { ...m, role: 'info' as const, content: event.message, statusType: 'compaction_complete' as const, infoLevel: event.level, timestamp: event.timestamp ?? m.timestamp }
+          : m)
+      : appendMessage(session, {
+        id: generateMessageId(),
+        role: 'info',
+        content: event.message,
+        timestamp: event.timestamp ?? Date.now(),
+        statusType: 'compaction_complete',
+        infoLevel: event.level,
+      }).messages
     return {
       state: {
         session: {
           ...session,
-          messages: updatedMessages,
+          messages,
           currentStatus: undefined,  // Clear status from ProcessingIndicator
         },
         streaming,
@@ -356,10 +388,10 @@ export function handleInterrupted(
     .map(m => {
       // Mark running tools as interrupted
       if (m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error') {
-        return { ...m, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
+        return { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
       }
-      // Clear pending state on assistant messages (transient streaming state)
-      if (m.role === 'assistant' && m.isPending) {
+      // Clear transient streaming flags even if only isStreaming was set.
+      if (m.role === 'assistant' && (m.isPending || m.isStreaming)) {
         return { ...m, isPending: false, isStreaming: false }
       }
       return m
@@ -380,6 +412,13 @@ export function handleInterrupted(
     })
   }
 
+  if (isUserInitiated && typeof event.runningChildCount === 'number' && event.runningChildCount > 0) {
+    effects.push({
+      type: 'toast_running_children',
+      count: event.runningChildCount,
+    })
+  }
+
   return {
     state: {
       session: {
@@ -387,6 +426,8 @@ export function handleInterrupted(
         isProcessing: false,
         messages,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
+        suppressedTurnIds: undefined,
       },
       streaming: null,
     },
@@ -533,6 +574,7 @@ export function handleConnectionChanged(
       session: {
         ...session,
         llmConnection: event.connectionSlug,
+        ...('model' in event && { model: event.model ?? undefined }),
         ...(event.supportsBranching !== undefined && { supportsBranching: event.supportsBranching }),
       },
       streaming,
@@ -556,24 +598,84 @@ export function handleUserMessage(
   const { session, streaming } = state
   const { message, status } = event
 
-  // Find existing message by ID match (backend ID, optimistic ID, or content+timestamp fallback)
-  const existingIndex = session.messages.findIndex(m =>
+  const existingQueued = session.messages.find(m =>
+    m.role === 'user' && m.isQueued && (
+      m.id === message.id ||
+      (event.optimisticMessageId && m.id === event.optimisticMessageId) ||
+      (event.optimisticMessageId && m.clientMessageId === event.optimisticMessageId) ||
+      m.queueId === message.id
+    ),
+  )
+  const incomingIds = new Set(
+    [message.id, event.optimisticMessageId, existingQueued?.id, existingQueued?.queueId]
+      .filter((id): id is string => !!id),
+  )
+  // Send-now / mid-stream steer: hide the in-flight body and let the
+  // follow-up start a new reply, matching Codex / Grok.
+  // A queued ack alone is not enough: after Stop, leftover work-chain
+  // rows can make the next "继续" look queued while the backend is idle.
+  // Collapsing then hides the already-generated body (#101).
+  const hasInFlightAssistant = session.messages.some(candidate =>
+    candidate.role === 'assistant' && !candidate.hidden && (candidate.isStreaming || candidate.isPending),
+  )
+  const hasOpenGeneration = streaming !== null || sessionHasLiveGeneration(session)
+  // Hidden system continuations may drive another model turn, but they are not
+  // user-authored redirects and must never suppress/collapse the visible reply.
+  const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && hasInFlightAssistant
+  const seedMessages = collapsesOpenTurn && !existingQueued
+    ? [...session.messages, { ...message, isQueued: false, isPending: false }]
+    : session.messages
+  const boundaryMessages = collapsesOpenTurn
+    ? applySteerTranscriptBoundary(seedMessages, incomingIds)
+    : session.messages
+
+  // Find existing message by ID match (backend ID, optimistic ID, queue id, or content+timestamp fallback)
+  const existingIndex = boundaryMessages.findIndex(m =>
     m.role === 'user' && (
       m.id === message.id ||
       (event.optimisticMessageId && m.id === event.optimisticMessageId) ||
+      (event.optimisticMessageId && m.clientMessageId === event.optimisticMessageId) ||
+      m.queueId === message.id ||
       (m.content === message.content && Math.abs(m.timestamp - message.timestamp) < 5000)
     )
   )
+  const followUpTimestamp = Math.max(
+    message.timestamp,
+    ...boundaryMessages
+      .filter(candidate =>
+        !candidate.hidden
+        && !(candidate.role === 'user' && (
+          candidate.isQueued
+          || candidate.id === existingQueued?.id
+          || candidate.queueId === message.id
+        )),
+      )
+      .map(candidate => candidate.timestamp),
+  )
+  const suppressedTurnIds = status === 'processing'
+    ? undefined
+    : collapsesOpenTurn
+      ? [
+          ...new Set([
+            ...(session.suppressedTurnIds ?? []),
+            ...collectOpenAssistantTurnIds(session.messages, streaming?.turnId),
+          ]),
+        ]
+      : session.suppressedTurnIds
+  const isHiddenUserMessage = !!message.hidden
+    || (existingIndex >= 0 && !!boundaryMessages[existingIndex]?.hidden)
 
   let updatedMessages: Message[]
 
   if (existingIndex >= 0) {
-    const existingMessage = session.messages[existingIndex]
+    const existingMessage = boundaryMessages[existingIndex]
 
     // Event sequence protection: don't regress from 'processing' back to 'queued'
-    // This handles out-of-order events (e.g., 'processing' arrives before 'queued')
-    if (status === 'queued' && existingMessage.isQueued === false) {
-      // Already progressed past queued state, ignore this late 'queued' event
+    // when a late queued ack arrives after the message is already confirmed.
+    // Optimistic follow-ups can be inserted with isQueued: false if live
+    // generation was missed at send time — those are still pending and must
+    // accept a legitimate queued ack (#94).
+    if (status === 'queued' && existingMessage.isQueued === false && !existingMessage.isPending) {
       return { state, effects: [] }
     }
 
@@ -594,13 +696,25 @@ export function handleUserMessage(
     // state and dropping the queued chip mid-flight. The canonical backend
     // id is irrelevant to subsequent events: they all use
     // `event.optimisticMessageId` for routing (see the findIndex above).
-    updatedMessages = session.messages.map((m, i) => {
+    updatedMessages = boundaryMessages.map((m, i) => {
       if (i === existingIndex) {
         return {
           ...m,
-          ...(status === 'processing' ? { timestamp: message.timestamp } : {}),
+          ...((status === 'processing' && existingMessage.isQueued) || (status === 'accepted' && !collapsesOpenTurn)
+            ? { timestamp: followUpTimestamp }
+            : {}),
           isPending: false,
           isQueued: status === 'queued',
+          clientMessageId: message.clientMessageId ?? m.clientMessageId,
+          // Backend visibility is canonical. This is essential when a legacy
+          // renderer optimistically inserted an auto-retry as a visible bubble
+          // before the server identified it as an internal continuation.
+          hidden: message.hidden ?? m.hidden,
+          ...(status === 'queued'
+            ? { queueId: message.id }
+            : existingQueued
+              ? { queueId: m.queueId ?? message.id }
+              : { queueId: undefined }),
         }
       }
       return m
@@ -609,10 +723,12 @@ export function handleUserMessage(
     // Message not found (e.g., queued message from backend) - add it
     const newMessage: Message = {
       ...message,
+      timestamp: status === 'queued' ? message.timestamp : followUpTimestamp,
       isPending: false,
       isQueued: status === 'queued',
+      ...(status === 'queued' ? { queueId: message.id } : {}),
     }
-    updatedMessages = [...session.messages, newMessage]
+    updatedMessages = [...boundaryMessages, newMessage]
   }
 
   return {
@@ -620,12 +736,60 @@ export function handleUserMessage(
       session: {
         ...session,
         messages: updatedMessages,
-        lastMessageAt: Date.now(),
-        lastMessageRole: 'user',  // Clear plan badge when user responds
+        // A queued item belongs to the composer, so it must not affect session
+        // ordering, preview role, or transcript-derived badges before replay.
+        ...(status !== 'queued' && !isHiddenUserMessage && {
+          lastMessageAt: Date.now(),
+          lastMessageRole: 'user' as const,
+        }),
         // Set isProcessing when message is accepted/processing (enables multi-window sync)
-        isProcessing: status === 'accepted' || status === 'processing',
+        // Every user_message acknowledgement belongs to an active turn. Queueing
+        // is orthogonal to that turn, so it must never clear its running state,
+        // timer, or streaming content (including in a newly opened window).
+        isProcessing: true,
+        processingStartedAt: collapsesOpenTurn
+          ? Date.now()
+          : (session.processingStartedAt ?? Date.now()),
+        suppressedTurnIds,
       },
-      streaming,
+      streaming: collapsesOpenTurn ? null : streaming,
+    },
+    effects: [],
+  }
+}
+
+/** Replace only visible queued messages while preserving formal and hidden turns. */
+export function handleQueueChanged(
+  state: SessionState,
+  event: QueueChangedEvent,
+): ProcessResult {
+  const existingQueued = state.session.messages.filter(
+    message => message.role === 'user' && message.isQueued && !message.hidden,
+  )
+  const formalAndHiddenMessages = state.session.messages.filter(
+    message => !(message.role === 'user' && message.isQueued && !message.hidden),
+  )
+
+  const queuedMessages = event.messages.map((message) => {
+    const existing = existingQueued.find(candidate =>
+      candidate.id === message.id || candidate.queueId === message.id,
+    )
+    return {
+      ...message,
+      id: existing?.id ?? message.id,
+      queueId: message.id,
+      isPending: false,
+      isQueued: true,
+    }
+  })
+
+  return {
+    state: {
+      ...state,
+      session: {
+        ...state.session,
+        messages: [...formalAndHiddenMessages, ...queuedMessages],
+      },
     },
     effects: [],
   }
@@ -674,27 +838,6 @@ export function handleSourcesChanged(
       streaming,
     },
     effects: [],
-  }
-}
-
-/**
- * Handle coding_mode_changed - update the session and let the parent sync its session options
- */
-export function handleCodingModeChanged(
-  state: SessionState,
-  event: CodingModeChangedEvent
-): ProcessResult {
-  const { session, streaming } = state
-
-  return {
-    state: {
-      session: {
-        ...session,
-        codingMode: event.codingMode || undefined,
-      },
-      streaming,
-    },
-    effects: [{ type: 'coding_mode_changed', sessionId: event.sessionId, codingMode: event.codingMode }],
   }
 }
 
@@ -954,6 +1097,42 @@ export function handleSessionUnshared(
   }
 }
 
+/** Append a clarification card. Only the asking session pauses. */
+export function handleClarificationRequest(
+  state: SessionState,
+  event: import('../types').ClarificationRequestEvent
+): ProcessResult {
+  const { session, streaming } = state
+  if (session.messages.some(message => message.id === event.message.id)) return { state, effects: [] }
+  return {
+    state: {
+      session: {
+        ...appendMessage(session, event.message),
+        ...(event.pause ? { isProcessing: false, processingStartedAt: undefined } : {}),
+      },
+      streaming: event.pause ? null : streaming,
+    },
+    effects: [],
+  }
+}
+
+export function handleClarificationResolved(
+  state: SessionState,
+  event: import('../types').ClarificationResolvedEvent
+): ProcessResult {
+  const { session, streaming } = state
+  return {
+    state: {
+      session: {
+        ...session,
+        messages: session.messages.map(message => message.id === event.message.id ? event.message : message),
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
 /**
  * Handle auth_request - add auth-request message to session
  * This is the unified auth flow - execution is paused until auth completes
@@ -970,6 +1149,7 @@ export function handleAuthRequest(
       session: {
         ...appendMessage(session, event.message),
         isProcessing: false,  // Agent execution is paused
+        processingStartedAt: undefined,
       },
       streaming: null,  // Clear any streaming state
     },
@@ -1029,18 +1209,9 @@ export function handleUsageUpdate(
 ): ProcessResult {
   const { session, streaming } = state
 
-  // Merge usage update into existing tokenUsage, providing defaults for required fields
-  const updatedTokenUsage = {
-    inputTokens: event.tokenUsage.inputTokens,
-    outputTokens: session.tokenUsage?.outputTokens ?? 0,
-    totalTokens: session.tokenUsage?.totalTokens ?? 0,
-    contextTokens: session.tokenUsage?.contextTokens ?? 0,
-    costUsd: session.tokenUsage?.costUsd ?? 0,
-    ...(session.tokenUsage?.cacheReadTokens !== undefined && { cacheReadTokens: session.tokenUsage.cacheReadTokens }),
-    ...(session.tokenUsage?.cacheCreationTokens !== undefined && { cacheCreationTokens: session.tokenUsage.cacheCreationTokens }),
-    contextWindow: event.tokenUsage.contextWindow ?? session.tokenUsage?.contextWindow,
-    contextUsage: event.tokenUsage.contextUsage ?? session.tokenUsage?.contextUsage,
-  }
+  // The server sends a complete snapshot so lastCall and the in-progress
+  // accounting remain consistent across desktop and web renderers.
+  const updatedTokenUsage = event.tokenUsage
 
   return {
     state: {
@@ -1054,3 +1225,83 @@ export function handleUsageUpdate(
   }
 }
 
+/** Enter regenerate running state without discarding the committed response. */
+export function handleRegenerateStarted(
+  state: SessionState,
+  _event: RegenerateStartedEvent,
+): ProcessResult {
+  return {
+    state: {
+      session: {
+        ...state.session,
+        isProcessing: true,
+        currentStatus: undefined,
+        processingStartedAt: Date.now(),
+      },
+      streaming: null,
+    },
+    effects: [],
+  }
+}
+
+/** Keep transcript through the last user prompt once the new run is ready. */
+export function handleMessagesTruncated(
+  state: SessionState,
+  event: MessagesTruncatedEvent,
+): ProcessResult {
+  const { session } = state
+  let keepIdx = session.messages.findIndex(m => m.id === event.keepThroughMessageId)
+  // Renderer keeps the optimistic user-message id; after regenerate the
+  // backend id may not match. Fall back to the last user prompt.
+  if (keepIdx === -1) {
+    keepIdx = session.messages.findLastIndex(m => m.role === 'user' && !m.hidden)
+  }
+  if (keepIdx === -1) {
+    return { state, effects: [] }
+  }
+
+  return {
+    state: {
+      session: {
+        ...session,
+        messages: session.messages.slice(0, keepIdx + 1),
+        // Regenerating reuses the existing user prompt and skips `user_message`,
+        // which is the event that normally sets isProcessing. Enter the same
+        // running state as a fresh send so the input shows Stop immediately.
+        isProcessing: true,
+        currentStatus: undefined,
+        // Reuse the original user-message timestamp for history, but start the
+        // elapsed-time clock from this regenerate so the indicator does not
+        // show time since the first send (e.g. 130:34).
+        processingStartedAt: Date.now(),
+      },
+      streaming: null,
+    },
+    effects: [],
+  }
+}
+
+/** Restore the pre-regenerate transcript while retaining the surfaced error. */
+export function handleMessagesRestored(
+  state: SessionState,
+  event: MessagesRestoredEvent,
+): ProcessResult {
+  const restoredIds = new Set(event.messages.map(message => message.id))
+  const diagnostics = state.session.messages.filter(message =>
+    (message.role === 'error' || message.role === 'info') && !restoredIds.has(message.id)
+  )
+
+  return {
+    state: {
+      session: {
+        ...state.session,
+        messages: [...event.messages, ...diagnostics],
+        isProcessing: false,
+        currentStatus: undefined,
+        processingStartedAt: undefined,
+      },
+      streaming: null,
+    },
+    effects: [],
+  }
+}

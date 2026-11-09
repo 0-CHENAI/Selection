@@ -1,9 +1,25 @@
-import { normalize, isAbsolute, sep } from 'path'
+import { existsSync, readdirSync } from 'fs'
+import { normalize, isAbsolute, dirname, basename, join } from 'path'
 import { homedir, tmpdir } from 'os'
 import { realpath } from 'fs/promises'
 import { getWorkspaceByNameOrId, type Workspace } from '@craft-agent/shared/config'
-import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
+import {
+  getWorkspaceSessionsPath,
+  getWorkspaceSourcesPath,
+  loadWorkspaceConfig,
+} from '@craft-agent/shared/workspaces'
+import { getWorkspaceProjectsPath, loadProjectConfig } from '@craft-agent/shared/projects'
+import { getSessionFilePath, readSessionHeader } from '@craft-agent/shared/sessions'
+import { loadSourceConfig } from '@craft-agent/shared/sources'
+import { expandPath, isPathInside, normalizePathForComparison, resolveFsPath } from '@craft-agent/shared/utils'
 import type { PlatformServices } from '../runtime/platform'
+
+/** Local shell actions must never interpret a remote host's paths. */
+export function assertLocalWorkspace(ctx: { workspaceId: string | null }, action: string): void {
+  if (getWorkspaceByNameOrId(ctx.workspaceId ?? '')?.remoteServer) {
+    throw new Error(`${action} is not available for remote workspaces`)
+  }
+}
 
 /**
  * Get workspace by ID or name, throwing if not found.
@@ -47,22 +63,169 @@ export function sanitizeFilename(name: string): string {
     || 'unnamed'
 }
 
-/**
- * Resolve allowed directories for a workspace: its root path and configured
- * working directory (if set). Returns an empty array if the workspace is
- * unknown or has no relevant paths.
- */
-export function getWorkspaceAllowedDirs(workspaceId?: string | null): string[] {
-  if (!workspaceId) return []
-  const workspace = getWorkspaceByNameOrId(workspaceId)
-  if (!workspace) return []
+export const FILE_ACCESS_OUTSIDE_ALLOWED_MESSAGE =
+  'Access denied: file path is outside allowed directories. Open files from the workspace folder, the session working directory, or an authorized Local Folder. Add that folder as a Local Folder or switch the working directory, then retry.'
 
-  const dirs: string[] = [workspace.rootPath]
-  const config = loadWorkspaceConfig(workspace.rootPath)
-  if (config?.defaults?.workingDirectory) {
-    dirs.push(config.defaults.workingDirectory)
+export const FILE_ACCESS_MISSING_WORKSPACE_MESSAGE =
+  'Access denied: workspace context is missing. Reopen the workspace window and try again.'
+
+export interface WorkspaceAllowlistSources {
+  getWorkspace(workspaceId: string): { rootPath: string } | null | undefined
+  getDefaultWorkingDirectory(rootPath: string): string | undefined
+  getProjectWorkingDirectories(rootPath: string): string[]
+  getLocalFolderPaths(rootPath: string): string[]
+  getSessionWorkingDirectories(rootPath: string): string[]
+}
+
+function listSubdirNames(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+  } catch {
+    return []
+  }
+}
+
+/** Read-only: session working directories, without listSessions' tmp cleanup or plan scans. */
+export function listSessionWorkingDirectories(workspaceRootPath: string): string[] {
+  const dirs: string[] = []
+  for (const sessionId of listSubdirNames(getWorkspaceSessionsPath(workspaceRootPath))) {
+    const header = readSessionHeader(getSessionFilePath(workspaceRootPath, sessionId))
+    const workingDirectory = header?.workingDirectory
+    if (typeof workingDirectory === 'string' && workingDirectory.trim()) {
+      dirs.push(expandPath(workingDirectory))
+    }
   }
   return dirs
+}
+
+/** Read-only: project working directories, without creating a projects folder. */
+export function listProjectWorkingDirectories(workspaceRootPath: string): string[] {
+  const dirs: string[] = []
+  for (const slug of listSubdirNames(getWorkspaceProjectsPath(workspaceRootPath))) {
+    const workingDirectory = loadProjectConfig(workspaceRootPath, slug)?.workingDirectory
+    if (workingDirectory) dirs.push(workingDirectory)
+  }
+  return dirs
+}
+
+/** Read-only: Local Folder source paths, without creating a sources folder. */
+export function listLocalFolderPaths(workspaceRootPath: string): string[] {
+  const dirs: string[] = []
+  for (const slug of listSubdirNames(getWorkspaceSourcesPath(workspaceRootPath))) {
+    const config = loadSourceConfig(workspaceRootPath, slug)
+    if (config?.type === 'local' && config.local?.path) {
+      dirs.push(config.local.path)
+    }
+  }
+  return dirs
+}
+
+/**
+ * Normalize markdown / file:// / Windows drive paths before allowlist checks.
+ * Mirrors the renderer generated-file-path rules so OPEN_FILE sees the same path.
+ */
+export function normalizeAccessibleFilePath(filePath: string, platform = process.platform): string {
+  let value = filePath.trim()
+  if (!value) return value
+  // A native filename may literally contain "%20". Keep an existing path
+  // before interpreting percent escapes from a Markdown or file URL.
+  if (value.includes('%') && !existsSync(value)) {
+    try {
+      value = decodeURIComponent(value)
+    } catch {
+      // Keep the raw path when encoding is invalid.
+    }
+  }
+  if (/^file:/i.test(value)) {
+    value = value.replace(/\\/g, '/')
+    value = value.replace(/^file:\/\/+/i, '')
+    value = value.replace(/^localhost\//i, '')
+    if (/^\/[A-Za-z]:[\\/]/.test(value)) value = value.slice(1)
+  }
+  if (platform === 'win32') {
+    value = value.replace(/^\/([A-Za-z])(?=[\\/])/, (_match, drive: string) => `${drive.toUpperCase()}:`)
+  }
+  return value.replace(/^\/([A-Za-z]:[\\/])/, '$1')
+}
+
+function collectAllowlistStrings(collect: () => string[] | string | undefined): string[] {
+  try {
+    const value = collect()
+    if (typeof value === 'string') return value.trim() ? [value] : []
+    return (value ?? []).filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  } catch {
+    return []
+  }
+}
+
+const liveWorkspaceAllowlistSources: WorkspaceAllowlistSources = {
+  getWorkspace: workspaceId => getWorkspaceByNameOrId(workspaceId),
+  getDefaultWorkingDirectory: rootPath => loadWorkspaceConfig(rootPath)?.defaults?.workingDirectory,
+  getProjectWorkingDirectories: listProjectWorkingDirectories,
+  getLocalFolderPaths: listLocalFolderPaths,
+  getSessionWorkingDirectories: listSessionWorkingDirectories,
+}
+
+function pushUniqueDir(dirs: string[], value?: string | null): void {
+  if (!value) return
+  const resolved = resolveFsPath(value)
+  if (!resolved) return
+  const key = normalizePathForComparison(resolved)
+  if (dirs.some(dir => normalizePathForComparison(dir) === key)) return
+  dirs.push(resolved)
+}
+
+/**
+ * Resolve allowed directories for a workspace: root, configured working
+ * directory, project folders, Local Folders, and session working directories.
+ * Returns an empty array if the workspace is unknown.
+ */
+export function getWorkspaceAllowedDirs(
+  workspaceId?: string | null,
+  sources?: WorkspaceAllowlistSources,
+): string[] {
+  const allowlistSources = sources ?? liveWorkspaceAllowlistSources
+  if (!workspaceId) return []
+  let workspace: { rootPath: string } | null | undefined
+  try {
+    workspace = allowlistSources.getWorkspace(workspaceId)
+  } catch {
+    return []
+  }
+  if (!workspace) return []
+
+  const dirs: string[] = []
+  pushUniqueDir(dirs, workspace.rootPath)
+  for (const dir of collectAllowlistStrings(() => allowlistSources.getDefaultWorkingDirectory(workspace.rootPath))) {
+    pushUniqueDir(dirs, dir)
+  }
+  for (const dir of collectAllowlistStrings(() => allowlistSources.getProjectWorkingDirectories(workspace.rootPath))) {
+    pushUniqueDir(dirs, dir)
+  }
+  for (const dir of collectAllowlistStrings(() => allowlistSources.getLocalFolderPaths(workspace.rootPath))) {
+    pushUniqueDir(dirs, dir)
+  }
+  for (const dir of collectAllowlistStrings(() => allowlistSources.getSessionWorkingDirectories(workspace.rootPath))) {
+    pushUniqueDir(dirs, dir)
+  }
+  return dirs
+}
+
+export function resolveWorkspaceIdForFileAccess(
+  ctx: { workspaceId?: string | null; webContentsId?: number | null },
+  windowManager?: { getWorkspaceForWindow(webContentsId: number): string | null } | null,
+): string | null {
+  if (typeof ctx.workspaceId === 'string' && ctx.workspaceId.length > 0) {
+    return ctx.workspaceId
+  }
+  const webContentsId = ctx.webContentsId
+  if (webContentsId != null) {
+    return windowManager?.getWorkspaceForWindow(webContentsId) ?? null
+  }
+  return null
 }
 
 /**
@@ -75,7 +238,7 @@ export async function validateFilePath(
   additionalAllowedDirs?: string[],
 ): Promise<string> {
   // Normalize the path to resolve . and .. components
-  let normalizedPath = normalize(filePath)
+  let normalizedPath = normalize(normalizeAccessibleFilePath(filePath))
 
   // Expand ~ to home directory
   if (normalizedPath.startsWith('~')) {
@@ -87,14 +250,26 @@ export async function validateFilePath(
     throw new Error('Only absolute file paths are allowed')
   }
 
-  // Resolve symlinks to get the real path
-  let realFilePath: string
-  try {
-    realFilePath = await realpath(normalizedPath)
-  } catch {
-    // File doesn't exist or can't be resolved - use normalized path
-    realFilePath = normalizedPath
+  // Resolve the nearest existing ancestor too: a missing path may sit below
+  // a symlink such as macOS /var -> /private/var or a linked workspace root.
+  const canonicalPath = async (path: string): Promise<string> => {
+    let ancestor = path
+    const missing: string[] = []
+    for (;;) {
+      try {
+        return join(await realpath(ancestor), ...missing)
+      } catch (error) {
+        const code = error instanceof Error && 'code' in error
+          ? (error as NodeJS.ErrnoException).code : undefined
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+        const parent = dirname(ancestor)
+        if (parent === ancestor) return path
+        missing.unshift(basename(ancestor))
+        ancestor = parent
+      }
+    }
   }
+  const realFilePath = await canonicalPath(normalizedPath)
 
   // Define allowed base directories
   const allowedDirs = [
@@ -103,15 +278,17 @@ export async function validateFilePath(
     ...(additionalAllowedDirs ?? []),
   ].filter(Boolean)
 
-  // Check if the real path is within an allowed directory (cross-platform)
-  const isAllowed = allowedDirs.some(dir => {
-    const normalizedDir = normalize(dir)
-    const normalizedReal = normalize(realFilePath)
-    return normalizedReal.startsWith(normalizedDir + sep) || normalizedReal === normalizedDir
-  })
+  // Unicode-safe containment (handles Chinese paths + NFC/NFD differences on macOS)
+  let isAllowed = allowedDirs.some(dir => isPathInside(dir, realFilePath))
+  if (!isAllowed) {
+    // Compare canonical paths on both sides only when needed. macOS maps /var
+    // to /private/var, and workspace roots may themselves be symlinks.
+    const realAllowedDirs = await Promise.all(allowedDirs.map(dir => canonicalPath(normalize(dir))))
+    isAllowed = realAllowedDirs.some(dir => isPathInside(dir, realFilePath))
+  }
 
   if (!isAllowed) {
-    throw new Error('Access denied: file path is outside allowed directories')
+    throw new Error(FILE_ACCESS_OUTSIDE_ALLOWED_MESSAGE)
   }
 
   // Block sensitive files even within allowed directories.
@@ -133,4 +310,22 @@ export async function validateFilePath(
   }
 
   return realFilePath
+}
+
+export async function validateWorkspaceFilePath(
+  filePath: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  try {
+    return await validateFilePath(filePath, getWorkspaceAllowedDirs(workspaceId))
+  } catch (error) {
+    if (
+      !workspaceId
+      && error instanceof Error
+      && error.message.startsWith('Access denied: file path is outside allowed directories')
+    ) {
+      throw new Error(FILE_ACCESS_MISSING_WORKSPACE_MESSAGE)
+    }
+    throw error
+  }
 }

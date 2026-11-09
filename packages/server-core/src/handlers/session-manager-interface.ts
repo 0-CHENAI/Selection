@@ -22,24 +22,19 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
-  BackgroundTaskOutput,
-  StopBackgroundTaskResult,
-  BoundPr,
-  PrMonitorState,
+  SwarmRunDetailsDto,
 } from '@craft-agent/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
+  handoverSession?(sessionId: string, operation: import('@craft-agent/shared/protocol').HandoverOperation): Promise<import('@craft-agent/shared/protocol').HandoverResult>
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
   waitForInit(): Promise<void>
-  /** Resolves once the background disk load has populated the session map (or
-   *  failed). List endpoints await this instead of waitForInit, which now only
-   *  guarantees fast-path init (migrations, auth, config watchers). */
-  waitForSessionsLoaded(): Promise<void>
   initialize(): Promise<void>
   cleanup(): void
   setEventSink(sink: EventSink): void
@@ -61,11 +56,6 @@ export interface ISessionManager {
   /** Resolved working directory of a live session (Tasks Conductor uses it so children inherit
    *  the orchestrator's cwd). */
   getSessionWorkingDirectory(sessionId: string): string | undefined
-  /** Parent of a live sub-session (the Tasks Conductor refuses to run on one). */
-  getSessionParentId(sessionId: string): string | undefined
-  /** Calls `listener(sessionId)` each time a session's turn completes; returns an unsubscribe.
-   *  (The PR watcher refetches then: a turn is when pushes and `gh pr create` happen.) */
-  onTurnComplete?(listener: (sessionId: string) => void): () => void
   deleteSession(sessionId: string): Promise<void>
 
   // ---------------------------------------------------------------------------
@@ -88,27 +78,26 @@ export interface ISessionManager {
   // Session configuration
   // ---------------------------------------------------------------------------
 
+  setProgressSupervision?(sessionId: string, enabled: boolean): void
+  cleanupArtifactVersions?(sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
+  restoreArtifactVersionForSession?(sessionId: string, artifactId: string, expectedVersion: string, versionId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
+  getBodyFeedbackDetails?(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]>
+  getArtifactFeedbackContext?(sessionId: string, artifactId: string): Promise<{ root: string; requiresProjectChecks: boolean }>
+  listArtifactFeedback?(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]>
+  officePreview?(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, ownerId?: string): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void>
+  getOfficeFiles?(sessionId: string): Promise<string[]>
+  officeHomePreview?(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, workspaceId: string, ownerId?: string): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void>
+  artifactFeedback?(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>
+  resumeExecution?(sessionId: string): Promise<void>
+  continueProgress?(sessionId: string): Promise<void>
+  setSessionWorkMode?(sessionId: string, mode: 'NORM' | 'PRO'): Promise<void>
+  applyOfficeTemplates?(sessionId: string, raw: string): import('@craft-agent/shared/protocol').OfficeTemplatesResult
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
+  setSessionFastMode?(sessionId: string, enabled: boolean): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
-  setSessionCodingMode(sessionId: string, enabled: boolean): void
-  continueSessionInNewSession(sessionId: string, codingMode: boolean): Promise<{ sessionId: string }>
-  /** Coding mode: PRs pinned to a session (chat-header PR carousel, in addedAt order). */
-  getSessionBoundPrs(sessionId: string): BoundPr[]
-  /** Pin a PR to a session (deduped by host/owner/repo#number); persists and returns the new list. */
-  bindPrToSession(sessionId: string, pr: BoundPr): BoundPr[]
-  /** Remove a pinned PR from a session (and its auto-fix state); persists and returns the new list. */
-  unbindPrFromSession(sessionId: string, pr: { host: string; owner: string; repo: string; number: number }): BoundPr[]
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id. */
-  getSessionPrMonitors(sessionId: string): Record<string, PrMonitorState>
-  /** Turn auto-fix on/off for one PR of a session; persists and returns the monitors. */
-  setSessionPrAutoFix(sessionId: string, prId: string, enabled: boolean): Record<string, PrMonitorState>
-  /** Record an auto-fix run (time + the review signature it acted on). */
-  recordPrAutoFixRun(sessionId: string, prId: string, signature: string[], at: number): void
-  /** A session's metadata without loading its messages (cheap, unlike getSession). */
-  getSessionSnapshot(sessionId: string): Session | null
-  /** Start a hidden, app-labelled turn in an idle session; false (nothing sent) when missing or busy. */
-  wakeIdleSessionWithNotice(sessionId: string, text: string): boolean
   updateWorkingDirectory(sessionId: string, path: string): void
+  /** Rewrite ordinary project conversations onto the project's folder. sdkCwd stays put. */
+  alignProjectConversationDirectories?(workspaceId: string, projectId: string, workingDirectory: string): Promise<void>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   /** Apply the reserved Task labeling (mint / inherit the per-task item label under the Task
@@ -131,8 +120,13 @@ export interface ISessionManager {
     taskSlug: string,
     reconcile?: { name?: string; projectId?: string; workingDirectory?: string; model?: string; llmConnection?: string; permissionMode?: PermissionMode },
   ): Promise<boolean>
+  assertTaskRunAllowed(workspaceId: string, orchestratorSessionId?: string, task?: { slug: string }): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
+  updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>
+  getSwarmRunDetails(sessionId: string, workspaceId: string): SwarmRunDetailsDto | null
+  updateSwarmTokenBudget(sessionId: string, tokenBudget: number): Promise<void>
+  stopSwarm(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>
 
   // ---------------------------------------------------------------------------
   // Messaging
@@ -149,11 +143,17 @@ export interface ISessionManager {
     onAck?: (messageId: string) => void,
     rpcContext?: { callerClientId?: string },
   ): Promise<void>
+  regenerateLastResponse(sessionId: string): Promise<{ success: true }>
+  retryCancelledTurn(sessionId: string): Promise<{ success: true }>
+  updateQueuedMessage(sessionId: string, messageId: string, content: string): Promise<void>
+  deleteQueuedMessage(sessionId: string, messageId: string): Promise<void>
+  reorderQueuedMessages(sessionId: string, messageIds: string[]): Promise<void>
+  sendQueuedMessageNow(sessionId: string, messageId: string): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
-  /** What a background task of the session has written so far, digested; null when there is nothing to read. */
-  getBackgroundTaskOutput(sessionId: string, taskId: string, kind?: 'agent' | 'shell' | 'workflow'): Promise<BackgroundTaskOutput | null>
-  /** Stop one background task (shell, agent or workflow) of the session through its live agent. */
-  stopBackgroundTask(sessionId: string, taskId: string): Promise<StopBackgroundTaskResult>
+  killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
+  getTaskOutput(taskId: string): Promise<string | null>
+  /** Install the workspace TaskRunner lookup used by the run_task session tool. */
+  setTaskRunnerLookup(lookup: (workspaceId: string) => import('../tasks').TaskRunner): void
 
   // --- Tasks Conductor seams (in-process; not renderer events, not agent-facing) ---
   /**
@@ -161,11 +161,13 @@ export interface ISessionManager {
    * when the session's message queue drains (true completion), carrying the stop
    * reason. Returns an unsubscribe function.
    */
+  notifyArtifactApplied?(workspaceId: string): void
+  onArtifactApplied?(listener: (workspaceId: string) => void): () => void
   onSessionComplete(
     listener: (evt: import('../sessions/SessionManager').SessionCompletionEvent) => void,
   ): () => void
-  /** Called for every event a session's agent emits; lets callers time out only a stalled turn. */
-  onSessionActivity(sessionId: string, listener: () => void): () => void
+  /** Read a session's final assistant message text (Conductor output reader). */
+  getSessionFinalText(sessionId: string): string | undefined
   addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void
   removeMessageAnnotation(sessionId: string, messageId: string, annotationId: string): void
   updateMessageAnnotation(
@@ -187,6 +189,7 @@ export interface ISessionManager {
     options?: PermissionResponseOptions,
   ): boolean
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
+  respondToClarification(sessionId: string, requestId: string, response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput): Promise<boolean>
   getSessionPermissionModeState(sessionId: string): PermissionModeState | null
 
   // ---------------------------------------------------------------------------
@@ -194,7 +197,7 @@ export interface ISessionManager {
   // ---------------------------------------------------------------------------
 
   setPendingPlanExecution(sessionId: string, planPath: string, draftInputSnapshot?: string): Promise<void>
-  markPendingPlanExecutionDispatched(sessionId: string): Promise<boolean>
+  markPendingPlanExecutionDispatched(sessionId: string): Promise<void>
   clearPendingPlanExecution(sessionId: string): Promise<void>
   getPendingPlanExecution(sessionId: string): { planPath: string; draftInputSnapshot?: string; awaitingCompaction: boolean; executionDispatched: boolean } | null
   markCompactionComplete(sessionId: string): Promise<void>
@@ -205,7 +208,7 @@ export interface ISessionManager {
    * If the session is in Explore (safe) mode, also switches it to allow-all
    * so the plan can actually run without per-tool prompts.
    *
-   * Used by the messaging gateway so Telegram/WhatsApp accept buttons produce
+   * Used by the messaging gateway so chat approval buttons produce
    * the same server-side effect as the desktop accept button.
    */
   acceptPlan(sessionId: string, planPath?: string): Promise<void>
@@ -275,17 +278,15 @@ export interface ISessionManager {
   getWorkspacesInfo(): WorkspaceInfo[]
   setupConfigWatcher(workspaceRootPath: string, workspaceId: string): void
   /**
+   * Release runtime resources for a workspace before its folder is deleted:
+   * in-memory sessions/agents, ConfigWatcher, AutomationSystem.
+   */
+  unloadWorkspace(workspaceId: string): Promise<void>
+  /**
    * Manually notify the ConfigWatcher of a file change.
    * Workaround for Bun's fs.watch on Linux not detecting atomic renames.
    */
   notifyConfigFileChange(workspaceRootPath: string, relativePath: string): void
-
-  /**
-   * Request a (re)capture of a page's preview poster. No-op unless a capturer
-   * was injected (Electron main only); headless/WebUI hosts fall back to the
-   * placeholder tile.
-   */
-  enqueuePageThumbnail(workspaceId: string, workspaceRootPath: string, slug: string): void
 
   // ---------------------------------------------------------------------------
   // Server-level observability
@@ -310,30 +311,8 @@ export interface ISessionManager {
    */
   refreshConnectionRuntime(connectionSlug: string): Promise<void>
   completeAuthRequest(sessionId: string, result: AuthResult): Promise<void>
-  /**
-   * After a successful OAuth sign-in for a source, complete the auth request of every session
-   * in the workspace waiting on it and resume each one. `boundRequests` are the cards that
-   * started or joined the sign-in. Returns the ids of the sessions it resumed.
-   */
-  completeAuthRequestsForSource(
-    workspaceId: string,
-    sourceSlug: string,
-    result: { email?: string; workspace?: string },
-    boundRequests?: Array<{ sessionId: string; authRequestId: string }>,
-  ): string[]
-  executePromptAutomation(input: ExecutePromptAutomationInput): Promise<{ sessionId: string }>
+  executePromptAutomation(input: ExecutePromptAutomationInput): Promise<ExecutePromptAutomationResult>
 
-  /**
-   * Install a callback invoked from `executePromptAutomation` after a session
-   * is created when the matcher declared `telegramTopic`. Wired by the
-   * messaging-gateway bootstrap so the SessionManager doesn't need to import
-   * the messaging package (avoids a circular package-level import).
-   *
-   * The callback should be best-effort: failures must not block the session.
-   */
-  setAutomationBinder?(
-    fn: (input: { workspaceId: string; sessionId: string; topicName: string }) => Promise<void>,
-  ): void
 }
 
 /**
@@ -354,18 +333,6 @@ export interface ExecutePromptAutomationInput {
   /** Override the workspace default thinking level for the spawned session. */
   thinkingLevel?: ThinkingLevel
   automationName?: string
-  /** Matcher id of the automation (stored on the session for the loop guard). */
-  automationId?: string
-  /** Event that fired the automation. */
-  triggerEvent?: string
-  /** Chain depth of the new session (see `automationLoopGuard`); 1 when omitted. */
-  chainDepth?: number
-  /**
-   * Optional Telegram forum-topic name. When set and the workspace has a
-   * paired supergroup, the new session is bound to a topic of this name
-   * (created on first use). Silently ignored when prerequisites aren't met.
-   */
-  telegramTopic?: string
   /**
    * When `false`, `executePromptAutomation` returns as soon as the session is
    * created and the prompt is dispatched, instead of awaiting the whole turn.
@@ -374,4 +341,8 @@ export interface ExecutePromptAutomationInput {
    * still streams live and run errors are logged. Defaults to awaiting completion.
    */
   waitForCompletion?: boolean
+}
+
+export interface ExecutePromptAutomationResult {
+  sessionId: string
 }

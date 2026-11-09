@@ -1,0 +1,88 @@
+{
+  "scope": "Local renderer implementation; production components and useOrchestrationRuns with labelled synthetic four-node transport. No new packaged model-run acceptance claim.",
+  "branch": "codex/autonomous-task-graph",
+  "issues": [
+    479,
+    480,
+    481
+  ],
+  "committed": false,
+  "published": false,
+  "layout": {
+    "desktop": "1716x951",
+    "narrow": "440x900",
+    "nodeSize": [
+      280,
+      144
+    ],
+    "inspectorWidth": 360,
+    "tabs": [
+      "responsibilities",
+      "results",
+      "runtime"
+    ]
+  },
+  "checks": {
+    "focusedTests": {
+      "pass": 37,
+      "fail": 0,
+      "files": 5
+    },
+    "electronTypecheck": "pass",
+    "electronLint": {
+      "errors": 0,
+      "existingWarnings": 87
+    },
+    "i18nParity": "pass",
+    "i18nSorted": "pass",
+    "i18nCoverage": "pass",
+    "rendererBuild": "pass",
+    "diffCheck": "pass"
+  },
+  "browser": {
+    "forkJoinLiveUpdate": "pass",
+    "completionUpdate": "pass",
+    "currentExecutionOutputUpdate": "pass",
+    "keyboardTabs": "pass",
+    "detailCloseReturnsNodeFocus": "pass",
+    "escapeReturnsTriggerFocus": "pass",
+    "outsideDismissal": "pass",
+    "errorRetry": "pass",
+    "emptyDoesNotReuseGraph": "pass",
+    "blockedDependencyExplanation": "pass",
+    "childSessionDrillIn": "pass",
+    "narrowHorizontalOverflow": false,
+    "writeCalls": 0,
+    "taskSpaceFinish": "complete"
+  },
+  "contrast": {
+    "lightInspectorLabel": 6.791,
+    "lightInactiveTab": 6.105
+  },
+  "review": {
+    "initialDisposition": "fix",
+    "materialFindings": [
+      "Secondary text contrast",
+      "Type above title"
+    ],
+    "verdictDisposition": "ship",
+    "verdictScope": "Both listed fixes resolved; not a second whole-surface audit."
+  },
+  "screenshots": [
+    "desktop.png",
+    "desktop-dark.png",
+    "desktop-light.png",
+    "mobile.png",
+    "failed-dependency.png"
+  ],
+  "previousBroaderValidation": {
+    "passes": 7804,
+    "skips": 11,
+    "note": "Source suite completed in portions after one external OAuth test hit its 5s timeout; the exact source file passed on a 15s retry. Latest layout has focused validation above."
+  },
+  "documentation": {
+    "status": "complete",
+    "report": "documentation.md",
+    "scope": "Ordinary extension; existing theme and typography retained."
+  }
+}

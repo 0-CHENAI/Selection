@@ -9,10 +9,10 @@ describe('resolveNodeStatePill', () => {
     const done = resolveNodeStatePill('done')
     const failed = resolveNodeStatePill('failed')
 
-    // Color distinction: a failed node must not look like a done node (solved status roles).
+    // Color distinction: a failed node must not look like a done node.
     expect(done.className).not.toBe(failed.className)
-    expect(done.className).toContain('success')
-    expect(failed.className).toContain('destructive')
+    expect(done.className).toContain('emerald')
+    expect(failed.className).toContain('red')
 
     // Distinct label keys, both resolvable to the expected EN strings.
     expect(done.labelKey).toBe('tasks.nodeStateDone')
@@ -27,10 +27,9 @@ describe('resolveNodeStatePill', () => {
     const pending = resolveNodeStatePill('pending')
 
     expect(cancelled.className).toBe(pending.className)
-    expect(cancelled.className).not.toContain('destructive')
-    expect(cancelled.className).not.toContain('success')
-    expect(cancelled.className).not.toContain('accent')
-    expect(cancelled.className).not.toContain('info')
+    expect(cancelled.className).not.toContain('red')
+    expect(cancelled.className).not.toContain('emerald')
+    expect(cancelled.className).not.toContain('amber')
     expect(cancelled.labelKey).toBe('tasks.nodeStateCancelled')
     expect(messages[cancelled.labelKey!]).toBe('Cancelled')
   })
@@ -44,7 +43,7 @@ describe('resolveNodeStatePill', () => {
   })
 
   it('maps every NodeRunState literal to an existing en.json label', () => {
-    for (const state of ['pending', 'running', 'done', 'failed', 'cancelled', 'skipped']) {
+    for (const state of ['pending', 'ready', 'running', 'retry-wait', 'waiting-approval', 'done', 'failed', 'invalid', 'cancelled', 'skipped', 'interrupted']) {
       const { labelKey } = resolveNodeStatePill(state)
       expect(labelKey).not.toBeNull()
       expect(messages[labelKey!]).toBeTruthy()

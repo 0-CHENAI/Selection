@@ -7,9 +7,12 @@
 
 import awsIcon from '@/assets/provider-icons/aws.svg'
 import azureIcon from '@/assets/provider-icons/azure.svg'
+import cerebrasIcon from '@/assets/provider-icons/cerebras.svg'
 import claudeIcon from '@/assets/provider-icons/claude.svg'
 import copilotIcon from '@/assets/provider-icons/copilot.svg'
+import deepseekIcon from '@/assets/provider-icons/deepseek.svg'
 import googleIcon from '@/assets/provider-icons/google.svg'
+import groqIcon from '@/assets/provider-icons/groq.svg'
 import huggingfaceIcon from '@/assets/provider-icons/huggingface.svg'
 import kimiIcon from '@/assets/provider-icons/kimi.svg'
 import minimaxIcon from '@/assets/provider-icons/minimax.svg'
@@ -17,10 +20,14 @@ import mistralIcon from '@/assets/provider-icons/mistral.svg'
 import ollamaIcon from '@/assets/provider-icons/ollama.svg'
 import openaiIcon from '@/assets/provider-icons/openai.svg'
 import openrouterIcon from '@/assets/provider-icons/openrouter.svg'
+import orderIcon from '@/assets/order-icon.svg'
 import piIcon from '@/assets/provider-icons/pi.svg'
 import vercelIcon from '@/assets/provider-icons/vercel.svg'
+import xaiIcon from '@/assets/provider-icons/xai.svg'
+import zaiIcon from '@/assets/provider-icons/zai.svg'
 
 import type { LlmProviderType } from '@craft-agent/shared/config/llm-connections'
+import { isOrderGatewayUrl } from '@config/order-gateway'
 
 /**
  * Icon URLs for each provider
@@ -29,8 +36,11 @@ export const providerIcons = {
   anthropic: claudeIcon,
   aws: awsIcon,
   azure: azureIcon,
+  cerebras: cerebrasIcon,
   copilot: copilotIcon,
+  deepseek: deepseekIcon,
   google: googleIcon,
+  groq: groqIcon,
   huggingface: huggingfaceIcon,
   kimi: kimiIcon,
   minimax: minimaxIcon,
@@ -38,8 +48,11 @@ export const providerIcons = {
   ollama: ollamaIcon,
   openai: openaiIcon,
   openrouter: openrouterIcon,
+  order: orderIcon,
   pi: piIcon,
   vercel: vercelIcon,
+  xai: xaiIcon,
+  zai: zaiIcon,
 } as const
 
 export type ProviderIconKey = keyof typeof providerIcons
@@ -55,8 +68,8 @@ const providerDisplayNames: Record<string, string> = {
   minimax: 'Minimax',
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
-  pi: 'Craft Agents Backend',
-  pi_compat: 'Craft Agents Backend',
+  pi: 'Selection Backend',
+  pi_compat: 'Selection Backend',
   vercel: 'Vercel',
 }
 
@@ -65,6 +78,7 @@ export function getProviderDisplayName(providerType: string, baseUrl?: string | 
   // Try URL detection first for compat providers
   if (baseUrl) {
     const url = baseUrl.toLowerCase()
+    if (isOrderGatewayUrl(baseUrl)) return 'ORDER'
     if (url.includes('openrouter.ai')) return 'OpenRouter'
     if (url.includes('ollama')) return 'Ollama'
     if (url.includes('kimi.com')) return 'Kimi'
@@ -72,7 +86,6 @@ export function getProviderDisplayName(providerType: string, baseUrl?: string | 
     if (url.includes('minimax.io') || url.includes('minimaxi.com')) return 'Minimax'
     if (url.includes('v0.dev') || url.includes('vercel')) return 'Vercel'
     if (url.includes('manifest.build')) return 'Manifest'
-    if (url.includes('opencode.ai')) return 'OpenCode Go'
   }
   return providerDisplayNames[providerType] || providerType
 }
@@ -83,6 +96,7 @@ export function getProviderDisplayName(providerType: string, baseUrl?: string | 
 function detectProviderFromUrl(baseUrl: string): ProviderIconKey | null {
   const url = baseUrl.toLowerCase()
 
+  if (url.includes('order.ai.jxepdi.top')) return 'order'
   if (url.includes('openrouter.ai')) return 'openrouter'
   if (url.includes('ollama')) return 'ollama'
   if (url.includes('api.anthropic.com')) return 'anthropic'
@@ -95,6 +109,11 @@ function detectProviderFromUrl(baseUrl: string): ProviderIconKey | null {
   if (url.includes('mistral.ai')) return 'mistral'
   if (url.includes('bedrock')) return 'aws'
   if (url.includes('huggingface.co')) return 'huggingface'
+  if (url.includes('deepseek.com')) return 'deepseek'
+  if (url.includes('groq.com')) return 'groq'
+  if (url.includes('x.ai') || url.includes('api.x.ai')) return 'xai'
+  if (url.includes('cerebras.ai')) return 'cerebras'
+  if (url.includes('z.ai') || url.includes('bigmodel.cn')) return 'zai'
 
   return null
 }
@@ -135,22 +154,46 @@ function piAuthProviderToIcon(piAuthProvider: string): ProviderIconKey | null {
       return 'huggingface'
     case 'vercel-ai-gateway':
       return 'vercel'
+    case 'groq':
+      return 'groq'
+    case 'xai':
+      return 'xai'
+    case 'cerebras':
+      return 'cerebras'
+    case 'deepseek':
+      return 'deepseek'
+    case 'zai':
+      return 'zai'
     default:
       return null
   }
 }
 
+export type ConnectionBrandKind = 'order' | 'image' | 'fallback'
+
 /**
- * Domain map for providers without static SVG icons.
- * Used to generate Google Favicon V2 URLs as fallback.
+ * Which mark to draw beside a connection name.
+ * ORDER always uses the filled order mark, including when the saved provider
+ * type would otherwise resolve to a different brand.
  */
-const PI_AUTH_PROVIDER_DOMAINS: Record<string, string> = {
-  groq: 'groq.com',
-  xai: 'x.ai',
-  cerebras: 'cerebras.ai',
-  deepseek: 'deepseek.com',
-  zai: 'z.ai',
-  'cloudflare-ai-gateway': 'cloudflare.com',
+export function resolveConnectionBrandIcon(connection: {
+  providerType?: string | null
+  type?: string | null
+  baseUrl?: string | null
+  piAuthProvider?: string | null
+}): { kind: ConnectionBrandKind; src: string | null } {
+  if (isOrderGatewayUrl(connection.baseUrl)) {
+    return { kind: 'order', src: providerIcons.order }
+  }
+
+  const src = getProviderIcon(
+    connection.providerType || connection.type || '',
+    connection.baseUrl,
+    connection.piAuthProvider,
+  )
+  if (!src) return { kind: 'fallback', src: null }
+  if (src === providerIcons.order) return { kind: 'order', src }
+  return { kind: 'image', src }
 }
 
 /**
@@ -174,14 +217,6 @@ export function getProviderIcon(
     if (detectedProvider) {
       return providerIcons[detectedProvider]
     }
-    // Manifest has no bundled SVG — fall back to Google Favicon V2 (same trick used for groq/xai elsewhere).
-    if (baseUrl.toLowerCase().includes('manifest.build')) {
-      return 'https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=128&url=https://app.manifest.build'
-    }
-    // OpenCode Go has no bundled SVG — same Favicon V2 fallback.
-    if (baseUrl.toLowerCase().includes('opencode.ai')) {
-      return 'https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=128&url=https://opencode.ai'
-    }
   }
 
   // Map provider type to icon
@@ -199,11 +234,6 @@ export function getProviderIcon(
       if (piAuthProvider) {
         const iconKey = piAuthProviderToIcon(piAuthProvider)
         if (iconKey) return providerIcons[iconKey]
-        // Favicon fallback for providers without static SVGs
-        const domain = PI_AUTH_PROVIDER_DOMAINS[piAuthProvider]
-        if (domain) {
-          return `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=128&url=https://${domain}`
-        }
       }
       return null  // Unknown/custom Pi provider — caller shows brain icon
     }

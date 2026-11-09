@@ -8,7 +8,8 @@
  * so releaseBrowserOwnershipOnForcedStop() accepts IBrowserPaneManager.
  */
 
-import type { BrowserInstanceInfo, BrowserSecurityChallenge } from '@craft-agent/shared/protocol'
+import type { BrowserInstanceInfo } from '@craft-agent/shared/protocol'
+import type { ImageSendPolicy } from '@craft-agent/shared/utils'
 
 // ---------------------------------------------------------------------------
 // Supporting types — minimal subsets of BPM's internal types
@@ -23,14 +24,6 @@ export interface BrowserInstanceSnapshot {
   currentUrl: string
 }
 
-/** How a click reached the element: trusted mouse input, or DOM events (`note` says why). */
-export interface BrowserClickResult {
-  via: 'mouse' | 'script'
-  note?: string
-  /** A popup the click opened, or a sign-in window refused because another browser window has one open. */
-  popup?: string
-}
-
 export interface BrowserScreenshotOptions {
   mode?: 'raw' | 'agent'
   refs?: string[]
@@ -39,11 +32,16 @@ export interface BrowserScreenshotOptions {
   annotate?: boolean
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserScreenshotResult {
   imageBuffer: Buffer
   imageFormat: 'png' | 'jpeg'
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
   metadata?: Record<string, unknown>
 }
 
@@ -57,6 +55,7 @@ export interface BrowserScreenshotRegionTarget {
   padding?: number
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserConsoleOptions {
@@ -237,8 +236,7 @@ export interface IBrowserPaneManager {
   // -- Interaction ---------------------------------------------------------
 
   getAccessibilitySnapshot(id: string): Promise<AccessibilitySnapshot>
-  /** Older remote hosts resolve to undefined. */
-  clickElement(id: string, ref: string, options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }): Promise<BrowserClickResult | void>
+  clickElement(id: string, ref: string, options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }): Promise<void>
   clickAtCoordinates(id: string, x: number, y: number): Promise<void>
   drag(id: string, x1: number, y1: number, x2: number, y2: number): Promise<void>
   fillElement(id: string, ref: string, value: string): Promise<void>
@@ -263,5 +261,5 @@ export interface IBrowserPaneManager {
   getNetworkLogs(id: string, options?: BrowserNetworkOptions): BrowserNetworkEntry[]
   waitFor(id: string, args: BrowserWaitArgs): Promise<BrowserWaitResult>
   getDownloads(id: string, options?: BrowserDownloadOptions): Promise<BrowserDownloadEntry[]>
-  detectSecurityChallenge(id: string): Promise<BrowserSecurityChallenge>
+  detectSecurityChallenge(id: string): Promise<{ detected: boolean; provider: string; signals: string[] }>
 }

@@ -6,7 +6,7 @@
  */
 
 import { homedir } from 'os';
-import { resolve, join, normalize, isAbsolute } from 'path';
+import { resolve, join, normalize, isAbsolute, relative } from 'path';
 import { existsSync } from 'fs';
 
 /**
@@ -33,9 +33,9 @@ export function expandPath(inputPath: string, basePath?: string): string {
     return home;
   }
 
-  // Handle ~/ prefix
-  if (expanded.startsWith('~/')) {
-    expanded = join(home, expanded.slice(2));
+  // Accept native Windows separators too, including paths saved by older builds.
+  if (/^~[\\/]/.test(expanded)) {
+    expanded = join(home, normalizePath(expanded.slice(2)));
   }
 
   // Handle ${HOME} and $HOME variables
@@ -66,6 +66,12 @@ export function expandPath(inputPath: string, basePath?: string): string {
 export function toPortablePath(absolutePath: string): string {
   if (!absolutePath) return absolutePath;
 
+  // Persistence and JSONL headers both convert paths. Keep the conversion
+  // idempotent: path.normalize() turns ~/... into ~\\... on Windows.
+  if (absolutePath === '~' || /^~[\\/]/.test(absolutePath)) {
+    return normalizePath(absolutePath);
+  }
+
   const home = homedir();
   const normalized = normalize(absolutePath);
 
@@ -79,11 +85,11 @@ export function toPortablePath(absolutePath: string): string {
   const homePrefixWin = home + '\\';
 
   if (normalized.startsWith(homePrefix)) {
-    return '~/' + normalized.slice(homePrefix.length);
+    return '~/' + normalizePath(normalized.slice(homePrefix.length));
   }
 
   if (normalized.startsWith(homePrefixWin)) {
-    return '~/' + normalized.slice(homePrefixWin.length);
+    return '~/' + normalizePath(normalized.slice(homePrefixWin.length));
   }
 
   // Path is outside home directory, keep as absolute
@@ -124,6 +130,37 @@ export function isPortablePath(path: string): boolean {
  */
 export function normalizePath(path: string): string {
   return path.replace(/\\/g, '/');
+}
+
+/**
+ * Resolve a workspace/filesystem path for reliable I/O.
+ * - Expands ~ / $HOME
+ * - Resolves to absolute
+ * - Normalizes . / .. and separators
+ * - On macOS only: NFC unicode form so Chinese path segments compare
+ *   consistently across dialog pickers (NFC) and APFS (often NFD).
+ *   Windows keeps the path as-is after resolve — forcing NFC there can
+ *   desync from the real on-disk folder name under Chinese parents.
+ */
+export function resolveFsPath(inputPath: string, basePath?: string): string {
+  if (!inputPath) return inputPath;
+  const resolved = resolve(normalize(expandPath(inputPath, basePath)));
+  if (process.platform === 'darwin') {
+    return resolved.normalize('NFC');
+  }
+  return resolved;
+}
+
+/**
+ * True if `child` is the same as or nested under `parent`.
+ * Unicode-safe (NFC) and works with mixed separators.
+ */
+export function isPathInside(parent: string, child: string): boolean {
+  if (!parent || !child) return false;
+  const parentRes = resolveFsPath(parent);
+  const childRes = resolveFsPath(child);
+  const rel = relative(parentRes, childRes);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 /**

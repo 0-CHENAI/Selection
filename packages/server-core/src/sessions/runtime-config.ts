@@ -1,6 +1,17 @@
+import { existsSync, statSync } from 'node:fs'
 import type { AgentProvider, LlmAuthType } from '@craft-agent/shared/agent/backend'
-import { isCompatProvider, modelSupportsImages, type LlmConnection } from '@craft-agent/shared/config'
+import { isCompatProvider, resolveModelImageSupportFromCatalog, type ImageSupportResolution, type LlmConnection } from '@craft-agent/shared/config'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
+import {
+  describeImageAttachment,
+  hydrateAttachmentBytes,
+  imageAttachmentsMissingBytes,
+  withStoredImagePaths,
+  type FileAttachment as HydratableAttachment,
+  type ImageBlockDiagnostic,
+  type ImageInputFailureCode,
+  type StoredAttachmentSource,
+} from '@craft-agent/shared/utils'
 
 export interface BackendRuntimeSignatureInput {
   connection: LlmConnection | null
@@ -14,6 +25,15 @@ export interface ModelAttachmentFilterResult {
   attachments?: FileAttachment[]
   /** Image attachments intentionally omitted from the model payload. */
   omittedImages: FileAttachment[]
+  /** Present when a connection was available to classify image input. */
+  resolution?: ImageSupportResolution
+}
+
+/** Text sentinels are model output, so they cannot reliably delimit an answer. */
+export function usesStreamingAnswerDelivery(
+  connection: Pick<LlmConnection, 'answerDelivery' | 'presentationProtocol'> | null | undefined,
+): boolean {
+  return connection?.answerDelivery === 'streaming' && connection.presentationProtocol !== 'marker-v1'
 }
 
 function definedObject<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
@@ -27,7 +47,12 @@ function normalizeCustomModels(connection: LlmConnection): Array<Record<string, 
       return definedObject({
         id: model.id,
         contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens,
         supportsImages: typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined,
+        imageSupport: model.imageSupport === 'auto' || model.imageSupport === 'on' || model.imageSupport === 'off'
+          ? model.imageSupport
+          : undefined,
+        learnedSupportsImages: typeof model.learnedSupportsImages === 'boolean' ? model.learnedSupportsImages : undefined,
       })
     })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)))
@@ -55,6 +80,7 @@ export function buildRestartRequiredSignature(input: BackendRuntimeSignatureInpu
     slug: connection?.slug,
     providerType: connection?.providerType,
     piAuthProvider: connection?.piAuthProvider,
+    streamingAnswerDelivery: usesStreamingAnswerDelivery(connection),
   }))
 }
 
@@ -81,7 +107,6 @@ export function buildBackendRuntimeSignature(input: BackendRuntimeSignatureInput
                     supportsImages: typeof connection.customEndpoint.supportsImages === 'boolean'
                       ? connection.customEndpoint.supportsImages
                       : undefined,
-                    maxTokens: connection.customEndpoint.maxTokens,
                   })
                 : undefined,
               models: normalizeCustomModels(connection),
@@ -103,9 +128,10 @@ export function isImageAttachment(attachment: Pick<FileAttachment, 'type' | 'mim
 }
 
 /**
- * Enforce saved custom-endpoint image capability at send time. The session can
- * still persist/display image attachments, but they are not passed to text-only
- * models even if an older subprocess has stale vision-capable registry state.
+ * Classify attachments a model must not receive.
+ * An explicit user "off" is a hard send failure (#61). Known, learned, and
+ * endpoint text-only results are a soft skip: the caller drops the images,
+ * tells the user, and still sends the turn.
  */
 export function filterAttachmentsForModelInput(
   attachments: FileAttachment[] | undefined,
@@ -113,8 +139,13 @@ export function filterAttachmentsForModelInput(
   modelId: string,
 ): ModelAttachmentFilterResult {
   if (!attachments?.length) return { attachments, omittedImages: [] }
-  if (!connection || !isCompatProvider(connection.providerType)) return { attachments, omittedImages: [] }
-  if (modelSupportsImages(connection, modelId)) return { attachments, omittedImages: [] }
+  if (!connection) return { attachments, omittedImages: [] }
+  const resolution = resolveModelImageSupportFromCatalog({
+    modelId,
+    models: connection.models,
+    endpointSupportsImages: connection.customEndpoint?.supportsImages,
+  })
+  if (resolution.supportsImages) return { attachments, omittedImages: [], resolution }
 
   const modelAttachments: FileAttachment[] = []
   const omittedImages: FileAttachment[] = []
@@ -130,5 +161,103 @@ export function filterAttachmentsForModelInput(
   return {
     attachments: modelAttachments.length > 0 ? modelAttachments : undefined,
     omittedImages,
+    resolution,
+  }
+}
+
+export interface PrepareModelImageAttachmentsInput {
+  attachments?: HydratableAttachment[]
+  storedAttachments?: StoredAttachmentSource[]
+  connection: LlmConnection | null
+  modelId: string
+}
+
+export type PrepareModelImageAttachmentsResult =
+  | {
+      ok: true
+      attachments?: HydratableAttachment[]
+      diagnostics: ImageBlockDiagnostic[]
+      payloadImageCount: number
+      /** Images removed because auto mode already knows this model cannot view them. */
+      skippedImages?: FileAttachment[]
+    }
+  | {
+      ok: false
+      code: ImageInputFailureCode
+      message: string
+      diagnostics: ImageBlockDiagnostic[]
+      payloadImageCount: 0
+    }
+
+/**
+ * Rebuild, hydrate, and gate image attachments before they reach the model.
+ * A vision-capable model only proceeds when every image has bytes in the
+ * sendable payload. Capability mismatches and missing pixels fail closed.
+ */
+function isMissingImageSource(attachment: HydratableAttachment): boolean {
+  const path = attachment.storedPath || attachment.path
+  if (!path) return true
+  try {
+    return !existsSync(path) || !statSync(path).isFile()
+  } catch {
+    return true
+  }
+}
+
+export function prepareModelImageAttachments(
+  input: PrepareModelImageAttachmentsInput,
+): PrepareModelImageAttachmentsResult {
+  const source = withStoredImagePaths(input.attachments, input.storedAttachments)
+  const capability = filterAttachmentsForModelInput(
+    source as FileAttachment[] | undefined,
+    input.connection,
+    input.modelId,
+  )
+  if (capability.omittedImages.length > 0 && capability.resolution?.source === 'explicit') {
+    const names = capability.omittedImages.map(attachment => attachment.name).join(', ')
+    return {
+      ok: false,
+      code: 'image_capability_mismatch',
+      message: `Image input is disabled for ${input.modelId}. ${names} ${capability.omittedImages.length === 1 ? 'was' : 'were'} not sent.`,
+      diagnostics: capability.omittedImages.map(attachment => describeImageAttachment(attachment)),
+      payloadImageCount: 0,
+    }
+  }
+
+  if (capability.omittedImages.length > 0) {
+    const hydrated = hydrateAttachmentBytes(capability.attachments as HydratableAttachment[] | undefined)
+    return {
+      ok: true,
+      attachments: hydrated,
+      diagnostics: [],
+      payloadImageCount: 0,
+      skippedImages: capability.omittedImages,
+    }
+  }
+
+  const hydrated = hydrateAttachmentBytes(capability.attachments as HydratableAttachment[] | undefined)
+  const diagnostics = (hydrated ?? [])
+    .filter(isImageAttachment)
+    .map(attachment => describeImageAttachment(attachment))
+  const missing = imageAttachmentsMissingBytes(hydrated)
+  if (missing.length > 0) {
+    const expiredOnly = missing.every(isMissingImageSource)
+    const names = missing.map(attachment => attachment.name).join(', ')
+    return {
+      ok: false,
+      code: expiredOnly ? 'image_resource_expired' : 'image_bytes_unavailable',
+      message: expiredOnly
+        ? `Stored image file${missing.length === 1 ? ' is' : 's are'} missing or no longer readable: ${names}.`
+        : `Image bytes could not be loaded for the model request: ${names}.`,
+      diagnostics,
+      payloadImageCount: 0,
+    }
+  }
+
+  return {
+    ok: true,
+    attachments: hydrated,
+    diagnostics,
+    payloadImageCount: diagnostics.length,
   }
 }

@@ -4,15 +4,15 @@
  * Uses real temp directories to exercise actual filesystem operations.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { appendFileSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { estimateTokensDensityAware } from '../../utils/large-response.ts';
 import {
-  appendProjectMemoryEntry,
   createProject,
   getProjectMemoryPath,
   loadProjectMemory,
+  loadProjectPromptContext,
   sanitizeAssetFilename,
 } from '../storage.ts';
 
@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 function makeProjectSlug(name = 'Memory Test'): string {
-  return createProject(workspaceRoot, { name }).slug;
+  return createProject(workspaceRoot, { name, workingDirectory: join(tempDir, 'work') }).slug;
 }
 
 describe('sanitizeAssetFilename', () => {
@@ -68,7 +68,7 @@ describe('loadProjectMemory', () => {
     expect(loadProjectMemory(workspaceRoot, slug)).toBe(content);
   });
 
-  it('keeps the start and the end with a marker when over the cap, staying within budget', () => {
+  it('head-truncates and appends a marker when over the cap, staying within budget', () => {
     const slug = makeProjectSlug();
     const maxTokens = 50;
     // ~2000 chars of plain text => ~500 tokens, well over the 50-token cap.
@@ -79,43 +79,45 @@ describe('loadProjectMemory', () => {
     expect(result).not.toBeNull();
     const text = result as string;
 
-    // Older files keep their newest notes at the top; appended notes land at the end.
+    // Head kept (newest-first authoring), tail dropped.
     expect(text).toContain('TOP-OF-MEMORY');
-    expect(text).toContain('BOTTOM-OF-MEMORY');
+    expect(text).not.toContain('BOTTOM-OF-MEMORY');
 
     // Marker present and budget respected (marker included).
-    expect(text).toContain(`over the ${maxTokens}-token cap`);
+    expect(text).toContain(`truncated at ${maxTokens}-token cap`);
     expect(estimateTokensDensityAware(text)).toBeLessThanOrEqual(maxTokens);
   });
 });
 
-describe('appendProjectMemoryEntry', () => {
-  it('creates MEMORY.md and appends notes under dated headings without touching earlier content', () => {
-    const slug = makeProjectSlug();
-    const first = appendProjectMemoryEntry(workspaceRoot, slug, '2026-10-11T22:00:00Z — Explore', 'Login needs the staging account.');
-    expect(first.path).toBe(getProjectMemoryPath(workspaceRoot, slug));
-    appendProjectMemoryEntry(workspaceRoot, slug, '2026-10-11T23:00:00Z —\n Persona  tests', '- The consent page needs a JS click.');
+describe('loadProjectPromptContext', () => {
+  it('keeps project context but does not read or expose memory in isolated mode', () => {
+    const project = createProject(workspaceRoot, {
+      name: 'Isolated Project',
+      description: 'Visible project description',
+      details: 'Visible project details',
+      workingDirectory: join(tempDir, 'work'),
+    });
+    writeFileSync(getProjectMemoryPath(workspaceRoot, project.slug), 'CANARY_ISOLATED_SECRET');
 
-    expect(readFileSync(first.path, 'utf-8')).toBe(
-      '## 2026-10-11T22:00:00Z — Explore\n\nLogin needs the staging account.\n\n' +
-      '## 2026-10-11T23:00:00Z — Persona tests\n\n- The consent page needs a JS click.\n',
-    );
+    const isolated = loadProjectPromptContext(workspaceRoot, project.id, false);
+    expect(isolated).toMatchObject({
+      name: 'Isolated Project',
+      description: 'Visible project description',
+      details: 'Visible project details',
+    });
+    expect(isolated?.memoryPath).toBeUndefined();
+    expect(isolated?.memoryContent).toBeUndefined();
   });
 
-  // Found 2026-10-11: a session rewrote MEMORY.md from its start-of-session snapshot and dropped
-  // notes other sessions had added since.
-  it('never rewrites the file, so notes added by others in between survive', () => {
-    const slug = makeProjectSlug();
-    const path = getProjectMemoryPath(workspaceRoot, slug);
-    writeFileSync(path, '# Lessons\n');
-    appendProjectMemoryEntry(workspaceRoot, slug, 'A', 'first note');
-    appendFileSync(path, '\n## B\n\nadded by another session\n');
-    appendProjectMemoryEntry(workspaceRoot, slug, 'A', 'second note');
+  it('loads only the selected project memory in shared mode', () => {
+    const projectA = createProject(workspaceRoot, { name: 'Project A', workingDirectory: join(tempDir, 'a') });
+    const projectB = createProject(workspaceRoot, { name: 'Project B', workingDirectory: join(tempDir, 'b') });
+    writeFileSync(getProjectMemoryPath(workspaceRoot, projectA.slug), 'CANARY_PROJECT_A');
+    writeFileSync(getProjectMemoryPath(workspaceRoot, projectB.slug), 'CANARY_PROJECT_B');
 
-    const content = readFileSync(path, 'utf-8');
-    expect(content.startsWith('# Lessons\n')).toBe(true);
-    const order = ['first note', 'added by another session', 'second note'].map(text => content.indexOf(text));
-    expect(order.every(index => index >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    const sharedA = loadProjectPromptContext(workspaceRoot, projectA.id, true);
+    expect(sharedA?.memoryContent).toContain('CANARY_PROJECT_A');
+    expect(sharedA?.memoryContent).not.toContain('CANARY_PROJECT_B');
+    expect(loadProjectPromptContext(workspaceRoot, 'missing-project', true)).toBeNull();
   });
 });

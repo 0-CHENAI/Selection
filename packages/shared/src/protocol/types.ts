@@ -60,7 +60,7 @@ export interface MessageEnvelope {
   stale?: boolean
   /** Server app version, sent in handshake_ack. Clients can use this for compatibility checks. */
   serverVersion?: string
-  /** Largest message the server accepts, in bytes (handshake_ack); a bigger one closes the connection. See message-limits.ts. */
+  /** Largest accepted WebSocket frame, sent in handshake_ack. Clients refuse bigger requests before send. */
   maxMessageBytes?: number
 }
 
@@ -158,6 +158,27 @@ export const HEARTBEAT_MAX_MISSED = 2
 
 /** Default request timeout in ms. */
 export const REQUEST_TIMEOUT_MS = 30_000
+
+/**
+ * Native dialogs and confirmations wait on the user. A 30s RPC deadline
+ * fails while they are still browsing. These channels wait until the
+ * dialog returns or the client disconnects.
+ */
+const USER_INTERACTION_CHANNELS = new Set<string>([
+  'dialog:openFolder',
+  'file:openDialog',
+  'gitbash:browse',
+  'auth:showLogoutConfirmation',
+  'auth:showDeleteSessionConfirmation',
+  'client:openFileDialog',
+  'client:confirmDialog',
+])
+
+/** `null` means do not arm a request timer. */
+export function requestTimeoutMsForChannel(channel: string): number | null {
+  if (USER_INTERACTION_CHANNELS.has(channel)) return null
+  return REQUEST_TIMEOUT_MS
+}
 
 // -- Reliable delivery constants --
 

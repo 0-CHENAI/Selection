@@ -7,8 +7,9 @@
 
 import { z } from 'zod';
 import type { ValidationIssue } from '../config/validators.ts';
-import { APP_EVENTS, AGENT_EVENTS } from './types.ts';
+import { APP_EVENTS } from './types.ts';
 import { THINKING_LEVEL_IDS, normalizeThinkingLevel } from '../agent/thinking-levels.ts';
+import { omitRetiredAutomations } from './legacy-migration.ts';
 
 // ============================================================================
 // Zod Schemas
@@ -63,32 +64,11 @@ export const WebhookActionSchema = z.object({
   ]).optional(),
 });
 
-export const ScriptActionSchema = z.object({
-  type: z.literal('script'),
-  script: z.string().min(1, 'Script path cannot be empty').superRefine((script, ctx) => {
-    // Workspace-relative only; the executor re-validates with symlink resolution.
-    if (script.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(script)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Script path must be relative to the workspace root' });
-    }
-    if (script.split(/[\\/]/).includes('..')) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Script path must not contain ".." segments' });
-    }
-  }),
-  args: z.array(z.string()).optional(),
-  runtime: z.enum(['bun', 'node', 'python3']).optional(),
-  timeoutMs: z.number().int().positive().optional(),
-  page: z.string().min(1).optional(),
-});
-
-/**
- * Strict action union — unknown action types are validation errors.
- * (Replaced the legacy `.passthrough()` escape hatch: silently-ignored actions
- * hid typos and let unvalidated config reach handlers.)
- */
-export const ActionDefinitionSchema = z.discriminatedUnion('type', [
-  PromptActionSchema.strict(),
-  WebhookActionSchema.strict(),
-  ScriptActionSchema.strict(),
+/** Accepts prompt and webhook actions strictly; passes through legacy/unknown action types without erroring */
+export const ActionDefinitionSchema = z.union([
+  PromptActionSchema,
+  WebhookActionSchema,
+  z.object({ type: z.string().refine(type => !['prompt', 'webhook', 'decision'].includes(type), 'Unsupported action type') }).passthrough(),
 ]);
 
 // ============================================================================
@@ -168,14 +148,6 @@ export const AutomationMatcherSchema = z.object({
   labels: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
   conditions: z.array(AutomationConditionSchema).optional(),
-  // Decision-model yes/no condition; inert when the decision model is off.
-  semanticCondition: z.object({
-    question: z.string().trim().min(1, 'Question cannot be empty').max(500),
-    threshold: z.number().gt(0).lte(1).optional(),
-  }).strict().optional(),
-  // Telegram forum-topic name (1–128 chars). Silently ignored at runtime when
-  // no supergroup is paired or the Telegram adapter is not connected.
-  telegramTopic: z.string().min(1).max(128).optional(),
   actions: z.array(ActionDefinitionSchema).min(1, 'At least one action required'),
 });
 
@@ -191,11 +163,10 @@ export const DEPRECATED_EVENT_ALIASES: Record<string, string> = {
 /** All valid event names: canonical events + deprecated aliases. Derived from types.ts. */
 export const VALID_EVENTS: readonly string[] = [
   ...APP_EVENTS,
-  ...AGENT_EVENTS,
   ...Object.keys(DEPRECATED_EVENT_ALIASES),
 ];
 
-export const AutomationsConfigSchema = z.object({
+export const AutomationsConfigSchema = z.preprocess(omitRetiredAutomations, z.object({
   version: z.number().optional(),
   automations: z.record(z.string(), z.array(AutomationMatcherSchema)).optional(),
 }).transform((data) => {
@@ -225,7 +196,7 @@ export const AutomationsConfigSchema = z.object({
   }
 
   return { version: data.version, automations: validAutomations };
-});
+}));
 
 // ============================================================================
 // Schema Utilities

@@ -1,0 +1,10 @@
+Excel 案例 annual-business、port-cargo、bio-assay 来自 dsh-desktop
+588412b9002fcb3ac88751fab7915e050c965563
+packages/dsh-desktop-office/sources/legacy/
+
+许可：dsh-desktop-office 包级 MIT。仓库根版权 DataElement（2026）。
+原件 sha256 见 docs/plans/dsh-office-inventory.json。
+example.xlsx、design.md、checks.json、inputs/*.json 保持原字节。
+工具只写工作区副本，不覆盖这些原件。
+
+Selection 仓库许可证为 Apache-2.0。上述 MIT 材料随案例保留。

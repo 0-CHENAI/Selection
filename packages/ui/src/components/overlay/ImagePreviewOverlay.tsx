@@ -26,6 +26,8 @@ export interface ImagePreviewOverlayProps {
   initialIndex?: number
   title?: string
   loadDataUrl: (path: string) => Promise<string>
+  /** Called instead of showing a load-failed overlay (e.g. HEIC transcode miss). */
+  onLoadError?: (error: Error) => boolean | void
   theme?: 'light' | 'dark'
 }
 
@@ -37,6 +39,7 @@ export function ImagePreviewOverlay({
   initialIndex = 0,
   title,
   loadDataUrl,
+  onLoadError,
   theme = 'light',
 }: ImagePreviewOverlayProps) {
   const { t } = useTranslation()
@@ -54,6 +57,7 @@ export function ImagePreviewOverlay({
   const containerRef = React.useRef<HTMLDivElement>(null)
 
   const {
+    attachContainerRef,
     scale,
     translate,
     isDragging,
@@ -116,14 +120,18 @@ export function ImagePreviewOverlay({
         }
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load image')
+        if (cancelled) return
+        const error = err instanceof Error ? err : new Error('Failed to load image')
+        if (onLoadError?.(error)) {
           setIsLoading(false)
+          return
         }
+        setError(error.message)
+        setIsLoading(false)
       })
 
     return () => { cancelled = true }
-  }, [isOpen, activeItem?.src, loadDataUrl, contentCache])
+  }, [isOpen, activeItem?.src, loadDataUrl, contentCache, onLoadError])
 
   const isDefaultView = scale === 1 && translate.x === 0 && translate.y === 0
 
@@ -164,7 +172,7 @@ export function ImagePreviewOverlay({
       headerActions={headerActions}
     >
       <div
-        ref={containerRef}
+        ref={attachContainerRef}
         className="min-h-full flex items-center justify-center p-4 select-none"
         onMouseDown={onMouseDown}
         onDoubleClick={onDoubleClick}

@@ -7,33 +7,27 @@
  */
 
 import { join, parse as parsePath } from 'path'
+import { randomUUID } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
+import { HTML_ARTIFACT_SCHEME, htmlArtifactLocation, resolveHtmlArtifactResource, isHtmlArtifactNavigationAllowed, isHtmlArtifactRequestAllowed } from './html-artifact'
 import { existsSync, mkdirSync } from 'fs'
-import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
-import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, screen, session, shell, type Session as ElectronSession } from 'electron'
+import { validateFilePath, getWorkspaceAllowedDirs, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
+import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, session, shell, type Session as ElectronSession } from 'electron'
 import { mainLog } from './logger'
 import type { WindowManager } from './window-manager'
 import { BrowserCDP, type AccessibilitySnapshot, type ElementGeometry } from './browser-cdp'
-import {
-  SECURITY_CHALLENGE_CONFIRM_DELAY_MS,
-  SECURITY_CHALLENGE_PAGE_SCRIPT,
-  classifySecurityChallenge,
-  countActionableAxNodes,
-  noSecurityChallenge,
-  type BrowserSecurityChallenge,
-  type SecurityChallengeFacts,
-} from './security-challenge'
 import {
   type BrowserEmptyStateLaunchPayload,
   type BrowserEmptyStateLaunchResult,
   type BrowserInstanceInfo,
 } from '../shared/types'
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@craft-agent/shared/config'
+import { IMAGE_ENCODING_QUALITIES, resolveImageSendPolicy, resolveImageSendSize, type ImageSendPolicy } from '@craft-agent/shared/utils'
 import { CodedError } from '@craft-agent/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
 import type {
   IBrowserPaneManager,
   BrowserInstanceSnapshot,
-  BrowserClickResult,
 } from '@craft-agent/server-core/handlers'
 import type {
   BrowserCapabilityRequest,
@@ -53,10 +47,7 @@ const DEFAULT_WAIT_TIMEOUT_MS = 10_000
 const DEFAULT_WAIT_POLL_MS = 100
 const SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS = 3
 const SCREENSHOT_RETRY_DELAY_MS = 120
-/** How long a capture waits for the page to paint (two animation frames) before calling it stale. */
-const SCREENSHOT_FRAME_TIMEOUT_MS = 400
-const SCREENSHOT_RESCUE_FRAME_TIMEOUT_MS = 1_000
-const STALE_FRAME_WARNING = 'The page did not paint a new frame, so this capture may show an older one.'
+const SCREENSHOT_RESCUE_PAINT_DELAY_MS = 180
 const SCREENSHOT_NETWORK_IDLE_TIMEOUT_MS = 1_000
 const SCREENSHOT_NETWORK_IDLE_MS = 300
 const THEME_COLOR_SIGNAL_PREFIX = '__craft_theme_color__:'
@@ -64,30 +55,7 @@ const THEME_COLOR_NULL_SENTINEL = '__NULL__'
 const THEME_OBSERVER_MIN_INTERVAL_MS = 120
 const EARLY_THEME_EXTRACTION_DELAY_MS = 100
 const BROWSER_EMPTY_STATE_PAGE = 'browser-empty-state.html'
-
 const CRAFT_DEEPLINK_SCHEME_PREFIX = `${process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'}://`
-
-/** A URL's origin ("null" for opaque ones such as about:blank and file:). */
-function originOf(url: string): string {
-  try {
-    return new URL(url).origin
-  } catch {
-    return 'null'
-  }
-}
-
-const SIGN_IN_HOSTS = /(^|\.)(accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|appleid\.apple\.com|github\.com|auth0\.com|okta\.com|onelogin\.com|amazoncognito\.com|slack\.com)$/i
-const SIGN_IN_PATH = /(^|\/)(__\/auth|oauth2?|auth|authorize|login|signin|sign-in|sso)(\/|$)/i
-
-/** Whether a popup URL looks like a sign-in window (an identity provider, or an auth/login path). */
-export function isSignInPopupUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return SIGN_IN_HOSTS.test(parsed.hostname) || SIGN_IN_PATH.test(parsed.pathname)
-  } catch {
-    return false
-  }
-}
 
 const THEME_COLOR_EXTRACTOR_FN = String.raw`
 () => {
@@ -151,8 +119,6 @@ const TOOLBAR_CHANNELS = {
   GO_FORWARD: 'browser-toolbar:go-forward',
   RELOAD: 'browser-toolbar:reload',
   STOP: 'browser-toolbar:stop',
-  MENU_GEOMETRY: 'browser-toolbar:menu-geometry',
-  FORCE_CLOSE_MENU: 'browser-toolbar:force-close-menu',
   HIDE: 'browser-toolbar:hide',
   DESTROY: 'browser-toolbar:destroy',
   STATE_UPDATE: 'browser-toolbar:state-update',
@@ -178,12 +144,6 @@ interface BrowserInstance {
   window: BrowserWindow
   toolbarView: BrowserView
   pageView: BrowserView
-  /**
-   * `pageView.webContents.id`, captured at creation. Lookups and teardown use
-   * this copy because reading `webContents` on a destroyed window throws
-   * "Object has been destroyed" (OSS #1059).
-   */
-  pageWebContentsId: number
   nativeOverlayView: BrowserView
   cdp: BrowserCDP
   currentUrl: string
@@ -204,11 +164,7 @@ interface BrowserInstance {
   workspaceId: string | null
   isVisible: boolean
   isHiding: boolean
-  keepAliveOnWindowClose: boolean
   toolbarReady: boolean
-  toolbarMenuOpen: boolean
-  toolbarMenuHeight: number
-  toolbarMenuOverlayActive: boolean
   showOnCreate: boolean
   pendingShowOnReady: boolean
   pendingShowToken: number
@@ -223,34 +179,12 @@ interface BrowserInstance {
   networkLogs: BrowserNetworkEntry[]
   downloads: BrowserDownloadEntry[]
   lastLaunchToken: string | null
-  /** Background throttling is off: the hidden page keeps painting (agent control, or a capture). */
-  rendersWhileHidden: boolean
-  /**
-   * The page shows (or is loading) the app's own empty-state page, whose requests (the Vite dev
-   * server in development) and console output are not the site's and are never logged.
-   */
-  onInternalPage: boolean
-  /** Origin and start time of the main-frame navigation in progress, for scoping logs to one site. */
-  pendingNavigation: { origin: string; startedAt: number } | null
-  /** Origin of the committed page the console and network logs belong to. */
-  logOrigin: string | null
-  /** When the navigation to that site started: requests started earlier belong to the previous site. */
-  logScopeStartedAt: number
-  /** Popups the page opened, or was refused because another window's sign-in was open (newest last). */
-  popupEvents: PopupEvent[]
+  htmlArtifact: boolean
+  htmlArtifactSource: { host: string; root: string; document: string } | null
 }
-
-interface PopupEvent {
-  seq: number
-  kind: 'opened' | 'joined'
-  url: string
-  /** For `joined`: the browser window whose sign-in popup is already open. */
-  ownerInstanceId?: string
-}
-
-const MAX_POPUP_EVENTS = 20
 
 interface CreateBrowserInstanceOptions {
+  pageSession?: ElectronSession
   show?: boolean
   ownerType?: 'session' | 'manual'
   ownerSessionId?: string
@@ -266,6 +200,7 @@ export interface BrowserScreenshotOptions {
   annotate?: boolean
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserConsoleEntry {
@@ -289,6 +224,7 @@ export interface BrowserScreenshotRegionTarget {
   padding?: number
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserNetworkEntry {
@@ -348,6 +284,10 @@ export interface BrowserDownloadOptions {
 export interface BrowserScreenshotResult {
   imageBuffer: Buffer
   imageFormat: 'png' | 'jpeg'
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
   metadata?: {
     mode: 'raw' | 'agent'
     viewport?: {
@@ -394,27 +334,15 @@ let instanceCounter = 0
 
 export class BrowserPaneManager implements IBrowserPaneManager {
   private instances: Map<string, BrowserInstance> = new Map()
-  private destroyingIds: Set<string> = new Set()
   private stateChangeCallback: ((info: BrowserInstanceInfo) => void) | null = null
   private removedCallback: ((id: string) => void) | null = null
   private interactedCallback: ((id: string) => void) | null = null
   private partitionPermissionsInitialized = false
   private partitionObserversInitialized = false
   private inFlightRequestsByWebContentsId = new Map<number, number>()
-  /** Requests started by the internal empty-state page; they complete (or abort) unlogged. */
-  private internalRequestIds = new Set<number>()
-  /** When each in-flight page request started, and the start time behind each logged entry. */
-  private requestStartedAt = new Map<number, number>()
-  private networkEntryStartedAt = new WeakMap<BrowserNetworkEntry, number>()
   private lastNetworkActivityByWebContentsId = new Map<number, number>()
   private popupWindowsByParentInstanceId = new Map<string, Set<BrowserWindow>>()
   private popupParentByWebContentsId = new Map<number, string>()
-  /** Origin of the URL each popup was opened with (e.g. a Firebase auth handler before its redirect). */
-  private popupOpenedOriginByWebContentsId = new Map<number, string>()
-  private popupEventSeq = 0
-  // Popup webContents ids captured at registration: a closed popup's `webContents`
-  // getter throws, so cleanup must never read it (OSS #1059).
-  private popupWebContentsIdByWindow = new WeakMap<BrowserWindow, number>()
   private windowManager: WindowManager | null = null
   private sessionPathResolver: ((sessionId: string) => string | null) | null = null
 
@@ -486,10 +414,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       },
     })
 
+    const pageSession = options?.pageSession ?? ses
     const pageView = new BrowserView({
       webPreferences: {
-        partition: SESSION_PARTITION,
-        session: ses,
+        session: pageSession,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -540,11 +468,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       workspaceId,
       isVisible: false,
       isHiding: false,
-      keepAliveOnWindowClose: true,
       toolbarReady: false,
-      toolbarMenuOpen: false,
-      toolbarMenuHeight: 0,
-      toolbarMenuOverlayActive: false,
       showOnCreate: shouldShow,
       pendingShowOnReady: false,
       pendingShowToken: 0,
@@ -562,13 +486,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       networkLogs: [],
       downloads: [],
       lastLaunchToken: null,
-      pageWebContentsId: pageView.webContents.id,
-      rendersWhileHidden: false,
-      onInternalPage: true, // the empty-state page loads first
-      pendingNavigation: null,
-      logOrigin: null,
-      logScopeStartedAt: 0,
-      popupEvents: [],
+      htmlArtifact: Boolean(options?.pageSession),
+      htmlArtifactSource: null,
     }
 
     const defaultUa = pageView.webContents.userAgent || ''
@@ -598,12 +517,61 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           this.markToolbarReady(instance, 'toolbar-load-finalized')
         }
       })
-    void this.loadEmptyStatePage(instance).catch((error) => {
+    if (!options?.pageSession) void this.loadEmptyStatePage(instance).catch((error) => {
       mainLog.warn(`[browser-pane] empty-state load failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
       void pageView.webContents.loadURL('about:blank')
     })
 
     return instanceId
+  }
+
+  async openHtmlFile(path: string, workspaceId: string): Promise<string> {
+    const { net } = await import('electron')
+    const host = randomUUID()
+    const location = await htmlArtifactLocation(path, host)
+    const pageSession = session.fromPartition(`html-artifact-${host}`)
+    pageSession.setPermissionCheckHandler(() => false)
+    pageSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    pageSession.protocol.handle(HTML_ARTIFACT_SCHEME, async request => {
+      try {
+        if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 })
+        const origin = (request as Request & { initiatorOrigin?: string }).initiatorOrigin
+        if (origin && origin !== `${HTML_ARTIFACT_SCHEME}://${host}`) return new Response(null, { status: 403 })
+        if (request.referrer && !isHtmlArtifactRequestAllowed(host, { url: request.url, resourceType: 'other', referrer: request.referrer })) return new Response(null, { status: 403 })
+        const resource = await resolveHtmlArtifactResource(location.root, host, request.url, location.document)
+        await validateWorkspaceFilePath(resource, workspaceId)
+        const response = await net.fetch(pathToFileURL(resource).toString())
+        if (request.method !== 'HEAD') return response
+        await response.body?.cancel()
+        return new Response(null, { status: response.status, headers: response.headers })
+      } catch {
+        return new Response('HTML resource unavailable', { status: 404 })
+      }
+    })
+    // No file://, app deep links or privileged internal protocols from generated pages.
+    pageSession.webRequest.onBeforeRequest((details, callback) => {
+      callback({ cancel: !isHtmlArtifactRequestAllowed(host, details) })
+    })
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      pageSession.protocol.unhandle(HTML_ARTIFACT_SCHEME)
+      void pageSession.clearStorageData().catch(() => {})
+    }
+    let id: string | undefined
+    try {
+      id = this.createInstance(undefined, { show: true, workspaceId, pageSession })
+      const instance = this.instances.get(id)!
+      instance.htmlArtifactSource = { host, root: location.root, document: location.document }
+      instance.pageView.webContents.once('destroyed', release)
+      await this.navigate(id, location.url)
+      return id
+    } catch (error) {
+      release()
+      if (id) this.destroyInstance(id)
+      throw error
+    }
   }
 
   destroyInstance(id: string): void {
@@ -614,7 +582,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     const destroyedBefore = instance.window.isDestroyed()
-    mainLog.info(`[browser-pane] destroy requested id=${id} destroyedBefore=${destroyedBefore} keepAlive=${instance.keepAliveOnWindowClose}`)
+    mainLog.info(`[browser-pane] destroy requested id=${id} destroyedBefore=${destroyedBefore}`)
 
     // Clear pending timers before destroying the window
     if (instance.inPageThemeTimer) {
@@ -626,17 +594,24 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     instance.pendingShowToken += 1
 
     // Clean up in-flight network tracking for this instance's webContents
-    const wcId = instance.pageWebContentsId
+    const wcId = instance.pageView.webContents.id
     this.inFlightRequestsByWebContentsId.delete(wcId)
     this.lastNetworkActivityByWebContentsId.delete(wcId)
 
-    this.runCleanupStep(id, 'closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
-    this.runCleanupStep(id, 'applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
-    this.runCleanupStep(id, 'updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
+    const runCleanup = (label: string, action: () => void): void => {
+      try {
+        action()
+      } catch (error) {
+        mainLog.warn(`[browser-pane] destroy cleanup failed id=${id} step=${label} error=${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+
+    runCleanup('closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
+    runCleanup('applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
+    runCleanup('updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
 
     try {
       if (!instance.window.isDestroyed()) {
-        this.destroyingIds.add(id)
         instance.window.destroy()
       }
     } catch (error) {
@@ -699,7 +674,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   private findInstanceByPageWebContentsId(senderWebContentsId: number): BrowserInstance | undefined {
     for (const instance of this.instances.values()) {
-      if (instance.pageWebContentsId === senderWebContentsId) {
+      if (instance.pageView.webContents.id === senderWebContentsId) {
         return instance
       }
     }
@@ -817,7 +792,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       if (looksLikeHost) {
         normalizedUrl = `https://${normalizedUrl}`
       } else {
-        normalizedUrl = `https://duckduckgo.com/?q=${encodeURIComponent(normalizedUrl)}`
+        normalizedUrl = `https://www.bing.com/search?q=${encodeURIComponent(normalizedUrl)}`
       }
     }
 
@@ -825,6 +800,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 
     try {
+      if (instance.htmlArtifact && !isHtmlArtifactNavigationAllowed(normalizedUrl)) throw new Error('Unsupported HTML artifact navigation')
       const loaded = instance.pageView.webContents.loadURL(normalizedUrl)
       const timeout = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => reject(new Error(`Navigation to "${normalizedUrl}" timed out after ${timeoutMs / 1000}s`)), timeoutMs)
@@ -838,6 +814,25 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         clearTimeout(timeoutHandle)
       }
     }
+  }
+
+  async openInDefaultBrowser(id: string): Promise<void> {
+    const instance = this.requireAliveInstance(id)
+    const url = instance.currentUrl
+    if (url.startsWith(`${HTML_ARTIFACT_SCHEME}://`)) {
+      const source = instance.htmlArtifactSource
+      if (!source || !instance.workspaceId) throw new Error('HTML artifact source is unavailable')
+      const path = await resolveHtmlArtifactResource(source.root, source.host, url, source.document)
+      const safePath = await validateWorkspaceFilePath(path, instance.workspaceId)
+      await shell.openExternal(pathToFileURL(safePath).toString())
+      return
+    }
+
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('This browser page cannot be opened externally')
+    }
+    await shell.openExternal(parsed.toString())
   }
 
   async goBack(id: string): Promise<void> {
@@ -910,8 +905,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       instance.pendingShowOnReady = false
       instance.pendingShowToken += 1
     }
-
-    this.forceCloseToolbarMenu(instance, 'window-hide')
 
     // Cancel an in-flight page load before hiding. Hiding the window while the
     // BrowserView is still loading can trigger a Chromium compositor assertion
@@ -1016,13 +1009,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     id: string,
     ref: string,
     options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }
-  ): Promise<BrowserClickResult> {
+  ): Promise<void> {
     const instance = this.requireAliveInstance(id)
-    // window.open runs inside the click handler, so popups it opens (or that were refused) are recorded by the time the click returns.
-    const popupMark = this.popupEventSeq
 
     try {
-      const { via, note, point: _point, ...geometry } = await instance.cdp.clickElement(ref)
+      const geometry = await instance.cdp.clickElement(ref)
       instance.lastAction = {
         tool: 'browser_click',
         ref,
@@ -1060,8 +1051,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       } else if (waitFor === 'network-idle') {
         await this.waitFor(id, { kind: 'network-idle', timeoutMs: options?.timeoutMs })
       }
-      const popup = this.describePopupEvents(instance, popupMark)
-      return { via, ...(note ? { note } : {}), ...(popup ? { popup } : {}) }
     } catch (error) {
       instance.lastAction = {
         tool: 'browser_click',
@@ -1153,13 +1142,17 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           dpr: viewport.dpr,
           format: options?.format,
           jpegQuality: options?.jpegQuality,
+          imagePolicy: options?.imagePolicy,
         })
 
-        // Warnings (a stale frame, a reveal) always reach the agent, metadata or not.
         return {
           imageBuffer: captured.imageBuffer,
           imageFormat: captured.imageFormat,
-          metadata: options?.includeMetadata || captured.warnings.length > 0
+          sourceWidth: captured.sourceWidth,
+          sourceHeight: captured.sourceHeight,
+          width: captured.width,
+          height: captured.height,
+          metadata: options?.includeMetadata
             ? {
               mode: 'raw',
               warnings: captured.warnings.length > 0 ? captured.warnings : undefined,
@@ -1177,7 +1170,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       if (annotate) {
         try {
           const snapshot = await instance.cdp.getAccessibilitySnapshot()
-          refs = snapshot.nodes.map((node) => node.ref)
+          refs = snapshot.nodes.map((node) => node.ref).slice(0, MAX_ANNOTATED_REFS)
+          if (snapshot.nodes.length > MAX_ANNOTATED_REFS) {
+            warnings.push(`Annotation capped at ${MAX_ANNOTATED_REFS} of ${snapshot.nodes.length} elements`)
+          }
         } catch (error) {
           warnings.push(`Accessibility snapshot for annotation failed: ${error instanceof Error ? error.message : String(error)}`)
           refs = []
@@ -1196,17 +1192,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
           warnings.push(`Could not resolve ref ${refs[i]}: ${reason}`)
         }
-      }
-
-      if (annotate) {
-        // The snapshot lists the whole page in document order; label what the image shows.
-        const viewport = await instance.cdp.getViewportMetrics()
-        const onScreen = geometries.filter(({ box }) => box.width > 0 && box.height > 0
-          && box.x < viewport.width && box.y < viewport.height && box.x + box.width > 0 && box.y + box.height > 0)
-        if (onScreen.length > MAX_ANNOTATED_REFS) {
-          warnings.push(`Annotation capped at ${MAX_ANNOTATED_REFS} of ${onScreen.length} on-screen elements`)
-        }
-        geometries.splice(0, geometries.length, ...onScreen.slice(0, MAX_ANNOTATED_REFS))
       }
 
       if (options?.includeLastAction && instance.lastAction?.geometry) {
@@ -1241,6 +1226,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           dpr: viewport.dpr,
           format: options?.format,
           jpegQuality: options?.jpegQuality,
+          imagePolicy: options?.imagePolicy,
         })
 
         if (captured.warnings.length > 0) {
@@ -1250,6 +1236,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         return {
           imageBuffer: captured.imageBuffer,
           imageFormat: captured.imageFormat,
+          sourceWidth: captured.sourceWidth,
+          sourceHeight: captured.sourceHeight,
+          width: captured.width,
+          height: captured.height,
           metadata: {
             mode: 'agent',
             viewport,
@@ -1353,11 +1343,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         dpr: viewport.dpr,
         format: target.format,
         jpegQuality: target.jpegQuality,
+        imagePolicy: target.imagePolicy,
       })
 
       return {
         imageBuffer: captured.imageBuffer,
         imageFormat: captured.imageFormat,
+        sourceWidth: captured.sourceWidth,
+        sourceHeight: captured.sourceHeight,
+        width: captured.width,
+        height: captured.height,
         metadata: {
           mode: 'raw',
           viewport,
@@ -1385,44 +1380,36 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       dpr?: number
       format?: 'png' | 'jpeg'
       jpegQuality?: number
+      imagePolicy?: ImageSendPolicy
     },
-  ): Promise<{ imageBuffer: Buffer; imageFormat: 'png' | 'jpeg'; warnings: string[] }> {
-    // A hidden page stops painting. Captured while its surface lingers, it gave its last frame,
-    // which agents took for the current page (found 2026-10-11); later the surface is gone and
-    // capturePage fails. Unthrottled it keeps painting while it can; hidden captures are used only
-    // once it has painted, otherwise the window is shown invisibly for the capture.
-    const unthrottledForCapture = !instance.rendersWhileHidden
-    if (unthrottledForCapture) this.setRendersWhileHidden(instance, true)
-    try {
-      return await this.capturePageWhenPainted(instance, options)
-    } finally {
-      if (unthrottledForCapture && !instance.agentControl?.active) this.setRendersWhileHidden(instance, false)
-    }
-  }
-
-  private async capturePageWhenPainted(
-    instance: BrowserInstance,
-    options: {
-      mode: 'raw' | 'agent' | 'region'
-      errorPrefix: 'screenshot' | 'region screenshot'
-      rect?: { x: number; y: number; width: number; height: number }
-      dpr?: number
-      format?: 'png' | 'jpeg'
-      jpegQuality?: number
-    },
-  ): Promise<{ imageBuffer: Buffer; imageFormat: 'png' | 'jpeg'; warnings: string[] }> {
+  ): Promise<{
+    imageBuffer: Buffer
+    imageFormat: 'png' | 'jpeg'
+    warnings: string[]
+    sourceWidth?: number
+    sourceHeight?: number
+    width?: number
+    height?: number
+  }> {
     let rescueUsed = false
     let sawDisplaySurfaceUnavailable = false
     const warnings: string[] = []
-    const imageOpts = { dpr: options.dpr, format: options.format, jpegQuality: options.jpegQuality }
-
-    const painting = await this.pageIsPainting(instance, SCREENSHOT_FRAME_TIMEOUT_MS)
-    if (!painting) {
-      mainLog.warn(`[browser-pane] ${options.errorPrefix} page not painting instance=${instance.id} visible=${instance.isVisible} url=${instance.currentUrl}`)
+    const imageOpts = {
+      dpr: options.dpr,
+      format: options.format,
+      jpegQuality: options.jpegQuality,
+      imagePolicy: options.imagePolicy,
     }
 
-    for (let attempt = 1; painting && attempt <= SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS; attempt += 1) {
-      let result: { buffer: Buffer; format: 'png' | 'jpeg' } | null = null
+    for (let attempt = 1; attempt <= SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS; attempt += 1) {
+      let result: {
+        buffer: Buffer
+        format: 'png' | 'jpeg'
+        sourceWidth?: number
+        sourceHeight?: number
+        width?: number
+        height?: number
+      } | null = null
       try {
         result = await this.capturePageImage(instance, {
           rect: options.rect,
@@ -1444,7 +1431,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         if (attempt > 1) {
           warnings.push(`Capture recovered after ${attempt} hidden attempt${attempt === 1 ? '' : 's'}.`)
         }
-        return { imageBuffer: result.buffer, imageFormat: result.format, warnings }
+        return {
+          imageBuffer: result.buffer,
+          imageFormat: result.format,
+          warnings,
+          sourceWidth: result.sourceWidth,
+          sourceHeight: result.sourceHeight,
+          width: result.width,
+          height: result.height,
+        }
       }
 
       mainLog.warn(
@@ -1460,23 +1455,27 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const wasVisible = instance.isVisible
 
     if (!window.isDestroyed()) {
-      let undoReveal: (() => void) | null = null
       try {
         if (!wasVisible) {
           if (window.isMinimized()) {
             window.restore()
           }
-          // A hidden page has no surface to copy, so it must be on screen for a moment.
-          undoReveal = this.revealInvisiblyForCapture(window)
+          window.showInactive()
           instance.isVisible = true
           this.emitStateChange(instance)
           rescueUsed = true
+          await this.sleep(SCREENSHOT_RESCUE_PAINT_DELAY_MS)
           await this.waitForScreenshotReadiness(instance.id)
         }
-        // Covered by other windows the page may still not paint: say so rather than pass an old frame off as current.
-        const paintedForRescue = await this.pageIsPainting(instance, SCREENSHOT_RESCUE_FRAME_TIMEOUT_MS)
 
-        let rescueResult: { buffer: Buffer; format: 'png' | 'jpeg' } | null = null
+        let rescueResult: {
+          buffer: Buffer
+          format: 'png' | 'jpeg'
+          sourceWidth?: number
+          sourceHeight?: number
+          width?: number
+          height?: number
+        } | null = null
         try {
           rescueResult = await this.capturePageImage(instance, {
             rect: options.rect,
@@ -1496,15 +1495,21 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
         if (rescueResult) {
           if (rescueUsed) {
-            warnings.push('The hidden window was shown invisibly for a moment to render this capture.')
+            warnings.push('Capture required temporary inactive reveal for rendering; browser visibility was restored immediately.')
           }
-          if (!paintedForRescue) warnings.push(STALE_FRAME_WARNING)
-          return { imageBuffer: rescueResult.buffer, imageFormat: rescueResult.format, warnings }
+          return {
+            imageBuffer: rescueResult.buffer,
+            imageFormat: rescueResult.format,
+            warnings,
+            sourceWidth: rescueResult.sourceWidth,
+            sourceHeight: rescueResult.sourceHeight,
+            width: rescueResult.width,
+            height: rescueResult.height,
+          }
         }
       } finally {
         if (!wasVisible && !window.isDestroyed()) {
-          if (undoReveal) undoReveal()
-          else window.hide()
+          window.hide()
           instance.isVisible = false
           this.emitStateChange(instance)
         }
@@ -1525,74 +1530,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     throw new Error(`Failed to capture ${options.errorPrefix}: empty image buffer`)
   }
 
-  /**
-   * Show a hidden window for a capture without the user seeing it, click-through either way.
-   * macOS and Windows: transparent and floating above other apps' windows (a plain showInactive
-   * left it behind the frontmost app, and covered windows are not painted). Linux has no window
-   * opacity, so the window is parked beyond every display instead (no taskbar entry); Wayland
-   * ignores positions, so there it still shows briefly. Returns the undo, which hides it again.
-   */
-  private revealInvisiblyForCapture(window: BrowserWindow): () => void {
-    window.setIgnoreMouseEvents(true)
-    if (process.platform === 'linux') {
-      const bounds = window.getBounds()
-      const beyondDisplays = Math.max(...screen.getAllDisplays().map(({ bounds: display }) => display.x + display.width)) + 100
-      window.setSkipTaskbar(true)
-      window.setPosition(beyondDisplays, bounds.y)
-      window.showInactive()
-      return () => {
-        window.hide()
-        window.setBounds(bounds)
-        window.setSkipTaskbar(false)
-        window.setIgnoreMouseEvents(false)
-      }
-    }
-    const opacity = window.getOpacity()
-    window.setOpacity(0)
-    window.setAlwaysOnTop(true, 'floating')
-    window.showInactive()
-    return () => {
-      window.hide()
-      window.setAlwaysOnTop(false)
-      window.setIgnoreMouseEvents(false)
-      window.setOpacity(opacity)
-    }
-  }
-
-  /**
-   * Whether the page renders frames right now: two animation frames within the timeout. A page
-   * that isn't painting would be captured from its last composited frame.
-   */
-  private async pageIsPainting(instance: BrowserInstance, timeoutMs: number): Promise<boolean> {
-    const webContents = instance.pageView.webContents
-    if (webContents.isDestroyed()) return false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      const painted = await Promise.race([
-        webContents.executeJavaScript('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))'),
-        new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs) }),
-      ])
-      return painted === true
-    } catch {
-      return false
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
-  }
-
-  /**
-   * Turn background throttling off (or back on) for the page. Off, a window that was just hidden or
-   * is covered keeps drawing frames, and timers and animations run at full speed: wanted while an
-   * agent drives the page, not for idle windows.
-   */
-  private setRendersWhileHidden(instance: BrowserInstance, renders: boolean): void {
-    if (instance.rendersWhileHidden === renders) return
-    const webContents = instance.pageView.webContents
-    if (webContents.isDestroyed()) return
-    webContents.setBackgroundThrottling(!renders)
-    instance.rendersWhileHidden = renders
-  }
-
   private isDisplaySurfaceUnavailableError(error: unknown): boolean {
     if (!(error instanceof Error)) return false
     return error.message.toLowerCase().includes('current display surface not available for capture')
@@ -1606,8 +1543,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       dpr?: number
       format?: 'png' | 'jpeg'
       jpegQuality?: number
+      imagePolicy?: ImageSendPolicy
     },
-  ): Promise<{ buffer: Buffer; format: 'png' | 'jpeg' } | null> {
+  ): Promise<{
+    buffer: Buffer
+    format: 'png' | 'jpeg'
+    sourceWidth?: number
+    sourceHeight?: number
+    width?: number
+    height?: number
+  } | null> {
     const captureOpts = options.useHiddenCaptureOptions
       ? { stayHidden: true, stayAwake: true }
       : undefined
@@ -1632,16 +1577,57 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       })
     }
 
-    const fmt = options.format ?? 'png'
-    const encoded = fmt === 'jpeg'
-      ? image.toJPEG(options.jpegQuality ?? 80)
-      : image.toPNG()
-
-    if (!encoded || encoded.length === 0) {
-      return null
+    const policy = options.imagePolicy ?? resolveImageSendPolicy()
+    let sourceWidth: number | undefined
+    let sourceHeight: number | undefined
+    let sentWidth: number | undefined
+    let sentHeight: number | undefined
+    const size = typeof image.getSize === 'function' ? image.getSize() : undefined
+    if (size && size.width > 0 && size.height > 0) {
+      sourceWidth = size.width
+      sourceHeight = size.height
+      const target = resolveImageSendSize(size.width, size.height, policy)
+      sentWidth = target.width
+      sentHeight = target.height
+      if (
+        (target.width !== size.width || target.height !== size.height)
+        && typeof image.resize === 'function'
+      ) {
+        image = image.resize({
+          width: target.width,
+          height: target.height,
+          quality: 'best',
+        })
+      }
     }
 
-    return { buffer: encoded, format: fmt }
+    const dimensions = {
+      sourceWidth,
+      sourceHeight,
+      width: sentWidth,
+      height: sentHeight,
+    }
+    const fmt = options.format ?? 'png'
+    if (fmt !== 'jpeg') {
+      const png = image.toPNG()
+      if (!png || png.length === 0) return null
+      if (png.length <= policy.maxBytes) {
+        return { buffer: png, format: 'png', ...dimensions }
+      }
+    }
+
+    let smallest: Buffer | null = null
+    for (const quality of IMAGE_ENCODING_QUALITIES) {
+      const jpeg = image.toJPEG(quality)
+      if (!jpeg || jpeg.length === 0) continue
+      if (!smallest || jpeg.length < smallest.length) smallest = jpeg
+      if (jpeg.length <= policy.maxBytes) {
+        smallest = jpeg
+        break
+      }
+    }
+    if (!smallest || smallest.length === 0) return null
+    return { buffer: smallest, format: 'jpeg', ...dimensions }
   }
 
   private async waitForScreenshotReadiness(instanceId: string): Promise<void> {
@@ -1749,7 +1735,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     if (args.kind === 'network-idle') {
-      const wcId = instance.pageWebContentsId
+      const wcId = instance.pageView.webContents.id
       return until(async () => {
         const inflight = this.inFlightRequestsByWebContentsId.get(wcId) ?? 0
         const last = this.lastNetworkActivityByWebContentsId.get(wcId) ?? started
@@ -1767,10 +1753,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     if (!key) throw new Error('browser_key requires key')
 
     const modifiers = (args.modifiers ?? []) as Array<'shift' | 'control' | 'alt' | 'meta'>
-
-    // CDP needs no window focus (agent windows are usually hidden); unknown keys and Ctrl/Cmd
-    // shortcuts stay on the native path.
-    if (await instance.cdp.pressKey(key, modifiers)) return
 
     instance.pageView.webContents.sendInputEvent({
       type: 'keyDown',
@@ -1841,60 +1823,75 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     return instance.pageView.webContents.executeJavaScript(expression)
   }
 
-  /**
-   * Classifies the page (see security-challenge.ts). `detected` means the user has to
-   * solve a challenge; it is only reported once a second look confirms it.
-   */
-  async detectSecurityChallenge(id: string): Promise<BrowserSecurityChallenge> {
+  async detectSecurityChallenge(id: string): Promise<{ detected: boolean; provider: string; signals: string[] }> {
     const instance = this.instances.get(id)
-    if (!instance || instance.window.isDestroyed()) return noSecurityChallenge()
+    if (!instance || instance.window.isDestroyed()) return { detected: false, provider: 'none', signals: [] }
 
-    const first = await this.checkSecurityChallenge(instance)
-    let verdict = first
-    if (first.detected) {
-      await this.sleep(SECURITY_CHALLENGE_CONFIRM_DELAY_MS)
-      verdict = instance.window.isDestroyed() ? noSecurityChallenge() : await this.checkSecurityChallenge(instance)
+    const signals: string[] = []
+    const title = instance.title || ''
+    const url = instance.currentUrl || ''
+
+    // Title-based detection
+    if (/^Just a moment/i.test(title)) {
+      signals.push('title:just-a-moment')
     }
 
-    if (verdict.detected || verdict.suspected) {
-      mainLog.info(`[browser-pane] security challenge ${verdict.detected ? 'detected' : 'suspected'} id=${id} provider=${verdict.provider} signals=[${verdict.signals.join(', ')}]`)
-    } else if (first.detected) {
-      mainLog.info(`[browser-pane] security challenge not confirmed on re-check id=${id} provider=${first.provider} signals=[${first.signals.join(', ')}]`)
+    // URL-based detection
+    if (url.includes('/cdn-cgi/challenge-platform/')) {
+      signals.push('url:cdn-cgi-challenge')
     }
 
-    return verdict
-  }
+    // DOM-based detection via JS evaluation
+    try {
+      const domSignals = await instance.pageView.webContents.executeJavaScript(`(() => {
+        const signals = [];
+        const bodyText = (document.body?.innerText || '').slice(0, 2000);
+        if (/Verify you are human/i.test(bodyText)) signals.push('text:verify-human');
+        if (/Checking (if the site connection is secure|your browser)/i.test(bodyText)) signals.push('text:checking-browser');
+        if (/Performing security verification/i.test(bodyText)) signals.push('text:security-verification');
+        if (document.querySelector('#challenge-form')) signals.push('dom:challenge-form');
+        if (document.querySelector('#turnstile-wrapper')) signals.push('dom:turnstile-wrapper');
+        if (document.querySelector('.cf-turnstile')) signals.push('dom:cf-turnstile');
+        if (document.querySelector('iframe[src*="challenges.cloudflare.com"]')) signals.push('dom:cf-challenge-iframe');
+        return signals;
+      })()`) as string[]
 
-  /** One look at the page: a page-script round trip plus accessibility counts, then the classifier. */
-  private async checkSecurityChallenge(instance: BrowserInstance): Promise<BrowserSecurityChallenge> {
-    const pageWc = instance.pageView.webContents
-    const url = instance.currentUrl
-    const facts: SecurityChallengeFacts = { url, loading: pageWc.isLoading(), urlChanged: false, page: null, ax: null }
-
-    // Mid-navigation there is no verdict to give, and executeJavaScript would wait for the load.
-    if (!facts.loading) {
-      try {
-        facts.page = await pageWc.executeJavaScript(SECURITY_CHALLENGE_PAGE_SCRIPT)
-      } catch {
-        // JS evaluation can fail if the page is in a weird state; without facts there is no verdict.
+      if (Array.isArray(domSignals)) {
+        signals.push(...domSignals)
       }
-      if (facts.page) {
-        try {
-          const snapshot = await instance.cdp.getAccessibilitySnapshot()
-          facts.ax = { nodes: snapshot.nodes.length, actionable: countActionableAxNodes(snapshot.nodes) }
-        } catch {
-          // AX snapshot can fail transiently during navigation; it is context only.
-        }
-      }
-      facts.urlChanged = instance.currentUrl !== url
+    } catch {
+      // JS evaluation can fail if page is in a weird state — don't block on it
     }
 
     try {
-      return classifySecurityChallenge(facts)
+      const snapshot = await instance.cdp.getAccessibilitySnapshot()
+      const actionableRoles = new Set([
+        'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch',
+        'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'option', 'slider', 'spinbutton', 'listbox',
+      ])
+      const actionableCount = snapshot.nodes.filter((node) => {
+        const role = (node.role || '').toLowerCase()
+        return actionableRoles.has(role) && !node.disabled
+      }).length
+
+      if (snapshot.nodes.length > 0 && actionableCount <= 2) {
+        signals.push(`ax:near-empty(${actionableCount}/${snapshot.nodes.length})`)
+      }
     } catch {
-      // A page that patches DOM built-ins can hand back malformed facts; never fail the calling command.
-      return noSecurityChallenge()
+      // AX snapshot can fail transiently during navigation; ignore
     }
+
+    const detected = signals.length > 0
+    const isCloudflare = signals.some(s =>
+      s.includes('cf-') || s.includes('challenge') || s.includes('turnstile') || s === 'title:just-a-moment'
+    )
+    const provider = detected ? (isCloudflare ? 'cloudflare' : 'unknown') : 'none'
+
+    if (detected) {
+      mainLog.info(`[browser-pane] security challenge detected id=${id} provider=${provider} signals=[${signals.join(', ')}]`)
+    }
+
+    return { detected, provider, signals }
   }
 
   async scroll(id: string, direction: 'up' | 'down' | 'left' | 'right', amount = 500): Promise<void> {
@@ -2172,28 +2169,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
   }
 
-  private getToolbarEffectiveHeight(instance: BrowserInstance): number {
-    if (!instance.toolbarMenuOpen) return TOOLBAR_HEIGHT
-
-    const [, contentHeight] = instance.window.getContentSize()
-    return Math.max(TOOLBAR_HEIGHT, contentHeight)
-  }
-
   private layoutToolbarView(instance: BrowserInstance): void {
     const [width] = instance.window.getContentSize()
-    const toolbarHeight = this.getToolbarEffectiveHeight(instance)
-
-    instance.toolbarView.setBounds({ x: 0, y: 0, width, height: toolbarHeight })
+    instance.toolbarView.setBounds({ x: 0, y: 0, width, height: TOOLBAR_HEIGHT })
     instance.toolbarView.setAutoResize({ width: true, height: false })
   }
 
   private updateNativeOverlayState(instance: BrowserInstance): void {
     const control = instance.agentControl
     const agentActive = !!control?.active
-    const menuActive = !!instance.toolbarMenuOverlayActive
-    const shouldShow = agentActive || menuActive
-
-    if (!shouldShow || !instance.nativeOverlayReady || instance.window.isDestroyed()) {
+    if (!agentActive || !instance.nativeOverlayReady || instance.window.isDestroyed()) {
       instance.nativeOverlayView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
       if (!instance.window.isDestroyed()) {
         instance.window.setTopBrowserView(instance.toolbarView)
@@ -2207,40 +2192,22 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     instance.nativeOverlayView.setAutoResize({ width: true, height: true })
     instance.window.setTopBrowserView(instance.toolbarView)
 
-    if (agentActive) {
-      const label = this.getAgentControlLabel(control)
-      const accent = this.getResolvedAccentColor()
+    const label = this.getAgentControlLabel(control)
+    const accent = this.getResolvedAccentColor()
 
-      void instance.nativeOverlayView.webContents.executeJavaScript(`(() => {
-        const overlay = document.getElementById('overlay');
-        const chip = document.getElementById('chip');
-        const shield = document.getElementById('shield');
-        if (!overlay || !chip || !shield) return;
-
-        overlay.style.borderColor = ${JSON.stringify(accent)};
-        overlay.style.boxShadow = 'inset 0 0 0 1px color-mix(in oklab, ' + ${JSON.stringify(accent)} + ' 45%, transparent), inset 0 0 24px color-mix(in oklab, ' + ${JSON.stringify(accent)} + ' 28%, transparent)';
-        chip.textContent = ${JSON.stringify(label)};
-        chip.style.display = 'inline-flex';
-        shield.style.pointerEvents = 'auto';
-        shield.style.cursor = 'not-allowed';
-        shield.style.background = 'rgba(2, 6, 23, 0.03)';
-      })()`).catch(() => {})
-      return
-    }
-
-    // Menu mode: transparent full-page tap-catcher, no visuals
     void instance.nativeOverlayView.webContents.executeJavaScript(`(() => {
       const overlay = document.getElementById('overlay');
       const chip = document.getElementById('chip');
       const shield = document.getElementById('shield');
       if (!overlay || !chip || !shield) return;
 
-      overlay.style.borderColor = 'transparent';
-      overlay.style.boxShadow = 'none';
-      chip.style.display = 'none';
+      overlay.style.borderColor = ${JSON.stringify(accent)};
+      overlay.style.boxShadow = 'inset 0 0 0 1px color-mix(in oklab, ' + ${JSON.stringify(accent)} + ' 45%, transparent), inset 0 0 24px color-mix(in oklab, ' + ${JSON.stringify(accent)} + ' 28%, transparent)';
+      chip.textContent = ${JSON.stringify(label)};
+      chip.style.display = 'inline-flex';
       shield.style.pointerEvents = 'auto';
-      shield.style.cursor = 'default';
-      shield.style.background = 'rgba(0, 0, 0, 0.001)';
+      shield.style.cursor = 'not-allowed';
+      shield.style.background = 'rgba(2, 6, 23, 0.03)';
     })()`).catch(() => {})
   }
 
@@ -2256,7 +2223,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   private applyAgentControlLock(instance: BrowserInstance, active: boolean): void {
     const wantsLock = active && !!instance.agentControl?.active
-    this.setRendersWhileHidden(instance, wantsLock)
 
     if (wantsLock && !instance.lockState.active) {
       instance.lockState.previousResizable = this.getWindowResizable(instance.window)
@@ -2279,29 +2245,26 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
   }
 
-  /** Run one teardown step; a failing step is logged and never blocks the rest. */
-  private runCleanupStep(id: string, label: string, action: () => void): void {
-    try {
-      action()
-    } catch (error) {
-      mainLog.warn(`[browser-pane] destroy cleanup failed id=${id} step=${label} error=${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
   private finalizeDestroyedInstance(instance: BrowserInstance, source: 'destroy' | 'closed'): void {
     if (!this.instances.has(instance.id)) {
       return
     }
 
-    // Every step is guarded. The window and its popups may already be destroyed
-    // here; an exception used to escape before `instances.delete`, leaving a dead
-    // instance registered so every later browser_tool call failed with
-    // "Object has been destroyed" until the app restarted (OSS #1059).
-    this.destroyingIds.delete(instance.id)
-    this.runCleanupStep(instance.id, 'closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
-    this.runCleanupStep(instance.id, 'applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
-    this.runCleanupStep(instance.id, 'updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
-    this.runCleanupStep(instance.id, 'cdp.detach', () => instance.cdp.detach())
+    const runCleanup = (label: string, action: () => void): void => {
+      try {
+        action()
+      } catch (error) {
+        mainLog.warn(`[browser-pane] finalize cleanup failed id=${instance.id} step=${label} error=${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+
+    runCleanup('closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
+    runCleanup('applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
+    runCleanup('updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
+    runCleanup('detachCdp', () => instance.cdp.detach())
+    if (instance.htmlArtifact) runCleanup('closeHtmlPage', () => {
+      if (!instance.pageView.webContents.isDestroyed()) instance.pageView.webContents.close({ waitForBeforeUnload: false })
+    })
     this.instances.delete(instance.id)
     this.removedCallback?.(instance.id)
     mainLog.info(`[browser-pane] Destroyed instance: ${instance.id} (${source})`)
@@ -2319,21 +2282,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.layoutPageView(instance)
     if (!instance.window.isDestroyed()) {
       instance.window.setTopBrowserView(instance.toolbarView)
-    }
-  }
-
-  private forceCloseToolbarMenu(instance: BrowserInstance, reason: string): void {
-    if (!instance.toolbarMenuOpen && instance.toolbarMenuHeight === 0 && !instance.toolbarMenuOverlayActive) {
-      return
-    }
-
-    instance.toolbarMenuOpen = false
-    instance.toolbarMenuHeight = 0
-    instance.toolbarMenuOverlayActive = false
-    this.layoutAllViews(instance)
-
-    if (!instance.window.isDestroyed() && !instance.toolbarView.webContents.isDestroyed()) {
-      instance.toolbarView.webContents.send(TOOLBAR_CHANNELS.FORCE_CLOSE_MENU, { reason })
     }
   }
 
@@ -2539,30 +2487,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       if (inst) this.stop(inst.id)
     })
 
-    ipcMain.handle(TOOLBAR_CHANNELS.MENU_GEOMETRY, async (_event, instanceId: string, open: boolean, height?: number) => {
-      const inst = findInstance(instanceId)
-      if (!inst) return
-
-      const normalizedOpen = !!open
-      const normalizedHeight = Math.max(0, Math.ceil(Number(height ?? 0)))
-
-      if (!normalizedOpen) {
-        this.forceCloseToolbarMenu(inst, 'renderer-close')
-        return
-      }
-
-      const changed = !inst.toolbarMenuOpen
-        || inst.toolbarMenuHeight !== normalizedHeight
-        || !inst.toolbarMenuOverlayActive
-
-      if (!changed) return
-
-      inst.toolbarMenuOpen = true
-      inst.toolbarMenuHeight = normalizedHeight
-      inst.toolbarMenuOverlayActive = true
-      this.layoutAllViews(inst)
-    })
-
     ipcMain.handle(TOOLBAR_CHANNELS.HIDE, async (_event, instanceId: string) => {
       const inst = findInstance(instanceId)
       mainLog.info(`[browser-pane] toolbar ipc hide requested instanceId=${instanceId} resolved=${inst?.id ?? 'none'}`)
@@ -2682,6 +2606,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       imageFormat: result.imageFormat,
       imageBytes: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength),
       metadata: result.metadata,
+      sourceWidth: result.sourceWidth,
+      sourceHeight: result.sourceHeight,
+      width: result.width,
+      height: result.height,
     }
   }
 
@@ -3202,9 +3130,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }, EARLY_THEME_EXTRACTION_DELAY_MS)
   }
 
+  private getInstanceByWebContentsId(webContentsId: number): BrowserInstance | undefined {
+    for (const instance of this.instances.values()) {
+      if (instance.pageView.webContents.id === webContentsId) return instance
+    }
+    return undefined
+  }
+
   private registerPopupWindow(parentInstance: BrowserInstance, popupWindow: BrowserWindow, sourceUrl?: string): void {
     const popupWcId = popupWindow.webContents.id
-    this.popupWebContentsIdByWindow.set(popupWindow, popupWcId)
     const existingParent = this.popupParentByWebContentsId.get(popupWcId)
     if (existingParent && existingParent !== parentInstance.id) {
       this.unregisterPopupWindow(popupWindow, 'reparented')
@@ -3220,8 +3154,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.popupParentByWebContentsId.set(popupWcId, parentInstance.id)
 
     const initialUrl = sourceUrl || popupWindow.webContents.getURL?.() || 'about:blank'
-    this.popupOpenedOriginByWebContentsId.set(popupWcId, originOf(initialUrl))
-    this.recordPopupEvent(parentInstance, { kind: 'opened', url: initialUrl })
     mainLog.info(`[browser-pane] popup created parent=${parentInstance.id} popupWebContentsId=${popupWcId} url=${initialUrl}`)
 
     popupWindow.webContents.on('did-navigate', (_event, urlFromEvent) => {
@@ -3250,18 +3182,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   private unregisterPopupWindow(popupWindow: BrowserWindow, reason: 'closed' | 'parent_destroy' | 'reparented'): void {
-    // The popup is usually already destroyed here (`closed` fired), and reading
-    // `popupWindow.webContents` would throw; use the id captured at registration.
-    const popupWcId = this.popupWebContentsIdByWindow.get(popupWindow)
-    if (popupWcId === undefined) return
+    const popupWcId = popupWindow.webContents.id
     const parentId = this.popupParentByWebContentsId.get(popupWcId)
     if (!parentId) return
 
     this.popupParentByWebContentsId.delete(popupWcId)
-    if (reason !== 'reparented') {
-      this.popupWebContentsIdByWindow.delete(popupWindow)
-      this.popupOpenedOriginByWebContentsId.delete(popupWcId)
-    }
 
     const popups = this.popupWindowsByParentInstanceId.get(parentId)
     if (popups) {
@@ -3274,54 +3199,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     mainLog.info(`[browser-pane] popup closed parent=${parentId} popupWebContentsId=${popupWcId} reason=${reason}`)
   }
 
-  private recordPopupEvent(instance: BrowserInstance, event: Omit<PopupEvent, 'seq'>): void {
-    instance.popupEvents.push({ ...event, seq: ++this.popupEventSeq })
-    if (instance.popupEvents.length > MAX_POPUP_EVENTS) {
-      instance.popupEvents.splice(0, instance.popupEvents.length - MAX_POPUP_EVENTS)
-    }
-  }
-
-  /**
-   * A sign-in popup another browser window already has open for the same origin. Every window
-   * shares one cookie partition, so one sign-in serves them all; parallel sessions each opened
-   * their own Google account chooser (found 2026-10-11).
-   */
-  private findOpenSignInPopup(url: string, requesterId: string): { window: BrowserWindow; ownerInstanceId: string } | null {
-    if (!isSignInPopupUrl(url)) return null
-    const origin = originOf(url)
-    for (const [ownerInstanceId, popups] of this.popupWindowsByParentInstanceId) {
-      if (ownerInstanceId === requesterId) continue
-      for (const popupWindow of popups) {
-        if (popupWindow.isDestroyed()) continue
-        const popupWcId = this.popupWebContentsIdByWindow.get(popupWindow)
-        const openedOrigin = popupWcId === undefined ? undefined : this.popupOpenedOriginByWebContentsId.get(popupWcId)
-        let currentOrigin: string | undefined
-        try {
-          currentOrigin = originOf(popupWindow.webContents.getURL())
-        } catch {
-          // closing
-        }
-        if (openedOrigin === origin || currentOrigin === origin) return { window: popupWindow, ownerInstanceId }
-      }
-    }
-    return null
-  }
-
-  /** What the agent should know about popups since `afterSeq`: they are invisible to browser_tool. */
-  private describePopupEvents(instance: BrowserInstance, afterSeq: number): string | undefined {
-    const events = instance.popupEvents.filter((event) => event.seq > afterSeq)
-    const lines = events.map((event) => event.kind === 'opened'
-      ? `The page opened a popup window (${event.url}). The user sees it; browser_tool cannot control it. Wait for it to close (e.g. after a sign-in) before reloading or navigating this page.`
-      : `The page tried to open a sign-in window, but one for ${originOf(event.url)} is already open from another browser window (${event.ownerInstanceId}). All browser windows share cookies: once that sign-in finishes, reload this page instead of starting another.`)
-    return lines.length > 0 ? [...new Set(lines)].join('\n') : undefined
-  }
-
   private closePopupsForParent(parentId: string, reason: 'parent_destroy'): void {
     const popups = this.popupWindowsByParentInstanceId.get(parentId)
     if (!popups || popups.size === 0) return
 
     for (const popupWindow of Array.from(popups)) {
-      const popupWcId = this.popupWebContentsIdByWindow.get(popupWindow)
+      const popupWcId = popupWindow.webContents.id
       this.unregisterPopupWindow(popupWindow, reason)
       try {
         if (!popupWindow.isDestroyed()) {
@@ -3335,31 +3218,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
   }
 
-  /**
-   * When a page from another site commits, drop the console and network entries from before its
-   * navigation started: an agent reading `console` or `network` on the new site got the previous
-   * site's entries (and the app's own dev-server requests). Same-site page changes keep them.
-   */
-  private scopeLogsToCommittedPage(instance: BrowserInstance, url: string): void {
-    const origin = originOf(url)
-    const startedAt = instance.pendingNavigation?.origin === origin ? instance.pendingNavigation.startedAt : Date.now()
-    instance.pendingNavigation = null
-    if (instance.logOrigin !== origin) {
-      // The new site's requests started with its navigation; until it committed only the old page ran scripts.
-      instance.logScopeStartedAt = startedAt
-      instance.networkLogs = instance.networkLogs.filter((entry) => (this.networkEntryStartedAt.get(entry) ?? entry.timestamp) >= startedAt)
-      instance.consoleLogs = []
-    }
-    instance.logOrigin = origin
-    instance.onInternalPage = this.isBrowserEmptyStateUrl(url)
-  }
-
-  private pushNetworkLog(instance: BrowserInstance, requestId: number, entry: BrowserNetworkEntry): void {
-    const startedAt = this.requestStartedAt.get(requestId) ?? entry.timestamp
-    this.requestStartedAt.delete(requestId)
-    // A request of the previous site that finished after the new one committed.
-    if (startedAt < instance.logScopeStartedAt) return
-    this.networkEntryStartedAt.set(entry, startedAt)
+  private pushNetworkLog(instance: BrowserInstance, entry: BrowserNetworkEntry): void {
     instance.networkLogs.push(entry)
     if (instance.networkLogs.length > MAX_NETWORK_LOG_ENTRIES) {
       instance.networkLogs.splice(0, instance.networkLogs.length - MAX_NETWORK_LOG_ENTRIES)
@@ -3407,9 +3266,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         const current = this.inFlightRequestsByWebContentsId.get(wcId) ?? 0
         this.inFlightRequestsByWebContentsId.set(wcId, current + 1)
         this.lastNetworkActivityByWebContentsId.set(wcId, Date.now())
-        const instance = this.findInstanceByPageWebContentsId(wcId)
-        if (instance?.onInternalPage) this.internalRequestIds.add(details.id)
-        else if (instance) this.requestStartedAt.set(details.id, Date.now())
       }
       callback({})
     })
@@ -3422,10 +3278,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       this.inFlightRequestsByWebContentsId.set(wcId, Math.max(0, current - 1))
       this.lastNetworkActivityByWebContentsId.set(wcId, Date.now())
 
-      const instance = this.findInstanceByPageWebContentsId(wcId)
-      if (!instance || this.internalRequestIds.delete(details.id)) return
+      const instance = this.getInstanceByWebContentsId(wcId)
+      if (!instance) return
 
-      this.pushNetworkLog(instance, details.id, {
+      this.pushNetworkLog(instance, {
         timestamp: Date.now(),
         method: details.method ?? 'GET',
         url: details.url ?? '',
@@ -3443,10 +3299,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       this.inFlightRequestsByWebContentsId.set(wcId, Math.max(0, current - 1))
       this.lastNetworkActivityByWebContentsId.set(wcId, Date.now())
 
-      const instance = this.findInstanceByPageWebContentsId(wcId)
-      if (!instance || this.internalRequestIds.delete(details.id)) return
+      const instance = this.getInstanceByWebContentsId(wcId)
+      if (!instance) return
 
-      this.pushNetworkLog(instance, details.id, {
+      this.pushNetworkLog(instance, {
         timestamp: Date.now(),
         method: details.method ?? 'GET',
         url: details.url ?? '',
@@ -3459,7 +3315,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     ses.on('will-download', (_event, item, webContents) => {
       const wcId = webContents?.id
       if (typeof wcId !== 'number') return
-      const instance = this.findInstanceByPageWebContentsId(wcId)
+      const instance = this.getInstanceByWebContentsId(wcId)
       if (!instance) return
 
       // Auto-save: set a deterministic path so Electron doesn't show a native dialog
@@ -3569,23 +3425,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private setupWindowListeners(instance: BrowserInstance): void {
     const pageWc = instance.pageView.webContents
     const toolbarWc = instance.toolbarView.webContents
-    const overlayWc = instance.nativeOverlayView.webContents
-
-    instance.window.on('close', (event) => {
-      const explicitDestroy = this.destroyingIds.has(instance.id)
-      const interceptToHide = !explicitDestroy && instance.keepAliveOnWindowClose
-      mainLog.info(`[browser-pane] window close requested id=${instance.id} explicitDestroy=${explicitDestroy} keepAlive=${instance.keepAliveOnWindowClose} interceptToHide=${interceptToHide}`)
-
-      if (interceptToHide) {
-        event.preventDefault()
-        // Skip if a hide is already in flight — hide() guards against re-entry
-        // itself, but bailing here also avoids redundant log noise during the
-        // teardown race that triggered issue #695.
-        if (!instance.isHiding) {
-          this.hide(instance.id)
-        }
-      }
-    })
 
     instance.window.on('resize', () => {
       this.layoutAllViews(instance)
@@ -3644,26 +3483,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
     })
 
-    overlayWc.on('before-input-event', (event, input) => {
-      if (!instance.toolbarMenuOverlayActive) return
-
-      const inputType = input.type || ''
-      if (inputType === 'mouseDown' || inputType === 'touchStart' || inputType === 'pointerDown') {
-        event.preventDefault()
-        this.forceCloseToolbarMenu(instance, 'overlay-tap')
-      }
-    })
-
-    pageWc.on('did-start-navigation', (details, urlFromEvent, isInPlace, isMainFrame) => {
-      const url = details?.url ?? urlFromEvent
-      if (!(details?.isMainFrame ?? isMainFrame) || (details?.isSameDocument ?? isInPlace) || !url) return
-      instance.onInternalPage = this.isBrowserEmptyStateUrl(url)
-      instance.pendingNavigation = { origin: originOf(url), startedAt: Date.now() }
-    })
-
     pageWc.on('did-navigate', (_event, urlFromEvent) => {
       const url = typeof pageWc.getURL === 'function' ? pageWc.getURL() : (urlFromEvent || instance.currentUrl)
-      this.scopeLogsToCommittedPage(instance, url)
       const previousUrl = instance.currentUrl
       if (instance.inPageThemeTimer) {
         clearTimeout(instance.inPageThemeTimer)
@@ -3758,7 +3579,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         return
       }
 
-      if (instance.onInternalPage) return
       const mappedLevel: BrowserConsoleEntry['level'] = level >= 3 ? 'error' : level === 2 ? 'warn' : level === 1 ? 'info' : 'log'
       instance.consoleLogs.push({
         timestamp: Date.now(),
@@ -3774,7 +3594,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
     })
 
+    const guardHtmlNavigation = (event: Electron.Event, url: string) => {
+      if (instance.htmlArtifact && !isHtmlArtifactNavigationAllowed(url)) event.preventDefault()
+    }
+    pageWc.on('will-redirect', guardHtmlNavigation)
     pageWc.on('will-navigate', (event, url) => {
+      if (instance.htmlArtifact) { guardHtmlNavigation(event, url); return }
       if (url.startsWith(CRAFT_DEEPLINK_SCHEME_PREFIX)) {
         event.preventDefault()
         void this.handleDeepLinkUrl(url)
@@ -3787,6 +3612,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
 
     pageWc.setWindowOpenHandler((details) => {
+      if (instance.htmlArtifact) {
+        if (isHtmlArtifactNavigationAllowed(details.url)) void this.navigate(instance.id, details.url).catch(error => mainLog.warn('[browser-pane] HTML link failed:', error))
+        return { action: 'deny' }
+      }
       mainLog.info(
         `[browser-pane] window-open requested id=${instance.id} url=${details.url} disposition=${details.disposition ?? 'unknown'} frameName=${details.frameName || 'none'}`,
       )
@@ -3806,18 +3635,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         mainLog.warn(`[browser-pane] window-open denied id=${instance.id} reason=unsupported_protocol protocol=${parsed.protocol} url=${details.url}`)
-        return { action: 'deny' }
-      }
-
-      const openSignIn = this.findOpenSignInPopup(details.url, instance.id)
-      if (openSignIn) {
-        mainLog.info(`[browser-pane] window-open denied id=${instance.id} reason=sign_in_open_elsewhere owner=${openSignIn.ownerInstanceId} url=${details.url}`)
-        this.recordPopupEvent(instance, { kind: 'joined', url: details.url, ownerInstanceId: openSignIn.ownerInstanceId })
-        try {
-          openSignIn.window.moveTop() // in front for the user, without stealing focus
-        } catch {
-          // closing
-        }
         return { action: 'deny' }
       }
 

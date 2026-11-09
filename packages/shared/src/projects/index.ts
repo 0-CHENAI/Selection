@@ -26,10 +26,10 @@ export {
   saveProjectConfig,
   // Memory operations
   loadProjectMemory,
-  appendProjectMemoryEntry,
   // Load operations
   loadProject,
   loadProjectById,
+  loadProjectPromptContext,
   loadWorkspaceProjects,
   // Create/update/delete
   generateProjectSlug,
@@ -45,3 +45,17 @@ export {
 } from './storage.ts';
 
 export type { UploadProjectAssetInput } from './storage.ts';
+
+export {
+  folderNameFromPath,
+  suggestProjectNameFromFolder,
+  createProjectBlocker,
+  projectWorkingDirectorySaveIssue,
+  requireCreateProjectFields,
+  applyWorkingDirectoryPatch,
+  isProjectConversation,
+  requiredProjectConversationDirectory,
+  resolveCreatedWorkingDirectory,
+  projectConversationDirectoryUpdates,
+} from './working-directory.ts';
+export type { ProjectConversationIdentity } from './working-directory.ts';

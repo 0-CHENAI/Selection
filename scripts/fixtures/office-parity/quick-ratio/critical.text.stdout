@@ -1,0 +1,33 @@
+
+======================================================================
+QUICK RATIO ANALYSIS
+======================================================================
+
+⚡ QUICK RATIO: 0.33
+   Status: CRITICAL
+   Losing revenue faster than gaining - growth is unsustainable
+
+📊 COMPONENTS
+  Growth MRR (New + Expansion): $1,000.00
+    • New MRR: $1,000.00
+    • Expansion MRR: $0.00
+  Lost MRR (Churned + Contraction): $3,000.00
+    • Churned MRR: $2,500.00
+    • Contraction MRR: $500.00
+
+📈 GROWTH BREAKDOWN
+  New customers: 100.0%
+  Expansion: 0.0%
+
+📉 LOSS BREAKDOWN
+  Churn: 83.3%
+  Contraction: 16.7%
+
+🎯 BENCHMARKS
+  < 1.0  = CRITICAL (losing revenue faster than gaining)
+  1-2    = WATCH (marginal growth)
+  2-4    = HEALTHY (good growth efficiency)
+  > 4    = EXCELLENT (strong, efficient growth)
+
+======================================================================
+

@@ -270,18 +270,6 @@ export interface McpSourceConfig {
    */
   clientId?: string;
 
-  /**
-   * Route the OAuth redirect through Craft's hosted relay. Defaults to true.
-   * Set false for servers that only accept loopback redirect URIs.
-   */
-  oauthRelay?: boolean;
-
-  /**
-   * OAuth scopes to request on authorization. Unset sends no `scope` parameter,
-   * leaving the server to grant its default scopes.
-   */
-  scopes?: string[];
-
   // === Stdio transport fields ===
   /**
    * Command to spawn for stdio transport.
@@ -342,12 +330,6 @@ export interface ApiOAuthConfig {
   scopes?: string[];
   /** Auth0-style audience parameter */
   audience?: string;
-  /**
-   * RFC 8707 resource indicator: set for resource-bound servers that require the
-   * issued token to be audience-scoped to a specific resource URI. Sent on the
-   * authorization, token and refresh requests.
-   */
-  resource?: string;
   /** Additional parameters to include in the authorization URL */
   extraParams?: Record<string, string>;
 }
@@ -426,13 +408,14 @@ export interface LocalSourceConfig {
 
 /**
  * Source connection status
+ * - 'connecting': Source is being authenticated or validated in the background
  * - 'connected': Source is connected and working
  * - 'needs_auth': Source requires authentication
  * - 'failed': Connection failed with error
  * - 'untested': Connection has not been tested
  * - 'local_disabled': Stdio source is disabled (local MCP servers off)
  */
-export type SourceConnectionStatus = 'connected' | 'needs_auth' | 'failed' | 'untested' | 'local_disabled';
+export type SourceConnectionStatus = 'connecting' | 'connected' | 'needs_auth' | 'failed' | 'untested' | 'local_disabled';
 
 // ============================================================================
 // Source Brand
@@ -533,10 +516,22 @@ export interface LoadedSource {
   workspaceId: string;
 
   /**
+   * Whether this is a built-in source (e.g., craft-agents-docs).
+   * Built-in sources are always available and not shown in the sources UI.
+   */
+  isBuiltin?: boolean;
+
+  /**
    * Pre-computed path to local icon file (icon.svg, icon.png, etc.) if it exists.
    * Computed during source loading so renderer doesn't need filesystem access.
    */
   iconPath?: string;
+
+  /**
+   * Workspace-scoped display alias. Does not change config.name or slug.
+   * Absent when the user has not set a custom title.
+   */
+  displayTitle?: string;
 }
 
 /**

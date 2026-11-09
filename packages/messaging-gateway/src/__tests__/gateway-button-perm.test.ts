@@ -1,7 +1,7 @@
 /**
  * MessagingGateway — `perm:` button-press behavior. Regression for issue
  * [#726](https://github.com/craft-ai-agents/craft-agents-oss/issues/726):
- * "Approve/Deny buttons in Telegram are unresponsive, fire in batch after
+ * "Approve/Deny buttons in Lark are unresponsive, fire in batch after
  * desktop action".
  *
  * The fix brings the `perm:` button path to parity with the `plan:` path:
@@ -71,7 +71,7 @@ function makeFakeAdapter(): FakeAdapter {
   let nextId = 100
 
   const adapter = {
-    platform: 'telegram' as const,
+    platform: 'lark' as const,
     capabilities: {
       messageEditing: true,
       inlineButtons: true,
@@ -92,16 +92,16 @@ function makeFakeAdapter(): FakeAdapter {
     sendText: mock(async (channelId: string, text: string) => {
       const messageId = String(nextId++)
       calls.push({ kind: 'sendText', channelId, text, messageId })
-      return { platform: 'telegram' as const, channelId, messageId }
+      return { platform: 'lark' as const, channelId, messageId }
     }),
     editMessage: async () => {},
     sendButtons: mock(async (channelId: string, text: string) => {
       const messageId = String(nextId++)
       calls.push({ kind: 'sendButtons', channelId, text, messageId })
-      return { platform: 'telegram' as const, channelId, messageId }
+      return { platform: 'lark' as const, channelId, messageId }
     }),
     sendTyping: async () => {},
-    sendFile: async () => ({ platform: 'telegram' as const, channelId: '', messageId: '0' }),
+    sendFile: async () => ({ platform: 'lark' as const, channelId: '', messageId: '0' }),
     clearButtons: mock(async (channelId: string, messageId: string) => {
       calls.push({ kind: 'clearButtons', channelId, messageId })
     }),
@@ -139,9 +139,9 @@ interface Harness {
   sessionManager: ISessionManager
 }
 
-const OPEN_TELEGRAM_CONFIG: MessagingConfig = {
+const OPEN_LARK_CONFIG: MessagingConfig = {
   enabled: true,
-  platforms: { telegram: { enabled: true, accessMode: 'open' } },
+  platforms: { lark: { enabled: true, accessMode: 'open' } },
 }
 
 async function makeHarness(opts: StubSessionManagerOpts = {}): Promise<Harness> {
@@ -150,7 +150,7 @@ async function makeHarness(opts: StubSessionManagerOpts = {}): Promise<Harness> 
     sessionManager,
     workspaceId: 'ws-test',
     storageDir,
-    getWorkspaceConfig: () => OPEN_TELEGRAM_CONFIG,
+    getWorkspaceConfig: () => OPEN_LARK_CONFIG,
   })
   const adapter = makeFakeAdapter()
   gateway.registerAdapter(adapter)
@@ -161,7 +161,7 @@ async function makeHarness(opts: StubSessionManagerOpts = {}): Promise<Harness> 
   gateway.getBindingStore().bind(
     'ws-test',
     'sess-A',
-    'telegram',
+    'lark',
     'chat-1',
     undefined,
     { approvalChannel: 'chat' },
@@ -196,7 +196,7 @@ async function registerPrompt(
 
 function pressFor(buttonId: string, overrides: Partial<ButtonPress> = {}): ButtonPress {
   return {
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chat-1',
     messageId: '1',
     senderId: 'sender-A',
@@ -264,7 +264,7 @@ describe('MessagingGateway — perm: button (#726)', () => {
     // for the tool_start event, so we can isolate the press-side ack count.
     const ackCountBeforePress = h.adapter.calls.filter((c) => c.kind === 'sendText').length
 
-    // User now taps the (already-cleared) Telegram button.
+    // User now taps the (already-cleared) Lark button.
     await h.adapter.fireButton(pressFor('perm:allow:req-1'))
 
     // No respondToPermission → no duplicate desktop-side flush.
@@ -335,7 +335,7 @@ describe('MessagingGateway — perm: button (#726)', () => {
     h.gateway.getBindingStore().bind(
       'ws-test',
       'sess-B',
-      'telegram',
+      'lark',
       'chat-2',
       undefined,
       { approvalChannel: 'chat' },

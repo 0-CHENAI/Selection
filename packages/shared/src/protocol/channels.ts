@@ -17,6 +17,7 @@ export const RPC_CHANNELS = {
     STATUS_CHANGED: 'server:statusChanged',
     HOME_DIR: 'server:homeDir',
   },
+  artifacts: { OFFICE_FILES: 'artifacts:officeFiles', OFFICE_PREVIEW: 'artifacts:officePreview', BODY_FEEDBACK: 'artifacts:bodyFeedback', CLEANUP: 'artifacts:cleanup', FEEDBACK_CONTEXT: 'artifacts:feedbackContext', MANAGE: 'artifacts:manage', FEEDBACK: 'artifacts:feedback', FEEDBACK_LIST: 'artifacts:feedbackList', PREVIEW: 'artifacts:preview' },
   sessions: {
     GET: 'sessions:get',
     GET_UNREAD_SUMMARY: 'sessions:getUnreadSummary',
@@ -27,18 +28,20 @@ export const RPC_CHANNELS = {
     GET_MESSAGES: 'sessions:getMessages',
     SEND_MESSAGE: 'sessions:sendMessage',
     CANCEL: 'sessions:cancel',
-    // Legacy name of STOP_BACKGROUND_TASK for shells (older clients); same handler.
     KILL_SHELL: 'sessions:killShell',
-    GET_BACKGROUND_TASK_OUTPUT: 'sessions:getBackgroundTaskOutput',
-    STOP_BACKGROUND_TASK: 'sessions:stopBackgroundTask',
     RESPOND_TO_PERMISSION: 'sessions:respondToPermission',
     RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
+    RESPOND_TO_CLARIFICATION: 'sessions:respondToClarification',
     COMMAND: 'sessions:command',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',
     EVENT: 'session:event',
     GET_MODEL: 'session:getModel',
     SET_MODEL: 'session:setModel',
+    SET_SWARM_ENABLED: 'session:setSwarmEnabled',
+    GET_SWARM_RUN_DETAILS: 'session:getSwarmRunDetails',
+    UPDATE_SWARM_BUDGET: 'session:updateSwarmBudget',
+    STOP_SWARM: 'session:stopSwarm',
     GET_FILES: 'sessions:getFiles',
     GET_NOTES: 'sessions:getNotes',
     SET_NOTES: 'sessions:setNotes',
@@ -58,9 +61,12 @@ export const RPC_CHANNELS = {
     ABORT: 'transfer:abort',
   },
   tasks: {
+    // Legacy: background-task output (disabled-feature remnant). Kept for back-compat; retire later.
+    GET_OUTPUT: 'tasks:getOutput',
     // Conductor — the Tasks DAG runner.
     VALIDATE: 'tasks:validate',
     CREATE: 'tasks:create',
+    SAVE: 'tasks:save',
     GENERATE: 'tasks:generate',
     // Push: the authored spec (or an error) for an async tasks:generate, keyed by orchestratorSessionId.
     GENERATED: 'tasks:generated',
@@ -68,10 +74,24 @@ export const RPC_CHANNELS = {
     PAUSE: 'tasks:pause',
     RESUME: 'tasks:resume',
     STOP: 'tasks:stop',
+    CONTINUE: 'tasks:continue',
+    RESPOND_APPROVAL: 'tasks:respondApproval',
+    UPDATE_RUN_LIMITS: 'tasks:updateRunLimits',
     GET: 'tasks:get',
     LIST: 'tasks:list',
+    LIST_TEMPLATES: 'tasks:listTemplates',
+    GET_TEMPLATE: 'tasks:getTemplate',
+    SAVE_TEMPLATE: 'tasks:saveTemplate',
+    DELETE_TEMPLATE: 'tasks:deleteTemplate',
+    CREATE_FROM_TEMPLATE: 'tasks:createFromTemplate',
+    LIST_RUNS: 'tasks:listRuns',
+    PATCH_RUN: 'tasks:patchRun',
+    APPLY_RUN_REVISION: 'tasks:applyRunRevision',
     // Storage-backed read of a run's outcome (verdict + per-node output). Survives restart.
     GET_RESULTS: 'tasks:getResults',
+    INSPECT_RUN: 'tasks:inspectRun',
+    // Push: full typed snapshot after every run/node/budget/approval/repair change.
+    RUN_CHANGED: 'tasks:runChanged',
   },
   workspaces: {
     GET: 'workspaces:get',
@@ -106,6 +126,7 @@ export const RPC_CHANNELS = {
   },
   fs: {
     SEARCH: 'fs:search',
+    STAT_PATH: 'fs:statPath',
     LIST_DIRECTORY: 'fs:listDirectory',
   },
   debug: {
@@ -216,22 +237,37 @@ export const RPC_CHANNELS = {
     LOGOUT: 'copilot:logout',
     DEVICE_CODE: 'copilot:deviceCode',
   },
+  kimi: {
+    START_OAUTH: 'kimi:startOAuth',
+    CANCEL_OAUTH: 'kimi:cancelOAuth',
+    DEVICE_CODE: 'kimi:deviceCode',
+  },
+  xai: {
+    START_OAUTH: 'xai:startOAuth',
+    CANCEL_OAUTH: 'xai:cancelOAuth',
+    DEVICE_CODE: 'xai:deviceCode',
+  },
   settings: {
     SETUP_LLM_CONNECTION: 'settings:setupLlmConnection',
     TEST_LLM_CONNECTION_SETUP: 'settings:testLlmConnectionSetup',
     GET_DEFAULT_THINKING_LEVEL: 'settings:getDefaultThinkingLevel',
     SET_DEFAULT_THINKING_LEVEL: 'settings:setDefaultThinkingLevel',
-    GET_AUTO_COMPACT_WINDOW: 'settings:getAutoCompactWindow',
-    SET_AUTO_COMPACT_WINDOW: 'settings:setAutoCompactWindow',
-    GET_SUBAGENT_MODEL: 'settings:getSubagentModel',
-    SET_SUBAGENT_MODEL: 'settings:setSubagentModel',
+    GET_SHARED_PROJECT_MEMORY_ENABLED: 'settings:getSharedProjectMemoryEnabled',
+    SET_SHARED_PROJECT_MEMORY_ENABLED: 'settings:setSharedProjectMemoryEnabled',
     GET_NETWORK_PROXY: 'settings:getNetworkProxy',
     SET_NETWORK_PROXY: 'settings:setNetworkProxy',
+    GET_ADVANCED: 'settings:getAdvanced',
+    SET_DAG_ORCHESTRATION_ENABLED: 'settings:setDagOrchestrationEnabled',
+    SET_SWARM_AGENTS_ENABLED: 'settings:setSwarmAgentsEnabled',
+    SET_ANYSEARCH_API_KEY: 'settings:setAnySearchApiKey',
+    SET_SEARCH_SETTINGS: 'settings:setSearchSettings',
+    SET_SEARCH_PROVIDER_API_KEY: 'settings:setSearchProviderApiKey',
     GET_SERVER_CONFIG: 'settings:getServerConfig',
     SET_SERVER_CONFIG: 'settings:setServerConfig',
     GET_SERVER_STATUS: 'settings:getServerStatus',
   },
   pi: {
+    FETCH_CUSTOM_ENDPOINT_MODELS: 'pi:fetchCustomEndpointModels',
     GET_API_KEY_PROVIDERS: 'pi:getApiKeyProviders',
     GET_PROVIDER_BASE_URL: 'pi:getProviderBaseUrl',
     GET_PROVIDER_MODELS: 'pi:getProviderModels',
@@ -258,12 +294,13 @@ export const RPC_CHANNELS = {
     CHANGED: 'sources:changed',
     GET_PERMISSIONS: 'sources:getPermissions',
     GET_MCP_TOOLS: 'sources:getMcpTools',
+    RETRY_CONNECTION: 'sources:retryConnection',
+    SET_DISPLAY_TITLE: 'sources:setDisplayTitle',
   },
   oauth: {
     START: 'oauth:start',
     COMPLETE: 'oauth:complete',
     CANCEL: 'oauth:cancel',
-    STATUS: 'oauth:status',
     REVOKE: 'oauth:revoke',
   },
   workspace: {
@@ -279,11 +316,19 @@ export const RPC_CHANNELS = {
   },
   skills: {
     GET: 'skills:get',
+    DELETE_PPT_TEMPLATE: 'skills:deletePptTemplate',
+    EXPORT_PPT_TEMPLATE: 'skills:exportPptTemplate',
+    GET_PPT_CATALOG: 'skills:getPptCatalog',
+    GET_PPT_TEMPLATE_PAGES: 'skills:getPptTemplatePages',
+    GET_PPT_TEMPLATE_PREVIEW: 'skills:getPptTemplatePreview',
+    IMPORT_PPT_TEMPLATE: 'skills:importPptTemplate',
+    RENAME_PPT_TEMPLATE: 'skills:renamePptTemplate',
     GET_FILES: 'skills:getFiles',
     DELETE: 'skills:delete',
     OPEN_EDITOR: 'skills:openEditor',
     OPEN_FINDER: 'skills:openFinder',
     CHANGED: 'skills:changed',
+    SET_DISPLAY_TITLE: 'skills:setDisplayTitle',
   },
   statuses: {
     LIST: 'statuses:list',
@@ -313,8 +358,6 @@ export const RPC_CHANNELS = {
     SET_ENABLED: 'notification:setEnabled',
   },
   input: {
-    GET_AUTO_CAPITALISATION: 'input:getAutoCapitalisation',
-    SET_AUTO_CAPITALISATION: 'input:setAutoCapitalisation',
     GET_SEND_MESSAGE_KEY: 'input:getSendMessageKey',
     SET_SEND_MESSAGE_KEY: 'input:setSendMessageKey',
     GET_SPELL_CHECK: 'input:getSpellCheck',
@@ -332,28 +375,6 @@ export const RPC_CHANNELS = {
     GET_BROWSER_TOOL_ENABLED: 'tools:getBrowserToolEnabled',
     SET_BROWSER_TOOL_ENABLED: 'tools:setBrowserToolEnabled',
   },
-  caching: {
-    GET_EXTENDED_PROMPT_CACHE: 'caching:getExtendedPromptCache',
-    SET_EXTENDED_PROMPT_CACHE: 'caching:setExtendedPromptCache',
-    GET_ENABLE_1M_CONTEXT: 'caching:getEnable1MContext',
-    SET_ENABLE_1M_CONTEXT: 'caching:setEnable1MContext',
-  },
-  rtk: {
-    GET_ENABLED: 'rtk:getEnabled',
-    SET_ENABLED: 'rtk:setEnabled',
-    GET_STATUS: 'rtk:getStatus',
-    GET_GAIN: 'rtk:getGain',
-  },
-  decisions: {
-    GET_SETTINGS: 'decisions:getSettings',
-    SET_SETTINGS: 'decisions:setSettings',
-    GET_STATUS: 'decisions:getStatus',
-    SET_API_KEY: 'decisions:setApiKey',
-    DELETE_API_KEY: 'decisions:deleteApiKey',
-    TEST: 'decisions:test',
-    PROBE_SERVER: 'decisions:probeServer',
-    GET_USAGE: 'decisions:getUsage',
-  },
   badge: {
     REFRESH: 'badge:refresh',
     SET_ICON: 'badge:setIcon',
@@ -366,28 +387,6 @@ export const RPC_CHANNELS = {
   },
   git: {
     GET_BRANCH: 'git:getBranch',
-    /** Coding mode's worktree picker: local repos + `gh repo list` (see protocol/git-repos.ts) */
-    LIST_REPOS: 'git:listRepos',
-    /** Creates a worktree (cloning first for a GitHub-only repo) for a new Coding session */
-    CREATE_WORKTREE: 'git:createWorktree',
-  },
-  /** Coding mode PR watcher (chat header PR chip): see protocol/pr-watch.ts */
-  prWatch: {
-    SUBSCRIBE: 'prWatch:subscribe',
-    UNSUBSCRIBE: 'prWatch:unsubscribe',
-    REFRESH: 'prWatch:refresh',
-    /** Card details for one carousel entry: (sessionId, prId) */
-    GET_DETAILS: 'prWatch:getDetails',
-    /** Pin a PR to the session by URL or number (verifies before persisting) */
-    BIND: 'prWatch:bind',
-    /** Remove a pinned PR from the session */
-    UNBIND: 'prWatch:unbind',
-    /** Enable/disable GitHub auto-merge for one of the session's PRs */
-    SET_AUTO_MERGE: 'prWatch:setAutoMerge',
-    /** Turn auto-fix (the card's Fix toggle) on/off for one of the session's PRs: (sessionId, prId, enabled) */
-    SET_AUTO_FIX: 'prWatch:setAutoFix',
-    /** Server → client push: (sessionId, PrWatchSessionState) */
-    CHANGED: 'prWatch:changed',
   },
   gitbash: {
     CHECK: 'gitbash:check',
@@ -396,6 +395,7 @@ export const RPC_CHANNELS = {
   },
   browserPane: {
     CREATE: 'browser-pane:create',
+    OPEN_HTML_FILE: 'browser-pane:open-html-file',
     DESTROY: 'browser-pane:destroy',
     LIST: 'browser-pane:list',
     NAVIGATE: 'browser-pane:navigate',
@@ -404,6 +404,7 @@ export const RPC_CHANNELS = {
     RELOAD: 'browser-pane:reload',
     STOP: 'browser-pane:stop',
     FOCUS: 'browser-pane:focus',
+    OPEN_IN_DEFAULT_BROWSER: 'browser-pane:open-in-default-browser',
     SNAPSHOT: 'browser-pane:snapshot',
     CLICK: 'browser-pane:click',
     FILL: 'browser-pane:fill',
@@ -418,6 +419,7 @@ export const RPC_CHANNELS = {
   },
   automations: {
     GET: 'automations:get',
+    VALIDATE: 'automations:validate',
     TEST: 'automations:test',
     SET_ENABLED: 'automations:setEnabled',
     DUPLICATE: 'automations:duplicate',
@@ -429,7 +431,20 @@ export const RPC_CHANNELS = {
   },
   resources: {
     EXPORT: 'resources:export',
+    PREVIEW_IMPORT: 'resources:previewImport',
     IMPORT: 'resources:import',
+    /** Native client file picker + bounded read. Never routed to a workspace server. */
+    OPEN_BUNDLE_FILE: 'resources:openBundleFile',
+    OPEN_MCP_JSON_FILE: 'resources:openMcpJsonFile',
+    OPEN_SKILL_IMPORT_FILE: 'resources:openSkillImportFile',
+    PREVIEW_MCP_JSON: 'resources:previewMcpJson',
+    IMPORT_MCP_JSON: 'resources:importMcpJson',
+    PREVIEW_SKILL_FILE: 'resources:previewSkillFile',
+    IMPORT_SKILL_FILE: 'resources:importSkillFile',
+    /** Native client save picker + atomic write. Never routed to a workspace server. */
+    SAVE_BUNDLE_FILE: 'resources:saveBundleFile',
+    /** Local filesystem copy between workspaces (optional credentials) */
+    COPY_BETWEEN: 'resources:copyBetweenWorkspaces',
   },
   projects: {
     GET: 'projects:get',
@@ -442,46 +457,7 @@ export const RPC_CHANNELS = {
     DELETE_ASSET: 'projects:deleteAsset',
     CHANGED: 'projects:changed',
   },
-  pages: {
-    GET: 'pages:get',
-    GET_ONE: 'pages:getOne',
-    CREATE: 'pages:create',
-    UPDATE: 'pages:update',
-    DELETE: 'pages:delete',
-    GET_CONTENT: 'pages:getContent',
-    SET_CONTENT: 'pages:setContent',
-    GET_DATA: 'pages:getData',
-    LIST_GRANTS: 'pages:listGrants',
-    ISSUE_GRANT: 'pages:issueGrant',
-    REVOKE_GRANT: 'pages:revokeGrant',
-    CREATE_LEASE: 'pages:createLease',
-    RELEASE_LEASE: 'pages:releaseLease',
-    EXECUTE_ACTION: 'pages:executeAction',
-    CANCEL_ACTION: 'pages:cancelAction',
-    GET_SHARE_CAPABILITIES: 'pages:getShareCapabilities',
-    GET_SHARE_DATA_SCAN: 'pages:getShareDataScan',
-    PUBLISH: 'pages:publish',
-    SET_PUBLICATION_PASSWORD: 'pages:setPublicationPassword',
-    UNPUBLISH: 'pages:unpublish',
-    PUBLISH_CLAUDE_ARTIFACT: 'pages:publishClaudeArtifact',
-    GET_THUMBNAIL: 'pages:getThumbnail',
-    REGENERATE_THUMBNAIL: 'pages:regenerateThumbnail',
-    CHANGED: 'pages:changed',
-  },
   messaging: {
-    // WhatsApp subprocess → Gateway (subprocess invokes on server)
-    WA_REGISTER: 'messaging:wa:register',
-    WA_INCOMING: 'messaging:wa:incoming',
-    WA_BUTTON_PRESS: 'messaging:wa:buttonPress',
-    WA_STATUS: 'messaging:wa:status',
-    WA_QR: 'messaging:wa:qr',
-    // Gateway → WhatsApp subprocess (server invokes on client)
-    WA_SEND: 'messaging:wa:send',
-    WA_SEND_BUTTONS: 'messaging:wa:sendButtons',
-    WA_SEND_TYPING: 'messaging:wa:sendTyping',
-    WA_SEND_FILE: 'messaging:wa:sendFile',
-    WA_CONNECT: 'messaging:wa:connect',
-    WA_DISCONNECT: 'messaging:wa:disconnect',
     // Gateway → UI clients (broadcast)
     BINDING_CHANGED: 'messaging:bindingChanged',
     PLATFORM_STATUS: 'messaging:platformStatus',
@@ -490,8 +466,6 @@ export const RPC_CHANNELS = {
     // UI ↔ Server (config/binding CRUD)
     GET_CONFIG: 'messaging:getConfig',
     UPDATE_CONFIG: 'messaging:updateConfig',
-    TEST_TELEGRAM: 'messaging:testTelegram',
-    SAVE_TELEGRAM: 'messaging:saveTelegram',
     TEST_LARK: 'messaging:testLark',
     SAVE_LARK: 'messaging:saveLark',
     DISCONNECT: 'messaging:disconnect',
@@ -500,15 +474,6 @@ export const RPC_CHANNELS = {
     GENERATE_CODE: 'messaging:generateCode',
     UNBIND: 'messaging:unbind',
     UNBIND_BINDING: 'messaging:unbindBinding',
-    /** Workspace-supergroup pairing (Telegram forum support). UI ↔ Server. */
-    GENERATE_SUPERGROUP_CODE: 'messaging:generateSupergroupCode',
-    GET_SUPERGROUP: 'messaging:getSupergroup',
-    UNBIND_SUPERGROUP: 'messaging:unbindSupergroup',
-    // UI ↔ Server — WhatsApp pairing/connection flow (Baileys subprocess adapter)
-    WA_START_CONNECT: 'messaging:wa:startConnect',
-    WA_SUBMIT_PHONE: 'messaging:wa:submitPhone',
-    /** Broadcast to UI clients: QR string, pairing code, status, unavailable, error. */
-    WA_UI_EVENT: 'messaging:wa:uiEvent',
     // UI ↔ Server — Access control (per-platform owners + per-binding allow-list)
     GET_PLATFORM_OWNERS: 'messaging:access:getOwners',
     SET_PLATFORM_OWNERS: 'messaging:access:setOwners',

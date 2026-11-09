@@ -1,6 +1,6 @@
 import { debug } from "../utils/debug";
 
-const VERSIONS_URL = 'https://thecraftagents.com/electron';
+const VERSIONS_URL = 'https://agents.craft.do/electron';
 
 export async function getLatestVersion(): Promise<string | null> {
     try {

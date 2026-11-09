@@ -18,7 +18,6 @@ import { Globe } from 'lucide-react'
 import { useAtomValue } from 'jotai'
 import { useTranslation, Trans } from 'react-i18next'
 import { Spinner } from '@craft-agent/ui'
-import { TWEEN } from '@craft-agent/ui/motion'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { getHostname, getThemeLuminance } from '@/components/browser/utils'
@@ -77,20 +76,25 @@ export function ToolbarStatusSlot({
           key="escape"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: TWEEN.exit }}
-          transition={TWEEN.fast}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
           className={cn(
-            // Opaque (it covers the toolbar): raised card fill under the info tint
-            "absolute inset-0 z-10 overflow-hidden rounded-b-xl bg-raised",
+            "absolute inset-0 z-10",
+            "rounded-b-[12px]",
+            "shadow-tinted",
             "flex items-center justify-center",
             "pointer-events-auto",
           )}
+          style={{
+            '--shadow-color': 'var(--info-rgb)',
+            backgroundColor: 'color-mix(in srgb, var(--info) 10%, var(--background))',
+            color: 'color-mix(in oklab, var(--info) 30%, var(--foreground))',
+          } as React.CSSProperties}
         >
-          <span aria-hidden="true" className="absolute inset-0 bg-info-tint" />
-          <span className="relative flex items-center gap-1.5 text-label font-medium text-info">
+          <span className="text-sm font-medium flex items-center gap-1.5">
             <Trans
               i18nKey="toolbar.escapeToInterrupt"
-              components={{ kbd: <Kbd /> }}
+              components={{ kbd: <Kbd className="text-inherit bg-current/10" /> }}
             />
           </span>
         </motion.div>
@@ -124,16 +128,14 @@ function BrowserStatusBar({
   const themeLuminance = themeColor ? getThemeLuminance(themeColor) : null
   const isDarkTheme = themeLuminance !== null && themeLuminance < 0.42
 
-  // The site's own theme color when it has one (text picks black/white by its luminance —
-  // an external color no theme role can be solved against); otherwise the raised card fill
-  // under an accent tint.
+  // Compute styles based on whether we have a theme color
   const backgroundStyle = themeColor
     ? { backgroundColor: themeColor }
-    : undefined
+    : { backgroundColor: 'color-mix(in srgb, var(--accent) 15%, var(--background))' }
 
   const textColorClass = themeColor
     ? (isDarkTheme ? 'text-white/90' : 'text-black/80')
-    : 'text-foreground'
+    : ''
 
   const [faviconFailed, setFaviconFailed] = React.useState(false)
 
@@ -146,21 +148,21 @@ function BrowserStatusBar({
       type="button"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: TWEEN.exit }}
-      transition={TWEEN.fast}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
       className={cn(
-        "absolute inset-0 z-10 overflow-hidden",
-        "rounded-b-xl",
+        "absolute inset-0 z-10",
+        "rounded-b-[12px]",
         "flex items-center justify-center gap-2",
         "pointer-events-auto cursor-pointer",
-        "transition-[background-color] duration-base",
-        !themeColor && "bg-raised",
+        "transition-[background-color] duration-200",
         textColorClass,
       )}
-      style={backgroundStyle}
+      style={{
+        ...backgroundStyle,
+      } as React.CSSProperties}
       onClick={onClick}
     >
-      {!themeColor && <span aria-hidden="true" className="absolute inset-0 bg-accent-tint" />}
       {/* Accent gradient loading line at top of banner */}
       <div className="absolute top-0 left-0 right-0 h-[2px] z-10 overflow-hidden">
         <div
@@ -171,12 +173,12 @@ function BrowserStatusBar({
         />
       </div>
 
-      <span className={`relative shrink-0 flex items-center justify-center ${isDarkTheme ? 'h-4 w-4' : 'h-3.5 w-3.5'}`}>
+      <span className={`shrink-0 flex items-center justify-center ${isDarkTheme ? 'h-4 w-4' : 'h-3.5 w-3.5'}`}>
         {instance.isLoading ? (
-          <Spinner className="text-caption leading-none" />
+          <Spinner className="text-[10px] leading-none" />
         ) : instance.favicon && !faviconFailed ? (
           isDarkTheme ? (
-            <span className="inline-flex h-4 w-4 items-center justify-center rounded-xs bg-white/90 p-[1px] leading-none">
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded-[5px] bg-white/90 p-[1px] leading-none">
               <img
                 src={instance.favicon}
                 alt=""
@@ -196,7 +198,7 @@ function BrowserStatusBar({
           <Globe className="h-3.5 w-3.5" />
         )}
       </span>
-      <span className="relative text-label font-medium truncate max-w-[200px]">
+      <span className="text-sm font-medium truncate max-w-[200px]">
         {t('chat.usingConnection', { name: hostname })}
       </span>
     </motion.button>

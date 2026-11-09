@@ -29,7 +29,7 @@ export interface SkillMetadata {
 }
 
 /** Source of a loaded skill */
-export type SkillSource = 'global' | 'workspace' | 'project';
+export type SkillSource = 'bundled' | 'global' | 'workspace' | 'project';
 
 /**
  * Plugin name for project-level and global skills.
@@ -56,4 +56,9 @@ export interface LoadedSkill {
   path: string;
   /** Where this skill was loaded from */
   source: SkillSource;
+  /**
+   * Workspace-scoped display alias. Does not change metadata.name or slug.
+   * Absent when the user has not set a custom title.
+   */
+  displayTitle?: string;
 }

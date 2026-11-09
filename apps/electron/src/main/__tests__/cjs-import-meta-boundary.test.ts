@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'bun:test'
+import { build, type BuildOptions } from 'esbuild'
+import { join } from 'node:path'
+
+const repoRoot = join(import.meta.dir, '..', '..', '..', '..', '..')
+
+const CJS_ENTRIES: Array<{ name: string; options: BuildOptions }> = [
+  {
+    name: 'main process',
+    options: {
+      entryPoints: [join(repoRoot, 'apps/electron/src/main/index.ts')],
+      external: ['electron'],
+      alias: {
+      },
+    },
+  },
+  {
+    name: 'preload',
+    options: {
+      entryPoints: [join(repoRoot, 'apps/electron/src/preload/bootstrap.ts')],
+      external: ['electron'],
+    },
+  },
+  {
+    name: 'session MCP server',
+    options: {
+      entryPoints: [join(repoRoot, 'packages/session-mcp-server/src/index.ts')],
+      packages: 'external',
+    },
+  },
+]
+
+describe('Electron CJS import.meta boundary', () => {
+  // The assertion is the bundle warning, not a speed budget. CI can spend longer than the 5s default on these three graphs.
+  it('does not emit empty-import-meta when bundling the desktop CJS entries', async () => {
+    for (const entry of CJS_ENTRIES) {
+      const result = await build({
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        write: false,
+        logLevel: 'silent',
+        ...entry.options,
+      })
+
+      expect(
+        result.warnings.filter(warning => warning.id === 'empty-import-meta'),
+        `${entry.name} must not read import.meta in the CJS bundle`,
+      ).toEqual([])
+    }
+  }, { timeout: 30_000 })
+})

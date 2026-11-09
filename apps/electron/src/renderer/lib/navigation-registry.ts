@@ -160,8 +160,9 @@ export const NavigationRegistry = {
       app: PlaceholderComponent, // AppSettingsPage
       ai: PlaceholderComponent, // AiSettingsPage
       appearance: PlaceholderComponent, // AppearanceSettingsPage
-      input: PlaceholderComponent, // InputSettingsPage
+      input: PlaceholderComponent, // retired; routes redirect to App settings
       workspace: PlaceholderComponent, // WorkspaceSettingsPage
+      advanced: PlaceholderComponent, // AdvancedSettingsPage
       permissions: PlaceholderComponent, // PermissionsSettingsPage
       labels: PlaceholderComponent, // LabelsSettingsPage
       shortcuts: PlaceholderComponent, // ShortcutsPage

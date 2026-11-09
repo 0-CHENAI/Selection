@@ -28,6 +28,7 @@ describe('setModelSupportsImages', () => {
       name: 'foo',
       shortName: 'foo',
       supportsImages: true,
+      imageSupport: 'on',
     } as never)
     expect(updated.models![1]).toBe('bar')
   })
@@ -43,6 +44,7 @@ describe('setModelSupportsImages', () => {
       id: 'foo',
       contextWindow: 200_000,
       supportsImages: true,
+      imageSupport: 'on',
     } as never)
   })
 
@@ -53,7 +55,20 @@ describe('setModelSupportsImages', () => {
     }
     const updated = setModelSupportsImages(conn, 'foo', false)
 
-    expect(updated.models![0]).toEqual({ id: 'foo', supportsImages: false } as never)
+    expect(updated.models![0]).toEqual({ id: 'foo', supportsImages: false, imageSupport: 'off' } as never)
+  })
+
+  it('matches a prefixed runtime ID against the stored model id', () => {
+    const conn: LlmConnection = { ...BASE, models: ['Opus'] }
+    const updated = setModelSupportsImages(conn, 'pi/Opus', true)
+
+    expect(updated.models![0]).toEqual({
+      id: 'Opus',
+      name: 'Opus',
+      shortName: 'Opus',
+      supportsImages: true,
+      imageSupport: 'on',
+    } as never)
   })
 
   it('returns the connection unchanged when modelId is not in models[]', () => {
@@ -82,6 +97,7 @@ describe('setModelSupportsImages', () => {
       name: 'foo',
       shortName: 'foo',
       supportsImages: true,
+      imageSupport: 'on',
     } as never)
     expect(updated.models![1]).toBe('foo')
   })

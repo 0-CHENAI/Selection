@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs'
 import { join } from 'path'
-import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { homedir } from 'os'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, updateWorkspaceRemoteServer } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { isValidWorkspaceRootPath } from '../../utils/path-validation'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 export const CORE_HANDLED_CHANNELS = [
   RPC_CHANNELS.workspaces.GET,
@@ -304,8 +305,14 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   })
 
   // Broadcast theme preferences to all other windows (for cross-window sync)
-  server.handle(RPC_CHANNELS.theme.BROADCAST_PREFERENCES, async (ctx, preferences: { mode: string; colorTheme: string; font: string; motion?: string }) => {
-    pushTyped(server, RPC_CHANNELS.theme.PREFERENCES_CHANGED, { to: 'all' }, preferences)
+  server.handle(RPC_CHANNELS.theme.BROADCAST_PREFERENCES, async (ctx, preferences: { mode: string; colorTheme: string; font: string; chromeOnly?: boolean }) => {
+    windowManager?.applyThemeMode?.(preferences.mode)
+    if (preferences.chromeOnly) return
+    pushTyped(server, RPC_CHANNELS.theme.PREFERENCES_CHANGED, { to: 'all' }, {
+      mode: preferences.mode,
+      colorTheme: preferences.colorTheme,
+      font: preferences.font,
+    })
   })
 
   // Workspace-level theme overrides
@@ -372,7 +379,7 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   // ============================================================
 
   // Tool icon mappings — loads tool-icons.json and resolves each entry's icon to a data URL
-  // for display in the Appearance settings page
+  // for chat activity CLI badges. The Appearance settings table no longer surfaces this.
   server.handle(RPC_CHANNELS.toolIcons.GET_MAPPINGS, async () => {
     const { getToolIconsDir } = await import('@craft-agent/shared/config/storage')
     const { loadToolIconConfig } = await import('@craft-agent/shared/utils/cli-icon-resolver')

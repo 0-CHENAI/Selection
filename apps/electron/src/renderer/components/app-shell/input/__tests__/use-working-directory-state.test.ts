@@ -65,6 +65,9 @@ describe('deriveSortedRecent', () => {
 })
 
 describe('deriveSelectionFlags', () => {
+  it('treats the explicit draft opt-out as no external folder', () => {
+    expect(deriveSelectionFlags('none', undefined, true)).toEqual({ hasFolder: false, folderName: undefined, showReset: false })
+  })
   it('returns "no folder" when workingDirectory is undefined', () => {
     const flags = deriveSelectionFlags(undefined, undefined)
     expect(flags.hasFolder).toBe(false)
@@ -102,10 +105,14 @@ describe('deriveSelectionFlags', () => {
     expect(flags.showReset).toBe(true)
   })
 
-  it('showReset is false when session root is unset (no path to reset to)', () => {
-    const flags = deriveSelectionFlags('/Users/alice/code/project', undefined)
+  it('offers reset in a draft before a session root has been created', () => {
+    const flags = deriveSelectionFlags('/Users/alice/code/project', undefined, true)
     expect(flags.hasFolder).toBe(true)
-    expect(flags.showReset).toBe(false)
+    expect(flags.showReset).toBe(true)
+  })
+
+  it('does not offer a draft opt-out to non-chat consumers such as the task editor', () => {
+    expect(deriveSelectionFlags('/chosen', undefined).showReset).toBe(false)
   })
 
   it('folderName falls back to undefined when basename resolves to empty', () => {

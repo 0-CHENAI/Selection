@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build script for standalone Craft Agent server.
+ * Build script for standalone Selection server.
  *
  * Assembles a self-contained distribution directory with all runtime
  * dependencies, resources, and platform-specific binaries.
@@ -53,8 +53,10 @@ import {
   BUN_VERSION,
   UV_VERSION,
   downloadBun,
+  downloadOfficecli,
   downloadUv,
-  buildSubprocessServers,
+  buildMcpServers,
+  copyPiAgentServer,
   getPlatformKey,
 } from './build/common';
 
@@ -81,7 +83,7 @@ interface ServerBuildConfig {
 
 function showHelp(): void {
   console.log(`
-Standalone server build script for Craft Agent
+Standalone server build script for Selection
 
 Usage:
   bun run scripts/build-server.ts [options]
@@ -117,8 +119,8 @@ function assembleResources(config: ServerBuildConfig): void {
   const srcResources = join(electronDir, 'resources');
   const destResources = join(outputDir, 'resources');
 
-  console.log('  Copying docs, themes, permissions, tool-icons...');
-  for (const dir of ['docs', 'themes', 'permissions', 'tool-icons']) {
+  console.log('  Copying docs, themes, permissions, tool-icons, officecli resources...');
+  for (const dir of ['docs', 'themes', 'permissions', 'tool-icons', 'officecli']) {
     const src = join(srcResources, dir);
     if (existsSync(src)) {
       cpSync(src, join(destResources, dir), { recursive: true });
@@ -163,6 +165,22 @@ function assembleResources(config: ServerBuildConfig): void {
     }
   }
 
+  // MCP servers
+  console.log('  Copying MCP servers...');
+  for (const server of ['session-mcp-server', 'bridge-mcp-server']) {
+    const src = join(srcResources, server);
+    if (existsSync(src)) {
+      cpSync(src, join(destResources, server), { recursive: true });
+    }
+  }
+
+  // Also copy session-mcp-server from packages/ build output (dev path fallback)
+  const sessionServerDist = join(config.rootDir, 'packages', 'session-mcp-server', 'dist', 'index.js');
+  if (existsSync(sessionServerDist)) {
+    const destSessionServer = join(destResources, 'session-mcp-server');
+    mkdirSync(destSessionServer, { recursive: true });
+    copyFileSync(sessionServerDist, join(destSessionServer, 'index.js'));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +225,40 @@ async function downloadUvForServer(config: ServerBuildConfig): Promise<void> {
   copyFileSync(electronUvPath, uvDest);
   await $`chmod +x ${uvDest}`.quiet();
   console.log(`  uv binary installed (${(lstatSync(uvDest).size / 1024 / 1024).toFixed(1)} MB)`);
+}
+
+async function downloadOfficecliForServer(config: ServerBuildConfig): Promise<void> {
+  const { platform, arch, outputDir } = config;
+  const destName = platform === 'win32' ? 'officecli.exe' : 'officecli';
+  const platformKey = getPlatformKey(platform, arch);
+  // Keep the reviewed wrapper at resources/bin/officecli. The raw runtime is
+  // platform-scoped so it cannot overwrite the wrapper or bypass Word repair.
+  const destPath = join(outputDir, 'resources', 'bin', platformKey, destName);
+  const electronPath = join(config.electronDir, 'resources', 'bin', platformKey, destName);
+
+  const buildConfig: BuildConfig = {
+    platform,
+    arch,
+    upload: false,
+    uploadLatest: false,
+    uploadScript: false,
+    rootDir: config.rootDir,
+    electronDir: config.electronDir,
+  };
+  // Always enter the shared downloader: it verifies cached binaries against
+  // the pinned checksum before server packaging.
+  await downloadOfficecli(buildConfig);
+
+  if (!existsSync(electronPath)) {
+    throw new Error(`officecli binary not found after download at ${electronPath}`);
+  }
+
+  mkdirSync(dirname(destPath), { recursive: true });
+  copyFileSync(electronPath, destPath);
+  if (platform !== 'win32') {
+    await $`chmod +x ${destPath}`.quiet();
+  }
+  console.log(`  officecli binary installed (${(lstatSync(destPath).size / 1024 / 1024).toFixed(1)} MB)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,11 +391,8 @@ function copyProductionDeps(config: ServerBuildConfig): void {
   //    This catches everything — declared deps, undeclared deps, transitive
   //    imports that happen to work due to hoisting. No more whack-a-mole.
   // -------------------------------------------------------------------------
-  // messaging-gateway is included so its runtime deps (grammy, etc.) land in node_modules.
-  // messaging-whatsapp-worker is intentionally OMITTED: Baileys and its transitive deps
-  // are bundled directly into packages/messaging-whatsapp-worker/dist/worker.cjs by
-  // scripts/build-wa-worker.ts — pulling them into node_modules would duplicate the tree.
-  const SERVER_PACKAGES = ['server', 'server-core', 'shared', 'core', 'session-tools-core', 'messaging-gateway'];
+  // messaging-gateway is included so the Lark SDK lands in node_modules.
+  const SERVER_PACKAGES = ['server', 'server-core', 'shared', 'core', 'session-tools-core', 'session-mcp-server', 'messaging-gateway', 'pi-agent-server'];
 
   const allImports = new Set<string>();
   for (const pkg of SERVER_PACKAGES) {
@@ -383,15 +432,10 @@ function copyProductionDeps(config: ServerBuildConfig): void {
   // 0.2.113 the SDK ships only sdk.mjs in the main package; the native
   // `claude` binary lives in this per-platform optional dep. The server runs
   // on its host platform/arch so we ship only the matching one.
-  const sdkPlatformPkg = platform === 'win32'
-    ? `@anthropic-ai/claude-agent-sdk-win32-${arch}`
-    : `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`;
-
   const PLATFORM_DEPS = [
     `@img/sharp-${platform === 'darwin' ? 'darwin' : 'linux'}-${arch}`,
     `@img/sharp-libvips-${platform === 'darwin' ? 'darwin' : 'linux'}-${arch}`,
     '@img/colour',
-    sdkPlatformPkg,
     '@vscode/ripgrep',
   ];
 
@@ -434,17 +478,16 @@ function getDirSize(dir: string): number {
 function copyWorkspacePackages(config: ServerBuildConfig): void {
   const { rootDir, outputDir } = config;
 
-  // messaging-whatsapp-worker is included so dist/worker.cjs (built in step 4) ships.
-  // The worker is spawned as a Node subprocess against that file at runtime; see
-  // CRAFT_MESSAGING_WA_WORKER env resolution in packages/server/src/index.ts.
   const packages = [
     'server',
     'server-core',
     'shared',
     'core',
     'session-tools-core',
+    'session-mcp-server',
     'messaging-gateway',
-    'messaging-whatsapp-worker',
+    // Server-side handover/history readers import the native transcript helpers.
+    'pi-agent-server',
   ];
 
   for (const pkg of packages) {
@@ -473,7 +516,7 @@ function copyWorkspacePackages(config: ServerBuildConfig): void {
       cpSync(srcDir, join(dest, 'src'), { recursive: true });
     }
 
-    // Copy dist/ directory if present (built artifacts like the WhatsApp worker)
+    // Copy dist/ directory if present (built artifacts like session-mcp-server)
     const distDir = join(src, 'dist');
     if (existsSync(distDir)) {
       cpSync(distDir, join(dest, 'dist'), { recursive: true });
@@ -569,6 +612,8 @@ export CRAFT_RESOURCES_PATH="$ROOT/resources"
 # CLI tools (doc tools use uv + Python scripts)
 export CRAFT_UV="$ROOT/resources/bin/uv"
 export CRAFT_SCRIPTS="$ROOT/resources/scripts"
+export CRAFT_OFFICECLI="$ROOT/resources/bin/officecli"
+export CRAFT_OFFICECLI_RESOURCES="$ROOT/resources/officecli"
 
 # Prepend resource bin to PATH (makes doc tool wrappers available)
 export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
@@ -580,7 +625,7 @@ exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
 
   // start.sh — convenience entry
   const startSh = `#!/bin/sh
-# Craft Agent Server — convenience entry point
+# Selection Server — convenience entry point
 DIR="$(cd "$(dirname "$0")" && pwd)"
 exec "$DIR/bin/craft-server" "$@"
 `;
@@ -592,7 +637,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== Craft Agent Server Setup ==="
+echo "=== Selection Server Setup ==="
 echo ""
 
 # Make binaries executable
@@ -638,7 +683,7 @@ if [ "\${1:-}" = "--systemd" ]; then
 
   cat > "$SERVICE_FILE" <<UNIT
 [Unit]
-Description=Craft Agent Server
+Description=Selection Server
 After=network.target
 
 [Service]
@@ -712,6 +757,8 @@ ENV CRAFT_APP_ROOT=/app
 ENV CRAFT_RESOURCES_PATH=/app/resources
 ENV CRAFT_UV=/app/resources/bin/uv
 ENV CRAFT_SCRIPTS=/app/resources/scripts
+ENV CRAFT_OFFICECLI=/app/resources/bin/officecli
+ENV CRAFT_OFFICECLI_RESOURCES=/app/resources/officecli
 ENV CRAFT_RPC_HOST=0.0.0.0
 ENV CRAFT_RPC_PORT=9100
 ENV PATH="/app/resources/bin:/app/vendor/bun:\${PATH}"
@@ -735,7 +782,7 @@ services:
       # - CRAFT_RPC_TLS_CERT=/certs/cert.pem
       # - CRAFT_RPC_TLS_KEY=/certs/key.pem
     volumes:
-      - craft-data:/root/.craft-agent
+      - craft-data:/root/.selection
       # TLS — mount cert directory
       # - ./certs:/certs:ro
     restart: unless-stopped
@@ -807,7 +854,7 @@ async function main(): Promise<void> {
     version,
   };
 
-  console.log(`=== Building Craft Agent Server ${version} for ${platform}-${arch} ===`);
+  console.log(`=== Building Selection Server ${version} for ${platform}-${arch} ===`);
   console.log(`  Output: ${outputDir}`);
 
   // Step 1: Clean
@@ -824,9 +871,10 @@ async function main(): Promise<void> {
   // Step 3: Download uv
   console.log(`\n[3/8] Downloading uv ${UV_VERSION}...`);
   await downloadUvForServer(config);
+  await downloadOfficecliForServer(config);
 
-  // Step 4: Build the Pi agent server subprocess
-  console.log('\n[4/8] Building the Pi agent server...');
+  // Step 4: Build MCP servers
+  console.log('\n[4/8] Building MCP servers...');
   const buildConfig: BuildConfig = {
     platform,
     arch,
@@ -836,17 +884,12 @@ async function main(): Promise<void> {
     rootDir,
     electronDir,
   };
-  buildSubprocessServers(buildConfig);
-
-  // Build the WhatsApp worker bundle. Must happen before copyWorkspacePackages
-  // so dist/worker.cjs exists when we copy the messaging-whatsapp-worker package.
-  // The bundle embeds Baileys + transitive deps; see scripts/build-wa-worker.ts.
-  console.log('  Building WhatsApp worker bundle...');
-  await $`bun run ${join(rootDir, 'scripts', 'build-wa-worker.ts')}`.cwd(rootDir);
+  buildMcpServers(buildConfig);
 
   // Step 5: Assemble resources
   console.log('\n[5/8] Assembling resources...');
   assembleResources(config);
+  copyPiAgentServer({ ...buildConfig, electronDir: outputDir });
 
   // Step 6: Copy production node_modules
   console.log('\n[6/8] Copying production dependencies...');

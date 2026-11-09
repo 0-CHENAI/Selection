@@ -11,7 +11,7 @@
  * v1 PARSES BUT DEFERS: every other `kind` and the control-flow fields
  *   (`loop`, `when`, `route`, `for_each`, `aggregate`, `approval`, …). They are
  *   validated so hand-authored yaml round-trips, but the Conductor ignores them
- *   until P4. See sessions/.../tasks-architecture.md §5–§5a for the full design.
+ *   until a v2 save enables the executors. See ARCHITECTURE.md in this folder.
  *
  * Design note: the architecture draft used BOTH `type:` and `kind:` for a
  * node's role. We consolidate on a single `kind` discriminant (cleaner, avoids
@@ -19,6 +19,7 @@
  * deprecated alias normalized onto `kind`.
  */
 import { z } from 'zod';
+import { ResearchConfigSchema } from './research.ts';
 import type { PermissionMode } from '../agent/mode-types.ts';
 
 // ---------------------------------------------------------------------------
@@ -45,8 +46,17 @@ export const TRIGGER_RULES = ['all_success', 'none_failed_min_one_success', 'one
 export const PARAM_TYPES = ['string', 'number', 'boolean', 'enum', 'json', 'text'] as const;
 export const OUTPUT_KINDS = ['param', 'artifact'] as const;
 export const RETRY_WHEN = ['error', 'empty', 'invalid'] as const;
-export const CACHE_MODES = ['pure', 'off'] as const;
+export const CACHE_MODES_V2 = ['pure', 'off'] as const;
+export const CACHE_MODES_V3 = ['none', 'run-pure', 'workspace-pure'] as const;
+export const CACHE_MODES = [...CACHE_MODES_V2, ...CACHE_MODES_V3] as const;
 export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
+export const COORDINATOR_GATE_MODES = ['required', 'adaptive', 'off'] as const;
+export const VERIFICATION_MODES = ['auto', 'required', 'off'] as const;
+export type VerificationMode = (typeof VERIFICATION_MODES)[number];
+
+/** DAG worker concurrency defaults/caps for the technical preview. */
+export const DEFAULT_DAG_MAX_PARALLEL = 4;
+export const MAX_DAG_MAX_PARALLEL = 8;
 
 // ---------------------------------------------------------------------------
 // Repair (verification-loop) bounds — SINGLE SOURCE OF TRUTH.
@@ -57,8 +67,51 @@ export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
 
 /** Repair attempts allowed when a task omits `max_iterations`. */
 export const DEFAULT_REPAIR_ATTEMPTS = 3;
+/** New v3 final verification defaults to one local repair; explicit max_iterations may raise it. */
+export const DEFAULT_V3_REPAIR_ATTEMPTS = 1;
 /** Hard upper bound on `max_iterations` — a guardrail against runaway verify→repair loops. */
 export const MAX_REPAIR_ATTEMPTS_CAP = 10;
+
+/** v3 coordinator gate wait is fixed; the field exists so the YAML contract is explicit. */
+export const COORDINATOR_GATE_TIMEOUT_SECONDS = 120;
+/** Share of `token_budget` reserved for the final structured verification. */
+export const VERIFY_RESERVE_RATIO = 0.2;
+export const VERIFY_RESERVE_MIN_TOKENS = 4_096;
+export const VERIFY_RESERVE_MAX_TOKENS = 32_768;
+/** Cross-run `workspace-pure` cache TTL. */
+export const WORKSPACE_CACHE_TTL_DAYS = 7;
+export const WORKSPACE_CACHE_TTL_MS = WORKSPACE_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+/** Fingerprint domain version — bump when cache key inputs change. */
+export const CONDUCTOR_CACHE_RUNTIME_VERSION = '3.0.0';
+
+export function isStructuredSchemaVersion(version: number | undefined): boolean {
+  return version === 2 || version === 3;
+}
+
+/** New tasks are authored as v3. Existing v1/v2 files stay until an explicit confirmed migration. */
+export { DEFAULT_TASK_SCHEMA_VERSION } from './version.ts';
+import { DEFAULT_TASK_SCHEMA_VERSION } from './version.ts';
+
+export function resolveNewTaskSchemaVersion(explicit?: unknown): 2 | 3 {
+  return explicit === 2 ? 2 : DEFAULT_TASK_SCHEMA_VERSION;
+}
+
+export function taskSourceVersion(spec: { schema_version?: number } | undefined): 1 | 2 | 3 {
+  if (spec?.schema_version === 3) return 3;
+  if (spec?.schema_version === 2) return 2;
+  return 1;
+}
+
+export function computeVerifyReserve(
+  tokenBudget: number | undefined,
+  reserveRatio = VERIFY_RESERVE_RATIO,
+): number {
+  if (tokenBudget == null || tokenBudget <= 0) return 0;
+  return Math.min(
+    VERIFY_RESERVE_MAX_TOKENS,
+    Math.max(VERIFY_RESERVE_MIN_TOKENS, Math.floor(tokenBudget * reserveRatio)),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Primitive validators
@@ -93,14 +146,8 @@ export const OutputDeclSchema = z.object({
   kind: z.enum(OUTPUT_KINDS).optional(),
   type: z.string().optional(),
   enum: z.array(z.string()).optional(),
-});
-
-/** Bounded loop control (Loop-Until-Done). `max` is mandatory — an unbounded loop burns tokens forever. */
-export const LoopSchema = z.object({
-  until: z.string().min(1),
-  max: z.number().int().positive(),
-  else: z.string().optional(),
-  carry: z.string().optional(),
+  required: z.boolean().optional(),
+  description: z.string().optional(),
 });
 
 export const RetrySchema = z.object({
@@ -112,7 +159,7 @@ export const RetrySchema = z.object({
       max: z.number().positive().optional(),
     })
     .optional(),
-  when: z.enum(RETRY_WHEN).optional(),
+  when: z.union([z.enum(RETRY_WHEN), z.array(z.enum(RETRY_WHEN))]).optional(),
 });
 
 export const TaskParamSchema = z.object({
@@ -120,6 +167,54 @@ export const TaskParamSchema = z.object({
   type: z.enum(PARAM_TYPES).optional(),
   default: z.unknown().optional(),
   enum: z.array(z.string()).optional(),
+  sensitive: z.boolean().optional(),
+});
+
+export const CONDITION_OPS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'] as const;
+
+export type ConditionAst =
+  | { ref: string; op: (typeof CONDITION_OPS)[number]; value?: unknown }
+  | { all: ConditionAst[] }
+  | { any: ConditionAst[] }
+  | { not: ConditionAst };
+
+export const ConditionAstSchema: z.ZodType<ConditionAst> = z.lazy(() =>
+  z.union([
+    z.object({
+      ref: z.string().min(1),
+      op: z.enum(CONDITION_OPS),
+      value: z.unknown().optional(),
+    }).strict(),
+    z.object({ all: z.array(ConditionAstSchema).min(1) }).strict(),
+    z.object({ any: z.array(ConditionAstSchema).min(1) }).strict(),
+    z.object({ not: ConditionAstSchema }).strict(),
+  ]),
+);
+
+export const WhenSchema = z.union([z.string().min(1), ConditionAstSchema]);
+
+/** Bounded loop control (Loop-Until-Done). `max` is mandatory — an unbounded loop burns tokens forever. */
+export const LoopSchema = z.object({
+  until: WhenSchema,
+  max: z.number().int().positive(),
+  else: z.string().optional(),
+  carry: z.string().optional(),
+});
+
+export const UiLayoutSchema = z.object({
+  direction: z.enum(['TB', 'LR']).optional(),
+  nodes: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
+  viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number() }).optional(),
+});
+
+export const RouteCaseSchema = z.object({
+  when: WhenSchema,
+  goto: slug('route target'),
+});
+
+export const RouteSchema = z.object({
+  cases: z.array(RouteCaseSchema).min(1),
+  default: slug('route default'),
 });
 
 export const TaskDefaultsSchema = z.object({
@@ -127,6 +222,52 @@ export const TaskDefaultsSchema = z.object({
   llmConnection: z.string().min(1).optional(),
   permissionMode: z.enum(PERMISSION_MODES).optional(),
 });
+
+export const CoordinatorGateSchema = z
+  .object({
+    /** Adaptive advances known healthy dependencies; omitted policy keeps persisted plans on required review. */
+    mode: z.enum(COORDINATOR_GATE_MODES).default('required'),
+    timeout_seconds: z.literal(COORDINATOR_GATE_TIMEOUT_SECONDS).optional(),
+  })
+  .strict();
+
+export const VerificationExecutionSchema = z
+  .object({
+    /** New policy. Omitted means auto; kept optional so legacy `required` can be detected without ambiguity. */
+    mode: z.enum(VERIFICATION_MODES).optional(),
+    /** Legacy compatibility: true → required, false → off. Must not coexist with mode. */
+    required: z.boolean().optional(),
+    reserve_ratio: z.literal(VERIFY_RESERVE_RATIO).optional(),
+  })
+  .superRefine((verification, ctx) => {
+    if (verification.mode !== undefined && verification.required !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['required'],
+        message: 'execution.verification.mode and execution.verification.required cannot be used together; remove the legacy required field',
+      });
+    }
+  })
+  .strict();
+
+/** Resolve the frozen run policy without inspecting or classifying natural-language intent. */
+export function resolveVerificationMode(
+  verification: z.input<typeof VerificationExecutionSchema> | z.output<typeof VerificationExecutionSchema> | undefined,
+): VerificationMode {
+  if (verification?.mode) return verification.mode;
+  if (verification?.required === true) return 'required';
+  if (verification?.required === false) return 'off';
+  return 'auto';
+}
+
+export const TaskExecutionSchema = z
+  .object({
+    /** Frozen per run; absent on historical runs using shared work directories. */
+    artifact_delivery: z.literal(1).optional(),
+    coordinator_gate: CoordinatorGateSchema.optional(),
+    verification: VerificationExecutionSchema.optional(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------------
 // Node schema
@@ -147,14 +288,23 @@ const TaskNodeObject = z.object({
   permissionMode: z.enum(PERMISSION_MODES).optional(),
   labels: z.array(z.string()).optional(),
   status: z.string().optional(),
+  researchRole: z.enum(['researcher', 'reviewer', 'reporter']).optional(),
+  researchLineIds: z.array(z.string().min(1)).min(1).optional(),
+  /** Logical actor, independent of a task node; definition order is its serial execution order. */
+  actor: z.object({ id: ident('actor id'), persona: z.string().min(1).optional() }).strict().optional(),
+
+  /** Explicit user protection against generated and runtime edits. */
+  locked: z.boolean().optional(),
 
   // Edges + data flow.
   depends_on: z.array(slug('depends_on entry')).optional(),
   inputs: z.record(z.string(), InputRefSchema).optional(),
   outputs: z.array(OutputDeclSchema).optional(),
+  /** Explicit files copied into non-Git isolated workspaces. */
+  workspace_inputs: z.array(z.string().min(1)).optional(),
 
   // Control-flow (parsed now, executed in P4).
-  when: z.string().optional(),
+  when: WhenSchema.optional(),
   trigger: z.enum(TRIGGER_RULES).optional(),
   replicas: z.number().int().positive().optional(),
   aggregate: z.enum(AGGREGATE_MODES).optional(),
@@ -165,6 +315,7 @@ const TaskNodeObject = z.object({
   timeout: z.number().positive().optional(),
   cache: z.enum(CACHE_MODES).optional(),
   approval: z.boolean().optional(),
+  route: RouteSchema.optional(),
 });
 
 /**
@@ -189,11 +340,16 @@ export const TaskNodeSchema = z.preprocess((raw) => {
 
 export const TaskSpecSchema = z
   .object({
+    schema_version: z.union([z.literal(2), z.literal(3)]).optional(),
     id: slug('task id'),
     title: z.string().min(1),
     goal: z.string().min(1),
     /** Freeform rubric the orchestrator grades the final result against (verification gate). Falls back to `goal`. */
     acceptance_criteria: z.string().min(1).optional(),
+    research: ResearchConfigSchema.optional(),
+    constraints: z.array(z.string().min(1)).optional(),
+    decisions: z.array(z.string().min(1)).optional(),
+    locked_fields: z.array(z.enum(['goal', 'acceptance_criteria', 'constraints', 'decisions'])).optional(),
     project: z.string().min(1).optional(),
     /** Working directory for the orchestrator and every child session. Absolute path; when
      *  omitted the orchestrator's own working directory (project/workspace default) is used and
@@ -211,15 +367,31 @@ export const TaskSpecSchema = z
     token_budget: z.number().int().positive().optional(),
     max_parallel: z.number().int().positive().optional(),
     /** Max repair attempts on a FAIL verdict (re-run the repair frontier). 0 disables repair;
-     *  capped at MAX_REPAIR_ATTEMPTS_CAP. Omitted → runner uses DEFAULT_REPAIR_ATTEMPTS. */
+     *  capped at MAX_REPAIR_ATTEMPTS_CAP. Omitted → v3 uses one repair; legacy versions keep DEFAULT_REPAIR_ATTEMPTS. */
     max_iterations: z.number().int().min(0).max(MAX_REPAIR_ATTEMPTS_CAP).optional(),
+    execution: TaskExecutionSchema.optional(),
     nodes: z.array(TaskNodeSchema).min(1, 'A task must define at least one node'),
     /** Named task outputs → reference strings, e.g. { result: "${nodes.review.output}" }. */
     outputs: z.record(z.string(), z.string()).optional(),
+    ui: z.object({ layout: UiLayoutSchema.optional() }).optional(),
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
+    const sessionLikeKinds = new Set(['session', 'orchestrator', 'map', 'loop', 'synthesize', 'verify', 'judge', 'finally']);
+    const researchKinds = new Set(['session', 'orchestrator', 'synthesize', 'verify', 'judge', 'finally']);
+    const structured = isStructuredSchemaVersion(spec.schema_version);
+    if (spec.schema_version !== 3 && spec.execution) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'execution is a v3 field; set schema_version: 3 after confirming the migration',
+        path: ['execution'],
+      });
+    }
+    if (spec.research && spec.schema_version !== 3) ctx.addIssue({ code: 'custom', path: ['research'], message: 'Research requires schema_version: 3' });
     spec.nodes.forEach((node, i) => {
+      if (node.researchRole && (!spec.research || spec.schema_version !== 3 || !researchKinds.has(node.kind) || (node.replicas ?? 1) > 1)) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'researchRole'], message: 'Research roles require an individual configured V3 model-backed task; add canonical nodes for additional research work' });
+      if (node.researchLineIds?.some(id => !spec.research || ![spec.research.line, ...(spec.research.lines ?? [])].some(line => line.id === id))) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'researchLineIds'], message: 'Unknown research line binding' });
+      if (node.researchRole && !node.outputs?.some(output => output.name === 'research' && output.type === 'json' && output.required && output.kind !== 'artifact')) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'outputs'], message: 'Research role requires a required JSON param output named research' });
       if (seen.has(node.id)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -228,13 +400,66 @@ export const TaskSpecSchema = z
         });
       }
       seen.add(node.id);
-      // v1 executes session nodes; they must carry a prompt.
-      if (node.kind === 'session' && (!node.prompt || node.prompt.trim() === '')) {
+      // Structured schemas must not accept a model-backed node that can only
+      // execute as a successful no-op. v1 keeps its historical session-only requirement.
+      if (
+        (node.kind === 'session' || (structured && sessionLikeKinds.has(node.kind)))
+        && (!node.prompt || node.prompt.trim() === '')
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Node "${node.id}" is a session node and must have a non-empty prompt`,
+          message: `Node "${node.id}" is model-backed and must have a non-empty prompt`,
           path: ['nodes', i, 'prompt'],
         });
+      }
+      if (node.kind === 'loop' && !node.loop) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" is a loop and must declare loop.max`,
+          path: ['nodes', i, 'loop'],
+        });
+      }
+      if (structured && node.kind === 'route' && !node.route) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" is a route and must declare cases plus a default`,
+          path: ['nodes', i, 'route'],
+        });
+      }
+      if (structured && (node.kind === 'map' || node.kind === 'filter') && !node.for_each) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" must declare for_each`,
+          path: ['nodes', i, 'for_each'],
+        });
+      }
+      if (structured && node.aggregate === 'synthesize') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `aggregate: synthesize is not a deterministic aggregate mode; use a separate synthesize node`,
+          path: ['nodes', i, 'aggregate'],
+        });
+      }
+      if (
+        structured
+        && node.timeout !== undefined
+        && node.kind !== 'approval'
+        && !sessionLikeKinds.has(node.kind)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" cannot use timeout because it does not dispatch a session or wait for approval`,
+          path: ['nodes', i, 'timeout'],
+        });
+      }
+      if (node.cache !== undefined) {
+        if (spec.schema_version !== 3 && (node.cache === 'none' || node.cache === 'run-pure' || node.cache === 'workspace-pure')) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Node "${node.id}" uses v3 cache "${node.cache}"; set schema_version: 3 after confirming the migration`,
+            path: ['nodes', i, 'cache'],
+          });
+        }
       }
     });
   });
@@ -246,17 +471,20 @@ export const TaskSpecSchema = z
 export type InputRef = z.infer<typeof InputRefSchema>;
 export type OutputDecl = z.infer<typeof OutputDeclSchema>;
 export type Loop = z.infer<typeof LoopSchema>;
+export type Route = z.infer<typeof RouteSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
 export type TaskParam = z.infer<typeof TaskParamSchema>;
 export type TaskDefaults = z.infer<typeof TaskDefaultsSchema>;
+export type TaskExecution = z.infer<typeof TaskExecutionSchema>;
 export type TaskNode = z.infer<typeof TaskNodeSchema>;
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
+export type CacheMode = (typeof CACHE_MODES)[number];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A node's materialized dependency list (never undefined). */
+/** Explicit authored edges. Use effectiveNodeDeps/planDependencies for graph or scheduling. */
 export function nodeDeps(node: TaskNode): string[] {
   return node.depends_on ?? [];
 }
@@ -264,6 +492,17 @@ export function nodeDeps(node: TaskNode): string[] {
 /** The board tile label for a node. */
 export function nodeTitle(node: TaskNode): string {
   return node.title ?? node.id;
+}
+
+/** Readable label for old plans whose authored title is missing or just repeats the node ID. */
+export function nodeDisplayTitle(node: TaskNode): string {
+  const title = node.title?.trim();
+  if (title && title !== node.id) return title;
+  const instruction = (node.prompt ?? '').replace(/\[skill:[^\]]+\]/g, '').trim()
+    .split(/[\n。]|\.\s|\$\{|[\[{]/, 1)[0]?.replace(/^[#*\s-]+/, '').trim();
+  if (!instruction) return node.id;
+  const chars = Array.from(instruction);
+  return chars.length > 42 ? `${chars.slice(0, 42).join('')}…` : instruction;
 }
 
 /** Parse an unknown value (parsed yaml/json) into a TaskSpec. */

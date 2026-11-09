@@ -8,7 +8,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -173,6 +173,18 @@ describe('handleLargeResponse contextWindow handling', () => {
     expect(written).toBe(eightKTokenText);
   });
 
+  test('spills Chinese tool output that chars/4 would leave in context', async () => {
+    const text = '汉'.repeat(13_000);
+    expect(estimateTokens(text)).toBeLessThan(TOKEN_LIMIT);
+    expect(estimateTokensDensityAware(text)).toBeGreaterThan(TOKEN_LIMIT);
+    const result = await handleLargeResponse({
+      text, sessionPath, context: { toolName: 'read' }, summarize: fakeSummarize,
+      contextWindow: 200_000,
+    });
+    expect(result?.wasSummarized).toBe(true);
+    expect(readFileSync(result!.filePath, 'utf-8')).toBe(text);
+  });
+
   test('contextWindow undefined matches pre-change behavior at 8k input', async () => {
     // 8k < TOKEN_LIMIT (12k) → null, identical to pre-change behavior.
     const result = await handleLargeResponse({
@@ -313,4 +325,79 @@ describe('guardLargeResult: base64-heavy regression (poisoned-session repro)', (
     });
     expect(result).not.toBeNull();
   });
+});
+
+describe('lossless tool-result spill', () => {
+  test('structured assets reuse verified bytes and preserve damaged caches and earlier JSON', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'asset-cache-'));
+    try {
+      const bytes = Buffer.alloc(1024, 0x42);
+      Buffer.from('89504e470d0a1a0a', 'hex').copy(bytes);
+      const text = JSON.stringify({ data: `data:image/png;base64,${bytes.toString('base64')}`, note: 'original' });
+      const extract = async (input = text) => {
+        const message = await guardLargeResult(input, { sessionPath: root, toolName: 'Read' });
+        expect(message).toContain('Structured media assets extracted and saved');
+        const original = message!.match(/^Original JSON: (.+)$/m)![1]!;
+        const linked = message!.match(/^Linked JSON: (.+)$/m)![1]!;
+        return { original, path: JSON.parse(readFileSync(linked, 'utf8')).data.assetRef.path as string };
+      };
+      const first = await extract();
+      expect((await extract()).path).toBe(first.path);
+      const damaged = Buffer.alloc(bytes.length, 0x58);
+      writeFileSync(first.path, damaged);
+      const repaired = await extract(text.replace('original', 'next'));
+      expect(repaired.path).not.toBe(first.path);
+      expect(readFileSync(repaired.path).equals(bytes)).toBe(true);
+      expect(readFileSync(first.path).equals(damaged)).toBe(true);
+      expect(repaired.original).not.toBe(first.original);
+      expect(readFileSync(first.original, 'utf8')).toBe(text);
+      // A partial write must not be promoted into an asset reference on retry either.
+      writeFileSync(first.path, bytes.subarray(0, 10));
+      const retry = await extract();
+      expect(readFileSync(retry.path).equals(bytes)).toBe(true);
+      expect(readFileSync(first.path).length).toBe(10);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('a failed spill preserves the complete result instead of returning an unrecoverable preview', async () => {
+    const { writeFileSync } = await import('node:fs');
+    const root = mkdtempSync(join(tmpdir(), 'spill-failure-'));
+    try {
+      const blocked = join(root, 'not-a-directory');
+      writeFileSync(blocked, 'occupied');
+      let summarized = false;
+      expect(await handleLargeResponse({ text: '完整结果'.repeat(20_000), sessionPath: blocked,
+        context: { toolName: 'Read' }, summarize: async () => { summarized = true; return 'summary'; } })).toBeNull();
+      expect(summarized).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('repeated spills never overwrite earlier complete results', async () => {
+    const { saveLargeResponse } = await import('../large-response.ts');
+    const root = mkdtempSync(join(tmpdir(), 'spill-identity-'));
+    try {
+      const first = saveLargeResponse(root, 'tool/../../name', '', 'first')!;
+      const second = saveLargeResponse(root, 'tool/../../name', '', 'second')!;
+      expect(first).not.toBeNull(); expect(second).not.toBeNull();
+      expect(first.absolutePath).not.toBe(second.absolutePath);
+      expect(first.absolutePath.startsWith(join(root, 'long_responses') + '/')).toBe(true);
+      expect(readFileSync(first.absolutePath, 'utf8')).toBe('first');
+      expect(readFileSync(second.absolutePath, 'utf8')).toBe('second');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+test('bounded Bash preview preserves the head, exit error and exact original without a model request', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bash-preview-'));
+  try {
+    const text = 'command started\n' + 'row of output '.repeat(2500) + '\nERROR: command exited with code 7';
+    const result = await handleLargeResponse({ text, sessionPath: dir, context: { toolName: 'Bash', input: { command: 'test' } }, tokenLimit: 4000 });
+    expect(result).not.toBeNull();
+    expect(result!.wasSummarized).toBe(false);
+    expect(result!.message).toContain('command started');
+    expect(result!.message).toContain('ERROR: command exited with code 7');
+    expect(result!.message.length).toBeLessThan(3000);
+    expect(readFileSync(result!.filePath, 'utf8')).toBe(text);
+    expect(result!.message).toContain(result!.filePath);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

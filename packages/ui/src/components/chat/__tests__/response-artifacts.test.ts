@@ -1,0 +1,65 @@
+import { expect, it } from 'bun:test'
+import { extractDeliveredResponseArtifacts } from '../response-artifacts'
+
+it('shows every supported changed file without a link or a model selection', () => {
+  const names = ['a.doc', 'b.DOCX', 'b.docm', 'b.dotx', 'b.rtf', 'c.ppt', 'd.PPTX', 'd.pptm', 'd.potx', 'd.ppsx',
+    'e.xls', 'f.XLSX', 'f.xlsm', 'f.xlsb', 'f.xltx', 'g.htm', 'h.HTML', 'j.tex', 'j.latex', 'k.md', 'l.markdown', 'm.pdf']
+  const versions = names.map(name => ({ path: `/results/${name}`, change: 'created' as const }))
+  expect(extractDeliveredResponseArtifacts(versions).map(file => file.name)).toEqual(names)
+})
+
+it('excludes unsupported formats, deleted files and session scratch', () => {
+  const versions = [
+    { path: '/results/report.pdf', change: 'modified' as const },
+    { path: '/results/chart.png', change: 'created' as const },
+    { path: '/results/raw.csv', change: 'created' as const },
+    { path: '/results/raw.json', change: 'created' as const },
+    { path: '/results/old.docx', change: 'deleted' as const },
+    { path: '{{SESSION_PATH}}/data/draft.md', change: 'created' as const },
+    { path: '{{SESSION_PATH}}/long_responses/read.txt', change: 'created' as const },
+    { path: '/work/sessions/current/long_responses/tool.txt', change: 'created' as const },
+    { path: 'C:\\work\\sessions\\current\\long_responses\\tool.txt', change: 'created' as const },
+  ]
+  expect(extractDeliveredResponseArtifacts(versions)).toEqual([
+    { path: '/results/report.pdf', name: 'report.pdf', extension: 'pdf', change: 'modified' },
+  ])
+  expect(extractDeliveredResponseArtifacts()).toEqual([])
+})
+
+it('hides historical source-cache and TXT cards on every platform while keeping other documents', () => {
+  const paths = [
+    '/work/.selection-sources/version/snapshot.txt',
+    '.selection-sources/version/snapshot.txt',
+    'C:\\work\\.selection-sources\\version\\snapshot.txt',
+    '/work/.selection-sources/version/extracted.md',
+    '/results/snapshot.txt',
+    '/work/.selection-sources-export/snapshot.txt',
+    'C:\\results\\REPORT.TXT',
+    '/results/report.pdf',
+    '/work/.selection-sources-export/report.md',
+  ]
+  expect(extractDeliveredResponseArtifacts(paths.map(path => ({ path, ordinal: 1 }))).map(file => file.path))
+    .toEqual(paths.slice(7))
+})
+
+it('shows a session-root pptx and a working-directory pptx, and skips the scratch export', () => {
+  expect(extractDeliveredResponseArtifacts([
+    { path: '/work/sessions/current/data/deck.pptx', change: 'created' },
+    { path: '/work/sessions/current/季度经营会.pptx', change: 'created' },
+    { path: '/projects/brief/季度经营会.pptx', change: 'created' },
+  ]).map(file => file.path)).toEqual([
+    '/work/sessions/current/季度经营会.pptx',
+    '/projects/brief/季度经营会.pptx',
+  ])
+})
+
+it('keeps distinct paths, deduplicates aliases and preserves restored versions', () => {
+  expect(extractDeliveredResponseArtifacts([
+    { path: 'C:/Reports/Final.DOCX', change: 'restored' },
+    { path: 'c:\\reports\\final.docx', change: 'modified' },
+    { path: 'D:/Reports/Final.DOCX', ordinal: 1 },
+  ])).toEqual([
+    { path: 'C:/Reports/Final.DOCX', name: 'Final.DOCX', extension: 'docx', change: 'restored' },
+    { path: 'D:/Reports/Final.DOCX', name: 'Final.DOCX', extension: 'docx', change: 'created' },
+  ])
+})

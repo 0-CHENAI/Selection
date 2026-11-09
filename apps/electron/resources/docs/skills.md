@@ -1,6 +1,6 @@
 # Skills Configuration Guide
 
-This guide explains how to create and configure skills in Craft Agent.
+This guide explains how to create and configure skills in Selection.
 
 > **CLI-first workflow (recommended):** Use `craft-agent skill ...` commands instead of editing `SKILL.md` files directly.
 > - `craft-agent skill --help`
@@ -18,13 +18,13 @@ Skills are specialized instructions that extend Claude's capabilities for specif
 
 ## Same Format as Claude Code SDK
 
-Craft Agent uses **the identical SKILL.md format** as the Claude Code SDK. This means:
+Selection uses **the identical SKILL.md format** as the Claude Code SDK. This means:
 
-1. **Format compatibility**: Any skill written for Claude Code works in Craft Agent
+1. **Format compatibility**: Any skill written for Claude Code works in Selection
 2. **Same frontmatter fields**: `name`, `description`, `globs`, `alwaysAllow`, `requiredSources`
 3. **Same content structure**: Markdown body with instructions for Claude
 
-**What Craft Agent adds:**
+**What Selection adds:**
 - **Visual icons**: Display custom icons in the UI for each skill
 - **Workspace organization**: Skills are scoped to workspaces
 - **UI management**: Browse, edit, and validate skills through the interface
@@ -33,7 +33,7 @@ Craft Agent uses **the identical SKILL.md format** as the Claude Code SDK. This 
 
 When a skill is invoked (e.g., `/commit`):
 
-1. **Workspace skill checked first** - If `~/.craft-agent/workspaces/{id}/skills/commit/SKILL.md` exists, it's used
+1. **Workspace skill checked first** - If `~/.selection/workspaces/{id}/skills/commit/SKILL.md` exists, it's used
 2. **SDK skill as fallback** - If no workspace skill exists, the built-in SDK skill is used
 
 This allows you to:
@@ -45,7 +45,7 @@ This allows you to:
 
 Skills are stored as folders:
 ```
-~/.craft-agent/workspaces/{workspaceId}/skills/{slug}/
+~/.selection/workspaces/{workspaceId}/skills/{slug}/
 ├── SKILL.md          # Required: Skill definition (same format as Claude Code SDK)
 ├── icon.svg          # Recommended: Skill icon for UI display
 ├── icon.png          # Alternative: PNG icon
@@ -131,7 +131,7 @@ requiredSources:
 ### 1. Create the skill directory
 
 ```bash
-mkdir -p ~/.craft-agent/workspaces/{ws}/skills/my-skill
+mkdir -p ~/.selection/workspaces/{ws}/skills/my-skill
 ```
 
 ### 2. Write SKILL.md
@@ -296,7 +296,7 @@ session — no manual toggle needed.
 
 To customize a built-in SDK skill like `/commit`:
 
-1. Create `~/.craft-agent/workspaces/{ws}/skills/commit/SKILL.md`
+1. Create `~/.selection/workspaces/{ws}/skills/commit/SKILL.md`
 2. Write your custom instructions
 3. Add an icon
 4. Run `skill_validate({ skillSlug: "commit" })`
@@ -333,3 +333,15 @@ This is useful for:
 - File must be named `icon.{ext}` (not `my-icon.svg`)
 - Check icon file is not corrupted
 - For SVG, ensure valid XML structure
+
+
+## Install an existing skill
+
+Use `skill_inspect({ source })` for compatibility questions and candidate discovery.
+For an explicit installation request, use `skill_install({ source })`. Public GitHub repositories and local paths are supported; use `ref` and `skillPath` for branches/subdirectories or a returned candidate. Private authentication is not supported.
+
+The installer snapshots content, validates SKILL.md and explicit local Markdown references, publishes into the current workspace, and confirms which skill is loaded. It does not run scripts or install dependencies. Successful static validation is not a runtime compatibility guarantee. No additional `skill_validate` call is needed.
+
+Identical content returns `already_installed`. Different content returns `conflict`; only when the user explicitly asks for an update, retry with `replace: true` and the returned `targetFingerprint` as `expectedTargetFingerprint`. A changed target is rejected. Project-level skills may shadow workspace installations; the result reports the effective path.
+
+Do not replace this workflow with WebFetch/Bash installation or silently overwrite a conflict. Missing resources, unsupported symbolic links, unsafe paths, cancellation and size limits return explicit failures. Downloads are limited to 50 MiB, unpacked content to 200 MiB and 20,000 entries; operation timeout is 120 seconds. A failed replacement restores the old skill. Crash recovery only restores filesystem consistency and never sends a hidden continuation message.

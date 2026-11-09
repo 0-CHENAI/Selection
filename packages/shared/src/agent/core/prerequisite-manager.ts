@@ -5,18 +5,26 @@
  * State resets on compaction since the LLM loses the guide content.
  *
  * Key responsibilities:
- * - Track which files have been read via the Read tool or a shell read in Bash (cat, head, sed -n …)
+ * - Track which files have been read via the Read tool
  * - Check prerequisites before tool execution (e.g., guide.md for sources)
  * - Reset state on context compaction
  */
 
-/// <reference path="../bash-parser.d.ts" />
-import bashParser from 'bash-parser';
-import { existsSync } from 'node:fs';
-import { basename, isAbsolute, resolve, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { parse as shellParse } from 'shell-quote';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, relative, resolve, sep } from 'node:path';
 import { expandPath } from './path-processor.ts';
 import { getBrowserToolEnabled } from '../../config/storage.ts';
-import { CONFIG_DIR } from '../../config/paths.ts';
+import { catalogPathKey } from '../../skills/catalog.ts';
+import { getSourceSlugForTool, hasMeaningfulSourceGuide } from '../../sources/guide-content.ts';
+
+interface CatalogSkillRef {
+  slug: string;
+  skillMdPath: string;
+  requiredSources?: string[];
+}
 
 // ============================================================
 // Types
@@ -31,26 +39,38 @@ export interface PrerequisiteRule {
   blockMessage: string;
   /** If true, always block until file is read (no graceful fallback). */
   strict?: boolean;
+  /** Only apply this rule when the built-in browser tool is enabled. */
+  requiresBrowserToolEnabled?: boolean;
 }
 
 export interface PrerequisiteCheckResult {
   allowed: boolean;
   blockReason?: string;
+  sourceGuide?: SourceGuideRequirement;
+}
+
+export interface SourceGuideRequirement {
+  sourceSlug: string;
+  filePath: string;
+  content: string;
+  version: string;
+  /** Sibling calls from the same assistant message must also wait for replanning. */
+  alreadyPreparedInGeneration: boolean;
 }
 
 export interface PrerequisiteManagerConfig {
   workspaceRootPath: string;
   onDebug?: (message: string) => void;
+  /** Optional test/runtime override; production falls back to persisted config. */
+  browserToolEnabled?: boolean;
 }
 
 // ============================================================
 // Constants
 // ============================================================
 
-/** Slugs that are exempt from prerequisite checks (internal sources) */
-const EXEMPT_SLUGS = new Set(['session']);
-
 /** Global browser tools docs path required before browser tool usage. */
+import { CONFIG_DIR } from '../../config/paths.ts';
 const BROWSER_TOOLS_DOC_PATH = resolve(join(CONFIG_DIR, 'docs', 'browser-tools.md'));
 
 // ============================================================
@@ -64,237 +84,21 @@ const BROWSER_TOOLS_DOC_PATH = resolve(join(CONFIG_DIR, 'docs', 'browser-tools.m
  * - What message to show when blocking
  */
 const RULES: PrerequisiteRule[] = [
-  // MCP source tools: mcp__{slug}__* format
-  {
-    toolMatcher: (toolName: string) => {
-      if (!toolName.startsWith('mcp__')) return false;
-      const parts = toolName.split('__');
-      if (parts.length < 3) return false;
-      const slug = parts[1]!;
-      return !EXEMPT_SLUGS.has(slug);
-    },
-    resolveRequiredPath: (toolName: string, workspaceRootPath: string) => {
-      const parts = toolName.split('__');
-      const slug = parts[1]!;
-      const guidePath = resolve(workspaceRootPath, 'sources', slug, 'guide.md');
-      return existsSync(guidePath) ? guidePath : null;
-    },
-    blockMessage:
-      'You must read the source guide before using this tool. Read {filePath} first (Read tool or `cat` in Bash), then retry.',
-  },
-
-  // API source tools: api_{slug} format
-  {
-    toolMatcher: (toolName: string) => {
-      return toolName.startsWith('api_');
-    },
-    resolveRequiredPath: (toolName: string, workspaceRootPath: string) => {
-      const slug = toolName.slice(4); // Remove 'api_' prefix
-      const guidePath = resolve(workspaceRootPath, 'sources', slug, 'guide.md');
-      return existsSync(guidePath) ? guidePath : null;
-    },
-    blockMessage:
-      'You must read the source guide before using this tool. Read {filePath} first (Read tool or `cat` in Bash), then retry.',
-  },
-
   // Built-in browser tool: require browser-tools.md first.
   // Only matches the session-scoped tool (not external MCP browser tools like mcp__playwright__*),
   // and skipped entirely when the built-in browser tool is disabled.
   {
-    // Name first: every other tool call skips the config read.
     toolMatcher: (toolName: string) =>
-      (toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool') &&
-      getBrowserToolEnabled(),
+      toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool',
     resolveRequiredPath: () => {
       return existsSync(BROWSER_TOOLS_DOC_PATH) ? BROWSER_TOOLS_DOC_PATH : null;
     },
     blockMessage:
-      'You must read the browser tools guide before using browser automation. Read {filePath} first (Read tool or `cat` in Bash), then retry.',
+      'You must read the browser tools guide before using browser automation. Please read the file at {filePath} first, then retry.',
     strict: true,
+    requiresBrowserToolEnabled: true,
   },
 ];
-
-// ============================================================
-// Shell Reads
-// ============================================================
-
-/** Commands that print a file for the model, whole or in part (like Read with offset/limit). */
-const FILE_READERS = new Set(['cat', 'bat', 'less', 'more', 'nl', 'head', 'tail', 'sed']);
-
-/** Cheap pre-check so most Bash calls skip the shell parse. */
-const MENTIONS_FILE_READER = new RegExp(`\\b(?:${[...FILE_READERS].join('|')})\\b`);
-
-/** Prefixes expandPath turns into the home directory. */
-const HOME_PREFIX = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/;
-
-/** The bash-parser AST nodes walked below (bash-validator.ts types the full set). */
-interface ShellWord {
-  type: 'Word';
-  text: string;
-  expansion?: Array<{ type: string; parameter?: string }>;
-}
-
-interface ShellRedirect {
-  type: 'Redirect';
-  op: { text: string };
-  file: ShellWord;
-  numberIo?: { text: string };
-}
-
-interface ShellNode {
-  type: string;
-  /** Script, CompoundList, Pipeline */
-  commands?: ShellNode[];
-  /** Subshell */
-  list?: ShellNode;
-  /** LogicalExpression */
-  left?: ShellNode;
-  right?: ShellNode;
-  /** Command */
-  name?: ShellWord;
-  prefix?: Array<{ type: string }>;
-  suffix?: Array<{ type: string }>;
-  async?: boolean;
-}
-
-/**
- * Absolute paths of the files a Bash command prints for the model with a reader
- * (cat, head, sed -n …). Searching or counting a file (grep, wc), even through a
- * pipe, does not show it, and neither does sending the output to a file.
- */
-function getBashReadPaths(command: string): string[] {
-  // bash-parser parses heredoc bodies as commands, so their lines would look like reads.
-  if (!MENTIONS_FILE_READER.test(command) || command.includes('<<')) return [];
-  const paths: string[] = [];
-  try {
-    collectReads(bashParser(command) as ShellNode, paths);
-  } catch {
-    return []; // unparseable: count nothing
-  }
-  return paths;
-}
-
-function collectReads(node: ShellNode, paths: string[]): void {
-  switch (node.type) {
-    case 'Script':
-    case 'CompoundList':
-      for (const child of node.commands ?? []) collectReads(child, paths);
-      break;
-    case 'Subshell':
-      if (node.list) collectReads(node.list, paths);
-      break;
-    case 'LogicalExpression':
-      if (node.left) collectReads(node.left, paths);
-      if (node.right) collectReads(node.right, paths);
-      break;
-    case 'Pipeline': {
-      // The output reaches the model only if every later command is a reader too (`| head -50`).
-      const commands = node.commands ?? [];
-      commands.forEach((child, i) => {
-        if (commands.slice(i + 1).every((next) => readerFiles(next) !== null)) collectReads(child, paths);
-      });
-      break;
-    }
-    case 'Command':
-      paths.push(...(readerFiles(node) ?? []));
-      break;
-  }
-}
-
-/**
- * The files a reader command prints, or null when the node is not a reader whose
- * output reaches the model (any other command, a background job, output sent to a file).
- */
-function readerFiles(node: ShellNode): string[] | null {
-  if (node.type !== 'Command' || !node.name || node.async) return null;
-  const redirects = [...(node.prefix ?? []), ...(node.suffix ?? [])].filter(
-    (item): item is ShellRedirect => item.type === 'Redirect',
-  );
-  if (redirects.some(sendsStdoutToFile)) return null;
-
-  const words = (node.suffix ?? []).filter((item): item is ShellWord => item.type === 'Word');
-  let argv = [node.name, ...words].map(shellWordText);
-  // `command cat` runs cat; `command -v cat` only looks it up (and is no reader below).
-  if (argv[0] === 'command') argv = argv.slice(argv[1] === '-p' ? 2 : 1);
-  const name = argv[0] ? basename(argv[0]) : null; // also /bin/cat, /usr/bin/sed
-  if (!name || !FILE_READERS.has(name)) return null;
-
-  const operands = name === 'sed' ? sedInputFiles(argv.slice(1)) : readerOperands(argv.slice(1));
-  if (!operands) return null;
-  for (const redirect of redirects) {
-    if (redirect.op.text === '<') operands.push(shellWordText(redirect.file));
-  }
-  return operands.flatMap((operand) => {
-    const path = operand === null ? null : toReadPath(operand);
-    return path ? [path] : [];
-  });
-}
-
-/** `>`, `>>`, `>|` and `>&` to a file keep stdout from the model; `2>` and `>&2` do not. */
-function sendsStdoutToFile(redirect: ShellRedirect): boolean {
-  if ((redirect.numberIo?.text ?? '1') !== '1') return false;
-  if (redirect.op.text === '>&') return !/^\d+$/.test(redirect.file.text);
-  return redirect.op.text === '>' || redirect.op.text === '>>' || redirect.op.text === '>|';
-}
-
-/**
- * A word as the shell expands it, or null when that depends on more than $HOME.
- * bash-parser strips quotes only from words without expansions.
- */
-function shellWordText(word: ShellWord): string | null {
-  if (!word.expansion) return word.text;
-  if (word.expansion.some((part) => part.type !== 'ParameterExpansion' || part.parameter !== 'HOME')) return null;
-  return word.text.replace(/["']/g, '');
-}
-
-/** File operands: everything that is not a flag, and everything after `--` (`-` is stdin). */
-function readerOperands(args: Array<string | null>): Array<string | null> {
-  const end = args.indexOf('--');
-  const options = end === -1 ? args : args.slice(0, end);
-  const rest = end === -1 ? [] : args.slice(end + 1);
-  return [...options.filter((arg) => !arg?.startsWith('-')), ...rest];
-}
-
-/**
- * sed's input files: its operands minus the script, which is the first one unless
- * -e/-f gave it. null for -i/-I, which edit files in place and print nothing.
- */
-function sedInputFiles(args: Array<string | null>): Array<string | null> | null {
-  const operands: Array<string | null> = [];
-  let scriptFromOption = false;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i] ?? null;
-    if (arg === '--') {
-      operands.push(...args.slice(i + 1));
-      break;
-    }
-    if (arg?.startsWith('--')) {
-      const option = arg.split('=', 1)[0];
-      if (option === '--in-place') return null;
-      if (option === '--expression' || option === '--file') {
-        scriptFromOption = true;
-        if (!arg.includes('=')) i++;
-      }
-    } else if (arg?.startsWith('-') && arg.length > 1) {
-      for (let j = 1; j < arg.length; j++) {
-        if (arg[j] === 'i' || arg[j] === 'I') return null;
-        if (arg[j] === 'e' || arg[j] === 'f') {
-          scriptFromOption = true;
-          if (j === arg.length - 1) i++; // the script is the next argument
-          break;
-        }
-      }
-    } else {
-      operands.push(arg);
-    }
-  }
-  return scriptFromOption ? operands : operands.slice(1);
-}
-
-/** Absolute form of a path operand; null for relative ones, since the shell's cwd is not known here. */
-function toReadPath(operand: string): string | null {
-  return isAbsolute(operand) || HOME_PREFIX.test(operand) ? expandPath(operand) : null;
-}
 
 // ============================================================
 // PrerequisiteManager
@@ -307,17 +111,31 @@ export class PrerequisiteManager {
   private readFiles: Set<string> = new Set();
   private rejectionCounts: Map<string, number> = new Map();
   private pendingSkillPaths: Set<string> = new Set();
+  private preparedSourceGuides = new Map<string, { version: string; assistantGeneration?: number }>();
+  private catalogByPath = new Map<string, CatalogSkillRef>();
   private workspaceRootPath: string;
   private onDebug?: (message: string) => void;
+  private browserToolEnabledOverride?: boolean;
 
   constructor(config: PrerequisiteManagerConfig) {
     this.workspaceRootPath = config.workspaceRootPath;
     this.onDebug = config.onDebug;
+    this.browserToolEnabledOverride = config.browserToolEnabled;
+  }
+
+  /** Workspace changes must never reuse another workspace's guide or Skill state. */
+  setWorkspaceRootPath(workspaceRootPath: string): void {
+    if (resolve(workspaceRootPath) === resolve(this.workspaceRootPath)) return;
+
+    this.workspaceRootPath = workspaceRootPath;
+    this.catalogByPath.clear();
+    this.resetReadState();
+    this.onDebug?.(`Prerequisite: switched workspace root to ${workspaceRootPath}`);
   }
 
   /**
    * Register skill SKILL.md paths as prerequisites.
-   * All tool calls (except Read, and Bash reading one of these files) are blocked
+   * All tool calls (except Read targeting these paths) are blocked
    * until the files have been read.
    */
   registerSkillPrerequisites(paths: string[]): void {
@@ -329,17 +147,49 @@ export class PrerequisiteManager {
   }
 
   /**
-   * Check if a tool call's prerequisites are met.
-   * Iterates rules, checks if required files have been read.
-   * After MAX_REJECTIONS blocks for the same path, allows through gracefully.
+   * Remember catalog SKILL.md paths for this turn so a model-initiated Read
+   * can activate that skill's requiredSources.
    */
-  checkPrerequisites(toolName: string): PrerequisiteCheckResult {
+  setCatalogSkills(entries: CatalogSkillRef[]): void {
+    this.catalogByPath.clear();
+    for (const entry of entries) {
+      this.catalogByPath.set(catalogPathKey(entry.skillMdPath), entry);
+    }
+  }
+
+  /**
+   * If Read/cat targets a catalog SKILL.md, return that entry.
+   * Only handbook paths count — arbitrary file Reads do not open sources.
+   */
+  findCatalogSkillForTool(toolName: string, input: Record<string, unknown>): CatalogSkillRef | null {
+    for (const candidate of extractSkillReadCandidates(toolName, input)) {
+      const hit = this.catalogByPath.get(catalogPathKey(candidate));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * Check if a tool call's prerequisites are met.
+   * Source guides are prepared internally on demand. Skill/browser prerequisites
+   * retain their existing model-driven read behavior.
+   */
+  checkPrerequisites(toolName: string, assistantGeneration?: number): PrerequisiteCheckResult {
     // Check dynamic skill prerequisites first
     const skillResult = this.checkSkillPrerequisites(toolName);
     if (!skillResult.allowed) return skillResult;
 
+    const sourceSlug = getSourceSlugForTool(toolName);
+    if (sourceSlug) {
+      return this.checkSourceGuidePrerequisite(sourceSlug, assistantGeneration);
+    }
+
     for (const rule of RULES) {
       if (!rule.toolMatcher(toolName)) continue;
+      if (
+        rule.requiresBrowserToolEnabled &&
+        !(this.browserToolEnabledOverride ?? getBrowserToolEnabled())
+      ) continue;
 
       const requiredPath = rule.resolveRequiredPath(toolName, this.workspaceRootPath);
       if (!requiredPath) continue; // No guide.md exists, skip
@@ -365,6 +215,97 @@ export class PrerequisiteManager {
     }
 
     return { allowed: true };
+  }
+
+  private checkSourceGuidePrerequisite(
+    sourceSlug: string,
+    assistantGeneration?: number,
+  ): PrerequisiteCheckResult {
+    const filePath = resolve(this.workspaceRootPath, 'sources', sourceSlug, 'guide.md');
+    let content: string;
+    try {
+      content = readFileSync(filePath, 'utf8');
+    } catch (error) {
+      this.preparedSourceGuides.delete(sourceSlug);
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { allowed: true };
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        allowed: false,
+        blockReason: `Source "${sourceSlug}" has a guide that cannot be read at ${filePath}: ${detail}`,
+      };
+    }
+
+    if (!hasMeaningfulSourceGuide(content)) {
+      this.preparedSourceGuides.delete(sourceSlug);
+      return { allowed: true };
+    }
+
+    const version = createHash('sha256').update(content).digest('hex');
+    const prepared = this.preparedSourceGuides.get(sourceSlug);
+    const alreadyPrepared = prepared?.version === version;
+    const sameGeneration = alreadyPrepared
+      && assistantGeneration !== undefined
+      && prepared.assistantGeneration === assistantGeneration;
+
+    if (alreadyPrepared && !sameGeneration) {
+      return { allowed: true };
+    }
+
+    if (prepared && !alreadyPrepared) {
+      this.preparedSourceGuides.delete(sourceSlug);
+    }
+
+    this.onDebug?.(
+      sameGeneration
+        ? `Source guide preparation: deferring sibling call for ${sourceSlug}`
+        : `Source guide preparation required: ${sourceSlug} (${filePath})`,
+    );
+
+    return {
+      allowed: false,
+      sourceGuide: {
+        sourceSlug,
+        filePath,
+        content,
+        version,
+        alreadyPreparedInGeneration: sameGeneration,
+      },
+    };
+  }
+
+  /** Mark a source guide ready only after its content was returned to model history. */
+  markSourceGuidePrepared(
+    requirement: Pick<SourceGuideRequirement, 'sourceSlug' | 'filePath' | 'version'>,
+    assistantGeneration?: number,
+  ): void {
+    this.preparedSourceGuides.set(requirement.sourceSlug, {
+      version: requirement.version,
+      assistantGeneration,
+    });
+    this.readFiles.add(expandPath(requirement.filePath));
+    this.onDebug?.(`Source guide prepared: ${requirement.sourceSlug}`);
+  }
+
+  /** A user/model-directed Read counts only after its successful tool result. */
+  trackSuccessfulSourceGuideRead(toolInput: Record<string, unknown>): void {
+    const filePath = typeof toolInput.file_path === 'string'
+      ? toolInput.file_path
+      : typeof toolInput.path === 'string'
+        ? toolInput.path
+        : null;
+    if (!filePath) return;
+
+    const expanded = resolve(expandPath(filePath));
+    const fromSources = relative(resolve(this.workspaceRootPath, 'sources'), expanded);
+    const parts = fromSources.split(sep);
+    if (parts.length !== 2 || parts[1] !== 'guide.md' || !parts[0] || parts[0] === '..') return;
+
+    const inspection = this.checkSourceGuidePrerequisite(parts[0]);
+    if (inspection.sourceGuide) {
+      this.markSourceGuidePrepared(inspection.sourceGuide);
+    }
   }
 
   /**
@@ -395,39 +336,41 @@ export class PrerequisiteManager {
   }
 
   /**
-   * Track a Read tool call. Extracts file_path from tool input,
+   * Track a successful Read result. Extracts file_path from tool input,
    * normalizes it, and adds to the read set.
    * Also clears matching pending skill paths.
    */
   trackReadTool(toolInput: Record<string, unknown>): void {
     const filePath = (toolInput.file_path as string) || (toolInput.path as string);
     if (!filePath) return;
-    this.markRead(expandPath(filePath), 'Read');
+
+    const expanded = expandPath(filePath);
+    this.readFiles.add(expanded);
+
+    // Clear matching pending skill path
+    if (this.pendingSkillPaths.has(expanded)) {
+      this.pendingSkillPaths.delete(expanded);
+      this.onDebug?.(`Prerequisite: cleared skill prerequisite ${expanded}`);
+    }
+
+    this.onDebug?.(`Prerequisite: tracked read of ${expanded}`);
   }
 
   /**
-   * Prerequisite check for a Bash call, run from the pre-tool-use pipeline.
-   * Files the command prints with a reader (cat, head, sed -n …) count as read,
-   * like the Read tool. Reading a pending skill file is how the agent clears it,
-   * so such a call gets past the skill gate.
+   * Check if a Bash command is reading a pending skill file.
+   * Called before execution; does not mark an attempted read as successful.
    */
-  checkBashPrerequisites(command: string): PrerequisiteCheckResult {
-    const paths = getBashReadPaths(command);
-    if (!paths.some((path) => this.pendingSkillPaths.has(path))) {
-      const result = this.checkPrerequisites('Bash');
-      if (!result.allowed) return result; // held at the skill gate, so nothing was read
-    }
-    for (const path of paths) this.markRead(path, 'Bash');
-    return { allowed: true };
+  isPendingSkillReadCommand(input: Record<string, unknown>): boolean {
+    return extractSkillReadCandidates('Bash', input)
+      .some(path => this.pendingSkillPaths.has(expandPath(path)));
   }
 
-  /** Add a file to the read set and clear its skill prerequisite. */
-  private markRead(path: string, via: 'Read' | 'Bash'): void {
-    this.readFiles.add(path);
-    if (this.pendingSkillPaths.delete(path)) {
-      this.onDebug?.(`Prerequisite: cleared skill prerequisite via ${via}: ${path}`);
+  trackSuccessfulBashSkillRead(input: Record<string, unknown>): void {
+    for (const path of extractSkillReadCandidates('Bash', input)) {
+      if (this.pendingSkillPaths.has(expandPath(path)) || this.catalogByPath.has(catalogPathKey(path))) {
+        this.trackReadTool({ file_path: path });
+      }
     }
-    this.onDebug?.(`Prerequisite: tracked read of ${path} (${via})`);
   }
 
   /**
@@ -441,6 +384,7 @@ export class PrerequisiteManager {
     this.readFiles.clear();
     this.rejectionCounts.clear();
     this.pendingSkillPaths.clear();
+    this.preparedSourceGuides.clear();
     this.onDebug?.(`Prerequisite: reset read state (cleared ${count} reads, ${skillCount} skill prerequisites)`);
   }
 
@@ -450,4 +394,51 @@ export class PrerequisiteManager {
   hasRead(filePath: string): boolean {
     return this.readFiles.has(expandPath(filePath));
   }
+}
+
+export function extractSkillMdPathsFromCommand(command: string): string[] {
+  // Only complete cat reads count. Mentioning a path in echo/ls, redirecting
+  // output, or reading a snippet must not satisfy a skill prerequisite.
+  if (/[$`\n\r]/.test(command)) return [];
+  try {
+    const paths: string[] = [];
+    let needsCommand = true;
+    let hasOperand = false;
+    for (const token of shellParse(command)) {
+      if (typeof token !== 'string') {
+        if ('op' in token && token.op === '&&' && hasOperand) {
+          needsCommand = true;
+          hasOperand = false;
+          continue;
+        }
+        return [];
+      }
+      if (needsCommand) {
+        if (!['cat', '/bin/cat', '/usr/bin/cat'].includes(token)) return [];
+        needsCommand = false;
+      } else if (token === '--' && !hasOperand) {
+        continue;
+      } else {
+        if (!/^(?:\/|~\/|[A-Za-z]:[\\/]).*[/\\]SKILL\.md$/.test(token)) return [];
+        paths.push(token);
+        hasOperand = true;
+      }
+    }
+    return hasOperand ? paths : [];
+  } catch {
+    return [];
+  }
+}
+
+export function extractSkillReadCandidates(toolName: string, input: Record<string, unknown>): string[] {
+  if (toolName === 'Read') {
+    const filePath = (typeof input.file_path === 'string' && input.file_path)
+      || (typeof input.path === 'string' && input.path)
+      || '';
+    return filePath ? [filePath] : [];
+  }
+  if (toolName === 'Bash' && typeof input.command === 'string') {
+    return extractSkillMdPathsFromCommand(input.command);
+  }
+  return [];
 }

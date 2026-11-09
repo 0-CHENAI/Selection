@@ -17,6 +17,11 @@ import { createContext, useContext, type ReactNode } from 'react'
  * All actions are optional - platforms only implement what they support
  */
 export interface PlatformActions {
+  /** Optional device-local annotation drafts; keys contain only a content digest. */
+  onReadAnnotationDraft?: (key: string) => string | undefined
+  onWriteAnnotationDraft?: (key: string, value: string | undefined) => void
+  onManageArtifact?: (path: string, sessionId?: string, alternativePaths?: string[], versionId?: string) => void | Promise<void>
+
   /**
    * Open a file in the default application (Electron: shell.openPath)
    * Web: Could show file contents inline or provide download
@@ -113,6 +118,13 @@ export interface PlatformActions {
    * No-op on non-macOS platforms or in web viewer.
    */
   onSetTrafficLightsVisible?: (visible: boolean) => void
+
+  /**
+   * CSS padding-right that clears the Windows overlay caption buttons.
+   * Provided only on Windows desktop Electron. Preview headers that sit
+   * under the titlebar must apply this so zoom/close controls stay clickable.
+   */
+  windowsCaptionInsetPadding?: string
 }
 
 const PlatformContext = createContext<PlatformActions>({})

@@ -1,0 +1,102 @@
+type SidebarLinkLike = {
+  id: string
+  items?: unknown
+  expandable?: boolean
+  expanded?: boolean
+  onToggle?: unknown
+  sortable?: unknown
+}
+
+type SessionGroupingMode = 'date' | 'status' | 'unread' | 'project'
+
+/** Session lists no longer expose grouping controls; persist and render date only. */
+export function normalizeSessionGroupingMode(_mode?: SessionGroupingMode | string): 'date' {
+  return 'date'
+}
+
+/** Keep a single sidebar include. Drop exclude and multi-project combos (#263). */
+export function sanitizeSidebarProjectScope(
+  projects?: Record<string, 'include' | 'exclude'>,
+): Record<string, 'include'> {
+  if (!projects) return {}
+  const entries = Object.entries(projects)
+  if (entries.length !== 1) return {}
+  const [projectId, mode] = entries[0]
+  return mode === 'include' ? { [projectId]: 'include' } : {}
+}
+
+const REMOVED_ROOT_LINKS = new Set(['nav:labels'])
+
+/**
+ * Produces the issue #180/#181 primary navigation without mutating the link
+ * definitions. Keeping this as a pure transform makes the ordering and removal
+ * rules independently testable from the large AppShell component.
+ */
+export function prepareOrdinarySessionSidebarLinks<T extends SidebarLinkLike>(links: T[]): T[] {
+  const byId = new Map(links.map(link => [link.id, link]))
+  const ordinary = byId.get('nav:allSessions')
+  const projects = byId.get('nav:projects')
+  const office = byId.get('nav:office') ?? byId.get('nav:ppt')
+  const sources = byId.get('nav:sources')
+  const separator = byId.get('separator:chats-sources')
+
+  const ordered: T[] = []
+  if (ordinary) {
+    ordered.push({
+      ...ordinary,
+      items: undefined,
+      expandable: false,
+      expanded: undefined,
+      onToggle: undefined,
+      sortable: undefined,
+    })
+  }
+  if (projects) ordered.push(projects)
+  if (office) {
+    ordered.push({
+      ...office,
+      items: undefined,
+      expandable: false,
+      expanded: undefined,
+      onToggle: undefined,
+    })
+  }
+  if (separator) ordered.push(separator)
+  if (sources) ordered.push(sources)
+
+  const promoted = new Set([
+    'nav:allSessions',
+    'nav:projects',
+    'nav:office',
+    'nav:ppt',
+    'separator:chats-sources',
+    'nav:sources',
+  ])
+  for (const link of links) {
+    if (!promoted.has(link.id) && !REMOVED_ROOT_LINKS.has(link.id)) ordered.push(link)
+  }
+
+  return ordered
+}
+
+export type PersistedSessionViewFilters = Record<string, {
+  statuses?: Record<string, unknown> | unknown[]
+  labels?: Record<string, unknown> | unknown[]
+  projects?: Record<string, 'include' | 'exclude'>
+  groupingMode?: string
+}>
+
+/** Drop obsolete persisted filters while retaining a single sidebar project scope. */
+export function sanitizeRemovedSessionFilters<T extends PersistedSessionViewFilters>(saved: T): T {
+  const sanitized = Object.fromEntries(Object.entries(saved).map(([key, entry]) => [
+    key,
+    {
+      ...entry,
+      statuses: {},
+      labels: {},
+      projects: sanitizeSidebarProjectScope(entry.projects),
+      groupingMode: 'date',
+    },
+  ]))
+  return sanitized as T
+}

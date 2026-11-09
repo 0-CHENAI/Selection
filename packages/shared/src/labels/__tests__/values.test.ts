@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { extractLabelId, toggleLabelInList, validateLabelValue, formatDisplayValue, LabelEntrySet } from '../values.ts';
+import { extractLabelId, toggleLabelInList, validateLabelValue, formatDisplayValue } from '../values.ts';
 
 describe('extractLabelId', () => {
   test('returns the entry verbatim for boolean labels', () => {
@@ -90,43 +90,5 @@ describe('formatDisplayValue', () => {
 
   test('scheme-less link values display as-is', () => {
     expect(formatDisplayValue('example.com/path', 'link')).toBe('example.com/path');
-  });
-});
-
-describe('LabelEntrySet', () => {
-  test('a plain entry is present when the label is there in any form', () => {
-    const set = new LabelEntrySet(['bug::bug', 'trip::', 'priority::3']);
-    expect(set.has('bug')).toBe(true);
-    expect(set.has('bug::')).toBe(true);
-    expect(set.has('trip')).toBe(true);
-    expect(set.has('priority')).toBe(true);
-    expect(set.has('code')).toBe(false);
-  });
-
-  test('a valued entry needs the same value: exact by default, case-folded where the rule says so', () => {
-    const exact = new LabelEntrySet(['doc::https://youtu.be/dQw4w9WgXcQ', 'bug']);
-    expect(exact.has('doc::https://youtu.be/dQw4w9WgXcQ')).toBe(true);
-    expect(exact.has('doc::https://youtu.be/dqw4w9wgxcq')).toBe(false);
-    // A plain entry says nothing about values
-    expect(exact.has('bug::Bug')).toBe(false);
-
-    const folded = new LabelEntrySet(['linear-issue::CRA-1', 'doc::https://a.io/X'], id => id === 'linear-issue');
-    expect(folded.has('linear-issue::cra-1')).toBe(true);
-    expect(folded.has('linear-issue::CRA-2')).toBe(false);
-    expect(folded.has('doc::https://a.io/x')).toBe(false);
-  });
-
-  test('values keep everything after the first separator', () => {
-    const set = new LabelEntrySet(['url::https://a::b']);
-    expect(set.has('url::https://a::b')).toBe(true);
-    expect(set.has('url::https://a')).toBe(false);
-  });
-
-  test('add extends the set', () => {
-    const set = new LabelEntrySet();
-    expect(set.has('bug')).toBe(false);
-    set.add('bug::Bug');
-    expect(set.has('bug')).toBe(true);
-    expect(set.has('bug::Bug')).toBe(true);
   });
 });

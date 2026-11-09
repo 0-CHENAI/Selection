@@ -1,0 +1,74 @@
+#!/bin/sh
+# Transparent Selection launcher: always use the bundled binary and preserve
+# OfficeCLI's resident session. The only compatibility hook is post-create
+# Word Heading/TOC outline repair.
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+UNAME=$(uname -s 2>/dev/null || echo unknown)
+MACHINE=$(uname -m 2>/dev/null || echo unknown)
+
+case "$UNAME" in
+  Darwin)
+    ARCH=x64
+    [ "$MACHINE" = "arm64" ] && ARCH=arm64
+    BIN=$DIR/darwin-$ARCH/officecli
+    ;;
+  Linux)
+    ARCH=x64
+    if [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ]; then ARCH=arm64; fi
+    BIN=$DIR/linux-$ARCH/officecli
+    ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    BIN=$DIR/win32-x64/officecli.exe
+    ;;
+  *) BIN="" ;;
+esac
+
+if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+  echo "Selection does not include bundled OfficeCLI for this platform. Repair or reinstall Selection." >&2
+  exit 127
+fi
+
+# Selection owns the Word workflow; keep upstream runtime upgrades from restoring
+# the legacy repeated QA instructions. Other aliases remain binary-owned.
+WORD_GUIDE=$DIR/../skills/officecli/guides/word-reference.md
+if [ "$#" -eq 2 ] && [ "$1" = "load_skill" ] && [ "$2" = "word" ] && [ -f "$WORD_GUIDE" ]; then
+  cat "$WORD_GUIDE"
+  exit $?
+fi
+
+export OFFICECLI_SKIP_UPDATE=1
+
+verb=""
+docx=""
+for arg in "$@"; do
+  case "$arg" in
+    --*|-*) ;;
+    *)
+      [ -z "$verb" ] && verb=$arg
+      if [ -z "$docx" ]; then
+        case "$arg" in *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;; esac
+      fi
+      ;;
+  esac
+done
+
+"$BIN" "$@"
+status=$?
+[ $status -ne 0 ] && exit $status
+
+if [ "$verb" = "create" ] && [ -n "$docx" ]; then
+  BUN=$DIR/../../vendor/bun/bun
+  ENSURE=$DIR/../scripts/officecli-heading-repair.ts
+  if [ ! -x "$BUN" ] || [ ! -f "$ENSURE" ]; then
+    echo "Selection created the Word file, but its Heading/TOC compatibility helper is unavailable." >&2
+    exit 127
+  fi
+  "$BUN" "$ENSURE" "$BIN" "$docx"
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo "Selection created the Word file, but could not verify Heading 1-3 outline levels." >&2
+    exit $status
+  fi
+fi
+
+exit 0

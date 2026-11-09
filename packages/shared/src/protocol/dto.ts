@@ -1,3 +1,6 @@
+import type { OfficeDocumentState, OfficeRequest } from './office'
+import type { PptProgress, PptRequest, PptRevision } from './ppt'
+import type { HandoverLink, HandoverOperation } from './handover'
 /**
  * Server DTO types — data shapes used by RPC handlers and SessionManager.
  *
@@ -11,13 +14,17 @@ import type {
   TypedError,
   ContentBadge,
   ToolDisplayMeta,
+  AgentToolResultContent,
   AnnotationV1,
-  ContextUsageSnapshot,
+  AnnotationFeedbackReference,
   PermissionRequest as BasePermissionRequest,
+  QueuedMessageContext,
+  TextStreamPhase,
 } from '@craft-agent/core/types'
 import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
-import type { BoundPr, PrMonitorState } from './pr-watch'
+import type { SessionTokenUsage, SwarmAggregationContract } from '../sessions/types'
+import type { WorkMode, WorkModeMetadata } from '../sessions/work-mode'
 import type { CustomEndpointConfig } from '../config/llm-connections'
 import type {
   AuthRequest as SharedAuthRequest,
@@ -45,7 +52,31 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Electron-specific Session type (includes runtime state).
  * Extends core Session with messages array and processing state.
  */
-export interface Session {
+export interface ProgressSupervisionView {
+  phase: string; reason?: string; mode: 'off' | 'observe' | 'assist'
+  evaluationTokens: number; estimatedTokens: number; redirects: number
+  nextStep?: string; evidenceIds?: string[]
+  evidence?: Array<{ id: string; summary: string }>
+}
+
+export interface RuntimeRecoveryView {
+  version: 1
+  phase: 'running' | 'recovering' | 'blocked' | 'completed' | 'cancelled'
+  reason?: string
+  completedSteps: number
+  pendingTools: string[]
+  updatedAt: number
+  canResume: boolean
+}
+
+export interface Session extends WorkModeMetadata {
+  ppt?: PptRequest
+  /** Word / Excel document mode and selected case. Orthogonal to workMode. Null clears it. */
+  office?: OfficeDocumentState | null
+  pptProgress?: PptProgress
+  handover?: HandoverLink
+  runtimeRecovery?: RuntimeRecoveryView
+  progressSupervision?: ProgressSupervisionView
   id: string
   workspaceId: string
   workspaceName: string
@@ -56,7 +87,7 @@ export interface Session {
   messages: Message[]
   isProcessing: boolean
   isFlagged?: boolean
-  /** Permission mode for this session ('safe', 'ask', 'guarded', 'allow-all') */
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode
   sessionStatus?: SessionStatus
   /** Labels (additive tags, many-per-session — bare IDs or "id::value" entries) */
@@ -76,12 +107,7 @@ export interface Session {
   model?: string
   llmConnection?: string
   thinkingLevel?: ThinkingLevel
-  /** Coding mode: lean coding prompt + session-tool profile (fixed once the session has messages) */
-  codingMode?: boolean
-  /** Coding mode: PRs pinned to this session (chat-header PR carousel; see pr_bind / pr_unbind) */
-  boundPrs?: BoundPr[]
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id */
-  prMonitors?: Record<string, PrMonitorState>
+  fastMode?: boolean
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
   lastFinalMessageId?: string
   isAsyncOperationOngoing?: boolean
@@ -91,20 +117,17 @@ export interface Session {
     message: string
     statusType?: string
   }
+  /** Renderer-only: when the current generating turn started (elapsed-time clock). */
+  processingStartedAt?: number
+  /**
+   * Renderer-only: turnIds from a live text stream we just aborted.
+   * Leftover text_delta / text_complete events with these ids must not
+   * create a new assistant bubble under the follow-up.
+   */
+  suppressedTurnIds?: string[]
   createdAt?: number
   messageCount?: number
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    contextTokens: number
-    costUsd: number
-    cacheReadTokens?: number
-    cacheCreationTokens?: number
-    /** Model's context window size in tokens (from SDK modelUsage) */
-    contextWindow?: number
-    contextUsage?: ContextUsageSnapshot
-  }
+  tokenUsage?: SessionTokenUsage
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
   isArchived?: boolean
@@ -112,13 +135,10 @@ export interface Session {
   supportsBranching?: boolean
   /** Workspace-scoped project id this session is bound to (undefined = unbound) */
   projectId?: string
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
+  sharedProjectMemoryEnabled?: boolean
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task) */
   parentSessionId?: string
-  /**
-   * Id of the session this one was branched from (undefined = not a branch). Computed on read
-   * from the persisted `branchFromSessionPath`; the session list nests a branch under its source.
-   */
-  branchFromSessionId?: string
   /** Kanban board column id ('todo' | 'in-progress' | 'done'); independent of sessionStatus */
   kanbanColumn?: string
   /** Tasks Conductor: slug of the task spec this session belongs to. */
@@ -127,13 +147,32 @@ export interface Session {
   taskRunId?: string
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   /** Tasks Conductor: total DAG node count (orchestrator only) — stable board progress denominator. */
   taskNodeCount?: number
   /** Tasks Conductor: generate-time draft orchestrator, hidden from the board until adopted by createTask. */
   taskDraft?: boolean
+  /** Per-session opt-in for autonomous Swarm delegation. */
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
+  orchestrationAggregation?: SwarmAggregationContract
 }
 
 export interface CreateSessionOptions {
+  ppt?: PptRequest
+  office?: OfficeDocumentState
+  workMode?: WorkMode
   name?: string
   permissionMode?: PermissionMode
   /**
@@ -143,6 +182,7 @@ export interface CreateSessionOptions {
    * the API request for models with `reasoning: false` in the Pi SDK catalog.
    */
   thinkingLevel?: ThinkingLevel
+  fastMode?: boolean
   /**
    * Working directory for the session:
    * - 'user_default' or undefined: Use workspace's configured default working directory
@@ -154,10 +194,6 @@ export interface CreateSessionOptions {
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string
   hidden?: boolean
-  /** Nobody answers prompts in this session (CLI runs): features that would add a prompt skip it. */
-  unattended?: boolean
-  /** Start in coding mode (lean coding prompt + session-tool profile). Falls back to the workspace default. */
-  codingMode?: boolean
   sessionStatus?: SessionStatus
   labels?: string[]
   isFlagged?: boolean
@@ -179,8 +215,23 @@ export interface CreateSessionOptions {
   taskRunId?: string
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   /** Tasks Conductor: mark the orchestrator as a generate-time draft (hidden until adopted by createTask). */
   taskDraft?: boolean
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
+  orchestrationAggregation?: SwarmAggregationContract
   /**
    * Apply the reserved "Task" label (valueType 'number') after creation. Top-level sessions
    * allocate the next task number; sessions with a `parentSessionId` inherit the parent's
@@ -203,36 +254,6 @@ export interface ImportRemoteSessionTransferResult {
 }
 
 // ---------------------------------------------------------------------------
-// Background tasks — wire contract for sessions:getBackgroundTaskOutput / stopBackgroundTask.
-// ---------------------------------------------------------------------------
-
-export interface BackgroundTaskStep {
-  /** Tool name as the agent called it (`Bash`, `Read`, `mcp__linear__list_issues`) */
-  tool: string
-  /** What the call worked on: a file name, command, pattern, URL or description */
-  label?: string
-}
-
-/** A background task's output, digested for the task chip's card (see server-core background-task-output.ts). */
-export type BackgroundTaskOutput =
-  | { kind: 'text'; text: string; truncated: boolean }
-  | {
-      kind: 'agent'
-      /** The agent's latest message: its progress note while it runs, its answer once done */
-      message: string | null
-      /** Its most recent tool calls, oldest first */
-      steps: BackgroundTaskStep[]
-      truncated: boolean
-    }
-
-export interface StopBackgroundTaskResult {
-  /** True when the stop request reached a live task; the stopped status arrives as a task_completed event */
-  success: boolean
-  /** Why nothing was stopped (e.g. the task ended with the turn that ran it) */
-  error?: string
-}
-
-// ---------------------------------------------------------------------------
 // Tasks (Conductor) DTOs — wire contract for the tasks:* channels.
 // ---------------------------------------------------------------------------
 
@@ -250,25 +271,43 @@ export interface TaskValidationResultDto {
   warnings: TaskValidationIssueDto[]
   /** Pre-flight estimate: total nodes and how many sessions a run would spawn. */
   estimate?: { nodeCount: number; sessionNodeCount: number }
+  /** Parsed spec when validation succeeded — used by the YAML↔canvas sync. */
+  spec?: unknown
+}
+
+export interface TaskSaveRequest {
+  yaml: string
+  expectedEtag: string
+  /** Required when first saving schema_version: 3 over a v1/v2 file that still uses cache: pure. */
+  confirmV3Migration?: boolean
+}
+
+export interface TaskSaveResult {
+  slug: string
+  validation: TaskValidationResultDto
+  spec?: unknown
+  yaml?: string
+  etag?: string
+  sourceVersion?: 1 | 2 | 3
+  migrationWarnings?: string[]
+  conflict?: { code: 'etag-conflict'; expected: string; actual: string }
 }
 
 export interface TaskCreateRequest {
   /** task.yaml source text (authoritative). */
   yaml: string
+  /** Explicit user creation of a plan in this idle PRO root, preserving its history and permissions. */
+  rootSessionId?: string
   /**
-   * When this YAML was authored by a `tasks:generate` orchestrator, the id of that hidden
-   * draft session. tasks:create promotes it in place (clears taskDraft, binds taskSlug)
-   * instead of minting a second top-level session — preventing duplicate board tiles (#bug1).
-   * Only honored when the draft is still unadopted and its slug matches; otherwise ignored.
+   * Deprecated client field. CREATE rejects adoption; proposal sessions are temporary.
    */
   orchestratorSessionId?: string
   /**
-   * Edit-mode bind: the id of an existing, board-visible session (e.g. a quick-add tile) that the
-   * user is saving this spec onto. tasks:create calls `bindExistingSessionToTask` and HARD-ERRORS
-   * if the bind fails — it must never fall through to minting a fresh orchestrator (that would
-   * leave a duplicate tile). Distinct from `orchestratorSessionId`, which adopts a hidden draft.
+   * Deprecated client field. CREATE rejects implicit binding to existing sessions.
    */
   attachToExistingSession?: string
+  /** Legacy migration acknowledgement; CREATE still rejects existing task IDs. */
+  confirmV3Migration?: boolean
 }
 
 export interface TaskCreateResult {
@@ -285,7 +324,20 @@ export interface TaskCreateResult {
   taskLabelId?: string
 }
 
+/** Editor-local conversation; historical proposals are context, never saved definitions. */
+export interface TaskProposalTurn {
+  goal: string
+  yaml?: string
+  status: 'proposed' | 'applied' | 'discarded' | 'superseded' | 'failed'
+}
+
 export interface TaskGenerateRequest {
+  /** Monotonic editor version captured before generation. */
+  baseDraftVersion?: number
+  /** Previous rounds, including whether the user applied or discarded each proposal. */
+  conversation?: TaskProposalTurn[]
+  /** Existing definition to revise; never saved without user confirmation. */
+  currentYaml?: string
   /** Natural-language goal the orchestrator turns into a task.yaml DAG. */
   goal: string
   /** Optional working title for the task / orchestrator session. */
@@ -315,12 +367,13 @@ export interface TaskGenerateRequest {
  * takes longer than the request budget.
  */
 export interface TaskGenerateAck {
-  /** The persistent orchestrator session, reachable immediately so its work is never lost. */
+  /** Temporary proposal session used to correlate events; deleted after generation. */
   orchestratorSessionId: string
 }
 
 export interface TaskGenerateResult {
-  /** The persistent orchestrator session that authored the spec (also handles revisions). */
+  baseDraftVersion?: number
+  /** Temporary proposal session that authored the spec; not a saved task binding. */
   orchestratorSessionId: string
   /** Slug of the authored spec; empty when generation produced an invalid spec. */
   slug: string
@@ -334,39 +387,230 @@ export interface TaskGenerateResult {
 }
 
 export interface TaskRunRequest {
+  resumedFrom?: string
+  /** Save-and-run identity: reject if another editor saved after confirmation. */
+  expectedEtag?: string
   slug: string
   runId?: string
   orchestratorSessionId?: string
   params?: Record<string, unknown>
 }
 
-export interface TaskNodeRunStateDto {
+export interface TaskTemplateSummaryDto {
   id: string
-  /** pending | running | done | failed | cancelled | skipped */
+  name: string
+  description?: string
+  tags?: string[]
+  nodeCount: number
+  createdAt: string
+  updatedAt: string
+  sourceTaskSlug?: string
+}
+
+export interface TaskTemplateDetailDto extends TaskTemplateSummaryDto {
+  spec: unknown
+  yaml: string
+}
+
+export interface TaskTemplateSaveRequest {
+  name: string
+  description?: string
+  tags?: string[]
+  sourceTaskSlug?: string
+  yaml: string
+}
+
+export interface TaskTemplateSaveResult {
+  id: string
+  validation: TaskValidationResultDto
+}
+
+export interface TaskCreateFromTemplateRequest {
+  templateId: string
+  projectId?: string
+}
+
+export interface SwarmRunNodeDto {
+  artifactDelivery?: {
+    candidateDirectory?: string
+    sourceDirectory?: string
+    phase: 'executing' | 'validating' | 'integrating' | 'conflict' | 'validation-failed' | 'integrated' | 'needs-attention'
+    outputs: Record<string, string>
+    checks: string[]
+    conflicts: string[]
+  }
+  sessionId: string
+  parentSessionId?: string
+  name: string
+  role: 'coordinator' | 'worker' | 'reviewer'
+  model?: string
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  depth: number
+  elapsedSeconds: number
+  tokensUsed: number
+  /** Independent token ceiling for this spawned agent. Coordinators have no child-agent ceiling. */
+  tokenBudget?: number
+  lifecycle: 'managed' | 'detached'
+  blocker?: string
+  summary?: string
+}
+
+export interface SwarmRunDetailsDto {
+  orchestrationId: string
+  rootSessionId: string
+  coordinatorSessionId: string
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  blocker?: string
+  /** Highest usage among spawned agents in this run; never a sibling aggregate. */
+  tokensUsed: number
+  /** Independent ceiling applied to each spawned agent. */
+  tokenBudget?: number
+  /** Missing means the legacy run-wide budget contract. */
+  tokenBudgetScope?: 'run' | 'agent'
+  nodes: SwarmRunNodeDto[]
+}
+
+export interface TaskNodeRunStateDto {
+  actor?: { id: string; persona?: string }
+  title?: string
+  /** Frozen node assignment for display; never grants execution authority. */
+  instruction?: string
+  /** First dispatch time in Unix milliseconds; absent on legacy snapshots. */
+  startedAt?: number
+  attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[]
+  approvalFeedback?: string
+  approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }
+  id: string
+  /** Definition id for dynamic map/loop/replica instances. */
+  definitionId?: string
+  /** pending | ready | running | retry-wait | waiting-approval | done | failed | invalid | cancelled | skipped | interrupted */
   state: string
   sessionId?: string
   attempt: number
+  retryCount?: number
+  role?: 'worker' | 'reviewer'
+  model?: string
+  tokensUsed?: number
+  blocker?: string
+  elapsedMs?: number
+  queueMs?: number
+  cacheStatus?: 'none' | 'hit' | 'miss' | 'bypass'
+  cacheCreatedAt?: string
+  cacheSourceRunId?: string
+  verdict?: { result: 'pass' | 'fail'; reason?: string; evidence?: string; nodes?: string[] }
 }
 
 export interface TaskRunSnapshotDto {
+  help?: import('../tasks/task-help').TaskHelpRecord[]
+  coordinatorGate?: import('../tasks/orchestration-decision.ts').CoordinatorGateState
+  research?: import('../tasks/research.ts').ResearchSummary
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  resumedFrom?: string
+  supersededBy?: string
+  workers?: import('../tasks/planner').TaskWorkerRecord[]
+  planChanges?: import('../tasks/planner').PlanChange[]
+  planner?: { phase: import('../tasks/planner').PlannerPhase; pendingResults: import('../tasks/planner').PlannerResultEvent[]; consumedResults: number }
+  /** Owning workspace; optional for compatibility with older hosts. */
+  workspaceId?: string
   slug: string
   runId: string
   taskId: string
-  /** running | paused | verifying | stopped | completed | failed */
+  /** running | pausing | paused | waiting-approval | waiting-budget | waiting-coordinator | verifying | repairing | interrupted | stopped | completed | failed */
   status: string
   orchestratorSessionId?: string
   nodes: TaskNodeRunStateDto[]
+  canRetryFailedNodes?: boolean
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number
+  /** Current user-controlled run ceiling. Missing means unlimited. */
+  tokenBudget?: number
+  blockers?: string[]
+  revision?: number
+  metrics?: {
+    elapsedMs: number
+    queueMs: number
+    modelMs: number
+    tokensUsed: number
+    retries: number
+    repairs: number
+    coordinatorWaitMs: number
+    coordinatorWaits: number
+    cacheHits: number
+    cacheMisses: number
+    cacheBypasses: number
+    verifyBudgetReserved?: number
+    verifyBudgetRemaining?: number
+    criticalPathNodeIds?: string[]
+  }
+}
+
+export interface TaskControlResultDto {
+  snapshot: TaskRunSnapshotDto
+  conflict?: { code: 'conflict'; message: string }
+}
+
+export interface TaskRespondApprovalRequest {
+  slug: string
+  runId: string
+  nodeId: string
+  approved: boolean
+  /** Feedback-only submissions never release the approval gate. */
+  feedbackOnly?: boolean
+  feedback?: string
+}
+
+export interface TaskApplyRunRevisionRequest {
+  slug: string
+  runId: string
+  expectedEtag: string
+  /** Required on confirm; copied from the immediately preceding preview. */
+  expectedRunRevision?: number
+  /** Required on confirm; binds the preview to the exact run graph. */
+  expectedRunSpecHash?: string
+  confirm?: boolean
+  /** Required when apply would upgrade a v1/v2 task or convert cache: pure. */
+  confirmV3Migration?: boolean
+}
+
+export interface TaskApplyRunRevisionResult {
+  impact?: ReturnType<typeof import('../tasks/explain').revisionImpact>
+  diff: { added: string[]; removed: string[]; changed: string[] }
+  applied?: boolean
+  validation: TaskValidationResultDto
+  etag?: string
+  yaml?: string
+  runRevision?: number
+  runSpecHash?: string
+  sourceVersion?: 1 | 2 | 3
+  migrationWarnings?: string[]
+  conflict?:
+    | { code: 'etag-conflict'; expected: string; actual: string }
+    | { code: 'run-revision-conflict'; expected: number; actual: number }
+    | { code: 'run-spec-conflict'; expected: string; actual: string }
+}
+
+export interface TaskUpdateRunLimitsRequest {
+  slug: string
+  runId: string
+  tokenBudget?: number
+  /** Re-enter sensitive params after resume/continue (never persisted in plaintext). */
+  params?: Record<string, unknown>
 }
 
 export interface TaskGetResult {
+  /** Only populated when an orchestrator session is supplied; oldest first. */
+  runHistory?: TaskRunSnapshotDto[]
   slug: string
   validation: TaskValidationResultDto
   /** The parsed TaskSpec (from @craft-agent/shared/tasks) when valid; consumers cast. */
   spec?: unknown
+  yaml?: string
+  etag?: string
+  sourceVersion?: 1 | 2 | 3
+  migrationWarnings?: string[]
   /** Active run snapshot when a runId was supplied and known; otherwise null. */
   run?: TaskRunSnapshotDto | null
+  latestRun?: TaskRunSnapshotDto | null
 }
 
 /** One subtask's outcome in a completed/persisted run, for the editor's Results tab. */
@@ -379,20 +623,10 @@ export interface TaskResultNodeDto {
   sessionId?: string
   /** The node's recorded final output text (from nodes/<id>.json), when present. */
   output?: string
-}
-
-/** One verifier verdict as shown in the Results view. */
-export interface TaskVerdictDto {
-  result: 'pass' | 'fail' | 'unparsed'
-  reason?: string
-  nodes?: string[]
-  /**
-   * `decision` when the verdict was read out of a reply without a VERDICT line by the decision
-   * model (opt-in layer); absent for a parsed VERDICT line. The UI marks inferred verdicts.
-   */
-  via?: 'parsed' | 'decision'
-  /** Decision-model verdicts only: confidence of the winning option (0..1). */
-  confidence?: number
+  attempt?: number
+  /** Frozen plan revision which dispatched this node's latest execution. */
+  revision?: number
+  failureReason?: string
 }
 
 /**
@@ -401,19 +635,31 @@ export interface TaskVerdictDto {
  * `TaskRunSnapshotDto` this survives restart and does not require an active in-memory run.
  */
 export interface TaskResultsDto {
+  help?: import('../tasks/task-help').TaskHelpRecord[]
+  coordinatorGate?: import('../tasks/orchestration-decision.ts').CoordinatorGateState
+  research?: import('../tasks/research.ts').ResearchSummary
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  workers?: import('../tasks/planner').TaskWorkerRecord[]
+  resumedFrom?: string
+  supersededBy?: string
+  taskId?: string
+  orchestratorSessionId?: string
   slug: string
   /** The run inspected; null when the task has never been run. */
   runId: string | null
   /** All run ids for this task (newest last), for a run picker. */
   runIds: string[]
   /** The most recent verdict (kept for back-compat with single-verdict consumers). */
-  verdict?: TaskVerdictDto
+  verdict?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
   /** Every verdict in order (a FAIL→repair loop produces several), for the Results history view. */
-  verdicts?: TaskVerdictDto[]
+  verdicts?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }[]
   /** Repair-loop accounting: attempts consumed (= count of FAIL verdicts) and the resolved cap. */
   repair?: { used: number; max: number }
   /** Terminal run status recovered from the run-log (completed | failed | stopped | …). */
   runStatus?: string
+  tokensUsed?: number
+  /** Latest durable graph revision observed for this run. */
+  revision?: number
   /** The run's acceptance criteria (from the per-run spec snapshot), shown above the verdict. */
   acceptanceCriteria?: string
   nodes: TaskResultNodeDto[]
@@ -434,21 +680,18 @@ export interface PermissionModeState {
 
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
-  | { type: 'text_discard'; sessionId: string; turnId: string }
-  // Remove these turns' assistant text and these tool calls (a reply the backend took back)
-  | { type: 'messages_retracted'; sessionId: string; turnIds: string[]; toolUseIds: string[] }
-  | { type: 'retry'; sessionId: string; phase: 'backoff'; message: string }
-  | { type: 'retry'; sessionId: string; phase: 'active' | 'end' }
-  | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string }
-  | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
-  | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
-  // toolInput: replaces the input sent with tool_start (a browser_tool password fill is redacted once its result is known)
-  | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number; toolInput?: Record<string, unknown> }
+  | { type: 'progress_supervision'; sessionId: string; state: ProgressSupervisionView }
+  | { type: 'answer_preview'; sessionId: string; answerRunId: string; answerRoutingVersion?: 1; userMessageId: string; text: string; toolCallId: string }
+  | { type: 'text_delta'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; delta: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; turnId?: string }
+  | { type: 'text_complete'; sessionId: string; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; artifactVersions?: Message['artifactVersions']; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
+  | { type: 'tool_start'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
+  | { type: 'tool_progress'; sessionId: string; toolUseId: string; progress: NonNullable<Message['toolProgress']> }
+  | { type: 'tool_result'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; toolUseId: string; toolName: string; result: string; content?: AgentToolResultContent[]; toolInput?: Record<string, unknown>; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
   | { type: 'error'; sessionId: string; error: string; timestamp?: number }
   | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number }
-  | { type: 'complete'; sessionId: string; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean; backgroundTasksAlive?: boolean }
-  | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[] }
-  | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' }
+  | { type: 'complete'; sessionId: string; answerRunId?: string; answerRoutingVersion?: 1; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean; backgroundTasksAlive?: boolean; orchestrationPending?: boolean }
+  | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[]; runningChildCount?: number }
+  | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' | 'tool_arguments' }
   | { type: 'info'; sessionId: string; message: string; statusType?: 'compaction_complete'; level?: 'info' | 'warning' | 'error' | 'success'; timestamp?: number }
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'title_regenerating'; sessionId: string; isRegenerating: boolean }
@@ -459,41 +702,63 @@ export type SessionEvent =
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: PermissionModeState['changedBy'] }
   | { type: 'plan_submitted'; sessionId: string; message: Message }
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
-  | { type: 'coding_mode_changed'; sessionId: string; codingMode: boolean }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
   | { type: 'project_id_changed'; sessionId: string; projectId: string | null }
-  | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
-  | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string; kind?: 'workflow' | 'task'; workflowId?: string }
+  | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean; model?: string | null }
+  | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string; kind?: 'workflow'; workflowId?: string; orchestrationId?: string }
   | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
   | { type: 'task_progress'; sessionId: string; toolUseId: string; elapsedSeconds: number; turnId?: string }
-  | { type: 'task_activity'; sessionId: string; taskId: string; toolUseId?: string; summary?: string; lastToolName?: string; toolUses?: number; turnId?: string }
-  | { type: 'task_completed'; sessionId: string; taskId: string; status: 'completed' | 'failed' | 'stopped'; outputFile?: string; summary?: string; turnId?: string; toolUseId?: string; launchedHere?: boolean }
+  | { type: 'task_completed'; sessionId: string; taskId: string; status: 'completed' | 'failed' | 'stopped'; outputFile?: string; summary?: string; turnId?: string; orchestrationId?: string }
   | { type: 'workflow_agent_completed'; sessionId: string; workflowId: string; agentId: string; turnId?: string }
   | { type: 'shell_killed'; sessionId: string; shellId: string }
   | { type: 'user_message'; sessionId: string; message: Message; status: 'accepted' | 'queued' | 'processing'; optimisticMessageId?: string }
+  | { type: 'queue_changed'; sessionId: string; messages: Message[] }
   | { type: 'session_flagged'; sessionId: string }
   | { type: 'session_unflagged'; sessionId: string }
   | { type: 'session_archived'; sessionId: string }
   | { type: 'session_unarchived'; sessionId: string }
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
+  | { type: 'thinking_probe'; sessionId: string; modelId: string; provider?: string; mode: 'unsupported' | 'always-on' | 'levels'; levels: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; level?: string }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'ppt' | 'office' | 'pptProgress' | 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
   | { type: 'session_unshared'; sessionId: string }
   | { type: 'auth_request'; sessionId: string; message: Message; request: SharedAuthRequest }
   | { type: 'auth_completed'; sessionId: string; requestId: string; success: boolean; cancelled?: boolean; error?: string }
+  | { type: 'clarification_request'; sessionId: string; message: Message; pause: boolean }
+  | { type: 'clarification_resolved'; sessionId: string; message: Message }
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
-  | { type: 'usage_update'; sessionId: string; tokenUsage: Pick<NonNullable<Session['tokenUsage']>, 'inputTokens' | 'contextWindow' | 'contextUsage'> }
+  | { type: 'usage_update'; sessionId: string; tokenUsage: SessionTokenUsage }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
+  | { type: 'regenerate_started'; sessionId: string; runId: string }
+  | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string; runId?: string }
+  | { type: 'messages_restored'; sessionId: string; messages: Message[]; runId: string }
 
 export interface SendMessageOptions {
+  ppt?: PptRequest
+  /** Selects the Word / Excel case for this turn. Mutually exclusive with `ppt`. */
+  office?: OfficeRequest
+  /** Appended to model input only. Never stored on the user message. */
+  pptRevision?: PptRevision
+  officeSelection?: import('./artifacts').OfficeSelection
+  /** Optional document context for ordinary chat; the host validates the session's file scope. */
+  officeContext?: { path: string }
+  annotationFollowUps?: AnnotationFeedbackReference[]
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
+  /**
+   * Trusted renderer/main signal that this visible user turn came from an
+   * explicit delegation action. Message text never grants spawn authority.
+   * Internal and hidden turns must leave this unset.
+   */
+  userAuthorizedSpawn?: boolean
+  /** Session-scoped options frozen when a mid-stream message is queued. */
+  queueContext?: QueuedMessageContext
   /**
    * When true, the message drives a turn (reaches the model) but is marked
    * `hidden` on the persisted `Message` so it never renders as a transcript
@@ -501,12 +766,8 @@ export interface SendMessageOptions {
    * surfacing) that should wake the agent without looking user-authored.
    */
   hidden?: boolean
-  /**
-   * Thinking level for this turn only (and its automatic retries); the session's own level is
-   * unchanged and no adaptive-thinking check runs. Used by app-driven turns with a known shape,
-   * e.g. the tasks:generate authoring turn.
-   */
-  thinkingLevel?: ThinkingLevel
+  /** Readable presentation of an internal task turn; never changes model input or authorization. */
+  taskContext?: Message['taskContext']
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +775,12 @@ export interface SendMessageOptions {
 // ---------------------------------------------------------------------------
 
 export type SessionCommand =
+  | { type: 'handover'; operation: HandoverOperation }
+  | { type: 'setWorkMode'; mode: WorkMode }
+  | { type: 'officeTemplates'; body: string }
+  | { type: 'setProgressSupervision'; enabled: boolean }
+  | { type: 'continueProgress' }
+  | { type: 'resumeExecution' }
   | { type: 'flag' }
   | { type: 'unflag' }
   | { type: 'archive' }
@@ -525,9 +792,7 @@ export type SessionCommand =
   | { type: 'setActiveViewing'; workspaceId: string }
   | { type: 'setPermissionMode'; mode: PermissionMode }
   | { type: 'setThinkingLevel'; level: ThinkingLevel }
-  | { type: 'setCodingMode'; enabled: boolean }
-  /** Coding mode is fixed once a session has messages: continue in a new session with it switched. Returns `{ sessionId }`. */
-  | { type: 'continueInNewSession'; codingMode: boolean }
+  | { type: 'setFastMode'; enabled: boolean }
   | { type: 'updateWorkingDirectory'; dir: string }
   | { type: 'setSources'; sourceSlugs: string[] }
   | { type: 'setLabels'; labels: string[] }
@@ -547,6 +812,12 @@ export type SessionCommand =
   | { type: 'addAnnotation'; messageId: string; annotation: AnnotationV1 }
   | { type: 'removeAnnotation'; messageId: string; annotationId: string }
   | { type: 'updateAnnotation'; messageId: string; annotationId: string; patch: Partial<AnnotationV1> }
+  | { type: 'updateQueuedMessage'; messageId: string; content: string }
+  | { type: 'deleteQueuedMessage'; messageId: string }
+  | { type: 'reorderQueuedMessages'; messageIds: string[] }
+  | { type: 'sendQueuedMessageNow'; messageId: string }
+  | { type: 'regenerate' }
+  | { type: 'retryCancelled' }
 
 export interface NewChatActionParams {
   input?: string
@@ -619,6 +890,12 @@ export interface FileAttachment {
   text?: string
   size: number
   thumbnailBase64?: string
+  /** Full-resolution sibling of a downscaled image. Not a separate attachment. */
+  originalPath?: string
+  originalWidth?: number
+  originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
 }
 
 export interface SessionFile {
@@ -634,6 +911,12 @@ export interface FileSearchResult {
   path: string
   type: 'file' | 'directory'
   relativePath: string
+}
+
+/** An exact, access-checked filesystem target for opening from a link. */
+export interface FilePathStat {
+  path: string
+  type: 'file' | 'directory'
 }
 
 // ---------------------------------------------------------------------------
@@ -656,7 +939,7 @@ export interface LlmConnectionSetup {
   credential?: string
   baseUrl?: string | null
   defaultModel?: string | null
-  models?: string[] | null
+  models?: Array<string | { id: string; name?: string; shortName?: string; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean; contextWindow?: number; maxTokens?: number }> | null
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
   /** When true, reject setup if the connection doesn't already exist (reauth guard). */
@@ -683,11 +966,6 @@ export interface LlmConnectionSetup {
 export interface TestLlmConnectionParams {
   provider: 'anthropic' | 'pi'
   apiKey: string
-  /**
-   * Slug of the connection being edited. Lets the server resolve the masked
-   * GET_API_KEY placeholder back to the stored credential for the test.
-   */
-  connectionSlug?: string
   baseUrl?: string
   model?: string
   piAuthProvider?: string
@@ -822,14 +1100,13 @@ export interface WorkspaceSettings {
   model?: string
   permissionMode?: PermissionMode
   cyclablePermissionModes?: PermissionMode[]
+  /** Full Takeover risk warning already confirmed for this workspace. */
+  fullTakeoverAcknowledged?: boolean
   thinkingLevel?: ThinkingLevel
-  /** Start new sessions in coding mode */
-  codingMode?: boolean
   workingDirectory?: string
   localMcpEnabled?: boolean
   defaultLlmConnection?: string
   enabledSourceSlugs?: string[]
-  chatStarters?: Array<{ label: string; prompt: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -855,7 +1132,6 @@ export interface ClaudeOAuthResult {
 export type TestAutomationAction =
   | { type: 'prompt'; prompt: string; llmConnection?: string; model?: string; thinkingLevel?: ThinkingLevel }
   | { type: 'webhook'; url: string; method?: string; headers?: Record<string, string>; bodyFormat?: 'json' | 'form' | 'raw'; body?: unknown; captureResponse?: boolean; auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string } }
-  | { type: 'script'; script: string; args?: string[]; runtime?: 'bun' | 'node' | 'python3'; timeoutMs?: number; page?: string }
 
 export interface TestAutomationPayload {
   workspaceId: string
@@ -864,27 +1140,28 @@ export interface TestAutomationPayload {
   actions: TestAutomationAction[]
   permissionMode?: PermissionMode
   labels?: string[]
-  /** Forwarded from the matcher; routes test-run sessions into a Telegram topic when paired. */
-  telegramTopic?: string
+  /** When true, only evaluate matcher/conditions — do not execute actions. */
+  dryRun?: boolean
+  /** App event name used for dry-run matching. */
+  event?: string
+  /** App payload fields used for dry-run matching. */
+  sample?: Record<string, unknown>
+}
+
+export interface TestAutomationMatch {
+  matcherId: string
+  name: string
+  event: string
 }
 
 export type TestAutomationActionResult =
   | { type: 'prompt'; success: boolean; stderr?: string; sessionId?: string; duration: number }
   | { type: 'webhook'; success: boolean; url: string; statusCode: number; error?: string; duration: number }
-  | { type: 'script'; success: boolean; script: string; exitCode: number | null; stdout?: string; error?: string; duration: number }
 
 export interface TestAutomationResult {
   actions: TestAutomationActionResult[]
+  matches?: TestAutomationMatch[]
 }
-
-export type { AutomationLoadIssue } from '../automations/types'
-
-/**
- * `automations:get` returns the raw automations.json with this key added: the
- * automations that will not run, and why — computed with the same lenient load
- * the runtime uses, so the screen and the runtime agree. Older clients ignore it.
- */
-export const AUTOMATIONS_LOAD_ISSUES_KEY = '_loadIssues'
 
 // ---------------------------------------------------------------------------
 // Window types
@@ -924,25 +1201,19 @@ export interface BrowserInstanceInfo {
   workspaceId?: string | null
 }
 
-/**
- * Verdict of a security-challenge check on a browser page (Cloudflare interstitial,
- * captcha challenge, …). Classified in apps/electron/src/main/security-challenge.ts.
- */
-export interface BrowserSecurityChallenge {
-  /** A blocking challenge from a known provider: the user has to solve it. */
-  detected: boolean
-  /** Provider behind the evidence ('cloudflare', 'google', 'hcaptcha', …), or 'none'. */
-  provider: string
-  /** Evidence seen, including context that never decides a verdict. */
-  signals: string[]
-  /** Evidence too weak for a hand-off, e.g. a visible Turnstile widget: worth a note only. */
-  suspected?: boolean
-}
-
 export interface DeepLinkNavigation {
   view?: string
   tabType?: string
   tabParams?: Record<string, string>
   action?: string
   actionParams?: Record<string, string>
+}
+
+/** Explicitly apply the reviewed draft to pending/ready work; never writes task.yaml. */
+export interface TaskPatchRunRequest {
+  slug: string
+  runId: string
+  baseRevision: number
+  yaml: string
+  rationale: string
 }

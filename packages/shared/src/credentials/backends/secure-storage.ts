@@ -1,7 +1,7 @@
 /**
  * Secure Storage Backend
  *
- * Stores credentials in an encrypted file at ~/.craft-agent/credentials.enc
+ * Stores credentials in an encrypted file at ~/.selection/credentials.enc
  * Uses AES-256-GCM for authenticated encryption.
  *
  * Encryption key is derived from OS-native hardware UUID using PBKDF2:
@@ -32,30 +32,36 @@ import {
   createHash,
 } from 'crypto';
 import { execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, copyFileSync, chmodSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from 'fs';
 import { hostname, userInfo, homedir } from 'os';
 import { join, dirname } from 'path';
 
 import type { CredentialBackend } from './types.ts';
 import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
-import { CONFIG_DIR, DEFAULT_CONFIG_DIR_NAME } from '../../config/paths.ts';
 
 // File location
-const CREDENTIALS_FILE = join(CONFIG_DIR, 'credentials.enc');
+import { CONFIG_DIR as CREDENTIALS_DIR } from '../../config/paths.ts';
+const CREDENTIALS_FILE = join(CREDENTIALS_DIR, 'credentials.enc');
 
-// One-time migration: v0.13.5 always stored credentials in ~/.craft-agent even
-// when CRAFT_CONFIG_DIR was set. Copy on first start so credentials survive.
-const LEGACY_CREDENTIALS_FILE = join(homedir(), DEFAULT_CONFIG_DIR_NAME, 'credentials.enc');
-function migrateCredentialsIfNeeded(): void {
-  if (CREDENTIALS_FILE === LEGACY_CREDENTIALS_FILE) return;
-  if (existsSync(CREDENTIALS_FILE) || !existsSync(LEGACY_CREDENTIALS_FILE)) return;
+/**
+ * Write the encrypted blob via a sibling temp file + rename.
+ * Direct writeFileSync to the live path can leave a truncated file that
+ * loadStoreSync then treats as corrupt and deletes — wiping every key.
+ */
+function atomicWriteFileSync(filePath: string, data: Buffer, mode: number): void {
+  const tmpPath = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  writeFileSync(tmpPath, data, { mode });
   try {
-    mkdirSync(dirname(CREDENTIALS_FILE), { recursive: true, mode: 0o700 });
-    copyFileSync(LEGACY_CREDENTIALS_FILE, CREDENTIALS_FILE);
-    chmodSync(CREDENTIALS_FILE, 0o600);
+    renameSync(tmpPath, filePath);
   } catch {
-    // Best-effort: proceed with empty store rather than crashing startup.
+    // Windows cannot rename over an existing file.
+    copyFileSync(tmpPath, filePath);
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // temp leftover is harmless
+    }
   }
 }
 
@@ -130,47 +136,75 @@ export class SecureStorageBackend implements CredentialBackend {
   private cachedStore: CredentialStore | null = null;
   private encryptionKey: Buffer | null = null;
   private salt: Buffer | null = null;
+  private persistQueue: Promise<unknown> = Promise.resolve();
+
+  constructor(private readonly filePath: string = CREDENTIALS_FILE) {}
 
   async isAvailable(): Promise<boolean> {
     // File backend is always available - we can always write to filesystem
     return true;
   }
 
-  async get(id: CredentialId): Promise<StoredCredential | null> {
-    const store = await this.loadStore();
-    if (!store) return null;
+  /**
+   * Serialize read-modify-write so concurrent set/delete (setup + connection
+   * test temp keys) cannot clobber each other via a stale in-memory snapshot.
+   */
+  private runExclusive<T>(op: () => T): Promise<T> {
+    const run = this.persistQueue.then(op, op);
+    this.persistQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
 
-    const key = credentialIdToAccount(id);
-    return store.credentials[key] || null;
+  async get(id: CredentialId): Promise<StoredCredential | null> {
+    return this.runExclusive(() => {
+      const store = this.loadStoreSync();
+      if (!store) return null;
+
+      const key = credentialIdToAccount(id);
+      return store.credentials[key] || null;
+    });
   }
 
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
-    let store = await this.loadStore();
+    return this.runExclusive(() => {
+      // Reload from disk so we merge into the latest file, not a stale cache.
+      this.cachedStore = null;
+      let store = this.loadStoreSync();
 
-    if (!store) {
-      // Initialize new store
-      store = {
-        version: 1,
-        credentials: {},
-        metadata: {
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      };
-    }
+      if (!store) {
+        // File exists but could not be parsed (short/locked/unreadable).
+        // Do not replace it with an empty store — that would wipe every key.
+        if (existsSync(this.filePath)) {
+          throw new Error('Credential store exists but could not be read; refusing to overwrite');
+        }
+        store = {
+          version: 1,
+          credentials: {},
+          metadata: {
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        };
+      }
 
-    const key = credentialIdToAccount(id);
-    store.credentials[key] = credential;
-    store.metadata.updatedAt = Date.now();
+      const key = credentialIdToAccount(id);
+      store.credentials[key] = credential;
+      store.metadata.updatedAt = Date.now();
 
-    await this.saveStore(store);
+      this.saveStoreSync(store);
+    });
   }
 
   async delete(id: CredentialId): Promise<boolean> {
-    return this.deleteSync(id);
+    return this.runExclusive(() => this.deleteFromDisk(id));
   }
 
   deleteSync(id: CredentialId): boolean {
+    return this.deleteFromDisk(id);
+  }
+
+  private deleteFromDisk(id: CredentialId): boolean {
+    this.cachedStore = null;
     const store = this.loadStoreSync();
     if (!store) return false;
 
@@ -185,20 +219,22 @@ export class SecureStorageBackend implements CredentialBackend {
   }
 
   async list(filter?: Partial<CredentialId>): Promise<CredentialId[]> {
-    const store = await this.loadStore();
-    if (!store) return [];
+    return this.runExclusive(() => {
+      const store = this.loadStoreSync();
+      if (!store) return [];
 
-    const ids = Object.keys(store.credentials)
-      .map(accountToCredentialId)
-      .filter((id): id is CredentialId => id !== null);
+      const ids = Object.keys(store.credentials)
+        .map(accountToCredentialId)
+        .filter((id): id is CredentialId => id !== null);
 
-    if (!filter) return ids;
+      if (!filter) return ids;
 
-    return ids.filter((id) => {
-      if (filter.type && id.type !== filter.type) return false;
-      if (filter.workspaceId && id.workspaceId !== filter.workspaceId) return false;
-      if (filter.name && id.name !== filter.name) return false;
-      return true;
+      return ids.filter((id) => {
+        if (filter.type && id.type !== filter.type) return false;
+        if (filter.workspaceId && id.workspaceId !== filter.workspaceId) return false;
+        if (filter.name && id.name !== filter.name) return false;
+        return true;
+      });
     });
   }
 
@@ -206,29 +242,22 @@ export class SecureStorageBackend implements CredentialBackend {
   // Private Methods
   // ============================================================
 
-  private async loadStore(): Promise<CredentialStore | null> {
-    return this.loadStoreSync();
-  }
-
   private loadStoreSync(): CredentialStore | null {
     // Return cached store if available
     if (this.cachedStore) return this.cachedStore;
 
-    migrateCredentialsIfNeeded();
-
-    if (!existsSync(CREDENTIALS_FILE)) return null;
+    if (!existsSync(this.filePath)) return null;
 
     let fileData: Buffer;
     try {
-      fileData = readFileSync(CREDENTIALS_FILE);
+      fileData = readFileSync(this.filePath);
     } catch {
       return null;
     }
 
-    // Validate minimum size
+    // Validate minimum size. A short file is usually an in-progress or crashed
+    // write — do not delete the path, or every stored key is wiped.
     if (fileData.length < HEADER_SIZE + IV_SIZE + AUTH_TAG_SIZE) {
-      // File is corrupted, delete and return null
-      this.handleCorruptedFile();
       return null;
     }
 
@@ -291,14 +320,11 @@ export class SecureStorageBackend implements CredentialBackend {
     }
   }
 
-  private async saveStore(store: CredentialStore): Promise<void> {
-    this.saveStoreSync(store);
-  }
-
   private saveStoreSync(store: CredentialStore): void {
+    const dir = dirname(this.filePath);
     // Ensure directory exists
-    if (!existsSync(CONFIG_DIR)) {
-      mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
     // Use existing salt or generate new one
@@ -329,7 +355,7 @@ export class SecureStorageBackend implements CredentialBackend {
     const fileData = Buffer.concat([header, iv, authTag, ciphertext]);
 
     // Write with restrictive permissions (owner read/write only)
-    writeFileSync(CREDENTIALS_FILE, fileData, { mode: 0o600 });
+    atomicWriteFileSync(this.filePath, fileData, 0o600);
     this.cachedStore = store;
   }
 
@@ -367,8 +393,8 @@ export class SecureStorageBackend implements CredentialBackend {
   private handleCorruptedFile(): void {
     // Delete corrupted file - user will need to re-enter credentials
     try {
-      if (existsSync(CREDENTIALS_FILE)) {
-        unlinkSync(CREDENTIALS_FILE);
+      if (existsSync(this.filePath)) {
+        unlinkSync(this.filePath);
       }
     } catch {
       // Ignore deletion errors

@@ -1,0 +1,10 @@
+Office 案例与业务技能（dsh-desktop 588412b9002fcb3ac88751fab7915e050c965563）
+
+- meeting-recap：MIT，Copyright (c) 2026 meeting-minutes contributors。保留 business-skills/meeting-recap/LICENSE 原文。纪要结构校验改为 TypeScript，不随包 Python 脚本。
+- work-report-writer：MIT，Copyright (c) 2026 weekly-report-generator contributors。保留 LICENSE 原文。
+- research-writer：Apache-2.0。保留 business-skills/research-writer/LICENSE.txt。原文为 ComposioHQ/awesome-claude-skills content-research-writer；Selection 使用的是 dsh 中的中文译本，并在文末追加了 Selection 文件交付一节。LICENSE.txt 的版权行在上游仍未填写。
+- Word 案例 meeting-minutes、coffee-market、equity-research：随 dsh-desktop-office 的包级 MIT（仓库根版权 DataElement，2026）原样搬入。sha256 见 docs/plans/dsh-office-inventory.json。
+- government-notice：LinNai 本人提供的样例。2026-10-30 22:52 确认可以原样搬入，含嵌入字体。
+- 公文写作：能力参照 dsh-desktop gov-doc-writing，未复用其内容。不包含该目录下的技能正文、分册、素材库或示例文本。
+
+本目录不包含 LibreOffice Kit、Python 运行时或 PPTD。

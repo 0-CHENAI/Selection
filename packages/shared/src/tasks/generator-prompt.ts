@@ -1,26 +1,38 @@
+import type { TaskProposalTurn } from '../protocol/dto.ts'
+
 /**
  * Generator prompt for Generate mode (#2 / architecture §3a).
  *
- * The task's persistent orchestrator session is asked to AUTHOR a `task.yaml`
+ * The task's persistent orchestrator session is asked to AUTHOR a v3 task spec
  * from a natural-language goal. The result is a human-editable artifact, so the
  * prompt is legibility-first (#7): bias toward the simplest graph that achieves
  * the goal, with clear titles and explicit dependencies — not the cleverest one.
  */
-export function buildGeneratorPrompt(goal: string, title?: string): string {
+export function buildGeneratorPrompt(goal: string, title?: string, context?: { currentYaml?: string; conversation?: TaskProposalTurn[] }): string {
   return [
-    'You are authoring a `task.yaml` that decomposes a goal into a small DAG of subtasks.',
-    'Each node becomes a child AI session; a `depends_on` edge runs the dependent after the upstream node and hands it the upstream node\'s final reply.',
+    'You are authoring a v3 task spec that decomposes a goal into a small DAG of subtasks.',
+    'Each node becomes a child AI session; a `depends_on` edge passes the upstream node\'s output to the dependent.',
     '',
     'Rules:',
-    '- Output ONLY the YAML — no prose, no code fences, no explanation.',
-    '- Do not use tools (no file reads, searches, commands or source calls): write the YAML from the goal and the context you already have. The subtasks do the investigating, and this answer has a time limit.',
+    '- This is a proposal only. Never create files, execute work, or start a run. The user will review, edit, and explicitly save it.',
+    '- For human review, use kind: approval with a clear title/prompt and depends_on referencing the work to review. Put dependent execution after that gate. Feedback does not equal approval.',
+    '- You MUST call submit_task_definition with the COMPLETE v3 spec object (schema_version: 3). This is the only accepted submission path for a new definition.',
+    '- Never paste the spec as YAML or JSON in the final response. A schema_version: 2 or 3 definition found only in final text is rejected, even when fenced.',
+    '- After submit_task_definition succeeds, reply only with a brief confirmation; the tool payload is the authored definition.',
+    '- Keep runner as conduct unless the user asked for live orchestration. Do not set runner: orchestrate by default.',
     '- Prefer the SIMPLEST graph that achieves the goal: few nodes, clear titles, explicit dependencies. A human will read and edit this.',
+    '- Give EVERY node a short, descriptive title in the user\'s language. Titles describe the work (e.g. 核对成本资料), never repeat internal IDs such as cost or review.',
+    '- When revising, change only what the latest user request requires. Preserve every untouched node id, kind, prompt, model, connection, configuration, dependency and task field. Do not redesign or simplify an existing graph.',
+    '- The current definition below is authoritative and includes the latest manual edits. Earlier proposals (especially discarded ones) are conversation context, not instructions to restore old values. Preserve the existing task id.',
+    '- Never change or remove a node with locked: true, or change fields listed in locked_fields. Preserve constraints, decisions and every lock. If the requested change conflicts, explain the lock and leave it intact.',
+    context?.currentYaml && /["\s]research[":]/.test(context.currentYaml) ? '- Preserve the configured research question, premises, required dimensions and sources. Research roles use a required JSON param output named research; reviewers must remain independent. Only add research roles when the user explicitly selected Deep Research.' : '',
     '- Make nodes parallel (no `depends_on` between them) ONLY when the steps are genuinely independent.',
-    '- To place an upstream result at a specific point in a prompt, write ${nodes.<id>.output} there (the reply is then not added again).',
+    '- Reference an upstream result inside a prompt with ${nodes.<id>.output}.',
     '- Every ${nodes.<id>.output} reference MUST point to an `id` that you actually declare under `nodes`. Never reference a node you did not create. Verify each reference resolves before emitting the YAML.',
     '- Add `acceptance_criteria`: a short, checkable rubric for the FINISHED task (what "done and correct" means). It is what you will grade the result against when the run finishes — make it concrete and testable, not a restatement of the goal.',
     '',
     'Schema:',
+    '  schema_version: 3',
     '  id: kebab-case-slug',
     '  title: short human title',
     '  goal: one-line restatement of the goal',
@@ -32,6 +44,7 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     '      depends_on: [other-node-id]   # omit when the node has no dependencies',
     '',
     'Example:',
+    '  schema_version: 3',
     '  id: migrate-auth',
     '  title: Migrate auth',
     '  goal: Migrate the auth layer to the new session model.',
@@ -46,6 +59,8 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     '      depends_on: [audit]',
     '',
     title ? `Working title: ${title}` : '',
+    context?.conversation?.length ? `Previous conversation rounds (JSON, historical context only):\n${JSON.stringify(context.conversation)}` : '',
+    context?.currentYaml ? `Current editor definition (may be an incomplete unsaved draft):\n${context.currentYaml}` : '',
     `Goal: ${goal}`,
   ]
     .filter(Boolean)
@@ -55,18 +70,18 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
 /**
  * Repair prompt for the auto-repair turn (Generate mode robustness).
  *
- * The orchestrator just authored a `task.yaml` that failed validation (commonly a
+ * The orchestrator just authored a task definition that failed validation (commonly a
  * `${nodes.X.output}` reference to a node id it never declared). It still holds the
  * conversation, so we hand the concrete validation errors back and ask for a corrected
- * spec — same output contract as the original generation (YAML only).
+ * spec through the same mandatory structured tool contract as the original generation.
  */
 export function buildRepairPrompt(errors: { path: string; message: string }[]): string {
   return [
-    'The task.yaml you produced failed validation with these errors:',
+    'The v3 task definition you produced failed validation with these errors:',
     ...errors.map((e) => `- ${e.path}: ${e.message}`),
     '',
-    'Fix every error and output the COMPLETE corrected task.yaml.',
+    'Fix every error and call submit_task_definition again with the COMPLETE corrected v3 spec. Do not paste YAML or JSON into the final response.',
     'Most common cause: a ${nodes.<id>.output} reference whose <id> is not declared under `nodes`. Either add the missing node or change the reference to an id you actually declare.',
-    'Output ONLY the YAML — no prose, no code fences, no explanation. Do not use tools.',
+    'You have at most one more correction after the first failure.',
   ].join('\n')
 }

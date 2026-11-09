@@ -1,5 +1,19 @@
 # PDF Preview Guide
 
+## Quick start
+
+This is assistant reply syntax, not a tool call. First create or verify the file; use its actual absolute path. A preview displays content to the user and does not inspect it for you.
+
+````
+```pdf-preview
+{"src":"/absolute/path/to/file.pdf","title":"Result"}
+```
+````
+
+For tabs, replace `src` with `"items":[{"src":"/absolute/path/to/first.pdf","label":"First"},{"src":"/absolute/path/to/second.pdf","label":"Second"}]`. Each path must exist. Use permission-allowed locations; Explore writes are restricted to the session's plans/data folders.
+
+Read the sections below only for additional options or troubleshooting.
+
 This guide covers how to display PDF documents inline using `pdf-preview` code blocks.
 
 ## Overview
@@ -9,7 +23,7 @@ The `pdf-preview` block renders PDF files inline in chat messages — showing th
 | Format | Best For | Rendering |
 |--------|----------|-----------|
 | **`pdf-preview` block** | PDF documents, reports, invoices | First page inline, full navigation in fullscreen |
-| **`html-preview` block** | Emails, newsletters, styled HTML | Sandboxed iframe with full CSS |
+| **`html-preview` block** | Emails, newsletters, styled HTML | Built-in browser with CSS and JavaScript |
 | **`image-preview` block** | Screenshots, captures, visual diffs | Inline fit-to-container + fullscreen viewer |
 | **`datatable`/`spreadsheet`** | Structured data, tables | Interactive sortable/filterable tables |
 

@@ -61,6 +61,8 @@ export function formatFollowUpSection(
     ].join('\n')
   })
 
+  // Canonical English marker. The chat bubble localizes this heading
+  // (`chat.followUps`) without changing the stored agent-facing message.
   const body = ['**Follow-ups**', items.join('\n\n---\n\n')].join('\n\n')
   return includeTopSeparator ? `---\n\n${body}` : body
 }

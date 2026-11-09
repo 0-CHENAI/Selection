@@ -11,7 +11,7 @@
  * Permissions and errors are mode-agnostic and tested separately.
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
+import { describe, expect, it, beforeEach } from 'bun:test'
 import { Renderer, type SessionEvent } from '../renderer'
 import {
   DEFAULT_BINDING_CONFIG,
@@ -45,13 +45,13 @@ function makeAdapter(
     inlineButtons: true,
     maxButtons: 3,
     maxMessageLength: 4096,
-    markdown: 'v2',
+    markdown: 'lark-post',
     webhookSupport: false,
     ...capabilities,
   }
 
   const adapter: PlatformAdapter & { calls: Call[] } = {
-    platform: 'telegram',
+    platform: 'lark',
     capabilities: caps,
     calls,
     async initialize() {},
@@ -64,7 +64,7 @@ function makeAdapter(
     async sendText(channelId: string, text: string): Promise<SentMessage> {
       const messageId = String(nextId++)
       calls.push({ kind: 'sendText', channelId, text, messageId })
-      return { platform: 'telegram', channelId, messageId }
+      return { platform: 'lark', channelId, messageId }
     },
     async editMessage(channelId: string, messageId: string, text: string): Promise<void> {
       calls.push({ kind: 'editMessage', channelId, messageId, text })
@@ -72,14 +72,14 @@ function makeAdapter(
     async sendButtons(channelId: string, text: string): Promise<SentMessage> {
       const messageId = String(nextId++)
       calls.push({ kind: 'sendButtons', channelId, text, messageId })
-      return { platform: 'telegram', channelId, messageId }
+      return { platform: 'lark', channelId, messageId }
     },
     async sendTyping(channelId: string): Promise<void> {
       calls.push({ kind: 'sendTyping', channelId })
     },
     async sendFile(channelId: string): Promise<SentMessage> {
       const messageId = String(nextId++)
-      return { platform: 'telegram', channelId, messageId }
+      return { platform: 'lark', channelId, messageId }
     },
   }
 
@@ -95,7 +95,7 @@ function makeBinding(overrides: Partial<BindingConfig> = {}): ChannelBinding {
     id: 'bind-1',
     workspaceId: 'ws-1',
     sessionId: 'sess-1',
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chan-1',
     enabled: true,
     createdAt: Date.now(),
@@ -115,25 +115,7 @@ async function play(
 }
 
 const ev = {
-  delta: (s: string, turnId?: string): SessionEvent => ({
-    type: 'text_delta',
-    sessionId: 's',
-    delta: s,
-    ...(turnId ? { turnId } : {}),
-  }),
-  discard: (turnId: string): SessionEvent => ({
-    type: 'text_discard',
-    sessionId: 's',
-    turnId,
-  }),
-  retryBackoff: (message: string): SessionEvent => ({
-    type: 'retry',
-    sessionId: 's',
-    phase: 'backoff',
-    message,
-  }),
-  retryActive: (): SessionEvent => ({ type: 'retry', sessionId: 's', phase: 'active' }),
-  retryEnd: (): SessionEvent => ({ type: 'retry', sessionId: 's', phase: 'end' }),
+  delta: (s: string): SessionEvent => ({ type: 'text_delta', sessionId: 's', delta: s }),
   intermediate: (text: string): SessionEvent => ({
     type: 'text_complete',
     sessionId: 's',
@@ -148,11 +130,10 @@ const ev = {
   }),
   // text_complete without an explicit isIntermediate flag — simulates
   // backends that don't set the field (older events or non-Claude agents).
-  completeText: (text: string, turnId?: string): SessionEvent => ({
+  completeText: (text: string): SessionEvent => ({
     type: 'text_complete',
     sessionId: 's',
     text,
-    ...(turnId ? { turnId } : {}),
   }),
   toolStart: (displayName?: string): SessionEvent => ({
     type: 'tool_start',
@@ -170,6 +151,11 @@ const ev = {
     result: 'ok',
   }),
   complete: (): SessionEvent => ({ type: 'complete', sessionId: 's' }),
+  pendingComplete: (): SessionEvent => ({
+    type: 'complete',
+    sessionId: 's',
+    orchestrationPending: true,
+  }),
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +206,25 @@ describe('Renderer — progress mode (default)', () => {
     expect(edits[0]!.text).toBe('hello world')
   })
 
+  it('does not commit dispatch text while managed Swarm aggregation is pending', async () => {
+    const adapter = makeAdapter()
+    const binding = makeBinding()
+    await play(renderer, binding, adapter, [
+      ev.final('Workers started.'),
+      ev.pendingComplete(),
+    ])
+
+    const edits = adapter.calls.filter((c) => c.kind === 'editMessage')
+    expect(edits).toHaveLength(0)
+
+    await play(renderer, binding, adapter, [
+      ev.final('Aggregated answer.'),
+      ev.complete(),
+    ])
+    expect(adapter.calls.filter((c) => c.kind === 'editMessage').at(-1)?.text)
+      .toBe('Aggregated answer.')
+  })
+
   it('drops intermediate text — never appears in any message', async () => {
     const adapter = makeAdapter()
     const binding = makeBinding()
@@ -262,7 +267,7 @@ describe('Renderer — progress mode (default)', () => {
     // and never emits a clean non-intermediate final text_complete.
     await play(renderer, binding, adapter, [
       ev.intermediate('Sending the report now.'),
-      ev.toolStart('SendTelegram'),
+      ev.toolStart('SendLark'),
       ev.toolResult(),
       ev.complete(),
     ])
@@ -284,7 +289,7 @@ describe('Renderer — progress mode (default)', () => {
     const all = adapter.calls
       .filter((c) => c.kind === 'sendText' || c.kind === 'editMessage')
       .map((c) => c.text ?? '')
-    // No empty-string edit on complete (would trip Telegram "not modified").
+    // No empty-string edit on complete (would trip Lark "not modified").
     expect(all.every((t) => t.length > 0)).toBe(true)
   })
 
@@ -335,6 +340,23 @@ describe('Renderer — final_only mode', () => {
     expect(sends[0]!.text).toBe('Part 1.\n\nPart 2.')
   })
 
+  it('stays silent on a pending Swarm completion', async () => {
+    const adapter = makeAdapter()
+    const binding = makeBinding({ responseMode: 'final_only' as ResponseMode })
+    await play(renderer, binding, adapter, [
+      ev.final('Workers started.'),
+      ev.pendingComplete(),
+    ])
+    expect(adapter.calls).toHaveLength(0)
+
+    await play(renderer, binding, adapter, [
+      ev.final('Aggregated answer.'),
+      ev.complete(),
+    ])
+    expect(adapter.calls.filter((c) => c.kind === 'sendText').map((c) => c.text))
+      .toEqual(['Aggregated answer.'])
+  })
+
   it('empty completion: no send at all', async () => {
     const adapter = makeAdapter()
     const binding = makeBinding({ responseMode: 'final_only' as ResponseMode })
@@ -347,7 +369,7 @@ describe('Renderer — final_only mode', () => {
     const binding = makeBinding({ responseMode: 'final_only' as ResponseMode })
     await play(renderer, binding, adapter, [
       ev.intermediate('Here is the summary you asked for.'),
-      ev.toolStart('SendTelegram'),
+      ev.toolStart('SendLark'),
       ev.toolResult(),
       ev.complete(),
     ])
@@ -389,12 +411,7 @@ describe('Renderer — final_only mode', () => {
 describe('Renderer — streaming mode (legacy)', () => {
   let renderer: Renderer
   beforeEach(() => {
-    jest.useFakeTimers()
     renderer = new Renderer()
-  })
-  afterEach(() => {
-    jest.clearAllTimers()
-    jest.useRealTimers()
   })
 
   it('each text_complete finalises its own message (legacy behaviour)', async () => {
@@ -413,128 +430,6 @@ describe('Renderer — streaming mode (legacy)', () => {
     expect(sends.length).toBe(2)
     expect(sends[0]!.text).toBe('first')
     expect(sends[1]!.text).toBe('second')
-  })
-
-  it('drops a buffered failed attempt and sends only the recovered answer without editing', async () => {
-    const adapter = makeAdapter({ messageEditing: false })
-    const binding = makeBinding({ responseMode: 'streaming' as ResponseMode })
-
-    await play(renderer, binding, adapter, [
-      ev.delta('Failed ', 'attempt-0'),
-      ev.delta('partial', 'attempt-0'),
-      ev.discard('attempt-0'),
-      ev.retryBackoff('Retrying in 2s…'),
-      ev.retryActive(),
-      ev.delta('Recovered ', 'attempt-1'),
-      ev.delta('answer', 'attempt-1'),
-      { type: 'text_complete', sessionId: 's', turnId: 'attempt-1' },
-      ev.retryEnd(),
-      ev.complete(),
-    ])
-
-    expect(adapter.calls.filter((call) => call.kind === 'editMessage')).toHaveLength(0)
-    expect(
-      adapter.calls.filter((call) => call.kind === 'sendText').map((call) => call.text),
-    ).toEqual(['Recovered answer'])
-  })
-
-  it('reuses a posted partial for discard, retry status, and recovered output', async () => {
-    const adapter = makeAdapter()
-    const binding = makeBinding({ responseMode: 'streaming' as ResponseMode })
-    const backoff = 'Connection Error. Retrying in 2s…'
-
-    await play(renderer, binding, adapter, [
-      ev.delta('Failed', 'attempt-0'),
-      ev.delta(' partial', 'attempt-0'),
-      ev.discard('attempt-0'),
-    ])
-    // The failed attempt's scheduled edit must not reappear after discard.
-    jest.advanceTimersByTime(10_000)
-    await play(renderer, binding, adapter, [
-      ev.retryBackoff(backoff),
-      ev.retryActive(),
-      ev.delta('Recovered ', 'attempt-1'),
-      ev.delta('answer', 'attempt-1'),
-    ])
-    // A retained message ID must restart periodic editing for the recovered
-    // stream rather than waiting for text_complete to replace the status.
-    jest.advanceTimersByTime(10_000)
-    await Promise.resolve()
-    await Promise.resolve()
-    await play(renderer, binding, adapter, [
-      { type: 'text_complete', sessionId: 's', text: '', turnId: 'attempt-1' },
-      ev.retryEnd(),
-      ev.complete(),
-    ])
-
-    const sends = adapter.calls.filter((call) => call.kind === 'sendText')
-    const edits = adapter.calls.filter((call) => call.kind === 'editMessage')
-    expect(sends).toHaveLength(1)
-    expect(sends[0]).toMatchObject({ messageId: '1', text: 'Failed' })
-    expect(edits.map((call) => call.messageId)).toEqual(['1', '1', '1', '1'])
-    expect(edits.map((call) => call.text)).toEqual([
-      '⚠️ Incomplete response discarded.',
-      backoff,
-      '💭 thinking…',
-      'Recovered answer',
-    ])
-  })
-
-  it('ignores a stale discard and preserves completed output', async () => {
-    const adapter = makeAdapter()
-    const binding = makeBinding({ responseMode: 'streaming' as ResponseMode })
-
-    await play(renderer, binding, adapter, [
-      ev.delta('Earlier partial', 'completed-turn'),
-      ev.completeText('Earlier completed', 'completed-turn'),
-      ev.delta('Keep this', 'current-turn'),
-      ev.discard('older-turn'),
-      ev.completeText('Keep this completed', 'current-turn'),
-      ev.complete(),
-    ])
-
-    const sends = adapter.calls.filter((call) => call.kind === 'sendText')
-    const edits = adapter.calls.filter((call) => call.kind === 'editMessage')
-    expect(sends.map((call) => call.messageId)).toEqual(['1', '2'])
-    expect(edits).toEqual([
-      {
-        kind: 'editMessage',
-        channelId: 'chan-1',
-        messageId: '1',
-        text: 'Earlier completed',
-      },
-      {
-        kind: 'editMessage',
-        channelId: 'chan-1',
-        messageId: '2',
-        text: 'Keep this completed',
-      },
-    ])
-  })
-
-  it('replaces a running retry placeholder before surfacing terminal failure', async () => {
-    const adapter = makeAdapter()
-    const binding = makeBinding({ responseMode: 'streaming' as ResponseMode })
-
-    await play(renderer, binding, adapter, [
-      ev.delta('Failed partial', 'attempt-0'),
-      ev.discard('attempt-0'),
-      ev.retryBackoff('Retrying…'),
-      ev.retryActive(),
-      ev.retryEnd(),
-      { type: 'error', sessionId: 's', error: 'provider unavailable' },
-      ev.complete(),
-    ])
-    jest.advanceTimersByTime(10_000)
-
-    const sends = adapter.calls.filter((call) => call.kind === 'sendText')
-    const edits = adapter.calls.filter((call) => call.kind === 'editMessage')
-    expect(edits.at(-1)).toMatchObject({
-      messageId: '1',
-      text: '⚠️ Incomplete response discarded.',
-    })
-    expect(edits.at(-1)?.text).not.toBe('💭 thinking…')
-    expect(sends.at(-1)?.text).toBe('❌ provider unavailable')
   })
 })
 
@@ -655,64 +550,5 @@ describe('Renderer — permissions and errors', () => {
     expect(sends.length).toBe(2)
     expect(sends[1]!.text).toContain('❌')
     expect(sends[1]!.text).toContain('boom')
-  })
-})
-
-
-describe('Renderer — WhatsApp desktop-only approvals', () => {
-  it('permission_request on WhatsApp sends an informational desktop-only message', async () => {
-    const renderer = new Renderer()
-    const adapter = makeAdapter({ inlineButtons: false, messageEditing: false, markdown: 'whatsapp' })
-    ;(adapter as any).platform = 'whatsapp'
-    const binding = {
-      ...makeBinding({ approvalChannel: 'chat' }),
-      platform: 'whatsapp' as const,
-      channelId: 'wa-1',
-    }
-
-    await renderer.handle(
-      {
-        type: 'permission_request',
-        sessionId: 's',
-        request: {
-          requestId: 'r1',
-          toolName: 'bash',
-          description: 'run tests',
-        },
-      } as SessionEvent,
-      binding,
-      adapter,
-    )
-
-    expect(adapter.calls.filter((c) => c.kind === 'sendButtons')).toHaveLength(0)
-    const sends = adapter.calls.filter((c) => c.kind === 'sendText')
-    expect(sends).toHaveLength(1)
-    expect(sends[0]!.text).toContain('desktop app')
-  })
-
-  it('plan_submitted on WhatsApp sends an informational desktop-only message', async () => {
-    const renderer = new Renderer()
-    const adapter = makeAdapter({ inlineButtons: false, messageEditing: false, markdown: 'whatsapp' })
-    ;(adapter as any).platform = 'whatsapp'
-    const binding = {
-      ...makeBinding(),
-      platform: 'whatsapp' as const,
-      channelId: 'wa-1',
-    }
-
-    await renderer.handle(
-      {
-        type: 'plan_submitted',
-        sessionId: 's',
-        message: { id: 'm1', role: 'assistant', content: 'Plan ready' } as any,
-      } as SessionEvent,
-      binding,
-      adapter,
-    )
-
-    const sends = adapter.calls.filter((c) => c.kind === 'sendText')
-    expect(sends).toHaveLength(1)
-    expect(sends[0]!.text).toContain('plan is ready')
-    expect(sends[0]!.text).toContain('desktop app')
   })
 })

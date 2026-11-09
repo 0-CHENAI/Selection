@@ -1,22 +1,24 @@
-import { CLOUDFLARE_AI_GATEWAY_PROVIDER, parseCloudflareGatewayUrl } from '../../shared/src/config/cloudflare-gateway.ts';
+import { toPiProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 
 /**
- * Environment the Pi SDK reads a tenant-specific endpoint from, derived from the
- * connection's base URL (Pi provider ids, after `toPiProviderId`):
+ * Environment the Pi SDK reads a tenant-specific endpoint from.
  *
- * - `azure`: AZURE_OPENAI_BASE_URL.
- * - `cloudflare-ai-gateway`: CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_GATEWAY_ID, which the
- *   SDK substitutes into every gateway model URL.
- *
- * Empty for other providers or an unusable URL.
+ * Azure (`azure` after `toPiProviderId`, stored as `azure-openai-responses`)
+ * uses `AZURE_OPENAI_BASE_URL`. The API name stays `azure-openai-responses`.
+ * Empty for other providers or a blank URL.
  */
-export function providerEndpointEnv(provider: string | undefined, baseUrl: string | undefined): Record<string, string> {
+export function providerEndpointEnv(
+  provider: string | undefined,
+  baseUrl: string | undefined,
+): Record<string, string> {
   const url = baseUrl?.trim();
-  if (!provider || !url) return {};
-  if (provider === 'azure') return { AZURE_OPENAI_BASE_URL: url };
-  if (provider === CLOUDFLARE_AI_GATEWAY_PROVIDER) {
-    const ids = parseCloudflareGatewayUrl(url);
-    return ids ? { CLOUDFLARE_ACCOUNT_ID: ids.accountId, CLOUDFLARE_GATEWAY_ID: ids.gatewayId } : {};
-  }
-  return {};
+  if (!url || !provider || toPiProviderId(provider) !== 'azure') return {};
+  return { AZURE_OPENAI_BASE_URL: url };
+}
+
+/** Apply or clear the Azure endpoint env var from the active connection. */
+export function applyProviderEndpointEnv(provider: string | undefined, baseUrl: string | undefined): void {
+  const url = providerEndpointEnv(provider, baseUrl).AZURE_OPENAI_BASE_URL;
+  if (url) process.env.AZURE_OPENAI_BASE_URL = url;
+  else delete process.env.AZURE_OPENAI_BASE_URL;
 }

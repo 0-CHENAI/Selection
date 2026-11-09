@@ -1,30 +1,35 @@
+import {
+  modelThinkingCapability,
+  thinkingLevelMapForLevels,
+  type ThinkingMode,
+} from '../../shared/src/agent/thinking-capabilities.ts'
+import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  normalizeConnectionModelId,
+  resolveModelImageSupportFromCatalog,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
+  type ImageSupportMode,
+} from '../../shared/src/config/model-image-support.ts'
+
 export type CustomEndpointInput = 'text' | 'image'
 
 /** Custom endpoint protocol — determines which streaming adapter Pi SDK uses. */
 export type CustomEndpointApi = 'openai-completions' | 'anthropic-messages'
 
-/**
- * Output-token cap for custom endpoint models when the connection doesn't set
- * `customEndpoint.maxTokens`. We can't query an arbitrary endpoint for its real
- * limit, so the default stays conservative.
- */
-export const DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS = 8_192
-
-/** Connection-level custom endpoint config (`LlmConnection.customEndpoint`) as sent by the main process. */
-export interface CustomEndpointConfig {
-  api: CustomEndpointApi
-  supportsImages?: boolean
-  maxTokens?: number
-}
-
 export interface CustomEndpointModelDefaults {
   supportsImages?: boolean
-  maxTokens?: number
 }
 
 export interface CustomEndpointModelOverrides {
   contextWindow?: number
+  maxTokens?: number
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  thinkingMode?: ThinkingMode;
   supportsImages?: boolean
+  imageSupport?: ImageSupportMode
+  learnedSupportsImages?: boolean
 }
 
 export interface CustomEndpointModelEntry extends CustomEndpointModelOverrides {
@@ -34,12 +39,29 @@ export interface CustomEndpointModelEntry extends CustomEndpointModelOverrides {
 export type CustomEndpointModelConfig = string | {
   id: string
   contextWindow?: number
+  maxTokens?: number
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  thinkingMode?: ThinkingMode;
   supportsImages?: boolean
+  imageSupport?: ImageSupportMode
+  learnedSupportsImages?: boolean
 }
 
-/** Strip bare model IDs (remove pi/ prefix if present). */
+/** Strip runtime provider prefixes so stored and live IDs compare as the same model. */
 export function stripPiPrefix(id: string): string {
-  return id.startsWith('pi/') ? id.slice(3) : id
+  return normalizeConnectionModelId(id)
+}
+
+export function findCustomEndpointModelEntry(
+  modelId: string,
+  customModels?: CustomEndpointModelConfig[],
+): CustomEndpointModelEntry {
+  const bareId = stripPiPrefix(modelId)
+  const match = customModels?.find((model) => {
+    const id = typeof model === 'string' ? model : model.id
+    return stripPiPrefix(id).toLowerCase() === bareId.toLowerCase()
+  })
+  return match ? normalizeCustomEndpointModelEntry(match) : { id: bareId }
 }
 
 /**
@@ -56,37 +78,46 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
 
   return {
     id: stripPiPrefix(model.id),
+    ...(model.thinkingMode ? { thinkingMode: model.thinkingMode } : {}),
+    ...(model.supportedThinkingLevels !== undefined ? { supportedThinkingLevels: model.supportedThinkingLevels } : {}),
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+    ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
     ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
+    ...(model.imageSupport ? { imageSupport: model.imageSupport } : {}),
+    ...(model.learnedSupportsImages !== undefined ? { learnedSupportsImages: model.learnedSupportsImages } : {}),
   }
 }
 
-/**
- * Honor a configured output cap only when it's a positive integer. Config can
- * reach the subprocess unvalidated, and `0`/strings would otherwise become an
- * invalid `max_tokens` on anthropic-messages requests.
- */
-function resolveMaxTokens(configured: number | undefined): number {
-  return configured !== undefined && Number.isSafeInteger(configured) && configured > 0
-    ? configured
-    : DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS
+function resolveCustomEndpointThinking(
+  id: string,
+  overrides?: CustomEndpointModelOverrides,
+): { reasoning: boolean; map?: Record<string, string | null> } {
+  if (overrides?.thinkingMode === 'always-on') {
+    return { reasoning: true, map: { ...thinkingLevelMapForLevels(['low']), off: null } }
+  }
+  if (overrides?.thinkingMode === 'unsupported') return { reasoning: false }
+  const declared = overrides?.supportedThinkingLevels
+  if (declared !== undefined) {
+    const enabled = declared.some(level => level !== 'off')
+    return enabled
+      ? { reasoning: true, map: thinkingLevelMapForLevels(declared) }
+      : { reasoning: false, map: thinkingLevelMapForLevels([]) }
+  }
+  const inferred = modelThinkingCapability({ id })
+  if (inferred.mode === 'always-on') {
+    return { reasoning: true, map: { ...thinkingLevelMapForLevels(['low']), off: null } }
+  }
+  if (inferred.mode === 'levels' && inferred.levels.some(level => level !== 'off')) {
+    return { reasoning: true, map: thinkingLevelMapForLevels(inferred.levels) }
+  }
+  return { reasoning: false }
 }
 
 /**
  * Build a synthetic model definition for a custom endpoint.
- * Uses reasonable defaults for context window and max tokens since we can't
- * query the endpoint for its actual capabilities. Image support must be
- * explicitly enabled either at the connection level or per-model.
- *
- * `maxTokens` is the model's output cap. Pi also bounds compaction summaries by
- * it (`min(0.8 × reserveTokens, model.maxTokens)`), so the connection-level
- * `customEndpoint.maxTokens` override is what lets long-session summaries exceed
- * the default. See craft-agents-oss#1100.
- *
- * For `openai-completions` endpoints we set `compat.supportsStore = false` so the
- * pi-ai driver omits the OpenAI-platform-specific `store` param entirely. Third-party
- * OpenAI-compatible gateways gain nothing from `store`, and strict ones reject unknown
- * params with a 400 — which made those connections unusable. See craft-agents-oss#1022.
+ * Context window comes from the stored catalog when present, otherwise 128k.
+ * Image support uses the shared auto resolver: explicit on/off, learned
+ * rejection, endpoint default, known table, then an optimistic attempt.
  */
 export function buildCustomEndpointModelDef(
   id: string,
@@ -94,17 +125,38 @@ export function buildCustomEndpointModelDef(
   overrides?: CustomEndpointModelOverrides,
   api?: CustomEndpointApi,
 ) {
-  const supportsImages = overrides?.supportsImages ?? defaults?.supportsImages ?? false
+  const supportsImages = resolveModelImageSupportFromCatalog({
+    modelId: id,
+    models: [{
+      id,
+      ...(overrides?.supportsImages !== undefined ? { supportsImages: overrides.supportsImages } : {}),
+      ...(overrides?.imageSupport ? { imageSupport: overrides.imageSupport } : {}),
+      ...(overrides?.learnedSupportsImages !== undefined ? { learnedSupportsImages: overrides.learnedSupportsImages } : {}),
+    }],
+    endpointSupportsImages: defaults?.supportsImages,
+  }).supportsImages
   const input: CustomEndpointInput[] = supportsImages ? ['text', 'image'] : ['text']
+  const contextWindow = sanitizeCustomContextWindow(overrides?.contextWindow) ?? DEFAULT_CUSTOM_CONTEXT_WINDOW
+  const maxTokens = sanitizeCustomMaxTokens(
+    overrides?.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,
+    contextWindow,
+  ) ?? Math.min(DEFAULT_CUSTOM_MAX_TOKENS, contextWindow)
+  const thinking = resolveCustomEndpointThinking(id, overrides)
 
   return {
     id,
     name: id,
-    reasoning: false,
+    reasoning: thinking.reasoning,
+    ...(thinking.map ? { thinkingLevelMap: thinking.map } : {}),
     input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: overrides?.contextWindow ?? 131_072,
-    maxTokens: resolveMaxTokens(defaults?.maxTokens),
-    ...(api === 'openai-completions' ? { compat: { supportsStore: false } } : {}),
+    contextWindow,
+    maxTokens,
+    // `store` is an OpenAI-only field. `developer` is the reasoning-model
+    // alias for a system prompt; compatible gateways reject that role.
+    // Third-party Anthropic Messages endpoints often return thinking blocks
+    // with an empty signature and require that block on the next turn.
+    ...(api === 'openai-completions' ? { compat: { supportsStore: false, supportsDeveloperRole: false } } : {}),
+    ...(api === 'anthropic-messages' ? { compat: { allowEmptySignature: true } } : {}),
   }
 }

@@ -2,7 +2,7 @@ import { writeFileSync, existsSync, mkdirSync } from 'fs'
 import { readJsonFileSync } from '@craft-agent/shared/utils/files'
 import { mainLog } from './logger'
 import { join } from 'path'
-import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { homedir } from 'os'
 
 export interface WindowBounds {
   x: number
@@ -29,6 +29,7 @@ export interface WindowState {
   lastFocusedWorkspaceId?: string
 }
 
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 const WINDOW_STATE_FILE = join(CONFIG_DIR, 'window-state.json')
 
 /**

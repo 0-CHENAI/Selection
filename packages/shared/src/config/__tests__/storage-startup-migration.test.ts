@@ -93,13 +93,80 @@ function getModelIds(connection: any): string[] {
 }
 
 describe('startup migration (integration)', () => {
+  it('updates legacy ChatGPT OAuth labels without overwriting custom names', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const model = getPiModelsForAuthProvider('openai-codex')[0]?.id
+    if (!model) throw new Error('expected at least one ChatGPT OAuth model')
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'codex',
+        name: 'ChatGPT Plus (via Pi)',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'chatgpt-paid',
+        name: 'ChatGPT Plus / Pro',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'chatgpt-pro',
+        name: 'ChatGPT Pro',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'my-chatgpt',
+        name: 'My ChatGPT Pro',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+    ])
+
+    runMigration(configDir)
+
+    expect(findConnection(configPath, 'chatgpt-plus').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'codex').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'chatgpt-paid').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'chatgpt-pro').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'my-chatgpt').name).toBe('My ChatGPT Pro')
+  })
+
   it('repairs broken pi-api-key openai-codex provider on startup migration', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
 
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (OpenAI)',
+        name: 'Selection Backend (OpenAI)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'openai-codex',
@@ -126,7 +193,7 @@ describe('startup migration (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -152,7 +219,7 @@ describe('startup migration (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -180,7 +247,7 @@ describe('startup migration (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -206,7 +273,7 @@ describe('startup migration (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -229,6 +296,168 @@ describe('startup migration (integration)', () => {
     expect(connection.defaultModel).toBe(modelIds[0])
   })
 
+  it('merges new Codex catalog ids into a stale full-catalog userDefined list', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const catalogIds = getPiModelsForAuthProvider('openai-codex').map(model => model.id)
+    expect(catalogIds).toContain('pi/gpt-6.1-sol')
+    const staleIds = catalogIds.filter(id => id !== 'pi/gpt-6.1-sol')
+    expect(staleIds.length).toBeGreaterThan(3)
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: staleIds,
+        defaultModel: 'pi/gpt-5.6-sol',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'chatgpt-plus')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    const modelIds = modelIdsOf(connection)
+    expect(modelIds).toContain('pi/gpt-6.1-sol')
+    expect(new Set(modelIds)).toEqual(new Set(catalogIds))
+    expect(connection.defaultModel).toBe('pi/gpt-5.6-sol')
+  })
+
+  it('restores the full Codex catalog even for a saved OAuth tier list', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const tier = ['pi/gpt-5.6-sol', 'pi/gpt-5.6-terra', 'pi/gpt-5.6-luna']
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: tier,
+        defaultModel: tier[0],
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'chatgpt-plus')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(new Set(modelIdsOf(connection))).toEqual(new Set(getPiModelsForAuthProvider('openai-codex').map(model => model.id)))
+    expect(connection.defaultModel).toBe(tier[0])
+    expect(modelIdsOf(connection)).toContain('pi/gpt-6.1-sol')
+  })
+
+  it('replaces removed Codex ids with the current OAuth catalog and moves the default', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    // gpt-5.5 is no longer in the live Codex catalog.
+    const tier = ['pi/gpt-5.5', 'pi/gpt-5.6-sol', 'pi/gpt-5.6-luna']
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: tier,
+        defaultModel: 'pi/gpt-5.5',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'chatgpt-plus')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(new Set(modelIdsOf(connection))).toEqual(new Set(getPiModelsForAuthProvider('openai-codex').map(model => model.id)))
+    expect(modelIdsOf(connection)).not.toContain('pi/gpt-5.5')
+    expect(modelIdsOf(connection)).toContain(connection.defaultModel)
+  })
+
+  it.each(['kimi-coding', 'xai'])('restores all SDK models for existing %s OAuth connections', (provider) => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const catalog = getPiModelsForAuthProvider(provider).map(model => model.id)
+    expect(catalog.length).toBeGreaterThan(1)
+    if (provider === 'kimi-coding') {
+      expect(catalog).toContain('pi/k3.1-pro')
+      expect(catalog).toContain('pi/k3.1-pro-highspeed')
+    }
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'oauth', name: provider, providerType: 'pi', authType: 'oauth',
+      piAuthProvider: provider, modelSelectionMode: 'userDefined3Tier',
+      models: [catalog[0]], defaultModel: catalog[0], createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'oauth')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(new Set(modelIdsOf(connection))).toEqual(new Set(catalog))
+    expect(connection.defaultModel).toBe(catalog[0])
+    const first = readFileSync(configPath, 'utf8')
+    runMigration(configDir)
+    expect(readFileSync(configPath, 'utf8')).toBe(first)
+  })
+
+  it('preserves the last live Copilot policy catalog until it can be refreshed', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const models = ['pi/copilot-policy-model-a', 'pi/copilot-policy-model-b']
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'copilot', name: 'Copilot', providerType: 'pi', authType: 'oauth',
+      piAuthProvider: 'github-copilot', modelSelectionMode: 'userDefined3Tier',
+      models, defaultModel: models[1], createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'copilot')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(connection.models).toEqual(models)
+    expect(connection.defaultModel).toBe(models[1])
+  })
+
+  it('keeps existing OAuth models when the provider catalog is unavailable', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'oauth', name: 'OAuth', providerType: 'pi', authType: 'oauth',
+      piAuthProvider: 'unknown-provider', modelSelectionMode: 'userDefined3Tier',
+      models: ['pi/last-known'], defaultModel: 'pi/last-known', createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'oauth')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(connection.models).toEqual(['pi/last-known'])
+    expect(connection.defaultModel).toBe('pi/last-known')
+  })
+
+  it('does not replace an empty Copilot policy catalog with static models on restart', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'copilot', name: 'Copilot', providerType: 'pi', authType: 'oauth',
+      piAuthProvider: 'github-copilot', modelSelectionMode: 'automaticallySyncedFromProvider',
+      models: [], defaultModel: '', createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'copilot')
+    expect(connection.models).toEqual([])
+    expect(connection.defaultModel).toBe('')
+    const first = readFileSync(configPath, 'utf8')
+    runMigration(configDir)
+    expect(readFileSync(configPath, 'utf8')).toBe(first)
+  })
+
   it('normalizes legacy unprefixed userDefined3Tier model IDs instead of resetting', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
 
@@ -246,7 +475,7 @@ describe('startup migration (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (OpenRouter)',
+        name: 'Selection Backend (OpenRouter)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'openrouter',
@@ -394,7 +623,7 @@ describe('legacy Opus migration to default Opus (integration)', () => {
       },
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -442,7 +671,7 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     expect(migratedWsConfig.defaults.model).toBe('claude-opus-4-6')
   })
 
-  it('migrates workspace default Opus 4.7 to Opus 4.8', () => {
+  it('leaves workspace default Opus 4.7 unchanged', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
     const wsConfigPath = join(workspaceRoot, 'config.json')
     const wsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
@@ -464,7 +693,32 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     runMigration(configDir)
 
     const migratedWsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
-    expect(migratedWsConfig.defaults.model).toBe('claude-opus-4-8')
+    expect(migratedWsConfig.defaults.model).toBe('claude-opus-4-7')
+  })
+
+  it('leaves workspace default alias Opus unchanged', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const wsConfigPath = join(workspaceRoot, 'config.json')
+    const wsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
+    wsConfig.defaults = { model: 'Opus' }
+    writeFileSync(wsConfigPath, JSON.stringify(wsConfig, null, 2), 'utf-8')
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'order',
+        name: 'ORDER',
+        providerType: 'pi_compat',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['Opus', 'Laufry'],
+        defaultModel: 'Opus',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const migratedWsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
+    expect(migratedWsConfig.defaults.model).toBe('Opus')
   })
 
   it('keeps Pi Anthropic Opus 4.6 IDs unchanged', () => {
@@ -473,7 +727,7 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -501,7 +755,7 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Bedrock)',
+        name: 'Selection Backend (Bedrock)',
         providerType: 'pi',
         authType: 'iam_credentials',
         piAuthProvider: 'amazon-bedrock',
@@ -529,7 +783,7 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     writeRootConfig(configPath, workspaceRoot, [
       {
         slug: 'pi-api-key',
-        name: 'Craft Agents Backend (Anthropic)',
+        name: 'Selection Backend (Anthropic)',
         providerType: 'pi',
         authType: 'api_key',
         piAuthProvider: 'anthropic',
@@ -570,5 +824,228 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     expect(connection.piAuthProvider).toBe('amazon-bedrock')
     expect(connection.defaultModel).toBe('pi/us.anthropic.claude-opus-4-6-v1')
     expect(modelIdsOf(connection)).toEqual(['pi/us.anthropic.claude-opus-4-6-v1', 'pi/us.anthropic.claude-sonnet-4-6'])
+  })
+})
+
+describe('leftover Anthropic connections are not rewritten onto Pi', () => {
+  it('keeps official Anthropic, Pi+Anthropic, and anthropic-messages connections as-is', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'anthropic-api',
+        name: 'Anthropic (API Key)',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['claude-sonnet-4-6'],
+        defaultModel: 'claude-sonnet-4-6',
+      },
+      {
+        slug: 'claude-max',
+        name: 'Claude Max',
+        providerType: 'anthropic',
+        authType: 'oauth',
+        createdAt: Date.now(),
+      },
+      {
+        slug: 'pi-anthropic',
+        name: 'Selection Backend (Anthropic)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'anthropic',
+        createdAt: Date.now(),
+      },
+      {
+        slug: 'compat-messages',
+        name: 'Custom Anthropic Messages',
+        providerType: 'pi_compat',
+        authType: 'api_key_with_endpoint',
+        customEndpoint: { api: 'anthropic-messages' },
+        baseUrl: 'https://example.com',
+        createdAt: Date.now(),
+      },
+    ])
+
+    runMigration(configDir)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      llmConnections: Array<Record<string, unknown>>
+    }
+
+    expect(findConnection(configPath, 'anthropic-api').providerType).toBe('anthropic')
+    expect(findConnection(configPath, 'anthropic-api').piAuthProvider).toBeUndefined()
+    expect(findConnection(configPath, 'claude-max').providerType).toBe('anthropic')
+    expect(findConnection(configPath, 'claude-max').authType).toBe('oauth')
+    expect(findConnection(configPath, 'pi-anthropic').providerType).toBe('pi')
+    expect(findConnection(configPath, 'pi-anthropic').piAuthProvider).toBe('anthropic')
+    expect(findConnection(configPath, 'compat-messages').providerType).toBe('pi_compat')
+    expect(findConnection(configPath, 'compat-messages').customEndpoint).toEqual({ api: 'anthropic-messages' })
+    expect(findConnection(configPath, 'compat-messages').piAuthProvider).toBe('anthropic')
+    expect(config.llmConnections).toHaveLength(4)
+  })
+
+  it('attaches an Anthropic auth hint to a custom endpoint on the official API host', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'official-messages',
+        name: 'Official host',
+        providerType: 'pi_compat',
+        authType: 'api_key_with_endpoint',
+        customEndpoint: { api: 'anthropic-messages' },
+        baseUrl: 'https://api.anthropic.com',
+        createdAt: Date.now(),
+      },
+      {
+        slug: 'keyless-local',
+        name: 'Local',
+        providerType: 'pi_compat',
+        authType: 'none',
+        customEndpoint: { api: 'anthropic-messages' },
+        baseUrl: 'http://127.0.0.1:8080',
+        createdAt: Date.now(),
+      },
+    ])
+
+    runMigration(configDir)
+
+    expect(findConnection(configPath, 'official-messages').piAuthProvider).toBe('anthropic')
+    expect(findConnection(configPath, 'official-messages').providerType).toBe('pi_compat')
+    expect(findConnection(configPath, 'keyless-local').piAuthProvider).toBeUndefined()
+
+    const once = readFileSync(configPath, 'utf-8')
+    runMigration(configDir)
+    expect(readFileSync(configPath, 'utf-8')).toBe(once)
+  })
+
+  it('moves the global default off leftover Anthropic when a supported connection exists', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          workspaces: [
+            {
+              id: 'ws-1',
+              name: 'My Workspace',
+              rootPath: workspaceRoot,
+              createdAt: Date.now(),
+            },
+          ],
+          activeWorkspaceId: 'ws-1',
+          activeSessionId: null,
+          defaultLlmConnection: 'anthropic-api',
+          llmConnections: [
+            {
+              slug: 'anthropic-api',
+              name: 'Anthropic (API Key)',
+              providerType: 'anthropic',
+              authType: 'api_key',
+              createdAt: Date.now(),
+            },
+            {
+              slug: 'openai',
+              name: 'OpenAI',
+              providerType: 'pi',
+              authType: 'api_key',
+              piAuthProvider: 'openai',
+              createdAt: Date.now(),
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    )
+
+    const run = Bun.spawnSync([
+      process.execPath,
+      '--eval',
+      `import '${PI_RESOLVER_SETUP_PATH}'; import { migrateLegacyLlmConnectionsConfig, migrateOrphanedDefaultConnections } from '${STORAGE_MODULE_PATH}'; migrateLegacyLlmConnectionsConfig(); migrateOrphanedDefaultConnections();`,
+    ], {
+      env: {
+        ...process.env,
+        CRAFT_CONFIG_DIR: configDir,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (run.exitCode !== 0) {
+      throw new Error(
+        `migration subprocess failed (exit ${run.exitCode})\nstdout:\n${run.stdout.toString()}\nstderr:\n${run.stderr.toString()}`,
+      )
+    }
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      defaultLlmConnection?: string
+      llmConnections: Array<Record<string, unknown>>
+    }
+    expect(findConnection(configPath, 'anthropic-api').providerType).toBe('anthropic')
+    expect(config.defaultLlmConnection).toBe('openai')
+    expect(config.llmConnections).toHaveLength(2)
+  })
+})
+
+describe('generic API-key connection names', () => {
+  it('rewrites Selection Backend (API Key) N on startup and leaves other titles', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const stamp = Date.now()
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'pi-api-key',
+        name: 'Selection Backend (API Key)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'deepseek',
+        baseUrl: 'https://api.deepseek.com',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+      {
+        slug: 'pi-api-key-2',
+        name: 'Selection Backend (API Key) 2',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'deepseek',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+      {
+        slug: 'pi-api-key-3',
+        name: '工作 DeepSeek',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'deepseek',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+      {
+        slug: 'pi-api-key-4',
+        name: 'Selection Backend (OpenAI)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'openai',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      llmConnections: Array<{ slug: string; name: string }>
+    }
+    const names = Object.fromEntries(config.llmConnections.map((connection) => [connection.slug, connection.name]))
+    expect(names['pi-api-key']).toBe('DeepSeek')
+    expect(names['pi-api-key-2']).toBe('DeepSeek 2')
+    expect(names['pi-api-key-3']).toBe('工作 DeepSeek')
+    expect(names['pi-api-key-4']).toBe('Selection Backend (OpenAI)')
   })
 })

@@ -11,7 +11,7 @@
 import { cn } from '@/lib/utils'
 import type { AutomationAction } from './types'
 import { ActionTypeIcon } from './ActionTypeIcon'
-import { DEFAULT_SCRIPT_RUNTIME, DEFAULT_WEBHOOK_METHOD } from './constants'
+import { DEFAULT_WEBHOOK_METHOD } from './constants'
 
 export interface AutomationActionPreviewProps {
   actions: AutomationAction[]
@@ -22,14 +22,12 @@ export function AutomationActionPreview({ actions, className }: AutomationAction
   return (
     <div className={cn('space-y-1', className)}>
       {actions.map((action, i) => (
-        <div key={i} className="flex items-start gap-2 text-label-sm">
-          <ActionTypeIcon type={action.type} className="mt-0.5 size-3 shrink-0" />
-          <span className="line-clamp-2 break-words text-secondary">
+        <div key={i} className="flex items-start gap-2 text-xs">
+          <ActionTypeIcon type={action.type} className="h-3 w-3 mt-0.5 shrink-0" />
+          <span className="text-foreground/70 break-words line-clamp-2">
             {action.type === 'webhook'
               ? `${action.method ?? DEFAULT_WEBHOOK_METHOD} ${action.url}`
-              : action.type === 'script'
-                ? `${action.runtime ?? DEFAULT_SCRIPT_RUNTIME} ${action.script}`
-                : action.prompt}
+              : action.prompt}
           </span>
         </div>
       ))}

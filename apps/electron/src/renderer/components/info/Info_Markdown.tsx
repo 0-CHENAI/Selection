@@ -8,10 +8,11 @@
 
 import * as React from 'react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Maximize2 } from 'lucide-react'
 import { Markdown } from '@/components/markdown'
 import { DocumentFormattedMarkdownOverlay } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
-import { Info_FullscreenButton } from './Info_FullscreenButton'
 
 export interface Info_MarkdownProps {
   /** Markdown content */
@@ -32,6 +33,7 @@ export function Info_Markdown({
   className,
   fullscreen = false,
 }: Info_MarkdownProps) {
+  const { t } = useTranslation()
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Detect if content starts with H1-H3 heading
@@ -41,8 +43,7 @@ export function Info_Markdown({
     <>
       <div
         className={cn(
-          // Same inset as every other card body (Info_Table rows, settings rows): the card pad
-          'px-card-pad pb-3 text-label',
+          'px-6 pb-3 text-sm',
           maxHeight && 'overflow-y-auto',
           startsWithHeading ? 'pt-0' : 'pt-1',
           // Add relative + group for fullscreen button positioning
@@ -53,10 +54,19 @@ export function Info_Markdown({
       >
         {/* Fullscreen button - visible on hover, positioned top-right */}
         {fullscreen && (
-          <Info_FullscreenButton
+          <button
             onClick={() => setIsFullscreen(true)}
-            className="absolute top-2 right-2 z-local"
-          />
+            className={cn(
+              'absolute top-2 right-2 p-1 rounded-[6px] transition-all z-10',
+              'opacity-0 group-hover:opacity-100',
+              'bg-background shadow-minimal',
+              'text-muted-foreground/50 hover:text-foreground',
+              'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100'
+            )}
+            title={t("table.viewFullscreen")}
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
         )}
 
         <Markdown mode={mode}>{children}</Markdown>

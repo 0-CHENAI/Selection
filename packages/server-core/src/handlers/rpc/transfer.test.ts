@@ -161,7 +161,11 @@ describe('chunked transfer handlers', () => {
   })
 
   it('refreshes TTL as chunks arrive so slow healthy uploads survive', async () => {
-    process.env.CRAFT_TRANSFER_TTL_MS = '40'
+    // Two gaps together outlast one TTL, but each gap stays inside it.
+    // The slack is large because a busy CI runner can fire a short timer late.
+    const ttlMs = 400
+    const gapMs = 220
+    process.env.CRAFT_TRANSFER_TTL_MS = String(ttlMs)
 
     const { start, chunk, commit } = createHarness()
     const payload = encodeParts({ hello: 'world', slow: true }, 8)
@@ -177,14 +181,14 @@ describe('chunked transfer handlers', () => {
       checksum: payload.checksum,
     }) as { transferId: string }
 
-    await new Promise(resolve => setTimeout(resolve, 25))
+    await new Promise(resolve => setTimeout(resolve, gapMs))
     await chunk(ctx('client-1'), {
       transferId,
       index: 0,
       data: payload.chunks[0],
     })
 
-    await new Promise(resolve => setTimeout(resolve, 25))
+    await new Promise(resolve => setTimeout(resolve, gapMs))
     await chunk(ctx('client-1'), {
       transferId,
       index: 1,

@@ -40,6 +40,10 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // file — native file dialog
   RPC_CHANNELS.file.OPEN_DIALOG,
+  RPC_CHANNELS.resources.OPEN_BUNDLE_FILE,
+  RPC_CHANNELS.resources.OPEN_MCP_JSON_FILE,
+  RPC_CHANNELS.resources.OPEN_SKILL_IMPORT_FILE,
+  RPC_CHANNELS.resources.SAVE_BUNDLE_FILE,
   // file — draft hydration for user-attached paths. Paths in drafts.json were captured
   // via webUtils.getPathForFile in the renderer, so they point at the user's local machine
   // — even when the workspace itself lives on a remote server. Routing this REMOTE_ELIGIBLE
@@ -135,8 +139,6 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.notification.SET_ENABLED,
 
   // input — local input preferences
-  RPC_CHANNELS.input.GET_AUTO_CAPITALISATION,
-  RPC_CHANNELS.input.SET_AUTO_CAPITALISATION,
   RPC_CHANNELS.input.GET_SEND_MESSAGE_KEY,
   RPC_CHANNELS.input.SET_SEND_MESSAGE_KEY,
   RPC_CHANNELS.input.GET_SPELL_CHECK,
@@ -150,24 +152,13 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.appearance.GET_RICH_TOOL_DESCRIPTIONS,
   RPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS,
 
-  // caching — prompt cache and context settings
-  RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE,
-  RPC_CHANNELS.caching.SET_EXTENDED_PROMPT_CACHE,
-  RPC_CHANNELS.caching.GET_ENABLE_1M_CONTEXT,
-  RPC_CHANNELS.caching.SET_ENABLE_1M_CONTEXT,
-
-  // rtk — token-optimization opt-in
-  RPC_CHANNELS.rtk.GET_ENABLED,
-  RPC_CHANNELS.rtk.SET_ENABLED,
-  RPC_CHANNELS.rtk.GET_STATUS,
-  RPC_CHANNELS.rtk.GET_GAIN,
-
   // tools — local tool settings
   RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
 
   // browserPane — Electron BrowserView
   RPC_CHANNELS.browserPane.CREATE,
+  RPC_CHANNELS.browserPane.OPEN_HTML_FILE,
   RPC_CHANNELS.browserPane.DESTROY,
   RPC_CHANNELS.browserPane.LIST,
   RPC_CHANNELS.browserPane.NAVIGATE,
@@ -176,6 +167,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.browserPane.RELOAD,
   RPC_CHANNELS.browserPane.STOP,
   RPC_CHANNELS.browserPane.FOCUS,
+  RPC_CHANNELS.browserPane.OPEN_IN_DEFAULT_BROWSER,
   RPC_CHANNELS.browserPane.SNAPSHOT,
   RPC_CHANNELS.browserPane.CLICK,
   RPC_CHANNELS.browserPane.FILL,
@@ -215,6 +207,15 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
+  RPC_CHANNELS.artifacts.BODY_FEEDBACK,
+  RPC_CHANNELS.artifacts.MANAGE,
+  RPC_CHANNELS.artifacts.FEEDBACK,
+  RPC_CHANNELS.artifacts.FEEDBACK_LIST,
+  RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT,
+  RPC_CHANNELS.artifacts.CLEANUP,
+  RPC_CHANNELS.artifacts.PREVIEW,
+  RPC_CHANNELS.artifacts.OFFICE_FILES,
+  RPC_CHANNELS.artifacts.OFFICE_PREVIEW,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,
   RPC_CHANNELS.server.CREATE_WORKSPACE,
@@ -236,16 +237,19 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sessions.SEND_MESSAGE,
   RPC_CHANNELS.sessions.CANCEL,
   RPC_CHANNELS.sessions.KILL_SHELL,
-  RPC_CHANNELS.sessions.GET_BACKGROUND_TASK_OUTPUT,
-  RPC_CHANNELS.sessions.STOP_BACKGROUND_TASK,
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
+  RPC_CHANNELS.sessions.RESPOND_TO_CLARIFICATION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,
   RPC_CHANNELS.sessions.EVENT,
   RPC_CHANNELS.sessions.GET_MODEL,
   RPC_CHANNELS.sessions.SET_MODEL,
+  RPC_CHANNELS.sessions.SET_SWARM_ENABLED,
+  RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS,
+  RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET,
+  RPC_CHANNELS.sessions.STOP_SWARM,
   RPC_CHANNELS.sessions.GET_FILES,
   RPC_CHANNELS.sessions.GET_NOTES,
   RPC_CHANNELS.sessions.SET_NOTES,
@@ -265,17 +269,32 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.transfer.ABORT,
 
   // tasks — workspace content (Conductor DAG runs on the workspace server)
+  RPC_CHANNELS.tasks.GET_OUTPUT,
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
+  RPC_CHANNELS.tasks.SAVE,
   RPC_CHANNELS.tasks.GENERATE,
   RPC_CHANNELS.tasks.GENERATED,
   RPC_CHANNELS.tasks.RUN,
   RPC_CHANNELS.tasks.PAUSE,
   RPC_CHANNELS.tasks.RESUME,
   RPC_CHANNELS.tasks.STOP,
+  RPC_CHANNELS.tasks.CONTINUE,
+  RPC_CHANNELS.tasks.RESPOND_APPROVAL,
+  RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS,
   RPC_CHANNELS.tasks.GET,
   RPC_CHANNELS.tasks.LIST,
+  RPC_CHANNELS.tasks.LIST_TEMPLATES,
+  RPC_CHANNELS.tasks.GET_TEMPLATE,
+  RPC_CHANNELS.tasks.SAVE_TEMPLATE,
+  RPC_CHANNELS.tasks.DELETE_TEMPLATE,
+  RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE,
+  RPC_CHANNELS.tasks.LIST_RUNS,
+  RPC_CHANNELS.tasks.PATCH_RUN,
+  RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
+  RPC_CHANNELS.tasks.INSPECT_RUN,
+  RPC_CHANNELS.tasks.RUN_CHANGED,
 
   // file — workspace files (not openDialog which is native)
   RPC_CHANNELS.file.READ,
@@ -288,6 +307,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // fs — workspace filesystem
   RPC_CHANNELS.fs.SEARCH,
+  RPC_CHANNELS.fs.STAT_PATH,
   RPC_CHANNELS.fs.LIST_DIRECTORY,
 
   // credentials — remote server's credential state
@@ -320,6 +340,16 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.copilot.LOGOUT,
   RPC_CHANNELS.copilot.DEVICE_CODE,
 
+  // kimi — Kimi Code device-flow OAuth via capability passthrough
+  RPC_CHANNELS.kimi.START_OAUTH,
+  RPC_CHANNELS.kimi.CANCEL_OAUTH,
+  RPC_CHANNELS.kimi.DEVICE_CODE,
+
+  // xAI — SuperGrok/X Premium device-flow OAuth via capability passthrough
+  RPC_CHANNELS.xai.START_OAUTH,
+  RPC_CHANNELS.xai.CANCEL_OAUTH,
+  RPC_CHANNELS.xai.DEVICE_CODE,
+
   // Claude OAuth — runs on workspace server so credentials and connection config
   // end up on the same server that will use them. Browser opening is client-side.
   // (ChatGPT OAuth stays LOCAL_ONLY — requires localhost callback server.)
@@ -332,24 +362,18 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
   RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
   RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL,
+  RPC_CHANNELS.settings.GET_ADVANCED,
+  RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED,
+  RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED,
+  RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY,
+  RPC_CHANNELS.settings.SET_SEARCH_SETTINGS,
+  RPC_CHANNELS.settings.SET_SEARCH_PROVIDER_API_KEY,
   RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL,
-  RPC_CHANNELS.settings.GET_AUTO_COMPACT_WINDOW,
-  RPC_CHANNELS.settings.SET_AUTO_COMPACT_WINDOW,
-  RPC_CHANNELS.settings.GET_SUBAGENT_MODEL,
-  RPC_CHANNELS.settings.SET_SUBAGENT_MODEL,
-
-  // decisions — the decision layer's settings and keys live on the server whose sessions ask the
-  // model (it can reuse that server's LLM connections); the Laya probe tests what that server reaches
-  RPC_CHANNELS.decisions.GET_SETTINGS,
-  RPC_CHANNELS.decisions.SET_SETTINGS,
-  RPC_CHANNELS.decisions.GET_STATUS,
-  RPC_CHANNELS.decisions.SET_API_KEY,
-  RPC_CHANNELS.decisions.DELETE_API_KEY,
-  RPC_CHANNELS.decisions.TEST,
-  RPC_CHANNELS.decisions.PROBE_SERVER,
-  RPC_CHANNELS.decisions.GET_USAGE,
+  RPC_CHANNELS.settings.GET_SHARED_PROJECT_MEMORY_ENABLED,
+  RPC_CHANNELS.settings.SET_SHARED_PROJECT_MEMORY_ENABLED,
 
   // pi — provider config on workspace server
+  RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS,
   RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS,
   RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL,
   RPC_CHANNELS.pi.GET_PROVIDER_MODELS,
@@ -357,6 +381,13 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // preferences — workspace-level preferences
   RPC_CHANNELS.preferences.READ,
   RPC_CHANNELS.preferences.WRITE,
+  RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.GET_PPT_CATALOG,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW,
+  RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE,
 
   // drafts — workspace content
   RPC_CHANNELS.drafts.GET,
@@ -373,12 +404,13 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sources.CHANGED,
   RPC_CHANNELS.sources.GET_PERMISSIONS,
   RPC_CHANNELS.sources.GET_MCP_TOOLS,
+  RPC_CHANNELS.sources.RETRY_CONNECTION,
+  RPC_CHANNELS.sources.SET_DISPLAY_TITLE,
 
   // oauth — OAuth state management
   RPC_CHANNELS.oauth.START,
   RPC_CHANNELS.oauth.COMPLETE,
   RPC_CHANNELS.oauth.CANCEL,
-  RPC_CHANNELS.oauth.STATUS,
   RPC_CHANNELS.oauth.REVOKE,
 
   // workspace — workspace config + images (sharp on headless)
@@ -397,6 +429,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.skills.GET_FILES,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.CHANGED,
+  RPC_CHANNELS.skills.SET_DISPLAY_TITLE,
 
   // statuses — workspace metadata
   RPC_CHANNELS.statuses.LIST,
@@ -421,6 +454,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // automations — workspace automations
   RPC_CHANNELS.automations.GET,
+  RPC_CHANNELS.automations.VALIDATE,
   RPC_CHANNELS.automations.TEST,
   RPC_CHANNELS.automations.SET_ENABLED,
   RPC_CHANNELS.automations.DUPLICATE,
@@ -441,90 +475,33 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.projects.DELETE_ASSET,
   RPC_CHANNELS.projects.CHANGED,
 
-  // pages — workspace pages (mini dashboards)
-  RPC_CHANNELS.pages.GET,
-  RPC_CHANNELS.pages.GET_ONE,
-  RPC_CHANNELS.pages.CREATE,
-  RPC_CHANNELS.pages.UPDATE,
-  RPC_CHANNELS.pages.DELETE,
-  RPC_CHANNELS.pages.GET_CONTENT,
-  RPC_CHANNELS.pages.SET_CONTENT,
-  RPC_CHANNELS.pages.GET_DATA,
-  RPC_CHANNELS.pages.LIST_GRANTS,
-  RPC_CHANNELS.pages.ISSUE_GRANT,
-  RPC_CHANNELS.pages.REVOKE_GRANT,
-  RPC_CHANNELS.pages.CREATE_LEASE,
-  RPC_CHANNELS.pages.RELEASE_LEASE,
-  RPC_CHANNELS.pages.EXECUTE_ACTION,
-  RPC_CHANNELS.pages.CANCEL_ACTION,
-  // Sharing runs on the workspace server: it holds the page files, the vault
-  // token, and evaluates the CRAFT_FEATURE_PAGES_SHARING flag.
-  RPC_CHANNELS.pages.GET_SHARE_CAPABILITIES,
-  RPC_CHANNELS.pages.GET_SHARE_DATA_SCAN,
-  RPC_CHANNELS.pages.PUBLISH,
-  RPC_CHANNELS.pages.SET_PUBLICATION_PASSWORD,
-  RPC_CHANNELS.pages.UNPUBLISH,
-  // claude.ai artifact: runs Claude Code where the page files and the Claude credential live.
-  RPC_CHANNELS.pages.PUBLISH_CLAUDE_ARTIFACT,
-  // Thumbnails: the poster file lives on the workspace server; regeneration is
-  // a no-op unless that host injected a capturer (Electron main).
-  RPC_CHANNELS.pages.GET_THUMBNAIL,
-  RPC_CHANNELS.pages.REGENERATE_THUMBNAIL,
-  RPC_CHANNELS.pages.CHANGED,
-
   // git — workspace filesystem
   RPC_CHANNELS.git.GET_BRANCH,
-  RPC_CHANNELS.git.LIST_REPOS,
-  RPC_CHANNELS.git.CREATE_WORKTREE,
 
-  // prWatch — the PR watcher runs where the session's repo, source credentials and `gh` live
-  RPC_CHANNELS.prWatch.SUBSCRIBE,
-  RPC_CHANNELS.prWatch.UNSUBSCRIBE,
-  RPC_CHANNELS.prWatch.REFRESH,
-  RPC_CHANNELS.prWatch.GET_DETAILS,
-  RPC_CHANNELS.prWatch.BIND,
-  RPC_CHANNELS.prWatch.UNBIND,
-  RPC_CHANNELS.prWatch.SET_AUTO_MERGE,
-  RPC_CHANNELS.prWatch.SET_AUTO_FIX,
-  RPC_CHANNELS.prWatch.CHANGED,
-
-  // resources — workspace resource export/import
+  // resources — workspace resource export/import/copy
   RPC_CHANNELS.resources.EXPORT,
+  RPC_CHANNELS.resources.PREVIEW_IMPORT,
   RPC_CHANNELS.resources.IMPORT,
+  RPC_CHANNELS.resources.PREVIEW_MCP_JSON,
+  RPC_CHANNELS.resources.IMPORT_MCP_JSON,
+  RPC_CHANNELS.resources.PREVIEW_SKILL_FILE,
+  RPC_CHANNELS.resources.IMPORT_SKILL_FILE,
+  RPC_CHANNELS.resources.COPY_BETWEEN,
 
   // messaging — gateway channels run on workspace server
-  RPC_CHANNELS.messaging.WA_REGISTER,
-  RPC_CHANNELS.messaging.WA_INCOMING,
-  RPC_CHANNELS.messaging.WA_BUTTON_PRESS,
-  RPC_CHANNELS.messaging.WA_STATUS,
-  RPC_CHANNELS.messaging.WA_QR,
-  RPC_CHANNELS.messaging.WA_SEND,
-  RPC_CHANNELS.messaging.WA_SEND_BUTTONS,
-  RPC_CHANNELS.messaging.WA_SEND_TYPING,
-  RPC_CHANNELS.messaging.WA_SEND_FILE,
-  RPC_CHANNELS.messaging.WA_CONNECT,
-  RPC_CHANNELS.messaging.WA_DISCONNECT,
   RPC_CHANNELS.messaging.BINDING_CHANGED,
   RPC_CHANNELS.messaging.PLATFORM_STATUS,
   RPC_CHANNELS.messaging.PENDING_CHANGED,
   RPC_CHANNELS.messaging.GET_CONFIG,
   RPC_CHANNELS.messaging.UPDATE_CONFIG,
-  RPC_CHANNELS.messaging.TEST_TELEGRAM,
-  RPC_CHANNELS.messaging.SAVE_TELEGRAM,
   RPC_CHANNELS.messaging.TEST_LARK,
   RPC_CHANNELS.messaging.SAVE_LARK,
   RPC_CHANNELS.messaging.DISCONNECT,
   RPC_CHANNELS.messaging.FORGET,
   RPC_CHANNELS.messaging.GET_BINDINGS,
   RPC_CHANNELS.messaging.GENERATE_CODE,
-  RPC_CHANNELS.messaging.GENERATE_SUPERGROUP_CODE,
-  RPC_CHANNELS.messaging.GET_SUPERGROUP,
-  RPC_CHANNELS.messaging.UNBIND_SUPERGROUP,
   RPC_CHANNELS.messaging.UNBIND,
   RPC_CHANNELS.messaging.UNBIND_BINDING,
-  RPC_CHANNELS.messaging.WA_START_CONNECT,
-  RPC_CHANNELS.messaging.WA_SUBMIT_PHONE,
-  RPC_CHANNELS.messaging.WA_UI_EVENT,
   // messaging access control — UI ↔ Server, per-platform owners + per-binding allow-list
   RPC_CHANNELS.messaging.GET_PLATFORM_OWNERS,
   RPC_CHANNELS.messaging.SET_PLATFORM_OWNERS,

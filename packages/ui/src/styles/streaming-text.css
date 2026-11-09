@@ -1,0 +1,22 @@
+/* Streaming text — Transitions.dev / Jakub Antalik
+ * https://transitions.dev/detail.html?t=streaming-text
+ * Product integration: one commit per display frame, no demo replay queue.
+ */
+:root {
+  --stream-gap: 0ms;
+  --stream-fade: 180ms;
+  --stream-blur: 0px;
+  --stream-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.t-stream-w {
+  opacity: 0;
+  transition: opacity var(--stream-fade) var(--stream-ease);
+}
+.t-stream-w.is-in {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-stream-w { transition: none !important; filter: none !important; opacity: 1 !important; }
+}

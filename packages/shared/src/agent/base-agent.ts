@@ -13,23 +13,25 @@
  * Provider-specific behavior (chat, abort, capabilities) is implemented in subclasses.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
+import { shouldLoadBundledOfficecliRouter } from '../utils/officecli.ts';
 import { expandPath } from '../utils/paths.ts';
+import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
-import { createdPrUrl } from '../pr-watch/rules.ts';
-import { getSessionScopedToolCallbacks } from './session-scoped-tool-callback-registry.ts';
 import type { ThinkingLevel } from './thinking-levels.ts';
-import type { AgentProfile } from '@craft-agent/session-tools-core';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
 import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
+import type { LoadedSkill } from '../skills/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
+import { getBackendRuntime } from './backend/internal/driver-types.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
+import { resolveSourceTitle } from '../display-titles.ts';
 import type { ApiServerConfig } from '../mcp/mcp-pool.ts';
 
 import type {
@@ -43,33 +45,37 @@ import type {
   SdkMcpServerConfig,
   BackendConfig,
   PostInitResult,
+  BridgeUpdateContext,
   RecoveryMessage,
 } from './backend/types.ts';
+import {
+  INTERRUPTION_SYSTEM_REMINDER,
+  sanitizeUserMessageForRetry,
+} from './user-message-sanitize.ts';
 import { AbortReason } from './backend/types.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
 import type { Workspace } from '../config/storage.ts';
 
 // Core modules
 import { PermissionManager } from './core/permission-manager.ts';
-import type { GuardedModeCheck } from './core/guarded-mode.ts';
-import type { SubagentModelPicker } from './core/subagent-model.ts';
 import { SourceManager } from './core/source-manager.ts';
 import { PromptBuilder } from './core/prompt-builder.ts';
 import { PathProcessor } from './core/path-processor.ts';
 import { ConfigWatcherManager, type ConfigWatcherManagerCallbacks } from './core/config-watcher-manager.ts';
 import { UsageTracker, type UsageUpdate } from './core/usage-tracker.ts';
 import { PrerequisiteManager } from './core/prerequisite-manager.ts';
+import { recoverSpawnSessionArguments } from './core/spawn-session-args.ts';
 
 // Automation system for agent events
-import type { AutomationSystem } from '../automations/automation-system.ts';
-import type { AgentEvent as AutomationAgentEvent, SdkAutomationInput } from '../automations/types.ts';
 import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../sessions/storage.ts';
 import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills } from '../skills/storage.ts';
+import { BUNDLED_PROSE_SKILL_SLUGS, invalidateSkillsCacheIfSkillMarkdown, loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
+import { toSkillCatalogEntries } from '../skills/catalog.ts';
+import { formatSkillSuggestions, matchSkillsByGlobs } from '../skills/match.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -94,8 +100,32 @@ export interface MiniAgentConfig {
 // Spawn Session Types
 // ============================================================
 
+export type SpawnSessionMode = 'wait' | 'background';
+export type SpawnSessionResultStatus = 'started' | 'completed' | 'failed' | 'interrupted' | 'timeout';
+export type SpawnSessionLifecycle = 'managed' | 'detached';
+export type SpawnSessionRole = 'coordinator' | 'worker' | 'reviewer';
+export type SpawnSessionReason = 'user-requested' | 'automatic';
+
+export interface SpawnSessionQualificationTrack {
+  name: string;
+  input: string;
+  expectedOutput: string;
+  evidence: string;
+  toolKinds: string[];
+}
+
+export interface SpawnSessionQualification {
+  tracks: SpawnSessionQualificationTrack[];
+  parallelBenefit: string;
+  finalAggregation: string;
+}
+
 export interface SpawnSessionRequest {
   prompt: string;
+  /** Bind delegated work to an active canonical task; the host validates ownership. */
+  taskBinding?: { runId: string; nodeId: string };
+  /** Declared file work uses runtime-owned isolation and verified integration. */
+  artifactDelivery?: { inputs: string[]; outputs: Record<string, string> };
   name?: string;
   llmConnection?: string;
   model?: string;
@@ -106,15 +136,46 @@ export interface SpawnSessionRequest {
   workingDirectory?: string;
   /** Workspace project id to bind the spawned session to */
   projectId?: string;
+  /** wait = block for finalText; background (default) = notify on complete */
+  mode?: SpawnSessionMode;
+  /** Wait-mode timeout in ms. Clamped to 30 minutes. */
+  timeoutMs?: number;
   attachments?: Array<{ path: string; name?: string }>;
+  /** managed children participate in the parent's completion and explicit stop. */
+  lifecycle?: SpawnSessionLifecycle;
+  /** Observation/result ownership only; never grants permissions. */
+  role?: SpawnSessionRole;
+  /** Distinguishes an explicit user delegation from autonomous planning. */
+  spawnReason?: SpawnSessionReason;
+  /** Required evidence contract for autonomous delegation. */
+  qualification?: SpawnSessionQualification;
+  /**
+   * Server-injected, single-use authorization bound to the current session turn.
+   * It is intentionally absent from the public spawn_session tool schema.
+   */
+  qualificationCredential?: string;
 }
 
 export interface SpawnSessionResult {
+  /** Runtime-verified references in the destination project, never candidate paths. */
+  artifacts?: Record<string, unknown>;
   sessionId: string;
   name: string;
-  status: 'started';
+  status: SpawnSessionResultStatus;
   connection?: string;
   model?: string;
+  /** Present in wait mode when the child produced a final assistant message. */
+  finalText?: string;
+  orchestrationId: string;
+  parentSessionId: string;
+  rootSessionId: string;
+  depth: number;
+  role: SpawnSessionRole;
+  projectId?: string;
+  lifecycle: SpawnSessionLifecycle;
+  /** Effective reason after trusted authorization normalization. */
+  spawnReason?: SpawnSessionReason;
+  mode?: SpawnSessionMode;
 }
 
 export interface SpawnSessionHelpResult {
@@ -144,12 +205,41 @@ export const MINI_AGENT_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'
 /** MCP servers for mini agents - minimal set (docs tools are now bundled in session) */
 export const MINI_AGENT_MCP_KEYS = ['session'] as const;
 
-/** How long the post-tool hook waits to pin a PR after `gh pr create` (it verifies the PR on GitHub). */
-const PIN_CREATED_PR_TIMEOUT_MS = 8_000;
-
 // ============================================================
 // BaseAgent Abstract Class
 // ============================================================
+
+/**
+ * Load bundled prose skills the user named on this turn.
+ * A workspace or project file with the same slug stays on the Read path.
+ */
+function loadExplicitBundledProseSkills(skillPaths: Map<string, string>): { text: string | null; error?: string } {
+  const slugs: string[] = [];
+  const blocks: string[] = [];
+  for (const slug of BUNDLED_PROSE_SKILL_SLUGS) {
+    const selected = skillPaths.get(slug);
+    if (!selected) continue;
+    const bundled = resolveBundledSkillMdPath(slug);
+    if (!bundled || resolve(selected) !== resolve(bundled)) continue;
+    try {
+      blocks.push(readFileSync(selected, 'utf8'));
+    } catch {
+      return { text: null, error: `Could not read the selected ${slug} skill.` };
+    }
+    skillPaths.delete(slug);
+    slugs.push(slug);
+  }
+  if (slugs.length === 0) return { text: null };
+  if (slugs.length === 1) {
+    return {
+      text: `The user explicitly selected ${slugs[0]} for this turn. Its full SKILL.md is already loaded below; do not Read it again this turn. Follow its instructions for the requested prose:\n\n${blocks[0]}`,
+    };
+  }
+  const labeled = slugs.map((slug, index) => `### ${slug}\n\n${blocks[index]}`).join('\n\n');
+  return {
+    text: `The user explicitly selected ${slugs.join(', ')} for this turn. Each full SKILL.md is already loaded below; do not Read them again this turn. Follow their instructions for the requested prose:\n\n${labeled}`,
+  };
+}
 
 /**
  * Abstract base class for agent backends.
@@ -190,7 +280,6 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   protected _model: string;
   protected _thinkingLevel: ThinkingLevel;
-  protected _agentProfile: AgentProfile;
 
   // ============================================================
   // Core Modules (protected for subclass access)
@@ -202,7 +291,6 @@ export abstract class BaseAgent implements AgentBackend {
   protected configWatcherManager: ConfigWatcherManager | null = null;
   protected usageTracker: UsageTracker;
   protected prerequisiteManager: PrerequisiteManager;
-  protected automationSystem?: AutomationSystem;
 
   // ============================================================
   // Additional State (protected for subclass access)
@@ -225,6 +313,7 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   protected _pendingSourceActivationRestart: { sourceSlug: string; userMessage: string } | null = null;
   protected _currentTurnUserMessage: string | null = null;
+  private skillContextGeneration = 0;
 
   setPendingSourceActivationRestart(pending: { sourceSlug: string; userMessage: string }): void {
     // First-writer-wins under parallel `mcp__session__source_test` calls. The
@@ -253,21 +342,22 @@ export abstract class BaseAgent implements AgentBackend {
   }
 
   protected setCurrentTurnUserMessage(message: string | null): void {
-    this._currentTurnUserMessage = message;
+    // Capture user intent only — never model-only system-reminder / activation suffixes
+    this._currentTurnUserMessage =
+      message == null ? null : sanitizeUserMessageForRetry(message);
   }
 
   // ============================================================
   // Callbacks (public for facade wiring)
   // ============================================================
+  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
   onPermissionRequest: PermissionCallback | null = null;
-  /** Guarded-mode risk check (decision model): may turn an allowed call into a prompt, never the reverse. */
-  guardedModeCheck: GuardedModeCheck | null = null;
-  /** Subagent model choice (decision model, Claude only): picks a cheaper model for an Agent call. */
-  subagentModelPicker: SubagentModelPicker | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
+  onClarifyRequest: ((ask: import('@craft-agent/session-tools-core').ClarificationAsk) => import('@craft-agent/session-tools-core').ClarificationGate) | null = null;
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
+  onSkillsListChange: ((skills: LoadedSkill[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;
   onPermissionModeChange: ((mode: PermissionMode) => void) | null = null;
   onDebug: ((message: string) => void) | null = null;
@@ -287,7 +377,6 @@ export abstract class BaseAgent implements AgentBackend {
     this._sessionId = config.session?.id || `agent-${Date.now()}`;
     this._model = config.model || defaultModel;
     this._thinkingLevel = normalizeThinkingLevel(config.thinkingLevel) ?? DEFAULT_THINKING_LEVEL;
-    this._agentProfile = config.agentProfile ?? 'default';
 
     // Initialize core modules
     // PermissionManager: handles permission evaluation, mode management, and command whitelisting
@@ -295,14 +384,15 @@ export abstract class BaseAgent implements AgentBackend {
       workspaceId: config.workspace.id,
       sessionId: this._sessionId,
       workingDirectory: this.workingDirectory,
-      plansFolderPath: getSessionPlansPath(config.workspace.rootPath, this._sessionId),
-      dataFolderPath: getSessionDataPath(config.workspace.rootPath, this._sessionId),
+      plansFolderPath: config.isolatedOfficeDocumentPath
+        ? join(config.isolatedShellDirectory!, '.qa', 'plans') : getSessionPlansPath(config.workspace.rootPath, this._sessionId),
+      dataFolderPath: config.isolatedOfficeDocumentPath
+        ? join(config.isolatedShellDirectory!, '.qa') : getSessionDataPath(config.workspace.rootPath, this._sessionId),
     });
 
     // SourceManager: tracks active/inactive sources and formats state for context injection
     this.sourceManager = new SourceManager({
       onDebug: (msg) => this.debug(msg),
-      getSourceFeatures: (slug) => this.config.mcpPool?.getSourceFeatures(slug),
     });
 
     // PromptBuilder: builds context blocks for user messages
@@ -312,7 +402,6 @@ export abstract class BaseAgent implements AgentBackend {
       debugMode: config.debugMode,
       systemPromptPreset: config.systemPromptPreset,
       isHeadless: config.isHeadless,
-      agentProfile: config.agentProfile,
     });
 
     // PathProcessor: expands ~ and normalizes paths
@@ -325,14 +414,13 @@ export abstract class BaseAgent implements AgentBackend {
       onDebug: (msg) => this.debug(msg),
     });
 
-    // PrerequisiteManager: blocks source tool calls until guide.md is read
+    // PrerequisiteManager: prepares meaningful source guides and enforces Skill/browser prerequisites
     this.prerequisiteManager = new PrerequisiteManager({
       workspaceRootPath: config.workspace.rootPath,
       onDebug: (msg) => this.debug(msg),
     });
 
     // AutomationSystem: workspace-level automations from automations.json
-    this.automationSystem = config.automationSystem;
   }
 
   // ============================================================
@@ -360,6 +448,10 @@ export abstract class BaseAgent implements AgentBackend {
       onSourcesListChange: (sources) => {
         this.debug(`Sources list changed: ${sources.length} sources`);
         this.onSourcesListChange?.(sources);
+      },
+      onSkillsListChange: (skills) => {
+        this.debug(`Skills list changed: ${skills.length} skills`);
+        this.onSkillsListChange?.(skills);
       },
       onValidationError: (file, errors) => {
         this.debug(`Config validation error: ${file}`);
@@ -401,20 +493,77 @@ export abstract class BaseAgent implements AgentBackend {
     this.onDebug?.(message);
   }
 
+  // ============================================================
+  // Session MCP Tool Completion Handling
+  // ============================================================
+
   /**
-   * Report an agent event (PreToolUse, Stop, …) to the AutomationSystem, which
-   * only matches it: agent events don't run automation actions (#1117).
-   * Catches all errors — automations must never break the agent flow.
+   * Handle successful completion of a session MCP tool (SubmitPlan, auth tools).
    *
-   * Non-Claude backends call this directly; ClaudeAgent would use buildSdkHooks().
+   * WHY THIS IS ON BaseAgent:
+   * -------------------------
+   * Session-scoped tools (SubmitPlan, source_oauth_trigger, etc.) run in an
+   * EXTERNAL MCP server subprocess (packages/session-mcp-server). That subprocess
+   * has its own process memory, so when it calls getSessionScopedToolCallbacks(),
+   * the callback registry is empty — it was populated in THIS process, not the subprocess.
    *
-   * @param signal - Optional AbortSignal, passed through to executeAgentEvent
+   * Instead, PiAgent detects session MCP tool completions from its own event
+   * stream and calls THIS shared method to fire the appropriate callback.
+   *
+   * ClaudeAgent doesn't need this — its session-scoped tools run in-process
+   * via Claude Agent SDK, so the callback registry works directly.
+   *
+   * CALLBACKS FIRED:
+   * - SubmitPlan → this.onPlanSubmitted(planPath)
+   *   → Electron reads plan file, shows plan card, calls interruptForHandoff(PlanSubmitted)
+   * - Auth tools → this.onAuthRequest(authRequest)
+   *   → Electron shows auth dialog, calls interruptForHandoff(AuthRequest)
    */
-  protected async emitAutomationEvent(event: AutomationAgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<void> {
-    try {
-      await this.automationSystem?.executeAgentEvent(event, input, signal);
-    } catch (err) {
-      this.debug(`Automation event ${event} failed: ${err}`);
+  protected handleSessionMcpToolCompletion(
+    toolName: string,
+    args: Record<string, unknown>
+  ): void {
+    // SubmitPlan — trigger plan view in the UI.
+    // The Electron SessionManager's onPlanSubmitted callback will:
+    //   1. Read the plan file content
+    //   2. Create a plan message (role: 'plan')
+    //   3. Send plan_submitted event to renderer
+    //   4. Call interruptForHandoff(AbortReason.PlanSubmitted) → turn terminates
+    if (toolName === 'SubmitPlan' && args.planPath) {
+      this.debug(`SubmitPlan completed: ${args.planPath}`);
+      this.onPlanSubmitted?.(args.planPath as string);
+      return;
+    }
+
+    // Auth tools — trigger auth request in the UI.
+    // Maps MCP tool names to auth request types.
+    const authToolTypes: Record<string, string> = {
+      'source_oauth_trigger': 'oauth',
+      'source_google_oauth_trigger': 'oauth-google',
+      'source_slack_oauth_trigger': 'oauth-slack',
+      'source_microsoft_oauth_trigger': 'oauth-microsoft',
+      'source_credential_prompt': 'credential',
+    };
+
+    const authType = authToolTypes[toolName];
+    if (authType && args.sourceSlug && this.onAuthRequest) {
+      const sourceSlug = args.sourceSlug as string;
+      const source = this.sourceManager.getAllSources().find(s => s.config.slug === sourceSlug);
+      const sourceName = source?.config.name || sourceSlug;
+      this.debug(`Auth tool completed: ${toolName} for ${sourceSlug}`);
+      this.onAuthRequest({
+        type: authType,
+        requestId: `${Date.now()}-auth`,
+        sessionId: this.config.session?.id || '',
+        sourceSlug,
+        sourceName,
+        ...(authType === 'credential' && {
+          mode: (args.mode as string) || 'bearer',
+          labels: args.labels as Record<string, string> | undefined,
+          description: args.description as string | undefined,
+          hint: args.hint as string | undefined,
+        }),
+      } as AuthRequest);
     }
   }
 
@@ -437,45 +586,6 @@ export abstract class BaseAgent implements AgentBackend {
   setThinkingLevel(level: ThinkingLevel): void {
     this._thinkingLevel = level;
     this.debug(`Thinking level set to: ${level}`);
-  }
-
-  getAgentProfile(): AgentProfile {
-    return this._agentProfile;
-  }
-
-  setAgentProfile(profile: AgentProfile): void {
-    this._agentProfile = profile;
-    this.promptBuilder.setAgentProfile(profile);
-    this.debug(`Agent profile set to: ${profile}`);
-  }
-
-  /**
-   * Post-tool hook, Coding mode: a Bash `gh pr create` pins the PR it printed to this session's PR
-   * carousel through the same verified path as pr_bind, unless it is the folder's own branch PR
-   * (shown anyway). PRs opened from another branch or worktree would otherwise never appear.
-   * Returns a note for the model when it pinned one (Claude passes it on as `additionalContext`).
-   * Never throws; bounded by PIN_CREATED_PR_TIMEOUT_MS, since Claude awaits it before its next step.
-   */
-  protected async pinCreatedPr(command: unknown, output: string): Promise<string | null> {
-    if (this._agentProfile !== 'coding' || typeof command !== 'string') return null;
-    const url = createdPrUrl(command, output);
-    const prWatch = url ? getSessionScopedToolCallbacks(this._sessionId)?.prWatch : undefined;
-    if (!url || !prWatch) return null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const result = await Promise.race([
-        prWatch.bind({ ref: url, skipBranchPr: true }),
-        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), PIN_CREATED_PR_TIMEOUT_MS); }),
-      ]);
-      if (!result?.ok || result.skipped) return null;
-      this.debug(`[pr-watch] pinned ${url} after gh pr create`);
-      return `The PR you just opened (${url}) is now pinned to this session's PR carousel; there is no need to call pr_bind.`;
-    } catch (error) {
-      this.debug(`[pr-watch] could not pin ${url}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   // ============================================================
@@ -513,7 +623,18 @@ export abstract class BaseAgent implements AgentBackend {
   }
 
   setWorkspace(workspace: Workspace): void {
+    const workspaceChanged = this.config.workspace.id !== workspace.id
+      || this.config.workspace.rootPath !== workspace.rootPath;
     this.config.workspace = workspace;
+    this.promptBuilder.setWorkspace(workspace);
+    this.prerequisiteManager.setWorkspaceRootPath(workspace.rootPath);
+    this.sourceManager.resetSeenSources();
+    if (workspaceChanged) {
+      this.sourceManager.updateActiveState([], [], []);
+      this.sourceManager.setAllSources([]);
+      this.permissionManager.clearWhitelists();
+      this.permissionManager.updateWorkingDirectory(workspace.rootPath);
+    }
     // Subclasses should clear session-specific state
   }
 
@@ -591,7 +712,7 @@ export abstract class BaseAgent implements AgentBackend {
     mcpServers: Record<string, SdkMcpServerConfig>,
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
-  ): Promise<void> {
+  ): Promise<string[]> {
     // Update SourceManager state (common tracking)
     this.sourceManager.updateActiveState(
       Object.keys(mcpServers),
@@ -603,15 +724,13 @@ export abstract class BaseAgent implements AgentBackend {
     // Both MCP sources and API sources are routed through the pool.
     if (this.config.mcpPool) {
       try {
-        const failures = await this.config.mcpPool.sync(mcpServers, apiServers as Record<string, ApiServerConfig>);
-        if (failures.length > 0) {
-          console.warn(`[${this.backendName}] ${failures.length} source(s) failed to connect and will be unavailable this session: ${failures.join(', ')}`);
-          this.debug(`MCP sync failures: ${failures.join(', ')}`);
-        }
+        return await this.config.mcpPool.sync(mcpServers, apiServers as Record<string, ApiServerConfig>);
       } catch (err) {
         this.debug(`Failed to sync MCP pool: ${err instanceof Error ? err.message : String(err)}`);
+        return intendedSlugs?.length ? [...intendedSlugs] : [...Object.keys(mcpServers), ...Object.keys(apiServers)];
       }
     }
+    return [];
   }
 
   getActiveSourceSlugs(): string[] {
@@ -837,7 +956,7 @@ ${formattedMessages}
   }
 
   // ============================================================
-  // Lifecycle (postInit)
+  // Lifecycle (postInit, applyBridgeUpdates)
   // ============================================================
 
   /**
@@ -847,6 +966,15 @@ ${formattedMessages}
    */
   async postInit(): Promise<PostInitResult> {
     return { authInjected: true };
+  }
+
+  /**
+   * Apply bridge/config updates mid-session.
+   * Default: no-op for backends that don't use bridge-mcp-server (Claude, Pi).
+   * Override in Codex/Copilot to regenerate config or write bridge files.
+   */
+  async applyBridgeUpdates(_context: BridgeUpdateContext): Promise<void> {
+    // No-op by default
   }
 
   /**
@@ -900,12 +1028,13 @@ ${formattedMessages}
    * must read them itself (enforced by PrerequisiteManager).
    *
    * @param message - The user message containing potential skill mentions
+   * @param attachments - Optional files; Office attachments also load the matching built-in skill
    * @returns Object with:
    *   - skillPaths: Map of slug → resolved SKILL.md absolute path
    *   - cleanMessage: Message with mentions stripped, or default directive
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
-  protected extractSkillPaths(message: string): {
+  protected extractSkillPaths(message: string, attachments?: FileAttachment[]): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
@@ -925,17 +1054,39 @@ ${formattedMessages}
 
     // Resolve SKILL.md paths for matched skills
     const skillPaths = new Map<string, string>();
-    for (const slug of parsed.skills) {
+    const resolveSlug = (slug: string) => {
       const skill = skills.find(s => s.slug === slug);
-      if (skill) {
-        const skillMdPath = join(skill.path, 'SKILL.md');
-        if (existsSync(skillMdPath)) {
-          skillPaths.set(slug, skillMdPath);
-          this.debug(`[extractSkillPaths] Resolved skill ${slug} → ${skillMdPath}`);
-        } else {
-          this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
-        }
+      if (!skill) return;
+      const skillMdPath = join(skill.path, 'SKILL.md');
+      if (existsSync(skillMdPath)) {
+        skillPaths.set(slug, skillMdPath);
+        this.debug(`[extractSkillPaths] Resolved skill ${slug} → ${skillMdPath}`);
+        return;
       }
+      this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
+    };
+    const resolveBundledSlug = (slug: string) => {
+      const skillMdPath = resolveBundledSkillMdPath(slug);
+      if (skillMdPath) {
+        skillPaths.set(slug, skillMdPath);
+        this.debug(`[extractSkillPaths] Resolved locked bundled skill ${slug} → ${skillMdPath}`);
+        return;
+      }
+      this.debug(`[extractSkillPaths] Locked bundled SKILL.md not found for ${slug}`);
+    };
+
+    for (const slug of parsed.skills) {
+      resolveSlug(slug);
+    }
+
+    // Named or attached Office files load the router only. The model then
+    // follows its concise format guide / PowerPoint workflow. Intent-only Office
+    // work ("做一份 PPT") discovers officecli from the skill catalog instead.
+    // An explicit user skill mention keeps Craft's normal project/workspace/global priority.
+    const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
+    if (shouldLoadBundledOfficecliRouter(message, attachments) && !explicitlySelectedOfficecli) {
+      skillPaths.delete('officecli');
+      resolveBundledSlug('officecli');
     }
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
@@ -970,7 +1121,25 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.`;
+    const bundledOfficecli = resolveBundledSkillMdPath('officecli');
+    const officeOnly = bundledOfficecli && skillPaths.get('officecli') === bundledOfficecli
+      ? '\nAfter reading the router, follow its concise Word/Excel guide or selected PowerPoint workflow. Use `officecli load_skill` only for specialized syntax when the router calls for it. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
+      : '';
+    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
+  }
+
+  /**
+   * After Write/Edit/Bash creates or edits a SKILL.md, drop the skill list
+   * cache and refresh catalog lookup so the same turn can activate sources
+   * and the next turn injects the new handbook entry.
+   */
+  protected noteSkillMarkdownMutation(filePath?: string, command?: string): void {
+    if (!invalidateSkillsCacheIfSkillMarkdown({ filePath, command })) return;
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const projectRoot = this.config.session?.workingDirectory;
+    const skills = loadAllSkills(workspaceRoot, projectRoot);
+    this.prerequisiteManager.setCatalogSkills(toSkillCatalogEntries(skills));
+    this.onSkillsListChange?.(skills);
   }
 
   // ============================================================
@@ -988,17 +1157,49 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, attachments);
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };
       return;
     }
 
+    // Only an app-owned prose skill may enter the system prefix. Workspace or
+    // project overrides keep their existing model-Read path and trust level.
+    // Recovery/progress prompts are new chat() calls but still belong to the
+    // original request. Resolve that selection again so a recreated agent can
+    // restore the skill without carrying it into a later user turn.
+    const continuedSkillPaths = options?.continueUserTask && options.userTaskMessage
+      ? this.extractSkillPaths(options.userTaskMessage).skillPaths
+      : undefined;
+    for (const slug of BUNDLED_PROSE_SKILL_SLUGS) {
+      const selectedPath = skillPaths.get(slug) ?? continuedSkillPaths?.get(slug);
+      if (selectedPath) skillPaths.set(slug, selectedPath);
+    }
+    const explicitWriting = loadExplicitBundledProseSkills(skillPaths);
+    if (explicitWriting.error) {
+      yield { type: 'error', message: explicitWriting.error };
+      yield { type: 'complete' };
+      return;
+    }
+    const explicitWritingInstructions = explicitWriting.text;
+
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const projectRoot = this.config.session?.workingDirectory;
+    const catalogEntries = toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot));
+    this.prerequisiteManager.setCatalogSkills(catalogEntries);
+
     // Register skill prerequisites — blocks all tools until SKILL.md files are read.
     if (skillPaths.size > 0) {
       this.prerequisiteManager.registerSkillPrerequisites([...skillPaths.values()]);
     }
+
+    const suggested = matchSkillsByGlobs(catalogEntries, { message, attachments });
+    const excludeSuggested = new Set(skillPaths.keys());
+    if (shouldLoadBundledOfficecliRouter(message, attachments)) {
+      excludeSuggested.add('officecli');
+    }
+    const suggestion = formatSkillSuggestions(suggested, excludeSuggested);
 
     // Prepend branch seed context (for seeded branch sessions) and transferred-session summary.
     const branchSeedContext = this.buildBranchSeedContext(this.config.getBranchSeedMessages?.());
@@ -1014,21 +1215,31 @@ ${formattedMessages}
       this.config.markTransferredSessionSummaryApplied?.();
     }
 
-    // Prepend read directive to the message so the model reads SKILL.md first. Host context goes
-    // around it after mention parsing (session context before, this turn's guidance last), so it
-    // can never register a skill or source.
+    // Prepend read directive to the message so the model reads SKILL.md first.
     const directive = this.formatSkillDirective(skillPaths);
-    const messageParts = [branchSeedContext, transferredSessionContext, options?.sessionContext, directive, cleanMessage, options?.turnContext].filter(Boolean);
-    const effectiveMessage = messageParts.join('\n\n');
+    // Strip any system-reminder that a caller accidentally embedded in `message`
+    // so retry capture and model injection stay separated.
+    const userFacingMessage = sanitizeUserMessageForRetry(cleanMessage);
+    const messageParts = [branchSeedContext, transferredSessionContext, directive, suggestion, userFacingMessage].filter(Boolean);
+    let effectiveMessage = messageParts.join('\n\n');
 
-    // Capture the raw user message for source-activation auto-retry. `cleanMessage`
-    // has skill paths stripped but otherwise matches what the user typed — exactly
-    // what we want to resend when an activation forces a turn restart.
-    this.setCurrentTurnUserMessage(cleanMessage);
+    // Model-only interruption context — never stored/displayed as user content.
+    if (options?.previousResponseInterrupted) {
+      effectiveMessage = `${effectiveMessage}\n\n${INTERRUPTION_SYSTEM_REMINDER}`;
+    }
+
+    // Capture the raw user message for source-activation auto-retry. This is the
+    // user-facing text only (no system-reminder, no prior activation suffix).
+    const skillContextGeneration = ++this.skillContextGeneration;
+    this.promptBuilder.setTurnSkillInstructions(explicitWritingInstructions);
+    this.setCurrentTurnUserMessage(userFacingMessage);
     try {
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {
-      this.setCurrentTurnUserMessage(null);
+      if (skillContextGeneration === this.skillContextGeneration) {
+        this.setCurrentTurnUserMessage(null);
+        this.promptBuilder.setTurnSkillInstructions(null);
+      }
     }
   }
 
@@ -1082,18 +1293,7 @@ ${formattedMessages}
     return false;
   }
 
-  /**
-   * Whether a manual compaction owns the current turn. Default: never.
-   * Backends that run /compact as an RPC (Pi) override this so the session
-   * layer queues mid-stream messages instead of steering into a turn that has
-   * no agent loop to consume them (OSS #1058).
-   */
-  isCompactionInFlight(): boolean {
-    return false;
-  }
-
-  /** Whether redirect() would steer into a live turn now instead of aborting. Default: never. */
-  canSteerNow(): boolean {
+  canRedirect(): boolean {
     return false;
   }
 
@@ -1128,7 +1328,7 @@ ${formattedMessages}
    * @param request - The query request (prompt, model, systemPrompt, etc.)
    * @returns The model's response text and optional token usage
    */
-  abstract queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult>;
+  abstract queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise<LLMQueryResult>;
 
   /**
    * Pre-execute a call_llm request: resolve attachments, validate model, run query.
@@ -1136,10 +1336,16 @@ ${formattedMessages}
    */
   protected async preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
     const sessionPath = getSessionPath(this.config.workspace.rootPath, this._sessionId);
+    const runtime = getBackendRuntime(this.config);
     const request = await buildCallLlmRequest(input, {
       backendName: this.backendName,
       sessionPath,
       validateModel: this.validateCallLlmModel?.bind(this),
+      defaultModel: this.getModel(),
+      imageSupport: {
+        models: runtime.customModels,
+        endpointSupportsImages: runtime.customEndpoint?.supportsImages,
+      },
     });
     return this.queryLlm(request);
   }
@@ -1147,7 +1353,7 @@ ${formattedMessages}
   /**
    * Optional model validation hook for call_llm.
    * Override in subclasses to filter models (e.g., Codex rejects non-OpenAI models).
-   * Return undefined to fall back to miniModel.
+   * Return undefined to fall back to the current session model.
    */
   protected validateCallLlmModel?(modelId: string): string | undefined;
 
@@ -1158,6 +1364,8 @@ ${formattedMessages}
   protected async preExecuteSpawnSession(
     input: Record<string, unknown>
   ): Promise<SpawnSessionResult | SpawnSessionHelpResult> {
+    input = recoverSpawnSessionArguments(input)
+
     // Help mode — return available config info
     if (input.help) {
       return this.getSpawnSessionHelp();
@@ -1175,6 +1383,8 @@ ${formattedMessages}
 
     const request: SpawnSessionRequest = {
       prompt,
+      artifactDelivery: input.artifactDelivery as SpawnSessionRequest['artifactDelivery'],
+      taskBinding: input.taskBinding as SpawnSessionRequest['taskBinding'],
       name: input.name as string | undefined,
       llmConnection: input.llmConnection as string | undefined,
       model: input.model as string | undefined,
@@ -1186,7 +1396,13 @@ ${formattedMessages}
         ? expandPath(input.workingDirectory)
         : undefined,
       projectId: input.projectId as string | undefined,
+      mode: resolveSpawnSessionMode(input.mode),
+      timeoutMs: resolveSpawnWaitTimeoutMs(input.timeoutMs),
       attachments: input.attachments as SpawnSessionRequest['attachments'],
+      lifecycle: input.lifecycle as SpawnSessionRequest['lifecycle'],
+      role: input.role as SpawnSessionRequest['role'],
+      spawnReason: input.spawnReason as SpawnSessionRequest['spawnReason'],
+      qualification: input.qualification as SpawnSessionRequest['qualification'],
     };
 
     return this.onSpawnSession(request);
@@ -1212,7 +1428,7 @@ ${formattedMessages}
       })),
       sources: allSources.map(s => ({
         slug: s.config.slug,
-        name: s.config.name,
+        name: resolveSourceTitle(s),
         type: s.config.type,
         enabled: activeSlugs.has(s.config.slug),
       })),

@@ -4,10 +4,13 @@ node_modules
 # output
 out
 dist
+dist-packages/
 *.tgz
 .build
 apps/electron/release
-# Legacy build output of the removed session-mcp-server; never commit a stale local copy
+apps/electron/release-swarm-preview
+# Accidental Windows NUL device file created on some hosts
+nul
 apps/electron/resources/session-mcp-server/
 apps/electron/resources/pi-agent-server/
 
@@ -55,6 +58,12 @@ __pycache__/
 
 # Lock files from other package managers
 pnpm-lock.yaml
+
+# Fetched OfficeCLI binaries (pinned by OFFICECLI_VERSION in scripts/build/common.ts)
+apps/electron/resources/bin/*/officecli
+apps/electron/resources/bin/*/officecli.exe
+apps/electron/resources/bin/*/officecli.version
+apps/electron/.officecli-download-temp/
 
 # Craft Agent local data (sessions, credentials, config)
 .craft-agent/

@@ -20,7 +20,6 @@ import { safeJsonParse, readJsonFileSync } from '../utils/files.ts';
 import { EntityColorSchema } from '../colors/validate.ts';
 import { THINKING_LEVEL_IDS } from '../agent/thinking-levels.ts';
 import { isValidProviderAuthCombination } from './llm-connections.ts';
-import { isParseableColor } from './theme-roles.ts';
 import { SUPPORTED_LANGUAGE_CODES } from '../i18n/languages.ts';
 import type { LanguageCode } from '../i18n/languages.ts';
 
@@ -81,7 +80,6 @@ const LlmAuthTypeSchema = z.enum([
 const CustomEndpointSchema = z.object({
   api: z.enum(['openai-completions', 'anthropic-messages']),
   supportsImages: z.boolean().optional(),
-  maxTokens: z.number().int().positive().optional(),
 });
 
 const LlmConnectionSchema = z.object({
@@ -125,8 +123,6 @@ export const UserPreferencesSchema = z.object({
   // Internal: mirrors Appearance → Language. Not user-editable.
   // Validated against the registry-derived supported set.
   uiLanguage: z.enum([...SUPPORTED_LANGUAGE_CODES] as [LanguageCode, ...LanguageCode[]]).optional(),
-  // Internal: Appearance → Default zoom, in percent. Not user-editable.
-  defaultZoomLevel: z.number().positive().optional(),
   updatedAt: z.number().int().min(0).optional(),
 }).passthrough();
 
@@ -389,8 +385,6 @@ const McpSourceConfigSchema = z.object({
   url: z.string().url().optional(),
   authType: z.enum(['oauth', 'bearer', 'none']).optional(),
   clientId: z.string().optional(),
-  oauthRelay: z.boolean().optional(),
-  scopes: z.array(z.string()).optional(),
   // Stdio fields
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
@@ -824,7 +818,7 @@ export function validateSkillContent(markdownContent: string, slug: string): Val
         path: 'frontmatter',
         message: `Invalid YAML frontmatter: ${e instanceof Error ? e.message : 'Unknown error'}`,
         severity: 'error',
-        suggestion: 'See ~/.craft-agent/docs/skills.md for SKILL.md format reference',
+        suggestion: 'See ~/.selection/docs/skills.md for SKILL.md format reference',
       }],
       warnings: [],
     };
@@ -1116,7 +1110,7 @@ export function validateStatusesContent(jsonString: string): ValidationResult {
 // Labels Validators
 // ============================================================
 
-import { validateAutoLabelRule, validateSemanticAutoLabelRule } from '../labels/auto/validation.ts';
+import { validateAutoLabelRule } from '../labels/auto/validation.ts';
 
 const LABEL_CONFIG_FILE = 'labels/config.json';
 
@@ -1129,36 +1123,14 @@ const MAX_LABEL_DEPTH = 5;
  * IDs are simple slugs (lowercase alphanumeric + hyphens).
  */
 /**
- * Zod schema for auto-label rules. Two kinds share one object schema (a union
- * would collapse every field error into "Invalid input"):
- * - regex rules (`pattern`): non-empty pattern here, regex validity semantically below
- * - semantic rules (`semantic`): a yes/no question for the decision model, threshold in (0, 1]
- * A rule must carry exactly one of `pattern` / `semantic`.
+ * Zod schema for auto-label rules (regex patterns for automatic label application).
+ * Validates pattern is non-empty; regex validity is checked semantically below.
  */
 const AutoLabelRuleSchema = z.object({
-  pattern: z.string().min(1, 'Auto-label rule pattern must not be empty').optional(),
+  pattern: z.string().min(1, 'Auto-label rule pattern is required'),
   flags: z.string().optional(),
   valueTemplate: z.string().optional(),
-  semantic: z.string().min(1, 'Semantic auto-label rule question must not be empty').optional(),
-  threshold: z.number().gt(0, 'threshold must be greater than 0').max(1, 'threshold must be at most 1').optional(),
-  value: z.string().optional(),
   description: z.string().optional(),
-}).superRefine((rule, ctx) => {
-  const hasPattern = rule.pattern !== undefined;
-  const hasSemantic = rule.semantic !== undefined;
-  if (!hasPattern && !hasSemantic) {
-    ctx.addIssue({ code: 'custom', path: ['pattern'], message: 'Auto-label rule needs a "pattern" (regex) or a "semantic" (yes/no question for the decision model)' });
-  } else if (hasPattern && hasSemantic) {
-    ctx.addIssue({ code: 'custom', path: ['semantic'], message: 'Auto-label rule must be either a regex rule ("pattern") or a semantic rule ("semantic"), not both' });
-  }
-  if (hasSemantic && !hasPattern) {
-    if (rule.flags !== undefined) ctx.addIssue({ code: 'custom', path: ['flags'], message: 'Semantic rules have no regex flags' });
-    if (rule.valueTemplate !== undefined) ctx.addIssue({ code: 'custom', path: ['valueTemplate'], message: 'Semantic rules use "value", not "valueTemplate"' });
-  }
-  if (hasPattern && !hasSemantic) {
-    if (rule.threshold !== undefined) ctx.addIssue({ code: 'custom', path: ['threshold'], message: 'Regex rules have no threshold' });
-    if (rule.value !== undefined) ctx.addIssue({ code: 'custom', path: ['value'], message: 'Regex rules use "valueTemplate", not "value"' });
-  }
 });
 
 const BaseLabelConfigSchema = z.object({
@@ -1183,10 +1155,7 @@ type LabelConfigSchemaType = z.ZodType<{
   color?: unknown;
   icon?: string;
   valueType?: 'string' | 'number' | 'date' | 'link';
-  autoRules?: Array<
-    | { pattern: string; flags?: string; valueTemplate?: string; description?: string }
-    | { semantic: string; threshold?: number; value?: string; description?: string }
-  >;
+  autoRules?: Array<{ pattern: string; flags?: string; valueTemplate?: string; description?: string }>;
   children?: LabelConfigSchemaType[];
 }>;
 
@@ -1322,34 +1291,15 @@ export function validateLabelsContent(jsonString: string): ValidationResult {
   }
   checkDepth(config.labels, 1, 'labels');
 
-  // 3. Validate auto-label rules (regex patterns + semantic questions on regular labels)
+  // 3. Validate auto-label rules (regex patterns on regular labels)
   function checkAutoRules(labels: any[], path: string): void {
     for (let i = 0; i < labels.length; i++) {
       const label = labels[i];
       if (label.autoRules && Array.isArray(label.autoRules)) {
         for (let j = 0; j < label.autoRules.length; j++) {
           const rule = label.autoRules[j];
-          if (rule && typeof rule.semantic === 'string' && rule.pattern === undefined) {
-            const ruleResult = validateSemanticAutoLabelRule(rule, { valueType: label.valueType });
-            for (const err of ruleResult.errors) {
-              errors.push({
-                file,
-                path: `${path}[${i}].autoRules[${j}].semantic`,
-                message: err,
-                severity: 'error',
-                suggestion: 'Fix the semantic rule or remove it',
-              });
-            }
-            for (const warn of ruleResult.warnings) {
-              warnings.push({
-                file,
-                path: `${path}[${i}].autoRules[${j}].semantic`,
-                message: warn,
-                severity: 'warning',
-              });
-            }
-          } else if (rule && rule.pattern) {
-            const ruleResult = validateAutoLabelRule(rule.pattern, rule.flags, { valueType: label.valueType, valueTemplate: rule.valueTemplate });
+          if (rule.pattern) {
+            const ruleResult = validateAutoLabelRule(rule.pattern, rule.flags);
             for (const err of ruleResult.errors) {
               errors.push({
                 file,
@@ -1371,9 +1321,9 @@ export function validateLabelsContent(jsonString: string): ValidationResult {
             errors.push({
               file,
               path: `${path}[${i}].autoRules[${j}]`,
-              message: 'Auto-label rule must have a "pattern" (regex) or a "semantic" (yes/no question) field',
+              message: 'Auto-label rule must have a "pattern" field',
               severity: 'error',
-              suggestion: 'Add a regex pattern string, or a semantic question for the decision model, to the rule',
+              suggestion: 'Add a regex pattern string to the rule',
             });
           }
         }
@@ -1598,7 +1548,7 @@ const ThemeDarkOverrideSchema = z.object({
 }).strict();
 
 /**
- * Zod schema for app-level theme override files (~/.craft-agent/theme.json).
+ * Zod schema for app-level theme override files (~/.selection/theme.json).
  * Allows partial overrides but rejects unknown keys.
  */
 export const ThemeOverrideSchema = z.object({
@@ -1676,33 +1626,6 @@ export const PresetThemeSchema = z.object({
 );
 
 /**
- * Warn about theme colors the role solver can't parse (e.g. `var(--x)`, `lab()`, typos). They are not
- * errors — the app falls back to the default theme's color for that key — but users should know.
- */
-function collectThemeColorWarnings(content: unknown, displayFile: string): ValidationIssue[] {
-  if (!content || typeof content !== 'object') return [];
-  const keys = ['background', 'foreground', 'accent', 'info', 'success', 'destructive', 'paper', 'navigator', 'input', 'popover', 'popoverSolid'];
-  const warnings: ValidationIssue[] = [];
-  const check = (obj: Record<string, unknown>, prefix: string) => {
-    for (const key of keys) {
-      const value = obj[key];
-      if (typeof value !== 'string' || isParseableColor(value)) continue;
-      warnings.push({
-        file: displayFile,
-        path: prefix + key,
-        message: `"${value}" is not a supported CSS color; the default theme's color is used instead`,
-        severity: 'warning',
-        suggestion: 'Use hex, rgb(), hsl(), oklch(), oklab() or a CSS color name',
-      });
-    }
-  };
-  const record = content as Record<string, unknown>;
-  check(record, '');
-  if (record.dark && typeof record.dark === 'object') check(record.dark as Record<string, unknown>, 'dark.');
-  return warnings;
-}
-
-/**
  * Validate theme content from a JSON string (no disk reads).
  * Used to check if an existing theme file is valid before deciding to overwrite.
  */
@@ -1736,7 +1659,7 @@ export function validateThemeContent(jsonString: string, displayFile: string = '
   return {
     valid: true,
     errors: [],
-    warnings: collectThemeColorWarnings(content, displayFile),
+    warnings: [],
   };
 }
 
@@ -1774,7 +1697,7 @@ export function validateThemeOverrideContent(jsonString: string, displayFile: st
   return {
     valid: true,
     errors: [],
-    warnings: collectThemeColorWarnings(content, displayFile),
+    warnings: [],
   };
 }
 
@@ -1967,7 +1890,7 @@ export function validateToolIcons(): ValidationResult {
               path: `tools[id=${tool.id}].icon`,
               message: `Icon file '${tool.icon}' not found in tool-icons directory`,
               severity: 'warning',
-              suggestion: `Place '${tool.icon}' in ~/.craft-agent/tool-icons/`,
+              suggestion: `Place '${tool.icon}' in ~/.selection/tool-icons/`,
             });
           }
         }
@@ -2114,11 +2037,11 @@ export function detectConfigFileType(filePath: string, workspaceRootPath: string
 
 /**
  * Detect if a file path corresponds to an app-level config file (outside workspace scope).
- * Checks paths relative to CONFIG_DIR (~/.craft-agent/).
+ * Checks paths relative to CONFIG_DIR (~/.selection/).
  * Returns null if the path is not a recognized app-level config file.
  *
  * Matches patterns:
- * - ~/.craft-agent/tool-icons/tool-icons.json → tool icon mappings
+ * - ~/.selection/tool-icons/tool-icons.json → tool icon mappings
  */
 export function detectAppConfigFileType(filePath: string): ConfigFileDetection | null {
   const normalizedPath = filePath.replace(/\\/g, '/');

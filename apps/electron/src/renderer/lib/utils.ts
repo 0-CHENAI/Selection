@@ -1,2 +1,6 @@
-// One class merger for every UI: aware of the design-token scales in packages/ui/src/styles/tokens.css
-export { cn } from "@craft-agent/ui/utils"
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}

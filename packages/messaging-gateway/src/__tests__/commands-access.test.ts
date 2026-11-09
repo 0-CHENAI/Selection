@@ -62,13 +62,13 @@ function makeSessionManager(sessions: Session[] = []): ISessionManager {
 function makeAdapter(): PlatformAdapter & { sent: string[] } {
   const sent: string[] = []
   return {
-    platform: 'telegram',
+    platform: 'lark',
     capabilities: {
       messageEditing: true,
       inlineButtons: true,
       maxButtons: 10,
       maxMessageLength: 4096,
-      markdown: 'v2',
+      markdown: 'lark-post',
       webhookSupport: false,
     },
     sent,
@@ -81,23 +81,23 @@ function makeAdapter(): PlatformAdapter & { sent: string[] } {
     onButtonPress() {},
     async sendText(_channelId: string, text: string): Promise<SentMessage> {
       sent.push(text)
-      return { platform: 'telegram', channelId: 'chan-1', messageId: String(sent.length) }
+      return { platform: 'lark', channelId: 'chan-1', messageId: String(sent.length) }
     },
     async editMessage() {},
     async sendButtons(_channelId: string, text: string): Promise<SentMessage> {
       sent.push(text)
-      return { platform: 'telegram', channelId: 'chan-1', messageId: String(sent.length) }
+      return { platform: 'lark', channelId: 'chan-1', messageId: String(sent.length) }
     },
     async sendTyping() {},
     async sendFile(): Promise<SentMessage> {
-      return { platform: 'telegram', channelId: 'chan-1', messageId: String(sent.length + 1) }
+      return { platform: 'lark', channelId: 'chan-1', messageId: String(sent.length + 1) }
     },
   }
 }
 
 function buildMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chan-1',
     messageId: 'm1',
     senderId: 'stranger',
@@ -111,7 +111,6 @@ function buildMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
 
 function buildPairingConsumer(
   result: ReturnType<PairingCodeConsumer['consume']> = {
-    kind: 'session',
     workspaceId: 'ws1',
     sessionId: 'sess-A',
   },
@@ -131,7 +130,7 @@ function buildAccessDeps(harness: AccessHarness): AccessControlDeps {
   return {
     getWorkspaceConfig: () => harness.config,
     seedOwnerOnFirstPair: async (_platform, candidate) => {
-      const existing = harness.config.platforms.telegram?.owners ?? []
+      const existing = harness.config.platforms.lark?.owners ?? []
       if (existing.length > 0) return existing
       const next = [candidate]
       harness.seeded = next
@@ -139,10 +138,10 @@ function buildAccessDeps(harness: AccessHarness): AccessControlDeps {
         ...harness.config,
         platforms: {
           ...harness.config.platforms,
-          telegram: {
-            ...harness.config.platforms.telegram,
+          lark: {
+            ...harness.config.platforms.lark,
             enabled: true,
-            accessMode: harness.config.platforms.telegram?.accessMode ?? 'owner-only',
+            accessMode: harness.config.platforms.lark?.accessMode ?? 'owner-only',
             owners: next,
           },
         },
@@ -164,7 +163,7 @@ function buildCommands(args: {
     config: {
       enabled: true,
       platforms: {
-        telegram: {
+        lark: {
           enabled: true,
           ...(args.ownerOnly ? { accessMode: 'owner-only' as const } : {}),
           ...(args.owners ? { owners: args.owners } : {}),
@@ -321,7 +320,7 @@ describe('Commands /pair bootstrap', () => {
     expect(harness.seeded[0]!.userId).toBe('first-pair')
   })
 
-  it('accepts /pair@BotName <code> (Telegram group disambiguation form)', async () => {
+  it('accepts /pair@BotName <code> (Lark group disambiguation form)', async () => {
     const { commands, harness } = buildCommands({ ownerOnly: false, owners: [] })
     const adapter = makeAdapter()
     await commands.handleCommand(

@@ -1,0 +1,24 @@
+extends: ./electron-builder.yml
+
+appId: com.lukilabs.craft-agent.swarm-preview
+productName: Selection Swarm Preview
+
+directories:
+  output: release-swarm-preview
+
+extraMetadata:
+  main: dist/main.cjs
+  productName: Selection Swarm Preview
+
+# Preview artifacts are intentionally not published to the normal update channel.
+publish: null
+
+mac:
+  artifactName: "Selection-Swarm-Preview-${arch}.${ext}"
+  extendInfo:
+    CFBundleName: Selection Swarm Preview
+    CFBundleDisplayName: Selection Swarm Preview
+
+dmg:
+  artifactName: "Selection-Swarm-Preview-${arch}.dmg"
+  title: "Selection Swarm Preview"

@@ -6,6 +6,10 @@ import {
   quickAddNodeId,
   quickAddSessionId,
   quickAddChildToSubtask,
+  taskDocumentForSave,
+  canSafelySaveExistingTask,
+  shouldRefreshYamlDraft,
+  specNeedsV3Confirm,
   MAX_REPAIR_ATTEMPTS_CAP,
   type EditorSubtask,
   type SpecNode,
@@ -14,6 +18,53 @@ import {
 const noConn = new Map<string, string>()
 
 describe('task-spec-form round-trip', () => {
+  it('lets a human add, delete and edit a V3 proposal without mutating the proposal or losing advanced fields', () => {
+    const proposal = { schema_version: 3, id: 'proposal', title: 'Plan', goal: 'g', token_budget: 9000, nodes: [
+      { id: 'keep', title: 'Keep', prompt: 'old', timeout: 60 },
+      { id: 'remove', title: 'Remove', prompt: 'remove', depends_on: ['keep'] },
+      { id: 'finish', title: 'Finish', prompt: 'finish', depends_on: ['remove'] },
+    ] }
+    const rows = specToSubtasks(proposal.nodes)
+    const removed = rows.find(row => row.nodeId === 'remove')!.uid
+    const edited = rows.filter(row => row.uid !== removed).map(row => ({ ...row,
+      prompt: row.nodeId === 'keep' ? 'Human edited instructions' : row.prompt,
+      dependsOn: row.dependsOn.filter(id => id !== removed),
+    }))
+    edited.push({ uid: 'human-gate', title: 'Review', prompt: 'Approve the result', kind: 'approval', dependsOn: [edited[0]!.uid] })
+    const saved = buildSpec({ title: 'Edited', goal: 'g', projectId: '', orchModel: '', preservedSpec: proposal, subtasks: edited }, noConn)
+    const nodes = saved.nodes as SpecNode[]
+    expect(saved.schema_version).toBe(3)
+    expect(saved.id).toBe('proposal')
+    expect(saved.token_budget).toBe(9000)
+    expect(nodes.map(n => n.id)).not.toContain('remove')
+    expect(nodes.find(n => n.id === 'keep')?.prompt).toBe('Human edited instructions')
+    expect(nodes.find(n => n.id === 'keep')?.timeout).toBe(60)
+    expect(nodes.find(n => n.kind === 'approval')?.depends_on).toEqual(['keep'])
+    expect(nodes.find(n => n.id === 'finish')?.depends_on).toBeUndefined()
+    expect(proposal.nodes[0]!.prompt).toBe('old')
+    expect(proposal.nodes).toHaveLength(3)
+  })
+  it('saves validated YAML verbatim instead of serializing the form projection', () => {
+    const yaml = 'schema_version: 2\nid: demo\ntoken_budget: 9000\n'
+    const formSpec = { id: 'demo', title: 'Form only' }
+    expect(taskDocumentForSave('yaml', yaml, formSpec)).toBe(yaml)
+    expect(taskDocumentForSave('form', yaml, formSpec)).toBe(JSON.stringify(formSpec, null, 2))
+  })
+
+  it('blocks an existing task save unless the versioned load succeeded', () => {
+    expect(canSafelySaveExistingTask({ taskSlug: 'demo', etag: null, loadError: null })).toBe(false)
+    expect(canSafelySaveExistingTask({ taskSlug: 'demo', etag: 'v1', loadError: 'load failed' })).toBe(false)
+    expect(canSafelySaveExistingTask({ taskSlug: 'demo', etag: 'v1', loadError: null })).toBe(true)
+    // A quick-add tile has no task file yet, so creating its first spec does not need an ETag.
+    expect(canSafelySaveExistingTask({ taskSlug: undefined, etag: null, loadError: null })).toBe(true)
+  })
+
+  it('preserves loaded or edited YAML until the form actually changes', () => {
+    expect(shouldRefreshYamlDraft(true, false)).toBe(false)
+    expect(shouldRefreshYamlDraft(true, true)).toBe(true)
+    expect(shouldRefreshYamlDraft(false, false)).toBe(true)
+  })
+
   it('preserves generated node ids so ${nodes.<id>.output} references survive generate → edit → create', () => {
     // A generated spec where one node references another by its (non-title-slug) id.
     const generated: SpecNode[] = [
@@ -57,6 +108,110 @@ describe('task-spec-form round-trip', () => {
     // Empty selections stay absent (not []) so sessions keep workspace defaults.
     expect('sources' in empty).toBe(false)
     expect('skills' in empty).toBe(false)
+  })
+
+  it('preserves valid v2 fields outside the definition form while applying form edits', () => {
+    const preservedSpec: Record<string, unknown> = {
+      schema_version: 2,
+      id: 'task',
+      title: 'Before',
+      goal: 'Before goal',
+      params: [
+        { name: 'environment', type: 'enum', enum: ['test', 'prod'], default: 'test' },
+      ],
+      token_budget: 12_000,
+      max_parallel: 6,
+      outputs: { report: '${nodes.review.output}' },
+      ui: {
+        layout: {
+          direction: 'LR',
+          viewport: { x: 10, y: 20, zoom: 0.8 },
+          nodes: { review: { x: 1, y: 2 } },
+        },
+      },
+      nodes: [{ id: 'review', prompt: 'review' }],
+    }
+    const spec = buildSpec(
+      {
+        title: 'After',
+        goal: 'After goal',
+        projectId: '',
+        orchModel: '',
+        subtasks: specToSubtasks(preservedSpec.nodes as SpecNode[]),
+        layout: { review: { x: 30, y: 40 } },
+        preservedSpec,
+      },
+      noConn,
+    )
+
+    expect(spec.title).toBe('After')
+    expect(spec.goal).toBe('After goal')
+    expect(spec.params).toEqual(preservedSpec.params)
+    expect(spec.token_budget).toBe(12_000)
+    expect(spec.max_parallel).toBe(6)
+    expect(spec.outputs).toEqual(preservedSpec.outputs)
+    expect(spec.ui).toEqual({
+      layout: {
+        direction: 'LR',
+        viewport: { x: 10, y: 20, zoom: 0.8 },
+        nodes: { review: { x: 30, y: 40 } },
+      },
+    })
+    expect(spec.schema_version).toBe(2)
+  })
+
+  it('stamps schema_version 3 on new forms and does not treat that as a v3 upgrade', () => {
+    const spec = buildSpec(
+      { title: 'New', goal: 'g', projectId: '', orchModel: '', subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]) },
+      noConn,
+    )
+    expect(spec.schema_version).toBe(3)
+    expect(specNeedsV3Confirm(undefined, spec)).toBe(false)
+    expect(specNeedsV3Confirm(2, spec)).toBe(true)
+    expect(specNeedsV3Confirm(3, spec)).toBe(false)
+    expect(specNeedsV3Confirm(undefined, {
+      ...spec,
+      nodes: [{ id: 'a', prompt: 'p', cache: 'pure' }],
+    })).toBe(true)
+  })
+
+  it('keeps an existing unversioned v1 definition on the v2 save path', () => {
+    const spec = buildSpec({ title: 'Legacy', goal: 'g', projectId: '', orchModel: '',
+      subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]),
+      preservedSpec: { id: 'legacy', title: 'Legacy', goal: 'g' },
+    }, noConn)
+    expect(spec.schema_version).toBe(2)
+    expect(specNeedsV3Confirm(1, spec)).toBe(false)
+  })
+
+  it('does not keep cleared form-owned fields from the preserved spec', () => {
+    const spec = buildSpec(
+      {
+        title: 'T',
+        goal: 'g',
+        projectId: '',
+        orchModel: '',
+        runner: 'conduct',
+        sourceSlugs: [],
+        skillSlugs: [],
+        subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]),
+        preservedSpec: {
+          runner: 'orchestrate',
+          sources: ['github'],
+          skills: ['audit'],
+          cwd: '/old',
+          acceptance_criteria: 'old',
+          nodes: [{ id: 'a', prompt: 'p' }],
+        },
+      },
+      noConn,
+    )
+
+    expect('runner' in spec).toBe(false)
+    expect('sources' in spec).toBe(false)
+    expect('skills' in spec).toBe(false)
+    expect('cwd' in spec).toBe(false)
+    expect('acceptance_criteria' in spec).toBe(false)
   })
 
   it('preserves multi-dependency (fan-in) edges that the single-dependency editor would otherwise drop', () => {
@@ -392,5 +547,88 @@ describe('canDependOn cycle guard', () => {
 
   it('allows a safe, unrelated dependency', () => {
     expect(canDependOn(rows({ a: [], b: [], c: [] }), 'c', 'a')).toBe(true)
+  })
+})
+
+describe('v2 extras round-trip', () => {
+  it('preserves loop, for_each, route, when, outputs, and timeout through generate → edit → save', () => {
+    const generated: SpecNode[] = [
+      {
+        id: 'gate',
+        title: 'Gate',
+        kind: 'approval',
+        timeout: 30,
+        prompt: 'wait',
+      },
+      {
+        id: 'fan',
+        title: 'Fan',
+        kind: 'map',
+        for_each: '${params.items}',
+        outputs: [{ name: 'item', required: true }],
+        prompt: 'do ${item}',
+        depends_on: ['gate'],
+      },
+      {
+        id: 'iter',
+        title: 'Iter',
+        kind: 'loop',
+        loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'ok' }, max: 3, else: 'fallback' },
+        prompt: 'n=${index}',
+      },
+      {
+        id: 'branch',
+        title: 'Branch',
+        kind: 'route',
+        route: { cases: [{ when: { ref: 'params.x', op: 'eq', value: 'a' }, goto: 'fan' }], default: 'iter' },
+        when: { ref: 'params.ready', op: 'exists' },
+      },
+    ]
+    const spec = buildSpec(
+      { title: 'T', goal: 'g', projectId: '', orchModel: '', subtasks: specToSubtasks(generated) },
+      noConn,
+    )
+    const nodes = spec.nodes as Array<Record<string, unknown>>
+    expect(nodes.find((n) => n.id === 'gate')).toMatchObject({ kind: 'approval', timeout: 30 })
+    expect(nodes.find((n) => n.id === 'fan')).toMatchObject({
+      kind: 'map',
+      for_each: '${params.items}',
+      outputs: [{ name: 'item', required: true }],
+      depends_on: ['gate'],
+    })
+    expect(nodes.find((n) => n.id === 'iter')).toMatchObject({
+      kind: 'loop',
+      loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'ok' }, max: 3, else: 'fallback' },
+    })
+    expect(nodes.find((n) => n.id === 'branch')).toMatchObject({
+      kind: 'route',
+      route: { cases: [{ when: { ref: 'params.x', op: 'eq', value: 'a' }, goto: 'fan' }], default: 'iter' },
+      when: { ref: 'params.ready', op: 'exists' },
+    })
+  })
+})
+
+describe('v2 canvas fields', () => {
+  it('round-trips kind, runner, and layout', () => {
+    const generated: SpecNode[] = [
+      { id: 'gate', title: 'Gate', kind: 'approval' },
+      { id: 'work', title: 'Work', kind: 'session', prompt: 'do it', depends_on: ['gate'] },
+    ]
+    const subtasks = specToSubtasks(generated)
+    const spec = buildSpec(
+      {
+        title: 'T',
+        goal: 'g',
+        projectId: '',
+        orchModel: '',
+        subtasks,
+        runner: 'orchestrate',
+        layout: { gate: { x: 10, y: 20 } },
+      },
+      noConn,
+    )
+    expect((spec.nodes as Array<{ id: string; kind?: string }>).find((n) => n.id === 'gate')?.kind).toBe('approval')
+    expect(spec.runner).toBe('orchestrate')
+    expect((spec.ui as { layout: { nodes: Record<string, { x: number }> } }).layout.nodes.gate.x).toBe(10)
   })
 })

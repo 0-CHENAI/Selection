@@ -1,0 +1,623 @@
+{
+  "rootId": "261005-ivory-obsidian",
+  "slug": "pro-57c8d043ce1d72c67f7430f1",
+  "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+  "model": "gpt-6-luna",
+  "permissionMode": "safe",
+  "status": "completed",
+  "elapsedMs": 988822,
+  "manualPlanEdits": 0,
+  "events": 44,
+  "finalText": "# 本地成本资料核验报告\n\n**任务：**核验本地成本资料并形成可追溯报告（Selection 规范深度研究计划）  \n**任务 / 运行：**`pro-57c8d043ce1d72c67f7430f1` / `chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838`（修订 1）  \n**来源：**[指定的 `costs.txt`](/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt)；冻结来源版本 SHA-256：`4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6`。\n\n## 结论摘要\n\n- **方案 A：**原文明确写明“两年总成本”为 **100 万元（1,000,000 元）**。这是资料确认的两年总额，不是单年实测，也没有年度分布或成本明细。**结论版本：`a-two-year-total@1`。**\n- **方案 B：**原文标注成本口径“待核对，暂不能与 A 直接比较”。因此 B 的金额、期间和成本口径均未核实，不能据此推断 B 成本为零、判断高低或作可比性结论。**结论版本：`b-cost-basis-unverified@1`。**\n- **成本覆盖：有限。**文件只支持 A 两年总额及 B 待核对这一判断，不构成完整成本审计。**结论版本：`cost-coverage-limited@1`。**\n- **风险覆盖：有限，无法评价总体风险。**资料只称存在一个内容未说明的风险缺口；另称“已确认的外部操作：无”。后者不能扩大解释为没有发生任何操作、没有其他风险或风险已全面覆盖。**结论版本：`risk-gap-uncharacterized@1`、`risk-coverage-limited@1`。**\n- 原文注明这是“仅用于测试，不代表市场事实”的固定验收资料；因此以上结论只针对这份文件，不外推为市场事实。**结论版本：`source-test-scope@1`。**\n\n## 原文证据与判定\n\n| 主题 | 原文（行号） | 可支持的结论与边界 |\n|---|---|---|\n| 资料性质 | 第 1 行：“Selection 3.0 固定验收资料（仅用于测试，不代表市场事实）” | 仅支持文件对自身用途的说明，不证明或代表市场实际情况。`source-test-scope@1` |\n| A 成本 | 第 3 行：“方案 A 两年总成本：100 万元，即 1000000 元。” | 确认 A 的两年总额；未列成本组成、年度分布或单年实测。`a-two-year-total@1` |\n| B 成本 | 第 4 行：“方案 B 成本口径：待核对，暂不能与 A 直接比较。” | B 的口径尚未核实，当前不能与 A 直接比较。`b-cost-basis-unverified@1` |\n| 风险缺口 | 第 5 行：“风险资料：存在一个未补齐的缺口。” | 缺口存在，但资料未说明其内容、范围或具体风险。`risk-gap-uncharacterized@1` |\n| 外部操作记录 | 第 6 行：“已确认的外部操作：无” | 仅能按字面报告“没有已确认的外部操作”；原文未给核查方法、时间或范围，不能推成操作绝对为零或不存在其他风险。 |\n\n### 覆盖与限制\n\n**成本（`main/cost：covered`，但结论受限）：**就“该资料写明什么”而言，A 两年总额与 B 待核对状态均有明确原文支持；但资料没有 A 的成本明细或年度记录，也没有 B 的金额、期间与可比口径。故只能判定**文件本身的成本覆盖有限**，不能据此认定实际完整成本范围或排列 A、B 成本高低。未列出的费用项目是否包含在 A 中，仍未知。\n\n**风险（`main/risk：covered`，但总体风险仍未评估）：**资料明确报告一个未补齐缺口，但没有描述其内容；第 6 行另记没有已确认的外部操作。这两条信息都不足以界定完整风险集合，因此只能判定**资料的风险覆盖有限**，不能评价总体风险。此处的“covered”表示报告已依据现有证据处理该研究维度，不表示风险已被全面覆盖或已消除。\n\n## 独立审查与实际查阅范围\n\n- **研究者**通过原生 Read 工具读取冻结原文第 **1–6 行**，并再次读取确认范围；实际读取范围记录在来源包中。\n- **独立审查者**在不同执行会话中自行通过原生 Read 工具读取同一冻结原文第 **1–6 行**，再逐项核对证据定位、原文支持、成本与风险覆盖及结论限制。审查逐项支持上述七项结论（各为 `@1`），并特别指出第 6 行应在报告中披露，但不能把它当作完整风险清单。\n- 审查者批判了原线前提：精确的 A 金额不等于成本明细或审计；资料没有说明不等于现实中不存在；“没有已确认的外部操作”也不是风险穷尽性证据。**审查性质是对同一冻结原文的独立复读与批判性复核，不是另行取得外部市场资料或外部事实验证。**\n\n## 替代前提歧路\n\n审查记录了真正不同的竞争前提：**把 A 的 100 万元解释为单年成本，而不是两年总成本**（候选 `annual-cost-as-two-year-total-v1`）。协调处置为 **`not-adopt`（不采用）**：冻结原文第 3 行明确写“两年总成本”，而本次资料没有单年实测或年度分布；算术年均即使计算，也不能冒充单年实测。本次原目标仅解释原文写明的两年总额，不扩大调查。竞争前提若要重新考虑，须有经核实的原文修订明确改为单年金额，或明确的单年实测记录。\n\n## 重要结论的证伪条件\n\n以下是能促使相应结论被重新核对或改判的具体证据条件；均针对同一资料的经核实修订或明确记录，不代表本次已开展新调查：\n\n1. **`source-test-scope@1`：**经核实的原文修订删除“仅用于测试、不代表市场事实”限定，或明确赋予资料市场代表性。\n2. **`a-two-year-total@1`：**经核实的原文修订更改或撤回 A 的 100 万元金额或“两年总成本”期间；可核验的年度分布或单年实测也会推翻“资料没有年度数据”的部分。\n3. **`b-cost-basis-unverified@1`：**经核实的原文补出 B 的金额、期间及可与 A 对齐的口径，并撤回“待核对／暂不能直接比较”的状态。\n4. **`cost-coverage-limited@1`：**原文补齐足够的 A、B 成本细项、期间与可比口径，使文件成本覆盖判断发生变化。\n5. **`risk-gap-uncharacterized@1`：**经核实的原文具体说明缺口内容与范围，或加入足以改变当前判断的风险记录。\n6. **`risk-coverage-limited@1`：**原文补入风险清单及缺口内容、范围等信息，且信息足以改变覆盖判断。\n7. **`two-year-total-not-annual-cost@1`：**经核实的原文明确将同一 100 万元界定为单年成本，或提供明确单年实测记录。仅有年均算术不构成证伪。\n\n## 尚未核实事项\n\nA 的成本组成与年度记录；B 的金额、期间、成本构成及与 A 对齐的口径；风险缺口的内容与范围；以及第 6 行外部操作记录的核查方法、时间和范围。本报告保留这些不确定性，不以推测补足。\n\n**执行与授权：**规范任务已完成并通过最终核验。全程限定为用户指定来源，没有扩大调查；本次未写入或修改文件，也未改变权限。",
+  "tokensUsed": 135262,
+  "revision": 1,
+  "verdict": {
+    "result": "pass",
+    "reason": "指定冻结原文由研究者与独立审查者分别通过原生 Read 实际读取第1–6行，来源包保留了两者的范围收据与来源版本。七项重要结论均有版本、原文定位、独立支持与具体证伪条件；独立审查逐条审查结论并批判了原线前提。成本覆盖、风险覆盖均明确判为有限/受限并披露未核实项。A两年总额与B待核对口径区分清楚；第5、6行风险信息的限制已说明。将两年总额作为单年成本的不同前提已正式记录为 not-adopt 并给出理由；报告明确不做年均换算、不扩大调查，披露未决项与测试用途限制。未见写文件或改变权限的记录。"
+  },
+  "nodes": [
+    {
+      "id": "read-source",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-soft-quasar",
+      "revision": 0
+    },
+    {
+      "id": "independent-review",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-new-blossom",
+      "revision": 0
+    },
+    {
+      "id": "final-report",
+      "state": "done",
+      "attempt": 2,
+      "sessionId": "261005-fine-moon",
+      "revision": 1
+    }
+  ],
+  "judgment": {
+    "version": 1,
+    "critiques": [
+      {
+        "id": "premise-scope-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "source-test-scope",
+            "version": 1
+          }
+        ],
+        "classification": "retained",
+        "finding": "保留第一项为本任务的范围约束，而非对市场代表性的证据主张；文件第1行明确称仅用于测试、不代表市场事实。不得由此扩大到新调查。",
+        "changeEvidence": [
+          "若本任务范围约束被明确修改，或冻结原文经核实修订而不再含测试限定，须重新审查适用范围。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      },
+      {
+        "id": "premise-a-total-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "a-two-year-total",
+            "version": 1
+          }
+        ],
+        "classification": "retained",
+        "finding": "第3行明确写“两年总成本”，支持按两年期间报告A总额；第1行又限定测试用途。批判性限制是金额虽可精确复述，却没有明细或年度记录，不能把精确金额误当成更广泛的成本核验。",
+        "changeEvidence": [
+          "冻结原文经核实修订并改变金额或“两年总成本”口径；或原文新增可核验成本组成/年度实测资料。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      },
+      {
+        "id": "premise-b-basis-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "b-cost-basis-unverified",
+            "version": 1
+          }
+        ],
+        "classification": "retained",
+        "finding": "保留基于原文的保守口径：第4行明示“待核对，暂不能与A直接比较”。该前提阻止把缺资料误当作B为零或推导比较结果；亦应避免把本次局部阅读说成B已完成核验。",
+        "changeEvidence": [
+          "冻结原文经核实修订，明确提供B金额、期间和与A可对齐的口径，并撤回待核对状态。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      },
+      {
+        "id": "premise-cost-coverage-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "cost-coverage-limited",
+            "version": 1
+          }
+        ],
+        "classification": "retained",
+        "finding": "第3–4行足以判定本文件的成本信息覆盖有限，但不支持声称文件列出的就是全部成本项目。原线恰当地把未列项目留作未知；报告须明确结论是资料覆盖判断，不是完整成本审计。",
+        "changeEvidence": [
+          "冻结原文经核实修订，新增完整的A/B成本组成、期间和可比口径，且足以改变覆盖判断。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      },
+      {
+        "id": "premise-risk-gap-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "risk-gap-uncharacterized",
+            "version": 1
+          }
+        ],
+        "classification": "retained",
+        "finding": "第5行确有未补齐但未描述内容的缺口。对原线的批判是：不可把“资料未说明”转成“现实中没有”；还须考虑第6行关于无已确认外部操作的有限陈述，避免将其误作完整风险清单。",
+        "changeEvidence": [
+          "冻结原文经核实修订，具体说明缺口性质/范围，或给出能够改变当前风险覆盖判断的风险记录。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      },
+      {
+        "id": "premise-risk-coverage-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "risk-coverage-limited",
+            "version": 1
+          }
+        ],
+        "classification": "retained",
+        "finding": "保留风险覆盖有限的结论，但对推理边界作严格批判：第5行描述一个未知缺口，第6行仅称无已确认外部操作；均非总体风险穷尽性证据，也不能外推成不存在其他风险。",
+        "changeEvidence": [
+          "冻结原文经核实修订并提供风险清单、缺口内容与范围，且信息足以证明风险覆盖已充分或改变现有判断。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      },
+      {
+        "id": "premise-annual-cost-alternative-v1",
+        "lineId": "main",
+        "premises": [
+          "本次原目标仅解释用户指定资料写明的两年总额，不扩大到新调查。",
+          "资料中标明的两年总额只能表述为对应两年期间的总额；算术年均换算不等同于单年实测或单年成本。",
+          "A与B的成本口径、风险覆盖分别依据原文判定；原文未说明的项目保持未核实，不补造事实。"
+        ],
+        "claimRefs": [
+          {
+            "id": "two-year-total-not-annual-cost",
+            "version": 1
+          }
+        ],
+        "classification": "alternative-premise",
+        "finding": "把A的100万元视作单年成本、而非原文标出的两年总成本，是实质不同且会改变时间口径的竞争前提，故记录为候选供协调者处置；但它与第3行明确的“两年总成本”正面冲突，当前证据不支持采用。此候选不构成开展新调查的理由。",
+        "changeEvidence": [
+          "冻结原文经核实修订，明确将同一100万元界定为单年成本，或新增明确的单年实测记录；仅有年均算术不满足该条件。"
+        ],
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "current": true
+      }
+    ],
+    "candidates": [
+      {
+        "id": "annual-cost-as-two-year-total-v1",
+        "critiqueId": "premise-annual-cost-alternative-v1",
+        "parentLineId": "main",
+        "question": "方案A的100万元应解释为单年成本，还是严格依原文解释为两年总成本？",
+        "premises": [
+          "方案A的100万元代表单年成本，而不是原文所写的两年总成本。"
+        ],
+        "reason": "这是会实质改变成本期间的不同前提，必须显式评估。现有冻结原文第3行明确支持两年总成本且没有单年实测；因此独立审查建议不采用该候选。候选的正式 not-adopt/open 处置留由协调者记录，不触发新调查。",
+        "producedBy": {
+          "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+          "nodeId": "independent-review",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "f984844e7a9a4c980b18f0df4d586adb20b78c903cf8ad7ef7ff8250d22b9398",
+          "sessionId": "261005-new-blossom"
+        },
+        "disposition": {
+          "candidateId": "annual-cost-as-two-year-total-v1",
+          "action": "not-adopt",
+          "reason": "该替代前提将原文明示的A“两年总成本”100万元改作单年成本，直接违反原文期间口径；独立审查者已在冻结原文第3行复核该表述。资料无单年实测或年度分布，年均算术不能作为其替代证据；本次范围也不允许扩大调查。"
+        }
+      }
+    ],
+    "stages": [
+      {
+        "lineId": "main",
+        "state": "deliverable",
+        "pendingClaimRefs": [],
+        "pendingCandidateIds": [],
+        "issueIds": []
+      }
+    ],
+    "blockers": []
+  },
+  "sourceBundle": {
+    "cited": [
+      {
+        "sourceId": "costs-source",
+        "sourceVersion": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+        "claimRefs": [
+          {
+            "id": "source-test-scope",
+            "version": 1
+          },
+          {
+            "id": "a-two-year-total",
+            "version": 1
+          },
+          {
+            "id": "b-cost-basis-unverified",
+            "version": 1
+          },
+          {
+            "id": "cost-coverage-limited",
+            "version": 1
+          },
+          {
+            "id": "risk-gap-uncharacterized",
+            "version": 1
+          },
+          {
+            "id": "risk-coverage-limited",
+            "version": 1
+          },
+          {
+            "id": "two-year-total-not-annual-cost",
+            "version": 1
+          }
+        ],
+        "readIds": [
+          "b4105763c85c7a422cb1644cfd2312f797a353918a9590fa6045c846f378a80e",
+          "92cd13f88545239e3dcb11129e6878553c164a2136b27c0e70f74167d55b575c",
+          "d252f9459f8907e58aa30a3540166e19280fd4b37663796e2b4abce0c6991ea2",
+          "4fd537081d3632a5ac090007ad04f29b70ac90c2c2f8ecd6c0eadb415e62d865",
+          "cebae70c660528420ce4feb3f7e62b73db85bbb588aeb50ba1708ff8fbc7d5ae"
+        ]
+      }
+    ],
+    "readNotCited": [],
+    "unresolved": [],
+    "unrecorded": []
+  },
+  "blockers": [],
+  "report": {
+    "claimRefs": [
+      {
+        "id": "source-test-scope",
+        "version": 1
+      },
+      {
+        "id": "a-two-year-total",
+        "version": 1
+      },
+      {
+        "id": "b-cost-basis-unverified",
+        "version": 1
+      },
+      {
+        "id": "cost-coverage-limited",
+        "version": 1
+      },
+      {
+        "id": "risk-gap-uncharacterized",
+        "version": 1
+      },
+      {
+        "id": "risk-coverage-limited",
+        "version": 1
+      },
+      {
+        "id": "two-year-total-not-annual-cost",
+        "version": 1
+      }
+    ],
+    "limitations": [
+      "来源是自称仅用于测试、不代表市场事实的单份冻结本地资料；结论不外推到市场事实。",
+      "A仅有两年总额，无成本组成、年度分布或单年实测；不构成完整成本审计。",
+      "B成本金额、期间、构成和可比口径均未核实，不能与A直接比较。",
+      "风险缺口内容与范围未说明；第6行仅记“已确认的外部操作：无”，不证明没有发生任何操作、风险为零或风险全覆盖。",
+      "报告仅评价该资料的成本与风险覆盖，不构成总体风险评估；不扩展到新调查。"
+    ],
+    "unresolved": [
+      "A成本组成与年度记录未提供。",
+      "B金额、期间、成本构成及与A对齐的口径未核实。",
+      "风险缺口具体内容和范围未说明。",
+      "第6行外部操作记录的核查方法、时间和范围不明。"
+    ],
+    "alternatives": [
+      "竞争前提：将A的100万元解释为单年成本，而非原文明示的两年总成本。正式处置 not-adopt。理由：冻结原文第3行明示“两年总成本”，无单年实测或年度分布；年均算术不是单年实测，且任务范围不允许扩大调查。"
+    ],
+    "changeEvidence": [
+      "source-test-scope v1：经核实的冻结原文修订不再含第1行测试/非市场事实限定，或明确赋予市场代表性。",
+      "a-two-year-total v1：经核实原文修订更改/撤回100万元或两年期间；关于无年度数据的部分可由可核验年度分布或单年实测推翻。",
+      "b-cost-basis-unverified v1：经核实原文补出B金额、期间及可与A对齐的口径，并撤回待核对/不可直接比较状态。",
+      "cost-coverage-limited v1：经核实原文补齐足够的A/B成本细项、期间和可比口径，使覆盖判断改变。",
+      "risk-gap-uncharacterized v1：经核实原文说明缺口内容及范围，或补入足以改变判断的风险记录。",
+      "risk-coverage-limited v1：经核实原文增加风险清单、缺口内容/范围及足以改变覆盖判断的信息。",
+      "two-year-total-not-annual-cost v1：经核实原文明确把同一100万元界定为单年成本，或新增明确单年实测记录；单纯年均算术不构成证伪。"
+    ],
+    "lineIds": [
+      "main"
+    ],
+    "branchCandidateIds": [
+      "annual-cost-as-two-year-total-v1"
+    ],
+    "producedBy": {
+      "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+      "nodeId": "final-report",
+      "attempt": 2,
+      "revision": 1,
+      "artifactVersion": "ed239cdcf53b515778aef8d243fa31f377a54ff6d10e83f4ccb66a4b78516424",
+      "sessionId": "261005-fine-moon"
+    }
+  },
+  "claims": [
+    {
+      "id": "source-test-scope",
+      "version": 1,
+      "text": "该文件自述为固定验收资料，仅用于测试，不代表市场事实。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文或其经核实的修订版本不再含有“仅用于测试，不代表市场事实”的限定，或明确界定为可代表市场事实的资料。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "source-test-scope",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "独立读取冻结快照第1行，原文逐字限定为“Selection 3.0 固定验收资料（仅用于测试，不代表市场事实）”。这支持该文件的测试资料属性；它不支持把其中成本或风险值外推为市场事实。",
+        "limitations": [
+          "结论仅说明文件自我标注的适用范围，不验证资料以外的市场事实。"
+        ]
+      }
+    },
+    {
+      "id": "a-two-year-total",
+      "version": 1,
+      "text": "原文确认方案A两年总成本为100万元，即1,000,000元；该数值的明示期间是两年。原文未提供单年实测值或年度分布。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文经确认的修订版更改或撤回A的100万元/1,000,000元金额或“两年总成本”期间；或同一原文中出现可核验的年度分布/单年实测记录，从而推翻关于其未提供年度数据的结论。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "a-two-year-total",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "独立读取第3行，金额与期间明确写作“方案 A 两年总成本：100 万元，即 1000000 元。”准确支持A的100万元/1,000,000元两年总额。",
+        "limitations": [
+          "该行未提供成本组成、年度分布或单年实测值；不能据此声称金额每年发生、已审计或包含特定项目。"
+        ]
+      }
+    },
+    {
+      "id": "b-cost-basis-unverified",
+      "version": 1,
+      "text": "原文将方案B的成本口径标为“待核对”，并明确说“暂不能与A直接比较”；本资料因此不能确认B成本或支持A/B同口径成本比较。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文的经核实修订版明确给出B的成本金额、期间及可与A对齐的口径，并撤销“待核对/暂不能直接比较”的状态。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "b-cost-basis-unverified",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "独立读取第4行，原文写作“方案 B 成本口径：待核对，暂不能与 A 直接比较。”支持B口径尚未核实且当前不能与A直接比较。",
+        "limitations": [
+          "该行未给出B金额、期间、成本构成或后续核对结果；不支持推算B成本、相对高低或可比性。"
+        ]
+      }
+    },
+    {
+      "id": "cost-coverage-limited",
+      "version": 1,
+      "text": "成本覆盖有限：这份文件确认A的两年总额，并将B口径留待核对；不足以确认B金额或比较两方案的成本。对于该文件未列出的成本细项，不作是否包含的推断。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文的经核实修订版补充了B成本金额、期间及可比口径，或补齐足够细项以改变本文件成本覆盖有限的判断。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "cost-coverage-limited",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "第3–4行分别给出A两年总额和B待核对状态，支持成本覆盖有限这一结论。研究者没有把未列明项目擅自归入成本口径，这一克制是恰当的。",
+        "limitations": [
+          "文件未列A成本明细，也未给B金额和对齐口径；因此只能说明本文件能确认什么，不能判断实际完整成本是否还含其他项目，也不能据此作方案成本排序。"
+        ]
+      }
+    },
+    {
+      "id": "risk-gap-uncharacterized",
+      "version": 1,
+      "text": "原文只记载“存在一个未补齐的缺口”，未说明缺口内容；据此只能确认资料存在未补齐项，不能识别该项具体风险，也不能断言风险已全面覆盖或除此之外无风险。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文的经核实修订版具体说明该缺口的内容与风险范围，或提供足以证明风险已全面覆盖/明确限定风险集合的记录，从而改变当前覆盖结论。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "risk-gap-uncharacterized",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "独立读取第5行，原文只具体说明“风险资料：存在一个未补齐的缺口”，未标明缺口内容。第6行另写“已确认的外部操作：无”；这条信息不能识别第5行缺口，也不能说明全部风险已经覆盖。",
+        "limitations": [
+          "报告应同时披露第6行“已确认的外部操作：无”，并严格按字面表述为没有已确认的外部操作；这不等于证明未发生任何操作，也不等于不存在其他风险。"
+        ]
+      }
+    },
+    {
+      "id": "risk-coverage-limited",
+      "version": 1,
+      "text": "风险覆盖有限且不足以评价总体风险：资料指出一个未补齐缺口，但没有说明其性质或范围；不能从这一句话推断缺口之外的风险不存在。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文的经核实修订版补充风险清单、缺口具体内容及范围，且该信息足以改变对风险覆盖程度的判断。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "risk-coverage-limited",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "第5行缺口未描述内容，第6行只报告没有已确认的外部操作。两项资料都不足以界定完整风险集合，故“风险覆盖有限、不能评价总体风险”得到支持。",
+        "limitations": [
+          "本结论限于该测试文件；第6行未给出核查方法、时间或范围，不可扩大解释为外部操作绝对为零或风险为零。"
+        ]
+      }
+    },
+    {
+      "id": "two-year-total-not-annual-cost",
+      "version": 1,
+      "text": "将A明示的两年总额直接说成单年成本与原文期间不符，现有资料不支持该替代前提；资料亦未给单年实测或年度分布。此处不计算算术年均，也不把任何年均数称为单年实测。",
+      "lineIds": [
+        "main"
+      ],
+      "falsificationConditions": [
+        "冻结原文的经核实修订版明确将同一金额界定为单年成本，或提供单年实测记录；若只新增明确的两年分年度额，则会推翻“无年度分布”部分，但仍须按原文核实单年口径。"
+      ],
+      "producedBy": {
+        "runId": "chat-1c9bcad7397068a3de63ea4df9eb403717817712dca9d34eacc3f87275b14838",
+        "nodeId": "read-source",
+        "attempt": 1,
+        "revision": 0,
+        "artifactVersion": "0c6d8bd57b84017931a9887664c72e8867ba5b10c13cc6b68d3e962f140c0527",
+        "sessionId": "261005-soft-quasar"
+      },
+      "review": {
+        "claimRef": {
+          "id": "two-year-total-not-annual-cost",
+          "version": 1
+        },
+        "citationExists": true,
+        "support": "supported",
+        "finding": "第3行将100万元明确标为“两年总成本”，并非单年成本；第1–6行没有单年实测或年度分布。因此不能把两年总额直接改述为单年成本。算术年均换算即使另行计算，也不等同于单年实测；本次不需要年均换算。",
+        "limitations": [
+          "仅审查冻结原文的口径，不扩展调查；若有经核实的修订原文或单年实测资料，需另行复核。"
+        ]
+      }
+    }
+  ]
+}

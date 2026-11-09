@@ -1,13 +1,13 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
-import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
-import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, type TaskSpec } from '@craft-agent/shared/tasks';
+import type { CreateSessionOptions, SendMessageOptions } from '@craft-agent/shared/protocol';
+import { appendRunLog, parseTaskSpec, saveTaskSpec, writeNodeOutput, readNodeSubmission, readRunLog, readNodeOutput, specRevisionPath, writeSpecRevision, type TaskSpec } from '@craft-agent/shared/tasks';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
-import { TaskRunner, type ConductorSessionHost, type TaskRunnerDeps } from './TaskRunner';
-import type { DecisionResult } from '@craft-agent/shared/decisions';
+import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 
 // Flush pending microtasks so the runner's async dispatch (create → column → send) settles.
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -22,28 +22,33 @@ function specOf(raw: unknown): TaskSpec {
   return r.data;
 }
 
-type CompletionOpts = Pick<SessionCompletionEvent, 'finalText' | 'backgroundWorkRunning' | 'fromUser' | 'tokenUsage'> & { reason?: SessionCompletionEvent['reason'] };
-
 /** Mock host: records calls; the test drives completions via complete(). */
 class MockHost implements ConductorSessionHost {
-  // A Set iterated as a snapshot, mirroring SessionManager.emitSessionComplete — the Conductor keeps
-  // its main subscription AND a one-shot verdict listener attached at the same time while a run is
-  // `verifying`, and re-attaches the latter synchronously inside the handler.
+  // A Set, mirroring SessionManager — the Conductor keeps its main subscription AND a one-shot
+  // verdict listener attached at the same time while a run is `verifying`.
   private readonly listeners = new Set<(evt: SessionCompletionEvent) => void>();
   readonly created: { id: string; options: CreateSessionOptions }[] = [];
-  readonly sent: { sessionId: string; message: string }[] = [];
+  readonly sent: { sessionId: string; message: string; options?: Pick<SendMessageOptions, 'hidden' | 'taskContext'> }[] = [];
   readonly statuses: { sessionId: string; status: string }[] = [];
   readonly columns: { sessionId: string; column: string | null }[] = [];
   readonly nodeCounts: { sessionId: string; count: number }[] = [];
+  readonly orchestrationStatuses: { sessionId: string; status: string; blocker?: string }[] = [];
   readonly cancelled: string[] = [];
+  canAutoResumeTaskDelivery?: ConductorSessionHost['canAutoResumeTaskDelivery'];
+  hasPreparedTaskDelivery?: ConductorSessionHost['hasPreparedTaskDelivery'];
+  prepareTaskWorkspace?: ConductorSessionHost['prepareTaskWorkspace'];
+  finalizeTaskWorkspace?: ConductorSessionHost['finalizeTaskWorkspace'];
+  stopSwarm?: ConductorSessionHost['stopSwarm'];
+  readonly finalTextById = new Map<string, string>();
+  resolveKanbanColumn?: (sessionId: string, statusId: string) => Promise<string | null>;
 
   async createSession(_workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }> {
     const id = `sess-${options.name}`;
     this.created.push({ id, options });
     return { id };
   }
-  async sendMessage(sessionId: string, message: string): Promise<void> {
-    this.sent.push({ sessionId, message });
+  async sendMessage(sessionId: string, message: string, _attachments?: undefined, _storedAttachments?: undefined, options?: Pick<SendMessageOptions, 'hidden' | 'taskContext'>): Promise<void> {
+    this.sent.push({ sessionId, message, options });
   }
   async setSessionStatus(sessionId: string, status: string): Promise<void> {
     this.statuses.push({ sessionId, status });
@@ -54,6 +59,9 @@ class MockHost implements ConductorSessionHost {
   async setTaskNodeCount(sessionId: string, count: number): Promise<void> {
     this.nodeCounts.push({ sessionId, count });
   }
+  async setOrchestrationStatus(sessionId: string, status: 'running' | 'completed' | 'need-to-check' | 'stopped', blocker?: string): Promise<void> {
+    this.orchestrationStatuses.push({ sessionId, status, ...(blocker ? { blocker } : {}) });
+  }
   async cancelProcessing(sessionId: string): Promise<void> {
     this.cancelled.push(sessionId);
   }
@@ -63,13 +71,20 @@ class MockHost implements ConductorSessionHost {
       this.listeners.delete(listener);
     };
   }
+  getSessionFinalText(sessionId: string): string | undefined {
+    return this.finalTextById.get(sessionId);
+  }
   workingDirById = new Map<string, string>();
+  modelById = new Map<string, string>();
+  connectionById = new Map<string, string>();
   getSessionWorkingDirectory(sessionId: string): string | undefined {
     return this.workingDirById.get(sessionId);
   }
-  parentById = new Map<string, string>();
-  getSessionParentId(sessionId: string): string | undefined {
-    return this.parentById.get(sessionId);
+  getSessionModel(sessionId: string): string | undefined {
+    return this.modelById.get(sessionId);
+  }
+  getSessionLlmConnection(sessionId: string): string | undefined {
+    return this.connectionById.get(sessionId);
   }
 
   // --- test helpers (sessionId is derived from the node title, which defaults to the node id) ---
@@ -82,18 +97,18 @@ class MockHost implements ConductorSessionHost {
   dispatchedNames(): string[] {
     return this.created.map((c) => c.options.name!).filter(Boolean);
   }
-  complete(nodeId: string, opts: CompletionOpts = {}): void {
+  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: SessionCompletionEvent['tokenUsage'] } = {}): void {
     this.completeSession(this.sessionIdFor(nodeId), opts);
   }
   /** Fire a completion for an arbitrary session id (e.g. the orchestrator's verification verdict). */
-  completeSession(sessionId: string, opts: CompletionOpts = {}): void {
+  completeSession(sessionId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: SessionCompletionEvent['tokenUsage'] } = {}): void {
     const evt: SessionCompletionEvent = {
       sessionId,
       workspaceId: 'ws',
+      generation: 0,
       reason: opts.reason ?? 'complete',
+      errorCode: opts.errorCode,
       finalText: opts.finalText,
-      backgroundWorkRunning: opts.backgroundWorkRunning,
-      fromUser: opts.fromUser,
       tokenUsage: opts.tokenUsage,
     };
     for (const listener of [...this.listeners]) listener(evt);
@@ -111,32 +126,258 @@ describe('TaskRunner (Conductor)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function makeRunner(extra: Partial<Pick<TaskRunnerDeps, 'decide' | 'classifyNodeOutcome' | 'pickRepairNodes'>> = {}) {
-    return new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z', ...extra });
+
+  it('reads all owned terminal runs and attempts after restart without side effects', async () => {
+    saveTaskSpec(root, specOf({ id: 'history', title: 'History', goal: 'g', nodes: [
+      { id: 'a', title: 'Original title', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] },
+    ] }));
+    const runner = makeRunner();
+    let serial = 0;
+    host.createSession = async (_ws, options) => {
+      const id = `attempt-${++serial}`;
+      host.created.push({ id, options });
+      return { id };
+    };
+    runner.run('history', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    const dispatchedAt = runner.getRunState('history', 'r1')?.nodes[0]?.startedAt;
+    expect(dispatchedAt).toBe(Date.parse(readRunLog(root, 'history', 'r1').find(entry => entry.kind === 'node-scheduled')!.t));
+    // Drive distinct session ids for the initial failure and its manual retry.
+    const complete = (id: string, reason: 'error' | 'complete', finalText?: string) => {
+      for (const listener of (host as unknown as { listeners: Set<(event: SessionCompletionEvent) => void> }).listeners)
+        listener({ sessionId: id, workspaceId: 'ws', generation: 0, reason, finalText });
+    };
+    complete('attempt-1', 'error');
+    await tick();
+    runner.continue('history', 'r1');
+    await tick();
+    expect(runner.getRunState('history', 'r1')?.nodes[0]?.startedAt).toBe(dispatchedAt);
+    await runner.stop('history', 'r1');
+    runner.run('history', { runId: 'r2', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    await runner.stop('history', 'r2');
+    runner.run('history', { runId: 'r3', orchestratorSessionId: 'other', verifyOnComplete: false });
+    await tick();
+    await runner.stop('history', 'r3');
+    const freshHost = new MockHost();
+    const reader = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    const before = JSON.stringify(readRunLog(root, 'history', 'r1'));
+    const history = reader.getRunHistory('history', 'owner');
+    expect(history.map(run => run.runId)).toEqual(['r1', 'r2']);
+    expect(history[0]?.nodes[0]).toMatchObject({ title: 'Original title', instruction: 'a', state: 'cancelled', attempt: 2,
+      attempts: [{ attempt: 1, sessionId: 'attempt-1', state: 'failed' }, { attempt: 2, sessionId: 'attempt-2', state: 'cancelled' }] });
+    expect(history[0]?.nodes[1]?.state).toBe('cancelled');
+    expect(history[0]?.nodes[0]?.startedAt).toBe(dispatchedAt);
+    expect(history[0]?.nodes[1]?.startedAt).toBeUndefined();
+    expect(reader.getRunState('history', 'r1')).toBeNull();
+    expect(reader.getRunHistory('history', 'unknown')).toEqual([]);
+    expect(reader.getRunHistory('history', 'owner')).toEqual(history);
+    expect(JSON.stringify(readRunLog(root, 'history', 'r1'))).toBe(before);
+    expect(freshHost.created).toHaveLength(0);
+    expect(freshHost.orchestrationStatuses).toHaveLength(0);
+    expect((freshHost as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0);
+  });
+
+  it('broadcasts a running child link before completion', async () => {
+    saveTaskSpec(root, specOf({ id: 'links', title: 'Links', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const snapshots: Array<{ nodes: Array<{ sessionId?: string; state: string }> }> = [];
+    const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, onRunChanged: snapshot => snapshots.push(snapshot) });
+    runner.run('links', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    expect(snapshots.some(snapshot => snapshot.nodes.some(node => node.sessionId === 'sess-a' && node.state === 'running'))).toBe(true);
+    await runner.stop('links', 'r1');
+  });
+
+  it('dispatches the complete model protocol with a separate readable task presentation', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'readable', title: '核对资料', goal: '比较方案成本', nodes: [{ id: 'cost', prompt: '核对成本资料。保留证据。' }] }));
+    const runner = makeRunner();
+    runner.run('readable', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    const dispatch = host.sent[0]!;
+    expect(dispatch.message).toContain('Canonical execution identity:');
+    expect(dispatch.message).toContain('核对成本资料。保留证据。');
+    expect(dispatch.options).toEqual({ taskContext: { kind: 'assignment', title: '核对成本资料', description: '比较方案成本', instruction: '核对成本资料。保留证据。' } });
+    expect(runner.getRunState('readable', 'r1')?.nodes[0]).toMatchObject({ id: 'cost', title: '核对成本资料', instruction: '核对成本资料。保留证据。' });
+    await runner.stop('readable', 'r1');
+  });
+
+  it('does not send work when session creation completes after Stop', async () => {
+    saveTaskSpec(root, specOf({ id: 'late', title: 'Late', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    let finishCreate!: (value: { id: string }) => void;
+    host.createSession = () => new Promise(resolve => { finishCreate = resolve; });
+    const runner = makeRunner();
+    runner.run('late', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    await runner.stop('late', 'r1');
+    finishCreate({ id: 'late-child' });
+    await tick();
+    expect(host.sent).toHaveLength(0);
+    expect(runner.getRunState('late', 'r1')).toMatchObject({ status: 'stopped', nodes: [{ state: 'cancelled', sessionId: 'late-child' }] });
+    expect(runner.getRunHistory('late', 'owner')[0]?.nodes[0]?.attempts).toEqual([{ attempt: 1, sessionId: 'late-child', state: 'cancelled', revision: 0 }]);
+  });
+
+  it.each([false, true])('retries failed nodes while preserving completed dependencies (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ id: 'partial', title: 'Partial', goal: 'g', nodes: [
+      { id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] }, { id: 'c', prompt: 'c', depends_on: ['b'] },
+    ] }));
+    let runner = makeRunner();
+    runner.run('partial', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A', tokenUsage: tu(10, 5) });
+    await tick();
+    host.complete('b', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('partial', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('partial', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter(name => name === 'a')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'b')).toHaveLength(2);
+    host.complete('b', { finalText: 'B' });
+    await tick();
+    host.complete('c', { finalText: 'C' });
+    await tick();
+    expect(runner.getRunState('partial', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('partial', 'r1')?.tokensUsed).toBe(15);
+  });
+
+  it.each([[false, false, false], [true, false, false], [false, true, false], [true, true, false], [true, false, true], [true, true, true]])('recovers failed parallel instances (restart=%s, replicas=%s, legacy=%s)', async (restart, replicas, legacy) => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'recover-map', title: 'Map', goal: 'g',
+      params: [{ name: 'items', default: '["one","two"]' }],
+      nodes: [replicas ? { id: 'fan', prompt: '${index}', replicas: 2, aggregate: 'concat' } : { id: 'fan', kind: 'map', for_each: '${params.items}', prompt: '${item}' },
+        { id: 'after', depends_on: ['fan'], prompt: '${nodes.fan.output}' }],
+    }));
+    let runner = makeRunner();
+    runner.run('recover-map', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('fan#0', { finalText: 'kept', tokenUsage: tu(10, 5) });
+    host.complete('fan#1', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('recover-map', 'r1')?.status).toBe('failed');
+    expect(runner.getRunState('recover-map', 'r1')?.canRetryFailedNodes).toBe(true);
+    if (legacy) {
+      // Older versions recorded only the parent stage failure, leaving the instance running on disk.
+      const log = readRunLog(root, 'recover-map', 'r1').filter(e => !(e.kind === 'node-finished' && e.nodeId === 'fan#1'));
+      writeFileSync(join(root, 'tasks/recover-map/runs/r1/run-log.jsonl'), log.map(e => JSON.stringify(e)).join('\n') + '\n');
+    }
+    if (restart) runner = makeRunner();
+    runner.continue('recover-map', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'fan#1')).toHaveLength(2);
+    host.complete('fan#1', { finalText: 'recovered' });
+    await tick();
+    expect(host.promptFor('after')).toContain('kept');
+    expect(host.promptFor('after')).toContain('recovered');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('recover-map', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('recover-map', 'r1')?.tokensUsed).toBe(15);
+  });
+
+  it.each([false, true])('retries a failed loop iteration while preserving successful iterations (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-loop', title: 'Loop', goal: 'g', nodes: [
+      { id: 'iter', kind: 'loop', loop: { max: 3, until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' } }, prompt: '${prev}' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-loop', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('iter#0', { finalText: 'kept' }); await tick();
+    host.complete('iter#1', { reason: 'error' }); await tick();
+    expect(runner.getRunState('retry-loop', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-loop', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'iter#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(n => n === 'iter#1')).toHaveLength(2);
+    host.complete('iter#1', { finalText: 'STOP' }); await tick();
+    expect(runner.getRunState('retry-loop', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('reopens failed approval without implicitly approving it (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-approval', title: 'Approval', goal: 'g', nodes: [
+      { id: 'gate', kind: 'approval' }, { id: 'work', depends_on: ['gate'], prompt: 'work' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-approval', { runId: 'r1', verifyOnComplete: false });
+    runner.respondApproval('retry-approval', 'r1', 'gate', false); await tick();
+    if (restart) runner = makeRunner();
+    runner.continue('retry-approval', 'r1'); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('waiting-approval');
+    expect(host.dispatchedNames()).toHaveLength(0);
+    runner.respondApproval('retry-approval', 'r1', 'gate', true); await tick();
+    host.complete('work'); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('invalidates completed all_done descendants but preserves unrelated successes (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-dependent', title: 'Dependent', goal: 'g', nodes: [
+      { id: 'bad', prompt: 'bad' }, { id: 'good', prompt: 'good' },
+      { id: 'after', depends_on: ['bad'], trigger: 'all_done', prompt: '${nodes.bad.output}' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-dependent', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('good', { finalText: 'kept' }); host.complete('bad', { reason: 'error' }); await tick();
+    host.complete('after', { finalText: 'stale failure report' }); await tick();
+    expect(runner.getRunState('retry-dependent', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-dependent', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'good')).toHaveLength(1);
+    host.complete('bad', { finalText: 'recovered' }); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'after')).toHaveLength(2);
+    host.complete('after', { finalText: 'new result' }); await tick();
+    expect(runner.getRunState('retry-dependent', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('rebuilds affected expanded descendants with fresh attempts (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-map-desc', title: 'Map', goal: 'g',
+      params: [{ name: 'items', default: '["one","two"]' }], nodes: [
+        { id: 'bad', prompt: 'bad' },
+        { id: 'fan', kind: 'map', trigger: 'all_done', depends_on: ['bad'], for_each: '${params.items}', prompt: '${item}' },
+      ],
+    }));
+    let runner = makeRunner(); runner.run('retry-map-desc', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('bad', { reason: 'error' }); await tick();
+    host.complete('fan#0', { finalText: 'old-0' }); host.complete('fan#1', { finalText: 'old-1' }); await tick();
+    expect(runner.getRunState('retry-map-desc', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-map-desc', 'r1'); await tick();
+    host.complete('bad', { finalText: 'new' }); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'fan#0')).toHaveLength(2);
+    expect(runner.getRunState('retry-map-desc', 'r1')?.nodes.find(n => n.id === 'fan#0')?.attempt).toBe(2);
+    host.complete('fan#0', { finalText: 'new-0' }); host.complete('fan#1', { finalText: 'new-1' }); await tick();
+    expect(runner.getRunState('retry-map-desc', 'r1')?.status).toBe('completed');
+    expect(readNodeOutput(root, 'retry-map-desc', 'r1', 'fan')?.text).toBe('new-0\nnew-1');
+  });
+
+  function makeRunner() {
+    return new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
   }
 
-  /** Decision-model stub answering the verdict choice (and optional per-node nouls). */
-  function decisionResult(choice: 'pass' | 'fail' | 'unclear', opts: { confidence?: number; probability?: number; rework?: Record<string, number> } = {}): DecisionResult {
-    const p = opts.probability ?? 0.95;
-    const answers: DecisionResult['answers'] = {
-      verdict: {
-        type: 'choice',
-        choice,
-        confidence: opts.confidence ?? 0.9,
-        probabilities: { pass: choice === 'pass' ? p : (1 - p) / 2, fail: choice === 'fail' ? p : (1 - p) / 2, unclear: choice === 'unclear' ? p : 0 },
-      },
-    };
-    for (const [id, noul] of Object.entries(opts.rework ?? {})) answers[`rework:${id}`] = { type: 'noul', noul };
-    return {
-      model: 'jev-1.13.0',
-      modelReported: true,
-      requestedModel: 'jev-1.13.0',
-      answers,
-      usage: { inputTokens: 10, outputTokens: 1 },
-      latencyMs: 50,
-      state: { sha256: 'x', bytes: 10, truncated: false },
-    };
-  }
+  it('pauses a supervised node and resumes the same session without another attempt', async () => {
+    saveTaskSpec(root, specOf({ id: 'progress', title: 'Progress', goal: 'generate', nodes: [{ id: 'work', prompt: 'Generate' }] }));
+    const resumed: string[] = [];
+    Object.assign(host, { continueProgress: async (id: string) => { resumed.push(id); } });
+    const runner = makeRunner(); runner.run('progress', { runId: 'r1' }); await tick();
+    runner.recordProgressUsage('progress', 'r1', 'sess-work', 20);
+    host.complete('work', { reason: 'error', errorCode: 'call_time_limit', tokenUsage: { ...tu(10, 5), evaluationTokens: 20 } });
+    expect(runner.getRunState('progress', 'r1')?.status).toBe('paused');
+    expect(runner.getRunState('progress', 'r1')?.tokensUsed).toBe(35);
+    runner.resume('progress', 'r1'); await tick();
+    expect(resumed).toEqual(['sess-work']); expect(host.created).toHaveLength(1);
+    expect(runner.getRunState('progress', 'r1')?.nodes[0]?.attempt).toBe(1);
+    host.complete('work', { finalText: 'done' }); await tick();
+  });
+
+  it('pauses final verification without converting interruption into a failed verdict', async () => {
+    saveTaskSpec(root, specOf({ id: 'progress-verify', title: 'Verify', goal: 'generate', nodes: [{ id: 'work', prompt: 'Generate' }] }));
+    const resumed: string[] = [];
+    Object.assign(host, { continueProgress: async (id: string) => { resumed.push(id); } });
+    const runner = makeRunner(); runner.run('progress-verify', { runId: 'r1', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('work', { finalText: 'done' }); await tick();
+    expect(runner.getRunState('progress-verify', 'r1')?.status).toBe('verifying');
+    host.completeSession('orch', { reason: 'error', errorCode: 'output_limit' });
+    expect(runner.getRunState('progress-verify', 'r1')?.status).toBe('paused');
+    runner.resume('progress-verify', 'r1'); await tick();
+    expect(resumed).toEqual(['orch']);
+    host.completeSession('orch', { finalText: 'VERDICT: PASS' }); await tick();
+    expect(runner.getRunState('progress-verify', 'r1')?.status).toBe('completed');
+  });
 
   it('runs a dependency chain, feeding each output into the next', async () => {
     saveTaskSpec(
@@ -182,11 +423,15 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.status).toBe('completed');
     expect(snap.nodes.every((n) => n.state === 'done')).toBe(true);
     expect(snap.tokensUsed).toBe(55);
+    expect(host.orchestrationStatuses.some((entry) => entry.sessionId === 'orch' && entry.status === 'running')).toBe(true);
+    expect(host.orchestrationStatuses.at(-1)).toMatchObject({ sessionId: 'orch', status: 'completed' });
 
     // Run-log + node output persisted.
     const log = readRunLog(root, 'demo', 'r1');
     expect(log[0]).toMatchObject({ kind: 'run-started' });
     expect(log.some((e) => e.kind === 'run-completed')).toBe(true);
+    expect(log.map((entry) => entry.seq)).toEqual(log.map((_, index) => index + 1));
+    expect(log.every((entry) => typeof entry.revision === 'number')).toBe(true);
     expect(readNodeOutput(root, 'demo', 'r1', 'audit')).toEqual({ text: 'AUDIT' });
   });
 
@@ -216,6 +461,33 @@ describe('TaskRunner (Conductor)', () => {
     expect(optsB?.llmConnection).toBe('default-conn')
   })
 
+  it('inherits the orchestrator session model when the spec omits one', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'inherit-model',
+        title: 'Inherit',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'b', prompt: 'b', model: 'pi/gpt-5-mini', llmConnection: 'pi-conn' },
+        ],
+      }),
+    )
+    host.modelById.set('orch', 'qwen/qwen3-max')
+    host.connectionById.set('orch', 'qwen-conn')
+    const runner = makeRunner()
+    runner.run('inherit-model', { runId: 'r1', orchestratorSessionId: 'orch' })
+    await tick()
+
+    const optsA = host.created.find((c) => c.options.name === 'a')?.options
+    const optsB = host.created.find((c) => c.options.name === 'b')?.options
+    expect(optsA?.model).toBe('qwen/qwen3-max')
+    expect(optsA?.llmConnection).toBe('qwen-conn')
+    expect(optsB?.model).toBe('pi/gpt-5-mini')
+    expect(optsB?.llmConnection).toBe('pi-conn')
+  })
+
   it('resolves permissionMode: node override → task default → child (never the workspace default)', async () => {
     saveTaskSpec(
       root,
@@ -238,9 +510,9 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'b')?.options.permissionMode).toBe('ask')
   })
 
-  it('defaults an omitted permission mode to allow-all (unattended-safe), not undefined/ask', async () => {
-    // A hand-authored spec that sets no permission mode must NOT fall through to the workspace default
-    // (which could be `ask` → the unattended child would hang). The runner supplies an explicit default.
+  it('defaults an omitted permission mode to safe instead of inheriting write authority', async () => {
+    // A hand-authored spec that sets no permission mode must not fall through
+    // to a permissive workspace default.
     saveTaskSpec(
       root,
       specOf({ id: 'perm2', title: 'Perm2', goal: 'g', nodes: [{ id: 'c', prompt: 'c' }] }),
@@ -249,7 +521,33 @@ describe('TaskRunner (Conductor)', () => {
     runner.run('perm2', { runId: 'r1' })
     await tick()
 
-    expect(host.created.find((c) => c.options.name === 'c')?.options.permissionMode).toBe('allow-all')
+    expect(host.created.find((c) => c.options.name === 'c')?.options.permissionMode).toBe('safe')
+  })
+
+  it('dispatches ask tasks without granting unattended write permission', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'perm-ask',
+        title: 'Perm ask',
+        goal: 'g',
+        defaults: { permissionMode: 'ask' },
+        nodes: [{ id: 'a', prompt: 'a' }],
+      }),
+    )
+    host.prepareTaskWorkspace = async () => ({ directory: root })
+    host.finalizeTaskWorkspace = async () => ({})
+    const runner = makeRunner()
+    runner.run('perm-ask', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false })
+    await tick()
+
+    expect(host.created).toHaveLength(1)
+    expect(host.created[0]?.options.permissionMode).toBe('ask')
+    expect(runner.getRunState('perm-ask', 'r1')?.status).toBe('running')
+    host.complete('a', { finalText: 'Read-only result' })
+    await tick()
+    expect(runner.getRunState('perm-ask', 'r1')?.status).toBe('completed')
   })
 
   it('stamps task/run/node linkage on each dispatched child session', async () => {
@@ -268,9 +566,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(optsA?.taskNodeId).toBe('a')
   })
 
-  it('creates a child session per node (createSession announces each to the renderer by default)', async () => {
-    // Renderer visibility depends on createSession emitting session_created; the runner's job is
-    // simply to create one session per node (the host's createSession owns the announcement).
+  it('creates persisted child sessions but hides DAG workers from the ordinary session list', async () => {
     saveTaskSpec(
       root,
       specOf({ id: 'announce', title: 'Announce', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b' }] }),
@@ -280,6 +576,7 @@ describe('TaskRunner (Conductor)', () => {
     await tick()
 
     expect(host.created.map((c) => c.id)).toEqual([host.sessionIdFor('a'), host.sessionIdFor('b')])
+    expect(host.created.every((child) => child.options.hidden === true)).toBe(true)
   })
 
   it("children inherit the orchestrator's working directory (falling back to spec.cwd)", async () => {
@@ -295,6 +592,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'a')?.options.workingDirectory).toBe('/parent/dir')
 
     // With no orchestrator cwd, the spec's declared cwd is used.
+    await runner.stop('cwd', 'r1')
     host.created.length = 0
     host.workingDirById.clear()
     const runner2 = makeRunner()
@@ -303,29 +601,18 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'a')?.options.workingDirectory).toBe('/spec/dir')
   })
 
-  it('refuses to run on a sub-session, but accepts an orchestrator id it does not know', async () => {
-    saveTaskSpec(root, specOf({ id: 'sub', title: 'Sub', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }))
-    host.parentById.set('child', 'orch')
-    const runner = makeRunner()
-    expect(() => runner.run('sub', { runId: 'r1', orchestratorSessionId: 'child' })).toThrow('sub-session of orch')
-    await tick()
-    expect(host.created).toEqual([])
-
-    runner.run('sub', { runId: 'r2', orchestratorSessionId: 'unknown' })
-    await tick()
-    expect(host.dispatchedNames()).toEqual(['a'])
-  })
-
-  it('moves the orchestrator tile to in-progress on start and done on completion', async () => {
+  it('moves the orchestrator tile to in-progress on start and needs-review on completion', async () => {
     saveTaskSpec(root, specOf({ id: 'col', title: 'Col', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }))
     const runner = makeRunner()
     runner.run('col', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false })
     await tick()
     expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'in-progress' })
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'in-progress' })
 
     host.complete('a', { finalText: 'A' })
     await tick()
-    expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'done' })
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'needs-review' })
+    expect(host.columns.some((c) => c.sessionId === 'orch' && c.column === 'done')).toBe(false)
   })
 
   it('runs a fan-out and joins at the synthesizer', async () => {
@@ -367,7 +654,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('fan', 'r1')!.status).toBe('completed');
   });
 
-  it('marks a node failed, leaves dependents pending, and settles the run as failed', async () => {
+  it('marks a node failed, cancels blocked dependents, and settles the run as failed', async () => {
     saveTaskSpec(
       root,
       specOf({
@@ -381,7 +668,7 @@ describe('TaskRunner (Conductor)', () => {
       }),
     );
     const runner = makeRunner();
-    runner.run('fail', { runId: 'r1' });
+    runner.run('fail', { runId: 'r1', orchestratorSessionId: 'orch' });
     await tick();
 
     host.complete('a', { reason: 'error' });
@@ -390,13 +677,58 @@ describe('TaskRunner (Conductor)', () => {
     const snap = runner.getRunState('fail', 'r1')!;
     expect(snap.status).toBe('failed');
     expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('failed');
-    expect(snap.nodes.find((n) => n.id === 'b')!.state).toBe('pending');
+    expect(snap.nodes.find((n) => n.id === 'b')!.state).toBe('cancelled');
     expect(host.promptFor('b')).toBeUndefined();
     expect(host.statuses.some((s) => s.sessionId === 'sess-a' && s.status === 'needs-review')).toBe(true);
+    expect(host.orchestrationStatuses.at(-1)).toMatchObject({
+      sessionId: 'orch',
+      status: 'need-to-check',
+      blocker: 'failed: a',
+    });
 
     const log = readRunLog(root, 'fail', 'r1');
     expect(log.some((e) => e.kind === 'node-finished' && (e as { state?: string }).state === 'failed')).toBe(true);
     expect(log.some((e) => e.kind === 'run-failed')).toBe(true);
+  });
+
+  it('reports a failed static PRO run to the parent after settling, without claiming completion', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'research-failed', title: '网页调研', goal: '核实来源',
+      runner: 'conduct', nodes: [
+        { id: 'research', prompt: '查阅网页', outputs: [{ name: 'notes', kind: 'param', type: 'json', required: true }] },
+        { id: 'review', kind: 'verify', prompt: '独立审查', depends_on: ['research'] },
+      ] }));
+    const runner = makeRunner();
+    runner.run('research-failed', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick();
+    host.finalTextById.set('sess-research', '网页搜索被环境拦截，未取得证据。');
+    host.complete('research', { finalText: host.finalTextById.get('sess-research') });
+    await tick();
+    expect(runner.getRunState('research-failed', 'r1')!.status).toBe('failed');
+    const reports = host.sent.filter(message => message.sessionId === 'orch');
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.options).toEqual({ hidden: true, taskContext: { kind: 'feedback', runId: 'r1' } });
+    expect(reports[0]!.message).toContain('completed without submit_task_output');
+    expect(reports[0]!.message).toContain('网页搜索被环境拦截');
+    expect(reports[0]!.message).toContain('Do not claim');
+    expect(host.promptFor('review')).toBeUndefined();
+  });
+
+  it('does not recursively retry a failed parent-status notification', async () => {
+    saveTaskSpec(root, specOf({ id: 'feedback-rejected', title: 'F', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const send = host.sendMessage.bind(host);
+    let reports = 0;
+    host.sendMessage = async (...args) => {
+      if (args[0] === 'orch') { reports++; throw new Error('Parent unavailable'); }
+      return send(...args);
+    };
+    const runner = makeRunner();
+    runner.run('feedback-rejected', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick();
+    host.complete('a', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('feedback-rejected', 'r1')!.status).toBe('failed');
+    expect(reports).toBe(1);
+    expect(readRunLog(root, 'feedback-rejected', 'r1').filter(event => event.kind === 'run-failed')).toHaveLength(1);
   });
 
   it('honors max_parallel', async () => {
@@ -445,6 +777,7 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
 
     runner.pause('pz', 'r1');
+    expect(runner.getRunState('pz', 'r1')!.status).toBe('pausing');
     host.complete('a', { finalText: 'A' });
     await tick();
     expect(host.promptFor('b')).toBeUndefined(); // paused → no scheduling
@@ -473,7 +806,7 @@ describe('TaskRunner (Conductor)', () => {
       }),
     );
     const runner = makeRunner();
-    runner.run('st', { runId: 'r1' });
+    runner.run('st', { runId: 'r1', orchestratorSessionId: 'orch' });
     await tick();
 
     await runner.stop('st', 'r1');
@@ -481,6 +814,8 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.status).toBe('stopped');
     expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('cancelled');
     expect(host.cancelled).toContain('sess-a');
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'needs-review' });
+    expect(host.columns.some((c) => c.sessionId === 'orch' && c.column === 'done')).toBe(false);
   });
 
   it('resumes a run from the persisted run-log after a restart, reusing finished node outputs', async () => {
@@ -575,10 +910,12 @@ describe('TaskRunner (Conductor)', () => {
     runner.run('rtok', { runId: 'r1' });
     await tick();
 
-    host.complete('a', { reason: 'error' });
+    host.complete('a', { reason: 'timeout' });
     await tick();
+    expect(host.sent.filter(s => s.sessionId === 'sess-a')).toHaveLength(1);
+    await Bun.sleep(1050);
     const retryPrompt = host.sent.filter((s) => s.sessionId === 'sess-a')[1]!.message;
-    expect(retryPrompt).toContain('Previous attempt failed: error');
+    expect(retryPrompt).toContain('Previous attempt failed: timeout');
     expect(retryPrompt).toContain('do a');
 
     host.complete('a', { finalText: 'OK' });
@@ -738,202 +1075,18 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('done'); // upstream untouched
     expect(snap.nodes.find((n) => n.id === 'b')!.state).toBe('running'); // re-dispatched
     expect(snap.nodes.find((n) => n.id === 'c')!.state).toBe('pending'); // waits on b
+    // Repairing a successful output must not relabel its historical worker as failed.
+    expect(snap.nodes.find((n) => n.id === 'b')!.attempts?.[0]?.state).toBe('done');
+    expect(snap.nodes.find((n) => n.id === 'c')!.attempts?.[0]?.state).toBe('done');
     // a ran once; b re-dispatched (2); c not yet re-dispatched.
     expect(host.created.filter((c) => c.options.name === 'a')).toHaveLength(1);
     expect(host.created.filter((c) => c.options.name === 'b')).toHaveLength(2);
     expect(host.created.filter((c) => c.options.name === 'c')).toHaveLength(1);
-  });
-
-  describe('repair scoping via the decision model', () => {
-    const chain = [
-      { id: 'a', prompt: 'fetch the data' },
-      { id: 'b', depends_on: ['a'], prompt: 'summarize ${nodes.a.output}' },
-      { id: 'c', depends_on: ['b'], prompt: 'format ${nodes.b.output}' },
-    ];
-    const settle = async () => { for (let i = 0; i < 5; i++) await tick(); };
-
-    async function failWithoutNodes(slug: string, runner: TaskRunner) {
-      saveTaskSpec(root, specOf({ id: slug, title: slug, goal: 'g', nodes: chain }));
-      runner.run(slug, { runId: 'r1', orchestratorSessionId: 'orch' });
-      await tick();
-      for (const id of ['a', 'b', 'c']) {
-        host.complete(id, { finalText: id.toUpperCase() });
-        await tick();
-      }
-      host.completeSession('orch', { finalText: 'VERDICT: FAIL — the summary drops the totals' });
-      await settle();
-      return runner.getRunState(slug, 'r1')!;
-    }
-
-    it('repairs only the subtasks the reason implicates, and their dependents', async () => {
-      const asked: Array<{ reason: string; ids: string[] }> = [];
-      const runner = makeRunner({
-        pickRepairNodes: async (reason, nodes) => { asked.push({ reason, ids: nodes.map((n) => n.id) }); return ['b']; },
-      });
-      const snap = await failWithoutNodes('pick', runner);
-      expect(asked).toEqual([{ reason: 'the summary drops the totals', ids: ['a', 'b', 'c'] }]);
-      expect(snap.status).toBe('running');
-      expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('done');
-      expect(snap.nodes.find((n) => n.id === 'b')!.state).toBe('running');
-      expect(snap.nodes.find((n) => n.id === 'c')!.state).toBe('pending');
-    });
-
-    it('repairs the whole DAG when the model has no answer or fails', async () => {
-      for (const [slug, pick] of [
-        ['none', async () => null],
-        ['boom', async () => { throw new Error('down'); }],
-      ] as const) {
-        const snap = await failWithoutNodes(slug, makeRunner({ pickRepairNodes: pick }));
-        expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('running');
-      }
-    });
-
-    it('repairs the whole DAG when a narrowed repair fails again', async () => {
-      const asked: string[] = [];
-      const runner = makeRunner({ pickRepairNodes: async (reason) => { asked.push(reason); return ['c']; } });
-      const first = await failWithoutNodes('escalate', runner);
-      expect(first.nodes.map((n) => n.state)).toEqual(['done', 'done', 'running']);
-      host.complete('c', { finalText: 'C again' });
-      await tick();
-      host.completeSession('orch', { finalText: 'VERDICT: FAIL — the summary drops the totals' });
-      await settle();
-      expect(asked).toHaveLength(1);
-      expect(runner.getRunState('escalate', 'r1')!.nodes.find((n) => n.id === 'a')!.state).toBe('running');
-    });
-
-    it('does not scope a FAIL the decision model read out of a reply without a VERDICT line', async () => {
-      let asked = 0;
-      const runner = makeRunner({
-        decide: async () => decisionResult('fail'),
-        pickRepairNodes: async () => { asked++; return ['c']; },
-      });
-      saveTaskSpec(root, specOf({ id: 'decided-fail', title: 'decided-fail', goal: 'g', nodes: chain }));
-      runner.run('decided-fail', { runId: 'r1', orchestratorSessionId: 'orch' });
-      await tick();
-      for (const id of ['a', 'b', 'c']) {
-        host.complete(id, { finalText: id });
-        await tick();
-      }
-      host.completeSession('orch', { finalText: 'Not quite there: the totals are missing.' });
-      await settle();
-      expect(asked).toBe(0);
-      expect(runner.getRunState('decided-fail', 'r1')!.nodes.find((n) => n.id === 'a')!.state).toBe('running');
-    });
-
-    it('never consults the model when the verdict names the subtasks', async () => {
-      let asked = 0;
-      const runner = makeRunner({ pickRepairNodes: async () => { asked++; return ['a']; } });
-      saveTaskSpec(root, specOf({ id: 'named', title: 'named', goal: 'g', nodes: chain }));
-      runner.run('named', { runId: 'r1', orchestratorSessionId: 'orch' });
-      await tick();
-      for (const id of ['a', 'b', 'c']) {
-        host.complete(id, { finalText: id });
-        await tick();
-      }
-      host.completeSession('orch', { finalText: 'VERDICT: FAIL — nodes=c — formatting' });
-      await settle();
-      expect(asked).toBe(0);
-      expect(runner.getRunState('named', 'r1')!.nodes.find((n) => n.id === 'b')!.state).toBe('done');
-    });
-  });
-
-  describe('decision-model verdicts (unparsed replies only)', () => {
-    async function runToVerifying(slug: string, runner: TaskRunner, nodes: Array<{ id: string; prompt: string; deps?: string[] }>) {
-      saveTaskSpec(root, specOf({ id: slug, title: slug, goal: 'g', nodes }));
-      runner.run(slug, { runId: 'r1', orchestratorSessionId: 'orch' });
-      await tick();
-      for (const n of nodes) {
-        host.complete(n.id, { finalText: `${n.id} output` });
-        await tick();
-      }
-      expect(runner.getRunState(slug, 'r1')!.status).toBe('verifying');
-    }
-
-    it('completes on a confident PASS read out of a reply without a VERDICT line', async () => {
-      const requests: unknown[] = [];
-      const runner = makeRunner({ decide: async (request) => { requests.push(request); return decisionResult('pass'); } });
-      await runToVerifying('dv-pass', runner, [{ id: 'a', prompt: 'a' }]);
-
-      host.completeSession('orch', { finalText: 'Everything checks out, the summary matches the criteria.' });
-      await tick();
-      expect(runner.getRunState('dv-pass', 'r1')!.status).toBe('completed');
-      expect(requests).toHaveLength(1);
-      expect(host.sent.some((s) => s.message.includes('did not include a parseable verdict'))).toBe(false);
-      const verdicts = readRunLog(root, 'dv-pass', 'r1').filter((e) => e.kind === 'verdict') as Array<{ result: string; via?: string; confidence?: number }>;
-      expect(verdicts).toEqual([{ t: '2026-06-07T00:00:00.000Z', kind: 'verdict', result: 'pass', via: 'decision', confidence: 0.9 } as never]);
-    });
-
-    it('never consults the model when the reply has a parseable VERDICT line', async () => {
-      let calls = 0;
-      const runner = makeRunner({ decide: async () => { calls += 1; return decisionResult('fail'); } });
-      await runToVerifying('dv-parsed', runner, [{ id: 'a', prompt: 'a' }]);
-      host.completeSession('orch', { finalText: 'Reviewed.\nVERDICT: PASS' });
-      await tick();
-      expect(runner.getRunState('dv-parsed', 'r1')!.status).toBe('completed');
-      expect(calls).toBe(0);
-      const verdict = readRunLog(root, 'dv-parsed', 'r1').find((e) => e.kind === 'verdict') as { via?: string };
-      expect(verdict.via).toBeUndefined();
-    });
-
-    it('falls back to the re-ask when the model is unavailable, unsure, or throws', async () => {
-      const outcomes: Array<{ decide: () => Promise<DecisionResult | null>; via: 'decision' | undefined }> = [
-        { decide: async () => null, via: undefined },                                   // layer off: no decision ran
-        { decide: async () => decisionResult('unclear'), via: 'decision' },             // model answered "unclear"
-        { decide: async () => decisionResult('pass', { confidence: 0.3 }), via: 'decision' }, // not confident enough
-        { decide: async () => { throw new Error('boom'); }, via: undefined },             // failed → no decision
-      ];
-      for (const [i, { decide, via }] of outcomes.entries()) {
-        const slug = `dv-fallback-${i}`;
-        const runner = makeRunner({ decide });
-        await runToVerifying(slug, runner, [{ id: 'a', prompt: 'a' }]);
-        host.completeSession('orch', { finalText: 'hmm, not sure what to say here' });
-        await tick();
-        expect(runner.getRunState(slug, 'r1')!.status).toBe('verifying');
-        expect(host.sent.filter((s) => s.sessionId === 'orch' && s.message.includes('did not include a parseable verdict')).length).toBe(i + 1);
-        const verdict = readRunLog(root, slug, 'r1').find((e) => e.kind === 'verdict') as { result: string; via?: string };
-        expect(verdict.result).toBe('unparsed');
-        expect(verdict.via).toBe(via);
-        // Detach this run's verdict listener so the next iteration's orchestrator completion is not
-        // also consumed by it (all iterations share one mock host / orchestrator id).
-        await runner.stop(slug, 'r1');
-      }
-    });
-
-    it('repairs only the nodes the model flags on a confident FAIL', async () => {
-      const runner = makeRunner({ decide: async () => decisionResult('fail', { rework: { research: 0.1, report: 0.95 } }) });
-      await runToVerifying('dv-fail', runner, [
-        { id: 'research', prompt: 'r' },
-        { id: 'report', prompt: 'p', deps: ['research'] },
-      ]);
-      const dispatchedBefore = host.created.length;
-
-      host.completeSession('orch', { finalText: 'The research is solid.\nThe report is missing the revenue table and needs another pass.' });
-      await tick();
-      expect(runner.getRunState('dv-fail', 'r1')!.status).toBe('running');
-      // Only `report` was reset and re-dispatched; `research` keeps its output.
-      expect(host.created.length).toBe(dispatchedBefore + 1);
-      expect(host.created.at(-1)!.options.name).toBe('report');
-      const retried = readRunLog(root, 'dv-fail', 'r1').filter((e) => e.kind === 'node-retry') as Array<{ nodeId: string; reason: string }>;
-      expect(retried.map((e) => e.nodeId)).toEqual(['report']);
-      // The repair reason never quotes the reply (an arbitrary line could mislead the re-run).
-      expect(retried[0]!.reason).toContain('no VERDICT line');
-      expect(retried[0]!.reason).not.toContain('needs another pass');
-      const verdict = readRunLog(root, 'dv-fail', 'r1').find((e) => e.kind === 'verdict') as { result: string; nodes?: string[]; via?: string };
-      expect(verdict).toMatchObject({ result: 'fail', nodes: ['report'], via: 'decision' });
-    });
-
-    it('ignores a classification that resolves after the run was stopped', async () => {
-      let release!: (value: DecisionResult | null) => void;
-      const pending = new Promise<DecisionResult | null>((resolve) => { release = resolve; });
-      const runner = makeRunner({ decide: () => pending });
-      await runToVerifying('dv-stop', runner, [{ id: 'a', prompt: 'a' }]);
-      host.completeSession('orch', { finalText: 'no verdict line here' });
-      await tick();
-      await runner.stop('dv-stop', 'r1');
-      release(decisionResult('pass'));
-      await tick();
-      expect(runner.getRunState('dv-stop', 'r1')!.status).toBe('stopped');
-    });
+    const reader = new TaskRunner({ host: new MockHost(), workspaceId: 'ws', workspaceRoot: root });
+    const restored = reader.getRunHistory('scope', 'orch')[0]!;
+    expect(restored.nodes.find(n => n.id === 'b')!.attempts?.[0]?.state).toBe('done');
+    expect(restored.nodes.find(n => n.id === 'c')!.attempts?.[0]?.state).toBe('done');
+    await runner.stop('scope', 'r1');
   });
 
   it('an unparsed re-ask does not consume the repair budget', async () => {
@@ -1005,7 +1158,12 @@ describe('TaskRunner (Conductor)', () => {
     // Restart: fresh host + runner with empty in-memory state, resume from the run-log.
     const host2 = new MockHost();
     const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
-    r2.resume('hyd', 'r1');
+    const scanned = r2.scanUnfinished();
+    expect(scanned.some((s) => s.runId === 'r1' && s.status === 'interrupted')).toBe(true);
+    r2.continue('hyd', 'r1');
+    await tick();
+    expect(r2.getRunState('hyd', 'r1')!.status).toBe('running');
+    host2.complete('a', { finalText: 'corrected attempt' });
     await tick();
     expect(r2.getRunState('hyd', 'r1')!.status).toBe('verifying');
 
@@ -1040,246 +1198,18 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.statuses.some((s) => s.sessionId === 'sess-a' && s.status === 'needs-review')).toBe(true);
   });
 
-  it('fails a node whose turn finished without a reply, outputs declared or not', async () => {
-    // Found 2026-10-11: a step that ended with no reply was marked done and its dependents started
-    // with nothing.
-    saveTaskSpec(root, specOf({ id: 'noreply', title: 'NoReply', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+  it('still marks a node done on empty text when it declares no outputs (lenient default)', async () => {
+    // The empty-output guard must only bite nodes that declared outputs; output-less nodes keep the
+    // lenient "completed = done" behavior.
+    saveTaskSpec(root, specOf({ id: 'lenient', title: 'Lenient', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
     const runner = makeRunner();
-    runner.run('noreply', { runId: 'r1' });
+    runner.run('lenient', { runId: 'r1' });
     await tick();
 
     host.complete('a', { finalText: '' });
     await tick();
 
-    expect(runner.getRunState('noreply', 'r1')!.nodes.find((n) => n.id === 'a')!.state).toBe('failed');
-    expect(readRunLog(root, 'noreply', 'r1').some((e) => e.kind === 'node-finished' && e.reason === 'finished without a reply')).toBe(true);
-  });
-
-  describe('a step that ended a turn without finishing', () => {
-    const chain = (id: string) => specOf({
-      id,
-      title: id,
-      goal: 'g',
-      nodes: [
-        { id: 'explore', prompt: 'Map the site' },
-        { id: 'journeys', prompt: 'Based on the exploration output, write the journeys', depends_on: ['explore'] },
-      ],
-    });
-
-    // Found 2026-10-11 (analyze-lizaos): the user stopped the exploration step to give it a login;
-    // it was marked done with no output 1 ms later, the next steps started without it, and the reply
-    // it wrote 40 minutes later was ignored.
-    it.each(['interrupted', 'timeout'] as const)('waits for the user after a stop (%s) and finishes with the turn that completes it', async (reason) => {
-      saveTaskSpec(root, chain(`stop-${reason}`));
-      const runner = makeRunner();
-      runner.run(`stop-${reason}`, { runId: 'r1' });
-      await tick();
-
-      host.complete('explore', { reason });
-      await tick();
-      let snap = runner.getRunState(`stop-${reason}`, 'r1')!;
-      expect(snap.status).toBe('running');
-      expect(snap.nodes.find((n) => n.id === 'explore')!.state).toBe('running');
-      expect(host.promptFor('journeys')).toBeUndefined();
-      expect(host.statuses).toContainEqual({ sessionId: 'sess-explore', status: 'needs-review' });
-      expect(readRunLog(root, `stop-${reason}`, 'r1')).toContainEqual(
-        expect.objectContaining({ kind: 'node-waiting', nodeId: 'explore', reason: 'stopped' }),
-      );
-
-      host.complete('explore', { finalText: 'SITE MAP' });
-      await tick();
-      snap = runner.getRunState(`stop-${reason}`, 'r1')!;
-      expect(snap.nodes.find((n) => n.id === 'explore')!.state).toBe('done');
-      expect(host.promptFor('journeys')).toContain('SITE MAP');
-    });
-
-    // A Stop keeps background agents alive; one finishing wakes the session before the user has
-    // steered the step. That wake-up turn must not complete it.
-    it('keeps a stopped step waiting through a background wake-up until the user\'s turn', async () => {
-      saveTaskSpec(root, chain('wake'));
-      const runner = makeRunner();
-      runner.run('wake', { runId: 'r1' });
-      await tick();
-
-      host.complete('explore', { reason: 'interrupted' });
-      host.complete('explore', { finalText: 'Agent: MCP latencies.', fromUser: false });
-      await tick();
-      expect(runner.getRunState('wake', 'r1')!.nodes.find((n) => n.id === 'explore')!.state).toBe('running');
-      expect(host.promptFor('journeys')).toBeUndefined();
-
-      host.complete('explore', { finalText: 'Signed in; SITE MAP.', fromUser: true });
-      await tick();
-      expect(readNodeOutput(root, 'wake', 'r1', 'explore')!.text).toBe('Agent: MCP latencies.\n\nSigned in; SITE MAP.');
-    });
-
-    it('waits for its background agents and keeps the reply of every turn', async () => {
-      saveTaskSpec(root, chain('bg'));
-      const runner = makeRunner();
-      runner.run('bg', { runId: 'r1' });
-      await tick();
-
-      host.complete('explore', { finalText: 'Portal mapped; two research agents still running.', backgroundWorkRunning: 2 });
-      await tick();
-      host.complete('explore', { finalText: 'Agent 1: MCP latencies.', backgroundWorkRunning: 1 });
-      await tick();
-      expect(runner.getRunState('bg', 'r1')!.nodes.find((n) => n.id === 'explore')!.state).toBe('running');
-      expect(host.promptFor('journeys')).toBeUndefined();
-      expect(host.statuses.some((s) => s.sessionId === 'sess-explore' && s.status === 'needs-review')).toBe(false);
-
-      host.complete('explore', { finalText: 'Agent 2: market landscape.', backgroundWorkRunning: 0 });
-      await tick();
-      expect(readNodeOutput(root, 'bg', 'r1', 'explore')!.text).toBe(
-        'Portal mapped; two research agents still running.\n\nAgent 1: MCP latencies.\n\nAgent 2: market landscape.',
-      );
-      expect(host.promptFor('journeys')).toContain('Agent 2: market landscape.');
-    });
-
-    it('fails on a backend error instead of waiting', async () => {
-      saveTaskSpec(root, chain('err'));
-      const runner = makeRunner();
-      runner.run('err', { runId: 'r1' });
-      await tick();
-      host.complete('explore', { reason: 'error', backgroundWorkRunning: 1 });
-      await tick();
-      expect(runner.getRunState('err', 'r1')!.nodes.find((n) => n.id === 'explore')!.state).toBe('failed');
-    });
-  });
-
-  describe('depends_on hands the upstream reply to the dependent', () => {
-    it('adds the reply unless the prompt already places it with ${nodes.<id>.output}', async () => {
-      saveTaskSpec(root, specOf({
-        id: 'hand',
-        title: 'Hand',
-        goal: 'g',
-        nodes: [
-          { id: 'explore', title: 'Explore the platform', prompt: 'Map the site' },
-          { id: 'journeys', prompt: 'Based on the exploration output, write the journeys', depends_on: ['explore'] },
-          { id: 'inline', prompt: 'Summarize: ${nodes.explore.output}', depends_on: ['explore'] },
-        ],
-      }));
-      const runner = makeRunner();
-      runner.run('hand', { runId: 'r1' });
-      await tick();
-      host.completeSession('sess-Explore the platform', { finalText: 'SITE MAP' }); // the mock names sessions by title
-      await tick();
-
-      expect(host.promptFor('journeys')).toBe(
-        'Replies of the step this one depends on:\n\n### Explore the platform\nSITE MAP\n\n---\n\nBased on the exploration output, write the journeys',
-      );
-      expect(host.promptFor('inline')).toBe('Summarize: SITE MAP');
-    });
-
-    it('cuts a very long reply and points at the full one', async () => {
-      saveTaskSpec(root, specOf({
-        id: 'long',
-        title: 'Long',
-        goal: 'g',
-        nodes: [{ id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] }],
-      }));
-      const runner = makeRunner();
-      runner.run('long', { runId: 'r1' });
-      await tick();
-      host.complete('a', { finalText: 'x'.repeat(50_000) });
-      await tick();
-
-      const prompt = host.promptFor('b')!;
-      expect(prompt.length).toBeLessThan(41_000);
-      expect(prompt).toContain(`the full reply is in ${join(root, 'tasks', 'long', 'runs', 'r1', 'nodes', 'a.json')}`);
-    });
-  });
-
-  it('waits out a stopped verification turn instead of reading it as a malformed verdict', async () => {
-    saveTaskSpec(root, specOf({ id: 'vstop', title: 'VStop', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
-    const runner = makeRunner();
-    runner.run('vstop', { runId: 'r1', orchestratorSessionId: 'orch' });
-    await tick();
-    host.complete('a', { finalText: 'A' });
-    await tick();
-    expect(runner.getRunState('vstop', 'r1')!.status).toBe('verifying');
-    const asked = host.sent.filter((s) => s.sessionId === 'orch').length;
-
-    host.completeSession('orch', { reason: 'interrupted' });
-    await tick();
-    host.completeSession('orch', { finalText: 'Checking with two agents.', backgroundWorkRunning: 2 });
-    await tick();
-    expect(runner.getRunState('vstop', 'r1')!.status).toBe('verifying');
-    expect(host.sent.filter((s) => s.sessionId === 'orch')).toHaveLength(asked); // nothing re-asked
-
-    host.completeSession('orch', { finalText: 'All good.\nVERDICT: PASS' });
-    await tick();
-    expect(runner.getRunState('vstop', 'r1')!.status).toBe('completed');
-  });
-
-  describe('child outcome via the decision model', () => {
-    type Outcome = 'finished' | 'needs_input' | 'blocked' | null;
-    const settle = async () => { for (let i = 0; i < 5; i++) await tick(); };
-
-    it('retries a child that asked for input, telling the retry to decide, then completes', async () => {
-      saveTaskSpec(root, specOf({ id: 'ask', title: 'Ask', goal: 'g', nodes: [{ id: 'a', prompt: 'do a', retry: { limit: 1 } }] }));
-      const answers: Outcome[] = ['needs_input', 'finished'];
-      const seen: string[] = [];
-      const runner = makeRunner({ classifyNodeOutcome: async (text) => { seen.push(text); return answers.shift() ?? null; } });
-      runner.run('ask', { runId: 'r1' });
-      await tick();
-
-      host.complete('a', { finalText: 'Which colour should the button be?' });
-      await settle();
-      expect(seen).toEqual(['Which colour should the button be?']);
-      expect(host.created.filter((c) => c.options.name === 'a')).toHaveLength(2);
-      const retryPrompt = host.sent.filter((s) => s.sessionId === 'sess-a')[1]!.message;
-      expect(retryPrompt).toContain('asked for input instead of finishing');
-
-      host.complete('a', { finalText: 'Made it blue.' });
-      await settle();
-      expect(runner.getRunState('ask', 'r1')!.status).toBe('completed');
-    });
-
-    it('fails a child that reports it is blocked when no retry budget remains', async () => {
-      saveTaskSpec(root, specOf({ id: 'blk', title: 'Blk', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
-      const runner = makeRunner({ classifyNodeOutcome: async () => 'blocked' });
-      runner.run('blk', { runId: 'r1' });
-      await tick();
-
-      host.complete('a', { finalText: 'I cannot reach the database.' });
-      await settle();
-      const snap = runner.getRunState('blk', 'r1')!;
-      expect(snap.nodes[0]!.state).toBe('failed');
-      expect(host.statuses.some((s) => s.sessionId === 'sess-a' && s.status === 'needs-review')).toBe(true);
-    });
-
-    it('marks the child done when the model finds it finished, is unavailable, or throws', async () => {
-      for (const [slug, classify] of [
-        ['fin', async () => 'finished' as const],
-        ['off', async () => null],
-        ['boom', async () => { throw new Error('boom'); }],
-      ] as const) {
-        saveTaskSpec(root, specOf({ id: slug, title: slug, goal: 'g', nodes: [{ id: `n-${slug}`, prompt: 'x' }] }));
-        const runner = makeRunner({ classifyNodeOutcome: classify });
-        runner.run(slug, { runId: 'r1' });
-        await tick();
-        host.complete(`n-${slug}`, { finalText: 'Done.' });
-        await settle();
-        expect(runner.getRunState(slug, 'r1')!.nodes[0]!.state).toBe('done');
-      }
-    });
-
-    it('drops an outcome that arrives after the run was stopped', async () => {
-      saveTaskSpec(root, specOf({ id: 'late', title: 'Late', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
-      let release: (outcome: Outcome) => void = () => {};
-      const runner = makeRunner({ classifyNodeOutcome: () => new Promise<Outcome>((resolve) => { release = resolve; }) });
-      runner.run('late', { runId: 'r1' });
-      await tick();
-
-      host.complete('a', { finalText: 'Should I continue?' });
-      await tick();
-      await runner.stop('late', 'r1');
-      await tick();
-      const before = runner.getRunState('late', 'r1')!.nodes[0]!.state;
-      release('needs_input');
-      await settle();
-      expect(runner.getRunState('late', 'r1')!.nodes[0]!.state).toBe(before);
-      expect(host.created.filter((c) => c.options.name === 'a')).toHaveLength(1);
-    });
+    expect(runner.getRunState('lenient', 'r1')!.nodes.find((n) => n.id === 'a')!.state).toBe('done');
   });
 
   it('publishes the total node count to the orchestrator at run start (stable board denominator)', async () => {
@@ -1304,4 +1234,1558 @@ describe('TaskRunner (Conductor)', () => {
 
     expect(host.nodeCounts).toContainEqual({ sessionId: 'orch', count: 3 });
   });
+
+  it('skips non-session node kinds and only dispatches session nodes', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'kinds',
+        title: 'Kinds',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'gate', kind: 'approval', prompt: 'ignored' },
+          { id: 'b', depends_on: ['a'], prompt: 'b' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('kinds', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['a']);
+    expect(runner.getRunState('kinds', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('skipped');
+    expect(host.nodeCounts).toContainEqual({ sessionId: 'orch', count: 2 });
+
+    host.complete('a');
+    await tick();
+    host.complete('b');
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['a', 'b']);
+    expect(runner.getRunState('kinds', 'r1')!.status).toBe('completed');
+  });
+
+  it('treats skipped nodes as satisfied dependencies', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'skip-dep',
+        title: 'Skip dep',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval', prompt: 'ignored' },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('skip-dep', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['work']);
+    host.complete('work');
+    await tick();
+    expect(runner.getRunState('skip-dep', 'r1')!.status).toBe('completed');
+  });
+
+  it('refuses to start a v2 run that contains unimplemented kinds', () => {
+    const { unimplementedV2Nodes } = require('./executors') as typeof import('./executors');
+    expect(unimplementedV2Nodes([{ id: 'ghost', kind: 'not-a-kind' as never }])).toHaveLength(1);
+  });
+
+  it('runs a v2 file that only uses implemented kinds', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'v2-ok',
+        title: 'V2 ok',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('v2-ok', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['a']);
+    host.complete('a');
+    await tick();
+    expect(runner.getRunState('v2-ok', 'r1')!.status).toBe('completed');
+  });
+
+  it('dispatches orchestrator-kind nodes (v1 escape hatch)', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'orch-kind',
+        title: 'Orch kind',
+        goal: 'g',
+        nodes: [{ id: 'lead', kind: 'orchestrator', prompt: 'coordinate' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('orch-kind', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['lead']);
+    host.complete('lead');
+    await tick();
+    expect(runner.getRunState('orch-kind', 'r1')!.status).toBe('completed');
+  });
+
+  it('does not dispatch deferred kinds when resuming a hydrated run', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'resume-skip',
+        title: 'Resume skip',
+        goal: 'g',
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'gate', kind: 'route', prompt: 'ignored' },
+        ],
+      }),
+    );
+    const r1 = makeRunner();
+    r1.run('resume-skip', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    r1.pause('resume-skip', 'r1');
+
+    const host2 = new MockHost();
+    const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    r2.resume('resume-skip', 'r1');
+    await tick();
+
+    expect(host2.dispatchedNames()).toEqual(['work']);
+    expect(r2.getRunState('resume-skip', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('skipped');
+  });
+
+  it('scans a crashed running run as interrupted and continues without re-running done nodes', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'crash',
+        title: 'Crash',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'b', depends_on: ['a'], prompt: 'b ${nodes.a.output}' },
+        ],
+      }),
+    );
+    const r1 = makeRunner();
+    r1.run('crash', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'b']);
+
+    const host2 = new MockHost();
+    const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    const scanned = r2.scanUnfinished();
+    expect(scanned[0]?.status).toBe('interrupted');
+    expect(scanned[0]?.nodes.find((n) => n.id === 'a')!.state).toBe('done');
+    expect(scanned[0]?.nodes.find((n) => n.id === 'b')!.state).toBe('interrupted');
+    expect(host2.dispatchedNames()).toEqual([]);
+
+    expect(() => r2.resume('crash', 'r1')).toThrow(TaskControlError);
+
+    r2.continue('crash', 'r1');
+    await tick();
+    expect(host2.dispatchedNames()).toEqual(['b']);
+    expect(host2.promptFor('b')).toBe('b A');
+    host2.complete('b', { finalText: 'B' });
+    await tick();
+    expect(r2.getRunState('crash', 'r1')!.status).toBe('completed');
+  });
+
+  it('restores the checkpointed run revision and ignores a newer orphan revision file', async () => {
+    const frozen = specOf({
+      schema_version: 2,
+      id: 'frozen',
+      title: 'Frozen',
+      goal: 'g',
+      nodes: [{ id: 'a', prompt: 'a' }],
+    });
+    saveTaskSpec(root, frozen);
+    const r1 = makeRunner();
+    r1.run('frozen', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+
+    // Simulate a crash after a revision file was written but before any event
+    // or checkpoint acknowledged it.
+    writeSpecRevision(root, 'frozen', 'r1', 1, {
+      ...frozen,
+      nodes: [...frozen.nodes, { id: 'orphan', kind: 'session', prompt: 'must not run' }],
+    });
+
+    const host2 = new MockHost();
+    const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root });
+    const [snapshot] = r2.scanUnfinished();
+    expect(snapshot?.revision).toBe(0);
+    expect(snapshot?.nodes.map((node) => node.id)).toEqual(['a']);
+  });
+
+  it('moves a child onto a custom dropStatusId column and keeps the top card off done', async () => {
+    const columns = [
+      { id: 'doing', dropStatusId: 'in-progress' },
+      { id: 'review', dropStatusId: 'needs-review' },
+    ];
+    host.resolveKanbanColumn = async (_id, status) => {
+      const { resolveKanbanColumnId } = await import('@craft-agent/shared/tasks');
+      return resolveKanbanColumnId(status, columns);
+    };
+    saveTaskSpec(root, specOf({ id: 'mapcol', title: 'Map', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const runner = makeRunner();
+    runner.run('mapcol', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+    expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'doing' });
+    host.complete('a', { finalText: 'A' });
+    await tick();
+    expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'review' });
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'needs-review' });
+  });
+
+  it('emits a snapshot on every run change', async () => {
+    const snaps: string[] = [];
+    saveTaskSpec(root, specOf({ id: 'push', title: 'Push', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const runner = new TaskRunner({
+      host,
+      workspaceId: 'ws',
+      workspaceRoot: root,
+      now: () => '2026-06-07T00:00:00.000Z',
+      onRunChanged: (s) => snaps.push(s.status),
+    });
+    runner.run('push', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A' });
+    await tick();
+    expect(snaps).toContain('running');
+    expect(snaps).toContain('completed');
+  });
+
+  it('v2 parallel completes without a session and unblocks dependents', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'par',
+        title: 'Par',
+        goal: 'g',
+        nodes: [
+          { id: 'fork', kind: 'parallel' },
+          { id: 'a', depends_on: ['fork'], prompt: 'a' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('par', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(existsSync(specRevisionPath(root, 'par', 'r1', 0))).toBe(true);
+    expect(host.dispatchedNames()).toEqual(['a']);
+    expect(runner.getRunState('par', 'r1')!.nodes.find((n) => n.id === 'fork')!.state).toBe('done');
+    host.complete('a');
+    await tick();
+    expect(runner.getRunState('par', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 route skips the unselected branch', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rt',
+        title: 'Rt',
+        goal: 'g',
+        params: [{ name: 'env', default: 'dev' }],
+        nodes: [
+          {
+            id: 'decide',
+            kind: 'route',
+            route: {
+              cases: [{ when: { ref: 'params.env', op: 'eq', value: 'prod' }, goto: 'prod' }],
+              default: 'dev',
+            },
+          },
+          { id: 'prod', depends_on: ['decide'], prompt: 'prod' },
+          { id: 'dev', depends_on: ['decide'], prompt: 'dev' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('rt', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['dev']);
+    expect(runner.getRunState('rt', 'r1')!.nodes.find((n) => n.id === 'prod')!.state).toBe('skipped');
+    host.complete('dev');
+    await tick();
+    expect(runner.getRunState('rt', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 approval waits, reject fails, approve continues', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'appr',
+        title: 'Appr',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval' },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    const rejector = makeRunner();
+    rejector.run('appr', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(rejector.getRunState('appr', 'r1')!.status).toBe('waiting-approval');
+    rejector.respondApproval('appr', 'r1', 'gate', false);
+    await tick();
+    expect(rejector.getRunState('appr', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('failed');
+    expect(rejector.getRunState('appr', 'r1')!.status).toBe('failed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'appr2',
+        title: 'Appr2',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval' },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    const approver = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    approver.run('appr2', { runId: 'r2', verifyOnComplete: false });
+    await tick();
+    approver.respondApproval('appr2', 'r2', 'gate', true);
+    await tick();
+    expect(host.dispatchedNames()).toContain('work');
+    host.complete('work');
+    await tick();
+    expect(approver.getRunState('appr2', 'r2')!.status).toBe('completed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'appr3',
+        title: 'Appr3',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval', timeout: 1 },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    let now = '2026-06-07T00:00:00.000Z';
+    const timed = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    timed.run('appr3', { runId: 'r3', verifyOnComplete: false });
+    await tick();
+    expect(timed.getRunState('appr3', 'r3')!.status).toBe('waiting-approval');
+    now = '2026-06-07T00:00:02.000Z';
+    const scanned = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    scanned.scanUnfinished();
+    expect(scanned.getRunState('appr3', 'r3')!.nodes.find((n) => n.id === 'gate')!.state).toBe('failed');
+    expect(scanned.getRunState('appr3', 'r3')!.status).toBe('interrupted');
+  });
+
+  it('v2 finally runs after a failure and does not overwrite the original failure', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'fin',
+        title: 'Fin',
+        goal: 'g',
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('fin', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('work', { reason: 'error' });
+    await tick();
+    expect(host.dispatchedNames()).toContain('cleanup');
+    host.complete('cleanup');
+    await tick();
+    expect(runner.getRunState('fin', 'r1')!.status).toBe('failed');
+    expect(runner.getRunState('fin', 'r1')!.nodes.find((n) => n.id === 'cleanup')!.state).toBe('done');
+  });
+
+  it('v2 stop still runs a ready finally node', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'stfin',
+        title: 'Stfin',
+        goal: 'g',
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('stfin', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    await runner.stop('stfin', 'r1');
+    await tick();
+    expect(host.cancelled).toContain('sess-work');
+    expect(host.dispatchedNames()).toContain('cleanup');
+    host.complete('cleanup');
+    await tick();
+    expect(runner.getRunState('stfin', 'r1')!.status).toBe('stopped');
+  });
+
+  it('v2 stop runs finally even when the run is already over its token budget', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'stfin-budget',
+        title: 'Stfin budget',
+        goal: 'g',
+        token_budget: 1,
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('stfin-budget', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('work', { finalText: 'done', tokenUsage: tu(2, 2) });
+    await tick();
+    expect(runner.getRunState('stfin-budget', 'r1')?.status).toBe('waiting-budget');
+
+    await runner.stop('stfin-budget', 'r1');
+    await tick();
+    expect(host.dispatchedNames()).toContain('cleanup');
+    host.complete('cleanup');
+    await tick();
+    expect(runner.getRunState('stfin-budget', 'r1')?.status).toBe('stopped');
+  });
+
+  it('v2 stop still settles and runs finally when descendant cancellation throws', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2,
+      id: 'stfin-cancel-error',
+      title: 'Stfin cancel error',
+      goal: 'g',
+      nodes: [
+        { id: 'work', prompt: 'work' },
+        { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+      ],
+    }));
+    host.stopSwarm = async () => { throw new Error('swarm transport failed'); };
+    host.cancelProcessing = async () => { throw new Error('cancel transport failed'); };
+    const runner = makeRunner();
+    runner.run('stfin-cancel-error', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    await runner.stop('stfin-cancel-error', 'r1');
+    await tick();
+    expect(host.dispatchedNames()).toContain('cleanup');
+    host.complete('cleanup');
+    await tick();
+    expect(runner.getRunState('stfin-cancel-error', 'r1')?.status).toBe('stopped');
+  });
+
+  it('v2 skips a node whose when condition is false', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'when',
+        title: 'When',
+        goal: 'g',
+        params: [{ name: 'ok', default: false }],
+        nodes: [
+          { id: 'maybe', prompt: 'maybe', when: { ref: 'params.ok', op: 'eq', value: true } },
+          { id: 'always', prompt: 'always' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('when', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['always']);
+    expect(runner.getRunState('when', 'r1')!.nodes.find((n) => n.id === 'maybe')!.state).toBe('skipped');
+    host.complete('always');
+    await tick();
+    expect(runner.getRunState('when', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 marks a node invalid when declared outputs are not submitted', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'out',
+        title: 'Out',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'summary', required: true }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('out', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'ignored without submit' });
+    await tick();
+    expect(runner.getRunState('out', 'r1')!.nodes.find((n) => n.id === 'a')!.state).toBe('invalid');
+    expect(runner.getRunState('out', 'r1')!.status).toBe('failed');
+  });
+
+  it('v2 accepts submit_task_output and submit_task_verdict; parent text is not a verdict', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'ver',
+        title: 'Ver',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'summary' }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('ver', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { summary: 'ok' } }).ok).toBe(true);
+    host.complete('a', { finalText: 'assistant prose' });
+    await tick();
+    expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');
+    expect(host.sent.findLast(message => message.sessionId === 'orch')?.options).toEqual({
+      hidden: true, taskContext: { kind: 'verification', runId: 'r1' },
+    });
+    host.completeSession('orch', { finalText: 'VERDICT: FAIL — human chatter' });
+    await tick();
+    expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');
+    runner.submitVerdict('orch', { result: 'pass' });
+    expect(runner.getRunState('ver', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 rejects missing and incorrectly typed structured outputs', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'typed-out',
+        title: 'Typed out',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'score', type: 'number' }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('typed-out', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.submitNodeOutput('sess-a', { text: 'prose only' })).toEqual({
+      ok: false,
+      error: 'Missing required output "score"',
+    });
+    expect(runner.submitNodeOutput('sess-a', { values: { score: 'high' } })).toEqual({
+      ok: false,
+      error: 'Output "score" must be a finite number',
+    });
+    expect(runner.submitNodeOutput('sess-a', { values: { score: 9 } })).toEqual({ ok: true });
+  });
+
+  it('v2 waiting-budget promotes only when idle and resumes after updateRunLimits', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'bud',
+        title: 'Bud',
+        goal: 'g',
+        token_budget: 1,
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'b', depends_on: ['a'], prompt: 'b' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('bud', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A', tokenUsage: tu(2, 2) });
+    await tick();
+    expect(runner.getRunState('bud', 'r1')).toEqual(expect.objectContaining({
+      status: 'waiting-budget',
+      tokenBudget: 1,
+      tokensUsed: 4,
+    }));
+    expect(() => runner.updateRunLimits('bud', 'r1', 0.5)).toThrow('only be increased');
+    expect(runner.updateRunLimits('bud', 'r1', 100).tokenBudget).toBe(100);
+    await tick();
+    expect(host.dispatchedNames()).toContain('b');
+    host.complete('b');
+    await tick();
+    expect(runner.getRunState('bud', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 map expands instances in order and unblocks dependents', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mp',
+        title: 'Mp',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one","two"]' }],
+        nodes: [
+          { id: 'fan', kind: 'map', for_each: '${params.items}', prompt: 'do ${item}' },
+          { id: 'after', depends_on: ['fan'], prompt: 'got ${nodes.fan.output}' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mp', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1']);
+    expect(host.promptFor('fan#0')).toContain('do one');
+    host.complete('fan#0', { finalText: 'A' });
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(host.promptFor('after')).toContain('A');
+    expect(host.promptFor('after')).toContain('B');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('mp', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 replicas run with bounded concurrency and aggregate in source order', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rep',
+        title: 'Rep',
+        goal: 'g',
+        max_parallel: 2,
+        nodes: [
+          { id: 'fan', prompt: 'replica ${index}', replicas: 3, aggregate: 'concat' },
+          { id: 'after', depends_on: ['fan'], prompt: 'joined ${nodes.fan.output}' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('rep', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1']);
+    expect(host.promptFor('fan#0')).toContain('replica 0');
+
+    // Completion order does not affect aggregate order.
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1', 'fan#2']);
+    host.complete('fan#2', { finalText: 'C' });
+    host.complete('fan#0', { finalText: 'A' });
+    await tick();
+    expect(host.promptFor('after')).toContain('A\nB\nC');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('rep', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 retries the failed replica instance with the prior failure reason', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rep-retry',
+        title: 'Rep retry',
+        goal: 'g',
+        max_parallel: 1,
+        nodes: [{ id: 'fan', prompt: 'replica ${index}', replicas: 2, aggregate: 'concat', retry: { limit: 1, when: 'error' } }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('rep-retry', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('fan#0', { reason: 'error' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#0']);
+    expect(host.sent.at(-1)?.message).toContain('Previous attempt failed: error');
+    host.complete('fan#0', { finalText: 'A' });
+    await tick();
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(runner.getRunState('rep-retry', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 continues interrupted replica instances from the frozen run graph', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rep-resume',
+        title: 'Rep resume',
+        goal: 'g',
+        max_parallel: 1,
+        nodes: [{ id: 'fan', prompt: 'replica ${index}', replicas: 2, aggregate: 'concat' }],
+      }),
+    );
+    const first = makeRunner();
+    first.run('rep-resume', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0']);
+
+    const resumedHost = new MockHost();
+    const resumed = new TaskRunner({ host: resumedHost, workspaceId: 'ws', workspaceRoot: root });
+    expect(resumed.scanUnfinished()[0]?.status).toBe('interrupted');
+    resumed.continue('rep-resume', 'r1');
+    await tick();
+    expect(resumedHost.dispatchedNames()).toEqual(['fan#0']);
+    resumedHost.complete('fan#0', { finalText: 'A' });
+    await tick();
+    resumedHost.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(resumed.getRunState('rep-resume', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 map instance accepts submit_task_output against the definition node', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mpo',
+        title: 'Mpo',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one"]' }],
+        nodes: [
+          {
+            id: 'fan',
+            kind: 'map',
+            for_each: '${params.items}',
+            prompt: 'do ${item}',
+            outputs: [{ name: 'item', required: true }],
+          },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mpo', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.submitNodeOutput(host.sessionIdFor('fan#0'), { values: { item: 'one' } })).toEqual({ ok: true });
+  });
+
+  it('v2 map over 256 instances fails the run', async () => {
+    const items = JSON.stringify(Array.from({ length: 300 }, (_, i) => i));
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'big',
+        title: 'Big',
+        goal: 'g',
+        params: [{ name: 'items', default: items }],
+        nodes: [{ id: 'fan', kind: 'map', for_each: '${params.items}', prompt: 'do ${item}' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('big', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.getRunState('big', 'r1')!.status).toBe('failed');
+    expect(host.dispatchedNames()).toEqual([]);
+  });
+
+  it('v2 loop iterates until the condition and fails when max is exhausted', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'lp',
+        title: 'Lp',
+        goal: 'g',
+        nodes: [
+          {
+            id: 'iter',
+            kind: 'loop',
+            loop: { until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' }, max: 5 },
+            prompt: 'n=${index}',
+          },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('lp', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['iter#0']);
+    host.complete('iter#0', { finalText: 'go' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['iter#0', 'iter#1']);
+    host.complete('iter#1', { finalText: 'STOP' });
+    await tick();
+    expect(runner.getRunState('lp', 'r1')!.status).toBe('completed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'lp2',
+        title: 'Lp2',
+        goal: 'g',
+        nodes: [
+          {
+            id: 'iter',
+            kind: 'loop',
+            loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'never' }, max: 2 },
+            prompt: 'n=${index}',
+          },
+        ],
+      }),
+    );
+    const runner2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    runner2.run('lp2', { runId: 'r2', verifyOnComplete: false });
+    await tick();
+    host.complete('iter#0', { finalText: 'a' });
+    await tick();
+    host.complete('iter#1', { finalText: 'b' });
+    await tick();
+    expect(runner2.getRunState('lp2', 'r2')!.status).toBe('failed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'lp3',
+        title: 'Lp3',
+        goal: 'g',
+        nodes: [
+          {
+            id: 'iter',
+            kind: 'loop',
+            loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'never' }, max: 1, else: 'fallback' },
+            prompt: 'n=${index}',
+          },
+          { id: 'fallback', depends_on: ['iter'], prompt: 'fb' },
+          { id: 'okpath', depends_on: ['iter'], prompt: 'ok' },
+        ],
+      }),
+    );
+    const runner3 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    runner3.run('lp3', { runId: 'r3', verifyOnComplete: false });
+    await tick();
+    host.complete('iter#0', { finalText: 'still-going' });
+    await tick();
+    expect(runner3.getRunState('lp3', 'r3')!.nodes.find((n) => n.id === 'okpath')!.state).toBe('skipped');
+    expect(host.dispatchedNames()).toContain('fallback');
+    host.complete('fallback');
+    await tick();
+    expect(runner3.getRunState('lp3', 'r3')!.status).toBe('completed');
+  });
+
+  it('v2 loop carries item, index, and previous output into each iteration', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2,
+      id: 'loop-carry',
+      title: 'Loop carry',
+      goal: 'g',
+      params: [{ name: 'seed', default: 'initial' }],
+      nodes: [{
+        id: 'iter',
+        kind: 'loop',
+        loop: { until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' }, max: 2, carry: '${params.seed}' },
+        prompt: '${item}|${index}|${prev}',
+      }],
+    }));
+    const runner = makeRunner();
+    runner.run('loop-carry', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.promptFor('iter#0')).toBe('initial|0|');
+    host.complete('iter#0', { finalText: 'next' });
+    await tick();
+    expect(host.promptFor('iter#1')).toBe('next|1|next');
+    host.complete('iter#1', { finalText: 'STOP' });
+    await tick();
+    expect(runner.getRunState('loop-carry', 'r1')?.status).toBe('completed');
+  });
+
+  it('v2 session timeout fails and cancels a node instead of being silently ignored', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2,
+      id: 'node-timeout',
+      title: 'Node timeout',
+      goal: 'g',
+      nodes: [{ id: 'slow', prompt: 'slow', timeout: 0.01 }],
+    }));
+    const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root });
+    runner.run('node-timeout', { runId: 'r1', verifyOnComplete: false });
+    const deadline = Date.now() + 3000;
+    while (!host.cancelled.includes('sess-slow') && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(runner.getRunState('node-timeout', 'r1')).toMatchObject({ status: 'failed' });
+    expect(runner.getRunState('node-timeout', 'r1')?.nodes[0]).toMatchObject({ state: 'failed', blocker: 'node-timeout' });
+    expect(host.cancelled).toContain('sess-slow');
+  });
+
+  it('v2 filter and aggregate transform without sessions', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'xf',
+        title: 'Xf',
+        goal: 'g',
+        params: [{ name: 'items', default: '["keep-a","drop","keep-b"]' }],
+        nodes: [
+          { id: 'flt', kind: 'filter', for_each: '${params.items}', when: { ref: 'item', op: 'contains', value: 'keep' } },
+          { id: 'left', prompt: 'L' },
+          { id: 'right', prompt: 'R' },
+          { id: 'agg', kind: 'aggregate', depends_on: ['left', 'right'], aggregate: 'concat' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('xf', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(JSON.parse(readNodeOutput(root, 'xf', 'r1', 'flt')!.text)).toEqual(['keep-a', 'keep-b']);
+    host.complete('left', { finalText: 'L' });
+    host.complete('right', { finalText: 'R' });
+    await tick();
+    expect(readNodeOutput(root, 'xf', 'r1', 'agg')!.text).toContain('L');
+    expect(runner.getRunState('xf', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 continue after restart requires re-entering sensitive params', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'sec',
+        title: 'Sec',
+        goal: 'g',
+        params: [{ name: 'token', sensitive: true }],
+        nodes: [{ id: 'a', prompt: 'use ${params.token}' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('sec', { runId: 'r1', params: { token: 's3cret' }, verifyOnComplete: false });
+    await tick();
+    expect(host.promptFor('a')).toContain('s3cret');
+    const runner2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    expect(runner2.scanUnfinished()[0]?.status).toBe('interrupted');
+    expect(() => runner2.continue('sec', 'r1')).toThrow(/Sensitive params/);
+    runner2.updateRunLimits('sec', 'r1', undefined, { token: 's3cret' });
+    runner2.continue('sec', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter((n) => n === 'a').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('orchestrate patch adds a pending node and rejects edits to done nodes', async () => {
+    const prev = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    try {
+      saveTaskSpec(
+        root,
+        specOf({
+          schema_version: 2,
+          id: 'orchp',
+          title: 'Orchp',
+          goal: 'g',
+          runner: 'orchestrate',
+          nodes: [{ id: 'a', prompt: 'a' }],
+        }),
+      );
+      const runner = makeRunner();
+      expect(() => runner.run('orchp', { runId: 'denied', verifyOnComplete: false })).toThrow(/Swarm mode/);
+      runner.run('orchp', { runId: 'r1', verifyOnComplete: false, orchestrateAllowed: true });
+      await tick();
+      host.complete('a', { finalText: 'A' });
+      await tick();
+      expect(() =>
+        runner.applyOrchestrationPatch('orchp', 'r1', {
+          runId: 'r1',
+          decisionId: 'd1',
+          baseRevision: 0,
+          rationale: 'cannot touch done',
+          update: [{ id: 'a', kind: 'session', prompt: 'nope' }],
+        }),
+      ).toThrow(/completed/);
+      saveTaskSpec(
+        root,
+        specOf({
+          schema_version: 2,
+          id: 'orchp2',
+          title: 'Orchp2',
+          goal: 'g',
+          runner: 'orchestrate',
+          nodes: [{ id: 'a', prompt: 'a' }],
+        }),
+      );
+      const r2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+      r2.run('orchp2', { runId: 'r2', verifyOnComplete: false, orchestrateAllowed: true });
+      await tick();
+      const snap = r2.applyOrchestrationPatch('orchp2', 'r2', {
+        runId: 'r2',
+        decisionId: 'add-b',
+        baseRevision: 0,
+        rationale: 'append pending work',
+        add: [{ id: 'b', kind: 'session', prompt: 'b', depends_on: ['a'] }],
+      });
+      expect(snap.revision).toBe(1);
+      expect(snap.nodes.some((n) => n.id === 'b')).toBe(true);
+      host.complete('a', { finalText: 'A' });
+      await tick();
+      expect(host.dispatchedNames()).toContain('b');
+      const restarted = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+      restarted.scanUnfinished();
+      expect(restarted.getRunState('orchp2', 'r2')!.revision).toBe(1);
+      expect(restarted.getRunState('orchp2', 'r2')!.nodes.some((n) => n.id === 'b')).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+      else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prev;
+    }
+  });
+
+  it('executes a verification-time orchestrate patch before accepting the final verdict', async () => {
+    const prev = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    try {
+      saveTaskSpec(root, specOf({
+        schema_version: 2,
+        id: 'verify-patch',
+        title: 'Verify patch',
+        goal: 'g',
+        runner: 'orchestrate',
+        nodes: [{ id: 'a', prompt: 'a' }],
+      }));
+      const runner = makeRunner();
+      runner.run('verify-patch', {
+        runId: 'r1',
+        orchestratorSessionId: 'orch',
+        orchestrateAllowed: true,
+      });
+      await tick();
+      host.complete('a', { finalText: 'A' });
+      await tick();
+      expect(runner.getRunState('verify-patch', 'r1')?.status).toBe('verifying');
+
+      const patched = runner.applyOrchestrationPatch('verify-patch', 'r1', {
+        runId: 'r1',
+        decisionId: 'repair-b',
+        baseRevision: 0,
+        rationale: 'add verification repair',
+        add: [{ id: 'b', kind: 'session', prompt: 'repair ${nodes.a.output}', depends_on: ['a'] }],
+      });
+      expect(patched.status).toBe('running');
+      await tick();
+      expect(host.dispatchedNames()).toContain('b');
+      expect(() => runner.submitVerdict('orch', { runId: 'r1', result: 'pass' })).toThrow(/not waiting for a verdict/);
+
+      host.complete('b', { finalText: 'B' });
+      await tick();
+      expect(runner.getRunState('verify-patch', 'r1')?.status).toBe('verifying');
+      expect(runner.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+    } finally {
+      if (prev === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+      else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prev;
+    }
+  });
+
+  it('prunes descendants exclusive to an unselected route branch but keeps the shared join', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'route-tree', title: 'Route tree', goal: 'g',
+      nodes: [
+        { id: 'route', kind: 'route', route: { cases: [{ when: { ref: 'params.env', op: 'eq', value: 'prod' }, goto: 'prod' }], default: 'dev' } },
+        { id: 'prod', depends_on: ['route'], prompt: 'prod' },
+        { id: 'prod-child', depends_on: ['prod'], prompt: 'prod child' },
+        { id: 'dev', depends_on: ['route'], prompt: 'dev' },
+        { id: 'dev-child', depends_on: ['dev'], prompt: 'dev child' },
+        { id: 'join', depends_on: ['prod-child', 'dev-child'], prompt: 'join' },
+      ],
+      params: [{ name: 'env', default: 'dev' }],
+    }));
+    const runner = makeRunner();
+    runner.run('route-tree', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['dev']);
+    expect(runner.getRunState('route-tree', 'r1')?.nodes.find((n) => n.id === 'prod-child')?.state).toBe('skipped');
+    host.complete('dev'); await tick();
+    host.complete('dev-child'); await tick();
+    expect(host.dispatchedNames()).toContain('join');
+  });
+
+  it('schedules synchronous control dependencies to a fixed point regardless of YAML order', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'reverse-control', title: 'Reverse', goal: 'g',
+      nodes: [
+        { id: 'work', depends_on: ['fork'], prompt: 'work' },
+        { id: 'fork', kind: 'parallel' },
+      ],
+    }));
+    const runner = makeRunner();
+    runner.run('reverse-control', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['work']);
+  });
+
+  it('keeps a one_success join alive when one branch fails and another can still succeed', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'one-success',
+        title: 'One success',
+        goal: 'continue after the first successful branch',
+        nodes: [
+          { id: 'left', prompt: 'left' },
+          { id: 'right', prompt: 'right' },
+          { id: 'join', trigger: 'one_success', depends_on: ['left', 'right'], prompt: 'join' },
+        ],
+      }),
+    );
+
+    const runner = makeRunner();
+    runner.run('one-success', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('left', { reason: 'error', finalText: 'left failed' });
+    await tick();
+
+    expect(runner.getRunState('one-success', 'r1')?.nodes.find((node) => node.id === 'join')?.state).toBe('pending');
+
+    host.complete('right', { finalText: 'right succeeded' });
+    await tick();
+    expect(host.dispatchedNames()).toContain('join');
+
+    host.complete('join', { finalText: 'joined' });
+    await tick();
+    expect(runner.getRunState('one-success', 'r1')).toMatchObject({ status: 'failed' });
+    expect(runner.getRunState('one-success', 'r1')?.nodes.find((node) => node.id === 'join')?.state).toBe('done');
+  });
+
+  it('cancels pending descendants on stop and runs implicit finally before stopped', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'stop-chain', title: 'Stop chain', goal: 'g',
+      nodes: [
+        { id: 'a', prompt: 'a' },
+        { id: 'b', depends_on: ['a'], prompt: 'b' },
+        { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+      ],
+    }));
+    const runner = makeRunner();
+    runner.run('stop-chain', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    const stopping = runner.stop('stop-chain', 'r1');
+    await stopping;
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'cleanup']);
+    expect(runner.getRunState('stop-chain', 'r1')?.nodes.find((n) => n.id === 'b')?.state).toBe('cancelled');
+    host.complete('cleanup'); await tick();
+    expect(runner.getRunState('stop-chain', 'r1')?.status).toBe('stopped');
+  });
+
+  it('holds the final completed batch at waiting-budget until the user raises the ceiling', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'final-budget', title: 'Final budget', goal: 'g', token_budget: 1,
+      nodes: [{ id: 'a', prompt: 'a' }],
+    }));
+    const runner = makeRunner();
+    runner.run('final-budget', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'done', tokenUsage: tu(2, 2) });
+    await tick();
+    expect(runner.getRunState('final-budget', 'r1')?.status).toBe('waiting-budget');
+    expect(runner.updateRunLimits('final-budget', 'r1', 10).status).toBe('completed');
+  });
+
+  it('restores completed map instance outputs before continuing the remaining instances', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'map-restore', title: 'Map restore', goal: 'g', max_parallel: 1,
+      params: [{ name: 'items', default: '["a","b"]' }],
+      nodes: [{ id: 'fan', kind: 'map', for_each: '${params.items}', prompt: '${item}' }],
+    }));
+    const first = makeRunner();
+    first.run('map-restore', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('fan#0', { finalText: 'A' });
+    await tick();
+
+    const resumedHost = new MockHost();
+    const resumed = new TaskRunner({ host: resumedHost, workspaceId: 'ws', workspaceRoot: root });
+    resumed.scanUnfinished();
+    resumed.continue('map-restore', 'r1');
+    await tick();
+    resumedHost.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(readNodeOutput(root, 'map-restore', 'r1', 'fan')?.text).toBe('A\nB');
+  });
+
+  it('does not reuse a structured output submitted by a failed attempt', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'stale-output', title: 'Stale output', goal: 'g',
+      nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'value', required: true }], retry: { limit: 1, when: 'error' } }],
+    }));
+    const runner = makeRunner();
+    runner.run('stale-output', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { value: 'old' } })).toEqual({ ok: true });
+    host.complete('a', { reason: 'error' }); await tick();
+    host.complete('a', { finalText: 'new text only' }); await tick();
+    expect(runner.getRunState('stale-output', 'r1')?.nodes[0]?.state).toBe('invalid');
+  });
+
+  it('allows only the parent coordinator to submit the structured verdict', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'verdict-owner', title: 'Verdict', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const runner = makeRunner();
+    runner.run('verdict-owner', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick(); host.complete('a', { finalText: 'A' }); await tick();
+    expect(() => runner.submitVerdict('sess-a', { runId: 'r1', result: 'pass' })).toThrow(/No verifying run/);
+    expect(runner.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+  });
+
+  it('persists non-sensitive params across restart and rejects unsafe or duplicate run ids', async () => {
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'param-restore', title: 'Params', goal: 'g',
+      params: [{ name: 'query', type: 'string' }], nodes: [{ id: 'a', prompt: '${params.query}' }],
+    }));
+    const first = makeRunner();
+    expect(() => first.run('param-restore', { runId: '../escape', params: { query: 'kept' }, verifyOnComplete: false })).toThrow(/Invalid run id/);
+    first.run('param-restore', { runId: 'r1', params: { query: 'kept' }, verifyOnComplete: false });
+    await tick();
+    expect(() => first.run('param-restore', { runId: 'r1', params: { query: 'other' }, verifyOnComplete: false })).toThrow(/already exists/);
+    saveTaskSpec(root, specOf({
+      schema_version: 2, id: 'other-task', title: 'Other', goal: 'g',
+      nodes: [{ id: 'b', prompt: 'b' }],
+    }));
+    expect(() => first.run('other-task', { runId: 'r1', verifyOnComplete: false })).toThrow(/workspace/);
+    const resumedHost = new MockHost();
+    const resumed = new TaskRunner({ host: resumedHost, workspaceId: 'ws', workspaceRoot: root });
+    resumed.scanUnfinished(); resumed.continue('param-restore', 'r1'); await tick();
+    expect(resumedHost.promptFor('a')).toContain('kept');
+  });
+  for (const paused of [false, true]) for (const damaged of [false, true]) it(`restores prepared delivery without spawning workers (damaged=${damaged}, paused=${paused})`, async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    host.finalizeTaskWorkspace = async () => new Promise(() => {});
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'resume-delivery', title: 'Delivery', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' }, nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] }] }));
+    const original = makeRunner(); original.run('resume-delivery', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(original.submitNodeOutput('sess-a', { values: { file: 'candidate.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    if (paused) original.pause('resume-delivery', 'r1');
+    if (damaged) rmSync(join(root, 'tasks', 'resume-delivery', 'runs', 'r1', 'submissions'), { recursive: true });
+    const restartedHost = new MockHost();
+    restartedHost.hasPreparedTaskDelivery = id => id === 'sess-a';
+    restartedHost.canAutoResumeTaskDelivery = id => id === 'sess-a';
+    let calls = 0;
+    restartedHost.finalizeTaskWorkspace = async (id, outputs, current) => {
+      current(); calls++; expect(id).toBe('sess-a'); expect(outputs).toEqual({ file: 'candidate.txt' });
+      return { file: { path: join(root, 'candidate.txt'), hash: createHash('sha256').update('candidate').digest('hex'), size: 9, artifactDeliveryVersion: 1 } };
+    };
+    const restarted = new TaskRunner({ host: restartedHost, workspaceId: 'ws', workspaceRoot: root });
+    restarted.scanUnfinished();
+    if (paused) {
+      restarted.resumePreparedDeliveries(); await tick();
+      expect(calls).toBe(0); expect(restartedHost.created).toHaveLength(0);
+      restarted.resume('resume-delivery', 'r1');
+    }
+    else restarted.resumePreparedDeliveries();
+    await tick();
+    expect(calls).toBe(damaged ? 0 : 1); expect(restartedHost.created).toHaveLength(0);
+    expect(restarted.getRunState('resume-delivery', 'r1')!.nodes[0]!.state).toBe(damaged ? 'invalid' : 'done');
+    original.stop('resume-delivery', 'r1');
+  });
+
+  it.each([false, true])('does not restore a completed delivery into an invalidated retry (restart=%s)', async restart => {
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    host.hasPreparedTaskDelivery = id => id === 'sess-report';
+    let deliveries = 0;
+    host.finalizeTaskWorkspace = async () => { deliveries++; return {}; };
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'settled-retry', title: 'Retry', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' },
+      nodes: [{ id: 'input', permissionMode: 'safe', prompt: 'read' },
+        { id: 'report', permissionMode: 'allow-all', trigger: 'all_done', depends_on: ['input'], prompt: '${nodes.input.output}' }] }));
+    let runner = makeRunner(); runner.run('settled-retry', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('input', { reason: 'error' }); await tick();
+    host.complete('report', { finalText: 'old failure report' }); await tick();
+    expect(runner.getRunState('settled-retry', 'r1')!.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('settled-retry', 'r1'); await tick();
+    expect(deliveries).toBe(1);
+    expect(runner.getRunState('settled-retry', 'r1')!.nodes.find(node => node.id === 'report')!.state).not.toBe('done');
+    host.complete('input', { finalText: 'recovered input' }); await tick();
+    expect(host.dispatchedNames().filter(name => name === 'report')).toHaveLength(2);
+    expect(host.sent.filter(message => message.sessionId === 'sess-report').at(-1)!.message).toContain('recovered input');
+    host.complete('report', { finalText: 'new report' }); await tick();
+    expect(deliveries).toBe(2);
+    expect(runner.getRunState('settled-retry', 'r1')!.status).toBe('completed');
+  });
+
+  it('does not turn an integration failure into a new worker even with automatic retry', async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    host.finalizeTaskWorkspace = async () => { throw new Error('authorization revoked'); };
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'delivery-retry', title: 'Delivery', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' }, nodes: [{ id: 'a', prompt: 'produce', retry: { limit: 2, when: 'invalid' }, outputs: [{ name: 'file', kind: 'artifact' }] }] }));
+    const runner = makeRunner(); runner.run('delivery-retry', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'candidate.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick(); await tick();
+    expect(host.created).toHaveLength(1);
+    expect(runner.getRunState('delivery-retry', 'r1')!.nodes[0]!.state).toBe('invalid');
+    runner.stop('delivery-retry', 'r1');
+  });
+
+  it('rejects null required artifacts before any isolated integration', async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    let integrateCalls = 0;
+    host.finalizeTaskWorkspace = async () => { integrateCalls++; return {}; };
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'incomplete-delivery', title: 'Delivery', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' }, nodes: [
+        { id: 'a', prompt: 'produce files', outputs: [{ name: 'first', kind: 'artifact' }, { name: 'second', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume files', permissionMode: 'safe', depends_on: ['a'] },
+      ] }));
+    const runner = makeRunner();
+    runner.run('incomplete-delivery', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { first: 'candidate.txt', second: null } }).ok).toBe(false);
+    host.complete('a'); await tick();
+    expect(integrateCalls).toBe(0);
+    expect(host.dispatchedNames()).not.toContain('b');
+    expect(runner.getRunState('incomplete-delivery', 'r1')!.nodes.find(n => n.id === 'a')!.state).not.toBe('done');
+    runner.stop('incomplete-delivery', 'r1');
+  });
+
+  it('isolated delivery waits for one runtime integration receipt before releasing dependencies', async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    let integrateCalls = 0;
+    let release!: (value: Record<string, unknown>) => void;
+    host.finalizeTaskWorkspace = async (_id, _outputs, ensureCurrent) => {
+      integrateCalls++; ensureCurrent();
+      return new Promise(resolve => { release = resolve; });
+    };
+    saveTaskSpec(root, specOf({schema_version:3,id:'delivery',title:'Delivery',goal:'g',execution:{coordinator_gate:{mode:'off'},verification:{required:false}},defaults:{permissionMode:'allow-all'},nodes:[
+      {id:'a',prompt:'produce file',outputs:[{name:'file',kind:'artifact'}]},
+      {id:'b',prompt:'consume file',permissionMode:'safe',depends_on:['a']},
+    ]}));
+    const runner=makeRunner();runner.run('delivery',{runId:'r1',verifyOnComplete:false});await tick();
+    expect(runner.submitNodeOutput('sess-a',{values:{file:'candidate.txt'}}).ok).toBe(true);
+    expect(readNodeSubmission(root, 'delivery', 'r1', 'a', 'sess-a', 1)?.params?.file).toBeDefined();
+    expect(readNodeSubmission(root, 'delivery', 'r1', 'a', 'sess-a', 2)).toBeNull();
+    host.complete('a');host.complete('a');await tick();
+    expect(integrateCalls).toBe(1);expect(host.dispatchedNames()).not.toContain('b');
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'candidate.txt' } }).ok).toBe(false);
+    release({file:{path:join(root,'candidate.txt'),hash:createHash('sha256').update('candidate').digest('hex'),size:9,artifactDeliveryVersion:1}});await tick();
+    expect(host.dispatchedNames()).toContain('b');
+    expect(runner.getRunState('delivery','r1')!.nodes.find(n=>n.id==='a')!.state).toBe('done');
+    runner.stop('delivery','r1');
+  });
+
+  for (const changedDuring of ['b', 'c'] as const) it(`does not publish ${changedDuring} when an upstream artifact changes during execution`, async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'input-change', title: 'Input change', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [
+        { id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] },
+        { id: 'c', prompt: 'follow', depends_on: ['b'] },
+      ],
+    }));
+    const runner = makeRunner(); runner.run('input-change', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    expect(host.dispatchedNames()).toContain('b');
+    const inputsEvent = readRunLog(root, 'input-change', 'r1').find(event => event.kind === 'node-artifact-inputs' && event.sessionId === 'sess-b');
+    expect(inputsEvent?.kind).toBe('node-artifact-inputs');
+    if (inputsEvent?.kind === 'node-artifact-inputs') {
+      expect(inputsEvent.inputs.a?.text).toBe('');
+      expect((inputsEvent.inputs.a?.params?.file as { hash: string }).hash).toBe(createHash('sha256').update('original').digest('hex'));
+    }
+    if (changedDuring === 'c') { host.complete('b'); await tick(); expect(host.dispatchedNames()).toContain('c'); }
+    writeFileSync(join(root, 'input.txt'), 'external edit');
+    host.complete(changedDuring); await tick();
+    expect(runner.getRunState('input-change', 'r1')!.nodes.find(node => node.id === changedDuring)!.state).toBe('invalid');
+    if (changedDuring === 'b') expect(host.dispatchedNames()).not.toContain('c');
+    runner.stop('input-change', 'r1');
+  });
+
+  for (const changed of [false, true]) it(`rehydrates original artifact inputs before resuming a paused consumer (changed=${changed})`, async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'input-resume', title: 'Input resume', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] }],
+    }));
+    const first = makeRunner(); first.run('input-resume', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(first.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    host.complete('b', { reason: 'error', errorCode: 'call_time_limit' });
+    expect(first.getRunState('input-resume', 'r1')?.status).toBe('paused');
+    if (changed) {
+      const replacement = 'changed while stopped';
+      writeFileSync(join(root, 'input.txt'), replacement);
+      // A newer producer receipt must not silently replace the paused consumer's input.
+      writeNodeOutput(root, 'input-resume', 'r1', 'a', { text: '', params: { file: {
+        path: 'input.txt', hash: createHash('sha256').update(replacement).digest('hex'), size: Buffer.byteLength(replacement), mime: 'text/plain',
+      } } });
+    }
+    const nextHost = new MockHost();
+    const continued: string[] = [];
+    Object.assign(nextHost, { continueProgress: async (id: string) => { continued.push(id); } });
+    const restarted = new TaskRunner({ host: nextHost, workspaceId: 'ws', workspaceRoot: root });
+    restarted.resume('input-resume', 'r1'); await tick();
+    expect(nextHost.created).toHaveLength(0);
+    expect(continued).toEqual(changed ? [] : ['sess-b']);
+    expect(restarted.getRunState('input-resume', 'r1')!.nodes.find(node => node.id === 'b')!.state).toBe(changed ? 'invalid' : 'running');
+    if (!changed) { nextHost.complete('b'); await tick(); }
+  });
+
+  it('preserves completed history while persisting changed artifact availability', async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'invalidate', title: 'Invalidate', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] }, { id: 'other', prompt: 'independent' }],
+    }));
+    const runner = makeRunner(); runner.run('invalidate', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick(); host.complete('other'); host.complete('b'); await tick();
+    expect(runner.getRunState('invalidate', 'r1')?.status).toBe('completed');
+    writeFileSync(join(root, 'input.txt'), 'changed');
+    const freshHost = new MockHost();
+    const fresh = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    fresh.revalidateKnownArtifacts();
+    expect(freshHost.created).toHaveLength(0);
+    expect(fresh.getLatestRun('invalidate')?.status).toBe('completed');
+    const state = fresh.getLatestRun('invalidate')!;
+    expect(state.status).toBe('completed');
+    expect(state.artifactAvailability?.nodeIds).toContain('a');
+    expect(state.artifactAvailability?.nodeIds).toContain('b');
+    expect(state.artifactAvailability?.nodeIds).not.toContain('other');
+    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
+    expect(readNodeOutput(root, 'invalidate', 'r1', 'b')).not.toBeNull();
+    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('done');
+    fresh.revalidateKnownArtifacts();
+    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-availability')).toHaveLength(1);
+  });
+  it('restores completed map history and separate availability warnings', async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'invalidate', title: 'Invalidate', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', kind: 'map', for_each: '["one","two"]', prompt: 'consume ${item}', depends_on: ['a'] }, { id: 'other', prompt: 'independent' }],
+    }));
+    const runner = makeRunner(); runner.run('invalidate', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick(); host.complete('other'); host.complete('b#0'); host.complete('b#1'); await tick();
+    expect(runner.getRunState('invalidate', 'r1')?.status).toBe('completed');
+    writeFileSync(join(root, 'input.txt'), 'changed');
+    const freshHost = new MockHost();
+    const fresh = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    fresh.revalidateKnownArtifacts();
+    expect(freshHost.created).toHaveLength(0);
+    expect(fresh.getLatestRun('invalidate')?.status).toBe('completed');
+    const state = fresh.getLatestRun('invalidate')!;
+    expect(state.status).toBe('completed');
+    expect(state.artifactAvailability?.nodeIds).toContain('a');
+    expect(state.artifactAvailability?.nodeIds).toContain('b');
+    expect(state.artifactAvailability?.nodeIds).not.toContain('other');
+    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b#0')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b#1')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
+    expect(readNodeOutput(root, 'invalidate', 'r1', 'b')).not.toBeNull();
+    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('done');
+    fresh.revalidateKnownArtifacts();
+    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-availability')).toHaveLength(1);
+  });
+
+  it('stops a running stale consumer and ignores late success without cancelling independent work', async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'active-invalidate', title: 'Active', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] }, { id: 'other', prompt: 'independent' }],
+    }));
+    const runner = makeRunner(); runner.run('active-invalidate', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    writeFileSync(join(root, 'input.txt'), 'changed');
+    runner.revalidateKnownArtifacts(); await tick();
+    expect(host.cancelled).toContain('sess-b');
+    expect(host.cancelled).not.toContain('sess-other');
+    host.complete('b', { finalText: 'late success' }); host.complete('other'); await tick();
+    const state = runner.getRunState('active-invalidate', 'r1')!;
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
+    expect(readNodeOutput(root, 'active-invalidate', 'r1', 'b')).toBeNull();
+  });
+
+  for (const replicas of [false, true]) it(`preserves expanded history and identifies only affected artifact siblings (replicas=${replicas})`, async () => {
+    writeFileSync(join(root, 'zero.txt'), 'zero'); writeFileSync(join(root, 'one.txt'), 'one');
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'map-artifacts', title: 'Map', goal: 'g',
+      nodes: [replicas
+        ? { id: 'fan', replicas: 2, aggregate: 'concat', prompt: '${index}', outputs: [{ name: 'file', kind: 'artifact' }] }
+        : { id: 'fan', kind: 'map', for_each: '["zero","one"]', prompt: '${item}', outputs: [{ name: 'file', kind: 'artifact' }] }],
+    }));
+    const runner = makeRunner(); runner.run('map-artifacts', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-fan#0', { values: { file: 'zero.txt' } }).ok).toBe(true);
+    expect(runner.submitNodeOutput('sess-fan#1', { values: { file: 'one.txt' } }).ok).toBe(true);
+    host.complete('fan#0'); host.complete('fan#1'); await tick();
+    expect(runner.getRunState('map-artifacts', 'r1')?.status).toBe('completed');
+    expect(runner.revalidateCompletedArtifacts('map-artifacts', 'r1').status).toBe('completed');
+    writeFileSync(join(root, 'zero.txt'), 'changed');
+    const invalid = runner.revalidateCompletedArtifacts('map-artifacts', 'r1');
+    expect(invalid.nodes.find(node => node.id === 'fan#0')?.state).toBe('done');
+    expect(invalid.artifactAvailability?.nodeIds).toContain('fan#0');
+    expect(invalid.artifactAvailability?.nodeIds).not.toContain('fan#1');
+    expect(invalid.nodes.find(node => node.id === 'fan#1')?.state).toBe('done');
+    expect(() => runner.continue('map-artifacts', 'r1')).toThrow('completed');
+    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'fan#1')).toHaveLength(1);
+  });
+
+  it('accepts sequential loop artifact updates and exposes the final receipt to consumers', async () => {
+    writeFileSync(join(root, 'result.txt'), 'first');
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'loop-files', title: 'Loop', goal: 'g',
+      nodes: [{ id: 'iter', kind: 'loop', loop: { max: 3, until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' } },
+        prompt: 'revise ${prev}', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'consumer', prompt: 'read', depends_on: ['iter'] }],
+    }));
+    const runner = makeRunner(); runner.run('loop-files', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-iter#0', { text: 'continue', values: { file: 'result.txt' } }).ok).toBe(true);
+    host.complete('iter#0'); await tick();
+    writeFileSync(join(root, 'result.txt'), 'second');
+    expect(runner.submitNodeOutput('sess-iter#1', { text: 'STOP', values: { file: 'result.txt' } }).ok).toBe(true);
+    host.complete('iter#1'); await tick();
+    expect(host.dispatchedNames()).toContain('consumer');
+    host.complete('consumer'); await tick();
+    expect(runner.revalidateCompletedArtifacts('loop-files', 'r1').status).toBe('completed');
+    expect(readNodeOutput(root, 'loop-files', 'r1', 'iter')?.params?.file).toBeDefined();
+    const restored = makeRunner(); restored.revalidateKnownArtifacts();
+    expect(restored.getLatestRun('loop-files')?.status).toBe('completed');
+    writeFileSync(join(root, 'result.txt'), 'external');
+    restored.revalidateKnownArtifacts();
+    expect(restored.getLatestRun('loop-files')?.status).toBe('completed');
+    expect(restored.getLatestRun('loop-files')?.artifactAvailability?.nodeIds).toContain('iter');
+  });
+
+  it('replay does not mistake a null input snapshot for a historical run without snapshots', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'damaged-input', title: 'Task', goal: 'g', nodes: [{ id: 'a', prompt: 'work' }] }));
+    const runner = makeRunner(); runner.run('damaged-input', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('a'); await tick();
+    expect(runner.getRunState('damaged-input', 'r1')?.status).toBe('completed');
+    appendRunLog(root, 'damaged-input', 'r1', { kind: 'node-artifact-inputs', nodeId: 'a', sessionId: 'sess-a', inputs: null, t: new Date().toISOString() } as never);
+    const restored = makeRunner(); restored.revalidateKnownArtifacts();
+    expect(restored.getLatestRun('damaged-input')?.status).toBe('completed');
+    expect(restored.getLatestRun('damaged-input')?.artifactAvailability?.nodeIds).toContain('a');
+  });
+
 });

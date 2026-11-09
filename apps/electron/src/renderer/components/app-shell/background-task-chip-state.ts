@@ -12,14 +12,12 @@ export const ORPHANED_LINGER_MS = 20_000
 export const RUNNING_SIGNAL_TIMEOUT_MS = 20 * 60_000
 
 /**
- * Advance age-based chip state and prune only states known to be terminal. `keepId` is the chip
- * whose card is open: it stays until the card closes, however long ago its task finished.
+ * Advance age-based chip state and prune only states known to be terminal.
  * Returns the original array when nothing changed to avoid spurious Jotai renders.
  */
 export function advanceBackgroundTaskChips(
   tasks: BackgroundTask[],
   now: number,
-  keepId?: string | null,
 ): BackgroundTask[] {
   let changed = false
   const next = tasks
@@ -35,7 +33,10 @@ export function advanceBackgroundTaskChips(
       return task
     })
     .filter((task) => {
-      if (task.status === 'running' || task.status === 'stale' || task.id === keepId) return true
+      if (task.status === 'running' || task.status === 'stale') return true
+      // Managed Swarm children remain inspectable while their coordinator is
+      // aggregating. The chip's Dismiss action is the explicit removal path.
+      if (task.type === 'agent' && task.orchestrationId) return true
       const age = now - (task.completedAt ?? now)
       const linger = task.status === 'orphaned'
         ? ORPHANED_LINGER_MS
@@ -74,13 +75,30 @@ export function markLiveBackgroundTasksOrphaned(
   let changed = false
   const next = tasks.map((task) => {
     if (task.status !== 'running' && task.status !== 'stale') return task
+    // spawn_session workers are independent sessions and survive the parent
+    // turn even when SDK-owned background agents do not.
+    if (task.type === 'agent' && task.orchestrationId) return task
     changed = true
     return {
       ...task,
       status: 'orphaned' as const,
-      stopping: false,
       completedAt: now,
     }
   })
   return changed ? next : tasks
+}
+
+/**
+ * A tool result normally closes its transient task chip. Managed Swarm workers
+ * are different: spawn_session returns a regular JSON tool result immediately
+ * after task_backgrounded, while the child keeps running independently. Keep
+ * those chips until their lifecycle event updates them and the user dismisses
+ * them explicitly.
+ */
+export function shouldRemoveTaskForToolResult(
+  task: BackgroundTask,
+  toolUseId: string,
+): boolean {
+  if (task.toolUseId !== toolUseId) return false
+  return !(task.type === 'agent' && task.orchestrationId)
 }

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { windowsCaptionEdgeStyle } from "@/lib/windows-caption-inset"
 import { WelcomeStep } from "./WelcomeStep"
 import type { ApiSetupMethod } from "./APISetupStep"
 import { ProviderSelectStep, type ProviderChoice } from "./ProviderSelectStep"
@@ -43,14 +44,16 @@ interface OnboardingWizardProps {
   onSubmitCredential: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
+  /** Let the API-key credentials form switch to ChatGPT / Copilot OAuth sign-in. */
+  allowOAuthSwitch?: boolean
 
   // Claude OAuth (two-step flow)
   isWaitingForCode?: boolean
   onSubmitAuthCode?: (code: string) => void
   onCancelOAuth?: () => void
 
-  // Copilot device flow
-  copilotDeviceCode?: { userCode: string; verificationUri: string }
+  // Subscription OAuth device flow
+  oauthDeviceCode?: { userCode: string; verificationUri: string }
 
   // Git Bash (Windows)
   onBrowseGitBash?: () => Promise<string | null>
@@ -73,6 +76,12 @@ interface OnboardingWizardProps {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, 'auto' | 'on' | 'off'>
+    modelImageLearned?: Record<string, boolean>
+    modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
   }
 
@@ -82,10 +91,10 @@ interface OnboardingWizardProps {
 /**
  * OnboardingWizard - Full-screen onboarding flow container
  *
- * Manages the step-by-step flow for setting up Craft Agent:
+ * Manages the step-by-step flow for setting up Selection:
  * 1. Welcome
- * 2. Provider Select (Claude / ChatGPT / Copilot / API Key / Local)
- * 3. Credentials (API Key or OAuth) or Local Model
+ * 2. Provider Select (ORDER / API Key / Local)
+ * 3. Credentials (API Key) or Local Model
  * 4. Completion
  */
 export function OnboardingWizard({
@@ -96,12 +105,13 @@ export function OnboardingWizard({
   onSubmitCredential,
   onStartOAuth,
   onFinish,
+  allowOAuthSwitch,
   // Two-step OAuth flow
   isWaitingForCode,
   onSubmitAuthCode,
   onCancelOAuth,
-  // Copilot device flow
-  copilotDeviceCode,
+  // Subscription OAuth device flow
+  oauthDeviceCode,
   // Git Bash (Windows)
   onBrowseGitBash,
   onUseGitBashPath,
@@ -168,11 +178,13 @@ export function OnboardingWizard({
             onSubmit={onSubmitCredential}
             onStartOAuth={onStartOAuth}
             onBack={onBack}
+            onSelectApiSetupMethod={onSelectApiSetupMethod}
+            allowOAuthSwitch={allowOAuthSwitch}
             isWaitingForCode={isWaitingForCode}
             onSubmitAuthCode={onSubmitAuthCode}
             editInitialValues={editInitialValues}
             onCancelOAuth={onCancelOAuth}
-            copilotDeviceCode={copilotDeviceCode}
+            oauthDeviceCode={oauthDeviceCode}
           />
         )
 
@@ -192,14 +204,16 @@ export function OnboardingWizard({
   return (
     <div
       className={cn(
-        // The navigator canvas; each step is a paper card on it (StepFormLayout)
-        "bg-navigator overflow-y-auto",
+        "bg-foreground-2 overflow-y-auto",
         !className?.includes('h-full') && "h-dvh",
         className
       )}
     >
-      {/* Draggable title bar region for transparent window (macOS) */}
-      <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar" />
+      {/* Draggable title bar — keep it off the Windows overlay caption buttons. */}
+      <div
+        className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar"
+        style={windowsCaptionEdgeStyle()}
+      />
 
       {/* Main content — min-h-full + flex center means: center when content fits,
           natural flow + scroll when content is taller than the viewport (mobile). */}

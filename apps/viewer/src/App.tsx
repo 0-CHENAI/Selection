@@ -1,7 +1,7 @@
 /**
- * Craft Agent Session Viewer
+ * Selection Session Viewer
  *
- * A minimal web app for viewing Craft Agent session transcripts.
+ * A minimal web app for viewing Selection session transcripts.
  * Users can upload session JSON files or view shared sessions via URL.
  *
  * Routes:
@@ -196,7 +196,7 @@ export function App() {
 
   return (
     <TooltipProvider>
-    <div className="h-full flex flex-col bg-navigator text-foreground">
+    <div className="h-full flex flex-col bg-foreground-2 text-foreground">
       <Header
         hasSession={!!session}
         sessionTitle={session?.name}
@@ -229,9 +229,7 @@ export function App() {
           mode="readonly"
           platformActions={platformActions}
           defaultExpanded={false}
-          // The transcript sits on the paper surface, like the app's content card (inset with a
-          // 6px gutter on wide screens, full-bleed on narrow ones)
-          className="flex-1 min-h-0 overflow-hidden bg-paper md:mx-1.5 md:mb-1.5 md:rounded-lg md:shadow-elev-0"
+          className="flex-1 min-h-0"
           onActivityClick={handleActivityClick}
         />
       ) : (
@@ -304,6 +302,7 @@ export function App() {
           typeBadge={{ icon: FileText, label: overlayData.toolName, variant: 'default' }}
           onOpenUrl={platformActions.onOpenUrl}
           error={overlayData.error}
+          errorLabel={overlayData.toolName === 'Write' ? 'Write Failed' : undefined}
         />
       )}
 

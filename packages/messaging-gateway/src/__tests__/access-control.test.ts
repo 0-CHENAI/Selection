@@ -26,7 +26,7 @@ const STRANGER_ID = '999'
 
 function buildMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chat-1',
     messageId: 'm1',
     senderId: OWNER_ID,
@@ -44,7 +44,7 @@ function buildConfig(args: {
   return {
     enabled: true,
     platforms: {
-      telegram: {
+      lark: {
         enabled: true,
         ...(args.accessMode ? { accessMode: args.accessMode } : {}),
         ...(args.owners ? { owners: args.owners } : {}),
@@ -55,7 +55,7 @@ function buildConfig(args: {
 
 function bindingWith(overrides: Partial<BindingConfig> = {}) {
   return {
-    config: normalizeBindingConfig('telegram', overrides),
+    config: normalizeBindingConfig('lark', overrides),
   }
 }
 
@@ -205,18 +205,18 @@ describe('evaluateBindingAccess', () => {
 describe('normalizeBindingConfig migration', () => {
   it('persisted config without accessMode defaults to "open"', () => {
     const raw = { responseMode: 'progress', streamResponses: true } as Partial<BindingConfig>
-    const normalized = normalizeBindingConfig('telegram', raw)
+    const normalized = normalizeBindingConfig('lark', raw)
     expect(normalized.accessMode).toBe('open')
     expect(normalized.allowedSenderIds).toEqual([])
   })
 
   it('fresh BindingConfig (undefined) defaults to "inherit"', () => {
-    const normalized = normalizeBindingConfig('telegram')
+    const normalized = normalizeBindingConfig('lark')
     expect(normalized.accessMode).toBe('inherit')
   })
 
   it('explicit accessMode is preserved across normalisation', () => {
-    const normalized = normalizeBindingConfig('telegram', {
+    const normalized = normalizeBindingConfig('lark', {
       accessMode: 'allow-list',
       allowedSenderIds: ['42'],
     })

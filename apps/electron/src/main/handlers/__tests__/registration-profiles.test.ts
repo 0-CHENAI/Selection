@@ -22,6 +22,7 @@ mock.module('electron', () => ({
   },
   dialog: {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+    showSaveDialog: async () => ({ canceled: true }),
     showMessageBox: async () => ({ response: 0 }),
   },
   shell: {
@@ -55,7 +56,7 @@ function createMockServer(): RpcServer {
 
 function createMockDeps(): HandlerDeps {
   return {
-    sessionManager: {} as HandlerDeps['sessionManager'],
+    sessionManager: { setTaskRunnerLookup: () => {} } as unknown as HandlerDeps['sessionManager'],
     platform: {
       appRootPath: '',
       resourcesPath: '',
@@ -94,7 +95,6 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     labels,
     llm,
     oauth,
-    pages,
     projects,
     sessions,
     settings,
@@ -107,9 +107,6 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     onboarding,
     resources,
     transfer,
-    decisions,
-    prWatch,
-    codingRepos,
   ] = await Promise.all([
     import('@craft-agent/server-core/handlers/rpc/auth'),
     import('@craft-agent/server-core/handlers/rpc/automations'),
@@ -117,7 +114,6 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     import('@craft-agent/server-core/handlers/rpc/labels'),
     import('@craft-agent/server-core/handlers/rpc/llm-connections'),
     import('@craft-agent/server-core/handlers/rpc/oauth'),
-    import('@craft-agent/server-core/handlers/rpc/pages'),
     import('@craft-agent/server-core/handlers/rpc/projects'),
     import('@craft-agent/server-core/handlers/rpc/sessions'),
     import('@craft-agent/server-core/handlers/rpc/settings'),
@@ -130,9 +126,6 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     import('@craft-agent/server-core/handlers/rpc/onboarding'),
     import('@craft-agent/server-core/handlers/rpc/resources'),
     import('@craft-agent/server-core/handlers/rpc/transfer'),
-    import('@craft-agent/server-core/handlers/rpc/decisions'),
-    import('@craft-agent/server-core/handlers/rpc/pr-watch'),
-    import('@craft-agent/server-core/handlers/rpc/coding-repos'),
   ])
 
   return new Set([
@@ -143,7 +136,6 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...llm.HANDLED_CHANNELS,
     ...oauth.HANDLED_CHANNELS,
     ...projects.HANDLED_CHANNELS,
-    ...pages.HANDLED_CHANNELS,
     ...sessions.HANDLED_CHANNELS,
     ...settings.HANDLED_CHANNELS,
     ...skills.HANDLED_CHANNELS,
@@ -155,18 +147,16 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...onboarding.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
-    ...decisions.HANDLED_CHANNELS,
-    ...prWatch.HANDLED_CHANNELS,
-    ...codingRepos.HANDLED_CHANNELS,
   ])
 }
 
 async function getExpectedGuiChannels(): Promise<Set<string>> {
-  const [browser, system, workspace, settings] = await Promise.all([
+  const [browser, system, workspace, settings, resources] = await Promise.all([
     import('../browser'),
     import('../system'),
     import('../workspace'),
     import('../settings'),
+    import('../resources'),
   ])
 
   return new Set([
@@ -174,6 +164,7 @@ async function getExpectedGuiChannels(): Promise<Set<string>> {
     ...system.GUI_HANDLED_CHANNELS,
     ...workspace.GUI_HANDLED_CHANNELS,
     ...settings.GUI_HANDLED_CHANNELS,
+    ...resources.HANDLED_CHANNELS,
   ])
 }
 

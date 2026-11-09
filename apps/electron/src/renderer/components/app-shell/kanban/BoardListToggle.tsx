@@ -1,9 +1,14 @@
-import { LayoutGrid, List } from 'lucide-react'
+import { createLucideIcon, MessageSquare } from 'lucide-react'
+import { useId } from 'react'
+import { LayoutGroup, motion, useReducedMotion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 
-export type BoardListValue = 'list' | 'board'
+export type BoardListValue = 'NORM' | 'PRO'
+
+const Lambda = createLucideIcon('Lambda', [
+  ['path', { d: 'M4 4h4l9 16h3M12 12l-7 8', key: 'lambda' }],
+])
 
 interface BoardListToggleProps {
   value: BoardListValue
@@ -12,31 +17,30 @@ interface BoardListToggleProps {
 }
 
 /**
- * List ⇄ Board view switch. Rendered both in the sessions navigator header (list
- * mode) and in the board's own header (board mode), since the navigator is hidden
- * while the board is open and would otherwise have nowhere to host the switch.
- *
- * A segmented control (spec §4/A5): neutral well, the selected segment is raised. Icon segments
- * carry their name as tooltip + accessible name.
+ * NORM / PRO root conversation navigation. Desktop layouts keep one persistent TopBar
+ * instance so changing views only updates the selected state and main content.
  */
 export function BoardListToggle({ value, onChange, className }: BoardListToggleProps) {
   const { t } = useTranslation()
+  const groupId = useId()
   return (
-    <div
-      role="group"
-      className={cn(
-        'titlebar-no-drag inline-flex items-center gap-0.5 rounded-md bg-fill-hover p-0.5',
-        className
-      )}
-    >
-      <ToggleButton active={value === 'list'} icon={List} label={t('kanban.list')} onClick={() => onChange('list')} />
-      <ToggleButton
-        active={value === 'board'}
-        icon={LayoutGrid}
-        label={t('kanban.board')}
-        onClick={() => onChange('board')}
-      />
-    </div>
+    <LayoutGroup id={groupId}>
+      <div
+        aria-label={t('session.workMode')}
+        className={cn(
+          'inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-0.5',
+          className
+        )}
+      >
+        <ToggleButton active={value === 'NORM'} icon={MessageSquare} label="NORM" onClick={() => onChange('NORM')} />
+        <ToggleButton
+          active={value === 'PRO'}
+          icon={Lambda}
+          label="PRO"
+          onClick={() => onChange('PRO')}
+        />
+      </div>
+    </LayoutGroup>
   )
 }
 
@@ -47,28 +51,30 @@ function ToggleButton({
   onClick,
 }: {
   active: boolean
-  icon: typeof List
+  icon: typeof MessageSquare
   label: string
   onClick: () => void
 }) {
+  const reduced = useReducedMotion()
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          aria-pressed={active}
-          aria-label={label}
-          className={cn(
-            'inline-grid h-control-sm w-7 place-items-center rounded-sm',
-            'transition-[background-color,color,box-shadow] duration-micro ease-out-subtle hover:duration-instant',
-            active ? 'bg-floating text-foreground shadow-elev-1' : 'text-secondary hover:text-foreground'
-          )}
-        >
-          <Icon className="size-3.5" strokeWidth={2} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'relative inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+        active ? 'text-foreground' : 'text-foreground/50 hover:text-foreground/80'
+      )}
+    >
+      {active && <motion.span
+        data-work-mode-indicator
+        className="pointer-events-none absolute inset-0 rounded-md bg-card shadow-xs"
+        layoutId="work-mode-indicator"
+        initial={false}
+        transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 36, mass: 0.8 }}
+      />}
+      <Icon className="relative h-3.5 w-3.5" strokeWidth={2} />
+      <span className="relative">{label}</span>
+    </button>
   )
 }

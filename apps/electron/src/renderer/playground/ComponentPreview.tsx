@@ -2,61 +2,10 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 import type { ComponentEntry } from './registry'
 import { TooltipProvider } from '@craft-agent/ui'
-import { Button } from '@/components/ui/button'
-import { PlaygroundPreviewProviders } from './PlaygroundPreviewProviders'
 
 interface ComponentPreviewProps {
   component: ComponentEntry
   props: Record<string, unknown>
-  /** Called when the preview throws, so the playground can stop persisting a crashing selection. */
-  onCrash?: (componentId: string, error: Error) => void
-}
-
-interface PreviewErrorBoundaryProps {
-  /** The preview's inputs: a change (other variant, edited prop) retries the render. */
-  previewProps: Record<string, unknown>
-  onError: (error: Error) => void
-  children: React.ReactNode
-}
-
-/**
- * Keeps a crashing entry inside its preview box: without it, one broken component unmounts the whole
- * playground (sidebar included), and the persisted selection reopens it on every reload.
- */
-class PreviewErrorBoundary extends React.Component<PreviewErrorBoundaryProps, { error: Error | null }> {
-  state: { error: Error | null } = { error: null }
-
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-
-  componentDidCatch(error: Error) {
-    this.props.onError(error)
-  }
-
-  componentDidUpdate(prevProps: PreviewErrorBoundaryProps) {
-    if (this.state.error && prevProps.previewProps !== this.props.previewProps) {
-      this.setState({ error: null })
-    }
-  }
-
-  render() {
-    const { error } = this.state
-    if (!error) return this.props.children
-    return (
-      <div role="alert" className="m-4 flex max-w-[560px] flex-col gap-2 rounded-lg bg-destructive-tint p-4 text-label">
-        <p className="font-semibold text-destructive">This preview crashed</p>
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-mono-ui text-foreground">
-          {error.message}
-        </pre>
-        <div>
-          <Button variant="secondary" size="sm" onClick={() => this.setState({ error: null })}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
 }
 
 const MIN_WIDTH = 100
@@ -83,7 +32,7 @@ function loadSavedSize(): { width: number; height: number } {
   return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
 }
 
-export function ComponentPreview({ component, props, onCrash }: ComponentPreviewProps) {
+export function ComponentPreview({ component, props }: ComponentPreviewProps) {
   const [size, setSize] = React.useState(loadSavedSize)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const isDraggingRef = React.useRef<'right' | 'bottom' | 'corner' | null>(null)
@@ -206,17 +155,9 @@ export function ComponentPreview({ component, props, onCrash }: ComponentPreview
             )}
           >
             <TooltipProvider>
-              <PreviewErrorBoundary
-                key={component.id}
-                previewProps={mergedProps}
-                onError={error => onCrash?.(component.id, error)}
-              >
-                <PlaygroundPreviewProviders>
-                  <Wrapper>
-                    <Component {...mergedProps} />
-                  </Wrapper>
-                </PlaygroundPreviewProviders>
-              </PreviewErrorBoundary>
+              <Wrapper>
+                <Component {...mergedProps} />
+              </Wrapper>
             </TooltipProvider>
           </div>
 

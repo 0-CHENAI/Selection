@@ -1,0 +1,49 @@
+{
+  "id": "keynote-stage",
+  "name": "暗场讲台",
+  "margin": 48,
+  "colors": {
+    "signal": "#FF6B3D",
+    "good": "#7DCEA0",
+    "watch": "#E0B15A",
+    "bad": "#F0A8A4",
+    "ink": "#F5F5F7",
+    "paper": "#0E0E10",
+    "muted": "#A1A1A6",
+    "accent": "#FF6B3D",
+    "surface": "#1C1C1E",
+    "inverse": "#0E0E10",
+    "line": "#3A3A3C"
+  },
+  "fonts": {
+    "cjk": {
+      "mac": "PingFang SC",
+      "win": "Microsoft YaHei",
+      "linux": "Noto Sans CJK SC"
+    },
+    "latin": {
+      "mac": "Arial",
+      "win": "Arial",
+      "linux": "Arial"
+    }
+  },
+  "type": {
+    "display": {
+      "min": 32,
+      "max": 72
+    },
+    "title": {
+      "min": 22,
+      "max": 40
+    },
+    "body": {
+      "min": 14,
+      "max": 22
+    },
+    "caption": {
+      "min": 10,
+      "max": 14
+    }
+  },
+  "source": "自拟的暗场讲台：近黑底、暖色信号。不是任何公司的发布会配色，没有标志。"
+}

@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'bun:test'
-import { AUTOMATIONS_LOAD_ISSUES_KEY } from '@craft-agent/shared/protocol'
-import { parseAutomationsConfig, getUnattachedLoadIssues, getEventDisplayName } from '../types'
-import { computeNextRuns } from '../utils'
+import { getEventCategory, parseAutomationsConfig } from '../types'
 
 describe('parseAutomationsConfig', () => {
+  it('does not display retired or unknown events from old configurations', () => {
+    const rule = { actions: [{ type: 'prompt', prompt: 'Review' }] }
+    expect(parseAutomationsConfig({ automations: { Stop: [rule], PreToolUse: [rule], Unknown: [rule], LabelAdd: [rule] } }).map(item => item.event)).toEqual(['LabelAdd'])
+  })
   it('returns [] for null input', () => {
     expect(parseAutomationsConfig(null)).toEqual([])
   })
@@ -86,7 +88,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        UserPromptSubmit: [{
+        SessionStatusChange: [{
           actions: [{ type: 'prompt', prompt: 'Run @daily-standup task' }],
         }],
       },
@@ -99,7 +101,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           actions: [{ type: 'prompt', prompt: 'echo "hello world"' }],
         }],
       },
@@ -113,7 +115,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           actions: [{ type: 'prompt', prompt: longPrompt }],
         }],
       },
@@ -126,7 +128,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           actions: [{ type: 'prompt', prompt: 'Run test' }],
         }],
       },
@@ -139,7 +141,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           enabled: false,
           actions: [{ type: 'prompt', prompt: 'Run test' }],
         }],
@@ -153,7 +155,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [
+        LabelRemove: [
           { actions: [] },
           { actions: [{ type: 'prompt', prompt: 'valid' }] },
         ],
@@ -187,7 +189,7 @@ describe('parseAutomationsConfig', () => {
       automations: {
         SchedulerTick: [{ actions: [{ type: 'prompt', prompt: 'a' }] }],
         LabelAdd: [{ actions: [{ type: 'prompt', prompt: 'b' }] }],
-        SessionStart: [{ actions: [{ type: 'prompt', prompt: 'c' }] }],
+        LabelRemove: [{ actions: [{ type: 'prompt', prompt: 'c' }] }],
       },
     }
     const items = parseAutomationsConfig(config)
@@ -214,89 +216,8 @@ describe('parseAutomationsConfig', () => {
   })
 })
 
-describe('parseAutomationsConfig: script actions and load issues', () => {
-  it('lists script automations (they run, so the screen must show them)', () => {
-    const items = parseAutomationsConfig({
-      automations: { SchedulerTick: [{ cron: '0 9 * * *', actions: [{ type: 'script', script: 'scripts/pull.ts', runtime: 'python3' }] }] },
-    })
-    expect(items).toHaveLength(1)
-    expect(items[0].actions).toEqual([{ type: 'script', script: 'scripts/pull.ts', runtime: 'python3' }])
-    expect(items[0].name).toBe('Script scripts/pull.ts')
-    expect(items[0].issues).toBeUndefined()
-  })
-
-  it('attaches the server\'s issues to the row and keeps a row that has no showable action', () => {
-    const items = parseAutomationsConfig({
-      automations: {
-        LabelAdd: [
-          { id: 'old', matcher: '^urgent$', actions: [{ type: 'command', command: 'echo hi' }] },
-          { id: 'ok', actions: [{ type: 'prompt', prompt: 'fine' }] },
-        ],
-      },
-      [AUTOMATIONS_LOAD_ISSUES_KEY]: [
-        { event: 'LabelAdd', index: 0, id: 'old', messages: ['Action 1 uses the removed "command" type; use a "script" action instead'] },
-      ],
-    })
-    expect(items.map(i => i.id)).toEqual(['old', 'ok'])
-    expect(items[0].actions).toEqual([])
-    // A first action of an unknown type must not crash naming (it used to read .prompt)
-    expect(items[0].name).toBe(getEventDisplayName('LabelAdd'))
-    expect(items[0].issues).toEqual(['Action 1 uses the removed "command" type; use a "script" action instead'])
-    expect(items[1].issues).toBeUndefined()
-  })
-
-  it('still skips a row with nothing to show when the server sends no issues (older servers)', () => {
-    const items = parseAutomationsConfig({
-      automations: { LabelAdd: [{ actions: [{ type: 'command', command: 'echo hi' }] }] },
-    })
-    expect(items).toEqual([])
-  })
-
-  it('skips non-object entries instead of crashing', () => {
-    const items = parseAutomationsConfig({
-      automations: { LabelAdd: [null, 'oops', { actions: [{ type: 'prompt', prompt: 'ok' }] }] },
-    })
-    expect(items.map(i => i.matcherIndex)).toEqual([2])
-  })
-
-  it('returns the issues no row shows, for the banner', () => {
-    const json = {
-      automations: {
-        LabelAdd: [null, { actions: [{ type: 'prompt', prompt: 'ok' }] }],
-      },
-      [AUTOMATIONS_LOAD_ISSUES_KEY]: [
-        { messages: ['automations.json is not valid JSON: Unexpected end'] },
-        { event: 'LabelAdd', index: 0, messages: ['actions: Required'] },
-        { event: 'LabelAdd', index: 1, name: 'Shown', messages: ['shown on its row'] },
-      ],
-    }
-    const items = parseAutomationsConfig(json)
-    expect(getUnattachedLoadIssues(json, items)).toEqual([
-      'automations.json is not valid JSON: Unexpected end',
-      'LabelAdd #1: actions: Required',
-    ])
-  })
-})
-
-describe('cron next-run timezone', () => {
-  // A zone that is never the machine's own, so the test fails if the cron is evaluated in the local zone.
-  const tz = 'Pacific/Kiritimati'
-
-  it('computes next runs in the automation timezone, like the scheduler', () => {
-    const [next] = computeNextRuns('0 9 * * *', 1, tz)
-    expect(next).toBeDefined()
-    const hour = next!.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz })
-    expect(Number(hour)).toBe(9)
-  })
-
-  it('shows the next run of a zoned automation at its own wall-clock time', () => {
-    const [item] = parseAutomationsConfig({
-      version: 2,
-      automations: {
-        SchedulerTick: [{ cron: '30 9 * * *', timezone: tz, actions: [{ type: 'prompt', prompt: 'standup' }] }],
-      },
-    })
-    expect(item!.summary).toContain('9:30 AM')
-    expect(item!.summary).toContain('(Kiritimati)')
+describe('getEventCategory', () => {
+  it('classifies permission changes', () => {
+    expect(getEventCategory('PermissionModeChange')).toBe('permission')
   })
 })

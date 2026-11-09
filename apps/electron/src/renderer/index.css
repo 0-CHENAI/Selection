@@ -1,4 +1,5 @@
 @import "tailwindcss" source(none);
+@import "../../../../packages/ui/src/styles/thinking-step.css";
 @plugin "@tailwindcss/typography";
 
 /* Tell Tailwind where to scan for utility classes */
@@ -15,13 +16,387 @@
 @source "../../../../packages/ui/src/components/**/*.{ts,tsx,jsx}";
 @source "../../../../packages/ui/src/lib/**/*.{ts,tsx,jsx}";
 
-/* Design tokens + shared base (packages/ui): the single source for colors, type, radii,
-   elevation, motion and z-index. Also consumed by the viewer and marketing via @craft-agent/ui/styles. */
-@import "../../../../packages/ui/src/styles/tokens.css";
-@import "../../../../packages/ui/src/styles/base.css";
-
 /* CSS Custom Highlight API styles are injected at runtime via ChatDisplay.tsx
    to avoid LightningCSS warnings (::highlight is not yet recognized by the optimizer) */
+
+/* =============================================================================
+   ANIMATABLE CSS CUSTOM PROPERTIES
+
+   Register theme color variables as animatable using @property.
+   This enables smooth transitions when themes change (e.g., hover preview).
+   Chromium/Electron has full support for @property.
+============================================================================= */
+
+@property --background {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.98 0.003 265);
+}
+
+@property --foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.185 0.01 270);
+}
+
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.62 0.13 293);
+}
+
+@property --info {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.65 0.16 70);
+}
+
+@property --success {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.55 0.17 145);
+}
+
+@property --destructive {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.55 0.22 27);
+}
+
+/* =============================================================================
+   CRAFT AGENT THEME - 6 Color System
+
+   Base colors:
+   - background: Light/dark surface
+   - foreground: Text and icons
+   - accent: Brand purple (highlights, Auto mode)
+   - info: Amber (warnings, Ask mode)
+   - success: Green (connected, checkmarks)
+   - destructive: Red (errors, failed)
+
+   Variants:
+   - /50 = 50% alpha (transparency) - for borders, hovers, overlays
+   - -50 = 50% mix toward background (solid) - for Explore mode
+
+   Example: bg-foreground/10, text-accent, bg-foreground-60
+============================================================================= */
+
+/* Light Mode */
+:root {
+  /* === 6 BASE COLORS === */
+  --background: oklch(0.98 0.003 265);
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground: oklch(0.185 0.01 270);
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background)); /* unfocused panel text */
+  --foreground-rgb: 38, 36, 42;             /* RGB for shadow borders */
+  --user-message-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
+  --accent: oklch(0.62 0.13 293);           /* purple - brand, Auto mode */
+  --accent-rgb: 104, 78, 133;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.50178870 0.09392988 58.44502375); /* Binchael copper #8B5527 */
+  --pro-accent-rgb: 97, 60, 27;
+  --info: oklch(0.75 0.16 70);              /* amber - warnings, Ask mode */
+  --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
+  --permission-ask: var(--info);
+  --permission-ask-rgb: var(--info-rgb);
+  --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
+  --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
+  --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
+  --destructive-rgb: 180, 60, 50;           /* RGB for shadow-tinted */
+
+  /* === SHADOW OPACITY (light mode = subtle, dark mode = stronger) === */
+  --shadow-border-opacity: 0.08;            /* Border ring opacity */
+  --shadow-blur-opacity: 0.06;              /* Blur/spread shadow opacity */
+
+  /* === SHADOW VALUES (reusable across utility classes and component overrides) === */
+  --shadow-xs: 0px 1px 2px rgba(0, 0, 0, var(--shadow-blur-opacity));
+  --shadow-minimal:
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 3px 3px -1.5px;
+
+  /* Minimal shadow without blur layers — just the border ring */
+  --shadow-minimal-flat:
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px;
+
+  --shadow-modal-small:
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 1px 1px -0.5px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 3px 3px 0px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 6px 6px 0px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 12px 12px 0px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 24px 24px 0px;
+
+  /* Drag-lift elevation — a card genuinely peeled off the surface. Shared by the
+     Planner's in-place sortable (`--sortable-shadow-active`) and the Kanban's
+     DragOverlay clone (`.shadow-dragging`). Keeps the two leading transparent
+     layers so it matches `--shadow-minimal`'s 5-layer count and the Planner's
+     selected→grabbed `box-shadow` transition stays interpolatable. The ring uses
+     `--foreground-rgb`, which flips per theme, so light/dark are covered for free. */
+  --shadow-dragging:
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(var(--foreground-rgb), 0.13) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.18) 0px 8px 10px -2px,
+    rgba(0, 0, 0, 0.24) 0px 18px 24px -10px;
+
+  /* === MIX VARIANTS (solid interpolation toward background) === */
+  /* Use -2, -3, -5, -10, -20, ..., -90, -95 for solid colors (e.g., separators, Explore mode) */
+  --foreground-1\.5: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --foreground-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --foreground-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --foreground-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --foreground-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --foreground-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --foreground-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --foreground-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --foreground-90: color-mix(in srgb, var(--foreground) 90%, var(--background));
+  --foreground-95: color-mix(in srgb, var(--foreground) 95%, var(--background));
+
+  /* Success/destructive/info interpolated toward foreground (for tinted text) */
+  /* Using oklab for perceptually uniform mixing without hue shifts */
+  --success-text: color-mix(in oklab, var(--success) 50%, var(--foreground));
+  --destructive-text: color-mix(in oklab, var(--destructive) 50%, var(--foreground));
+  --info-text: color-mix(in oklab, var(--info) 50%, var(--foreground));
+
+  /* === SHADCN COMPATIBILITY (derived from 6 base colors) === */
+  /* These variables exist for shadcn/ui component updates */
+  --secondary: oklch(from var(--foreground) l c h / 0.05);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--foreground-50);
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --popover: var(--background);
+  --popover-foreground: var(--foreground);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+  --ring-width: 1px;
+  --ring-offset: 0px;
+
+  /* Markdown list markers */
+  --md-bullets: var(--foreground-50);
+  --md-counters: var(--foreground-50);
+
+  /* Onboarding step styling */
+  --step-icon-size: 4rem;
+  --step-icon-inner-size: 2rem;
+  --step-icon-radius: 1rem;
+  --step-title-size: 1.5rem;
+  --step-description-max-width: 24rem;
+  --step-actions-gap: 0.75rem;
+  --step-content-gap: 1.5rem;
+  --step-actions-margin: 2rem;
+
+  /* Fonts - System fonts as default, Inter via data-font="inter" */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-default: var(--font-sans);
+
+  /* Layout */
+  --font-size-base: 15px;
+  --radius: 0rem;
+  --spacing: 0.25rem;
+  --tracking-normal: 0em;
+
+  /* === Z-INDEX SCALE ===
+     Centralized z-index registry for consistent stacking order.
+     Use semantic names (z-panel, z-modal) instead of magic numbers.
+
+     Layer              Value   Use Case
+     ─────────────────────────────────────────────────────
+     base               0       Default content
+     local              10      Local stacking (sticky headers, icons)
+     sticky             20      Sticky section headers
+     titlebar           40      Window titlebar drag region
+     panel              50      App panels (sidebar, chat, detail)
+     dropdown           100     Dropdowns, popovers, select menus
+     tooltip            150     Tooltips (above dropdowns)
+     modal              200     Dialogs, drawers
+     overlay            300     Full-screen overlays (settings, app chrome)
+     fullscreen         350     Fullscreen content viewers (above app chrome)
+     floating-backdrop  390     Backdrop for floating menus
+     floating-menu      400     Floating menus above modals
+     island-overlay     390     Backdrop for annotation island interactions
+     island             400     Annotation island menu surface
+     island-popover     410     Popovers/dropdowns opened from island content
+     splash             600     Splash screen, workspace creation
+  */
+  --z-base: 0;
+  --z-local: 10;
+  --z-sticky: 20;
+  --z-titlebar: 40;
+  --z-panel: 50;
+  --z-dropdown: 100;
+  --z-tooltip: 150;
+  --z-modal: 200;
+  --z-nested-tooltip: 250;
+  --z-overlay: 300;
+  --z-fullscreen: 350;
+  --z-floating-backdrop: 390;
+  --z-floating-menu: 400;
+  --z-island-overlay: 390;
+  --z-island: 400;
+  --z-island-popover: 410;
+  --z-splash: 600;
+
+}
+
+/* Dark Mode */
+.dark {
+  /* === 6 BASE COLORS (must match DEFAULT_THEME.dark in theme.ts) === */
+  --background: oklch(0.145 0.015 270);
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground: oklch(0.95 0.01 270);
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background)); /* unfocused panel text */
+  --foreground-rgb: 237, 236, 240;           /* RGB for shadow borders */
+  --user-message-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
+  --accent: oklch(0.65 0.22 293);            /* brighter purple in dark */
+  --accent-rgb: 130, 75, 185;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.76808414 0.08380584 76.89195147); /* Binchael champagne #D2AD76 */
+  --pro-accent-rgb: 147, 121, 83;
+  --info: oklch(0.78 0.14 70);               /* amber */
+  --info-rgb: 210, 155, 55;                  /* RGB for shadow-tinted */
+  --success: oklch(0.60 0.17 145);           /* green */
+  --success-rgb: 50, 140, 80;               /* RGB for shadow-tinted */
+  --destructive: oklch(0.65 0.22 28);        /* brighter red in dark */
+  --destructive-rgb: 200, 70, 60;            /* RGB for shadow-tinted */
+
+  /* === SHADOW OPACITY (stronger in dark mode for visibility) === */
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+
+  /* === MIX VARIANTS === */
+  --foreground-1\.5: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --foreground-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --foreground-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --foreground-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --foreground-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --foreground-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --foreground-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --foreground-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --foreground-90: color-mix(in srgb, var(--foreground) 90%, var(--background));
+  --foreground-95: color-mix(in srgb, var(--foreground) 95%, var(--background));
+
+  /* Success/destructive/info interpolated toward foreground (for tinted text) */
+  /* Using oklab for perceptually uniform mixing without hue shifts */
+  --success-text: color-mix(in oklab, var(--success) 50%, var(--foreground));
+  --destructive-text: color-mix(in oklab, var(--destructive) 50%, var(--foreground));
+  --info-text: color-mix(in oklab, var(--info) 50%, var(--foreground));
+
+  /* === SHADCN COMPATIBILITY (derived from 6 base colors) === */
+  --secondary: oklch(from var(--foreground) l c h / 0.05);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--foreground-50);
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --popover: var(--background);
+  --popover-foreground: var(--foreground);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+
+  /* Markdown list markers */
+  --md-bullets: var(--foreground-50);
+  --md-counters: var(--foreground-50);
+}
+
+/* PRO accent: Binchael's light copper (#8B5527) and dark champagne (#D2AD76).
+   Higher specificity than preset :root overrides; NORM keeps the selected theme.
+   Shadow RGB follows the existing 70% brightness convention. */
+:root[data-work-mode="PRO"] {
+  --accent: var(--pro-accent);
+  --accent-rgb: var(--pro-accent-rgb);
+  --permission-ask: oklch(0.48819831 0.21716546 264.37630409); /* blue #1D4ED8 */
+  --permission-ask-rgb: 20, 55, 151;
+}
+
+:root.dark[data-work-mode="PRO"] {
+  --permission-ask: oklch(0.71374005 0.14338051 254.62402137); /* blue #60A5FA */
+  --permission-ask-rgb: 67, 115, 175;
+}
+
+/* Snapshot only the changing surfaces. Chrome and the selected mode indicator stay live. */
+html[data-work-mode-transition-phase] {
+  view-transition-name: none;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="list"] {
+  view-transition-name: work-mode-list;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="chat"] {
+  view-transition-name: work-mode-chat;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition] {
+  pointer-events: none;
+}
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(work-mode-list),
+::view-transition-group(work-mode-chat) {
+  animation: none;
+}
+::view-transition-old(work-mode-list),
+::view-transition-old(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-fade-out 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+::view-transition-new(work-mode-list),
+::view-transition-new(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-fade-in 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes work-mode-fade-out { to { opacity: 0; } }
+@keyframes work-mode-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Theme Override - Semi-transparent background to allow macOS vibrancy through.
+   Only applied when ThemeContext sets data-theme-override (macOS desktop). */
+html[data-theme-override]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--background) 50%, transparent);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Windows / Web UI: the chrome (sidebar, top bar) is itself transparent so
+   vibrancy can show through. Without a native backdrop those regions pick up
+   the OS frame and look like a gray mask over light settings cards (#53). */
+html:not([data-theme-override]):not([data-scenic]),
+html:not([data-theme-override]):not([data-scenic]) body,
+html:not([data-theme-override]):not([data-scenic]) #root {
+  background-color: var(--background);
+}
+
+/* Theme Mismatch - Solid background when theme doesn't support current mode
+   e.g. dark-only theme in light mode. Uses foreground-10 for subtle contrast. */
+html[data-theme-mismatch]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--foreground-10);
+  z-index: -1;
+  pointer-events: none;
+}
 
 /* =============================================================================
    SCENIC THEME MODE
@@ -59,43 +434,396 @@ html.dark[data-scenic]::after {
   pointer-events: none;
 }
 
+/* Override the theme-override background for scenic mode
+   We don't want the semi-transparent background layer on top of the image */
+html[data-scenic][data-theme-override]::before {
+  background: transparent;
+  background-image: var(--background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
 /* Scenic mode: Make background color semi-transparent for glass effect
    Panels with bg-background will become translucent glass */
 html[data-scenic] {
   --background: oklch(0.2 0.005 270 / 0.55);
-  /* Glass cards keep a 0.72 opacity floor so solved text stays within one AA step over any image */
-  --card: color-mix(in srgb, var(--surface-raised) 72%, transparent);
-}
-html[data-scenic] .field-surface {
-  background: color-mix(in srgb, var(--surface-sunken) 72%, transparent);
 }
 
-/* Electron-only layout tokens (the shared ones live in tokens.css) */
+/* Bundled Selection brand face (copied into the installer). */
+@font-face {
+  font-family: "CATHALIE";
+  src: url("./assets/fonts/cathalie.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ORDER wordmark — Alumni Sans Pinstripe (single ultra-thin cut).
+   The face has no heavier weights; thicken hairlines with stroke so it stays
+   readable at card size without switching typefaces. */
+.font-order {
+  font-family: "Alumni Sans Pinstripe", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+  -webkit-text-stroke: 0.7px currentColor;
+  paint-order: stroke fill;
+}
+
+/* Product name "Selection" — bundled CATHALIE, slightly larger than surrounding copy */
+.font-cathalie {
+  font-family: "CATHALIE", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+/* Inter Font - Opt-in via data-font="inter" attribute
+   Loaded from Google Fonts in index.html with optical sizing (opsz) axis */
+html[data-font="inter"] {
+  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-default: var(--font-sans);
+  font-optical-sizing: auto;
+  font-feature-settings: "cv01", "cv02", "cv03", "cv04", "case";
+}
+
+/* Theme integration for Tailwind v4 */
 @theme inline {
-  /* Container query breakpoints: @panel-compact:, @panel-medium:, @mobile: */
+  /* === 6 BASE COLORS === */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-info: var(--info);
+  --color-permission-ask: var(--permission-ask);
+  --color-success: var(--success);
+  --color-destructive: var(--destructive);
+
+  /* === MIX VARIANTS (solid interpolation) === */
+  --color-foreground-1\.5: var(--foreground-1\.5);
+  --color-foreground-2: var(--foreground-2);
+  --color-foreground-3: var(--foreground-3);
+  --color-foreground-5: var(--foreground-5);
+  --color-foreground-10: var(--foreground-10);
+  --color-foreground-20: var(--foreground-20);
+  --color-foreground-30: var(--foreground-30);
+  --color-foreground-40: var(--foreground-40);
+  --color-foreground-50: var(--foreground-50);
+  --color-foreground-60: var(--foreground-60);
+  --color-foreground-70: var(--foreground-70);
+  --color-foreground-80: var(--foreground-80);
+  --color-foreground-90: var(--foreground-90);
+  --color-foreground-95: var(--foreground-95);
+
+  /* === SEMANTIC SURFACE COLORS === */
+  /* Subtle hover background for sidebar list items (2% foreground opacity) */
+  --color-sidebar-hover: oklch(from var(--foreground) l c h / 0.02);
+  /* User message bubble background (overridden on unfocused panels) */
+  --color-user-message-bubble: var(--user-message-bubble);
+
+  /* === LEGACY COMPATIBILITY === */
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive-foreground: var(--background);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-md-bullets: var(--md-bullets);
+  --color-md-counters: var(--md-counters);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+  /* ORDER wordmark — Google Fonts Alumni Sans Pinstripe */
+  --font-order: "Alumni Sans Pinstripe", sans-serif;
+
+  /* === Z-INDEX SCALE === */
+  --z-index-base: var(--z-base);
+  --z-index-local: var(--z-local);
+  --z-index-sticky: var(--z-sticky);
+  --z-index-titlebar: var(--z-titlebar);
+  --z-index-panel: var(--z-panel);
+  --z-index-dropdown: var(--z-dropdown);
+  --z-index-tooltip: var(--z-tooltip);
+  --z-index-modal: var(--z-modal);
+  --z-index-nested-tooltip: var(--z-nested-tooltip);
+  --z-index-overlay: var(--z-overlay);
+  --z-index-fullscreen: var(--z-fullscreen);
+  --z-index-floating-backdrop: var(--z-floating-backdrop);
+  --z-index-floating-menu: var(--z-floating-menu);
+  --z-index-island-overlay: var(--z-island-overlay);
+  --z-index-island: var(--z-island);
+  --z-index-island-popover: var(--z-island-popover);
+  --z-index-splash: var(--z-splash);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+
+  /* === CONTAINER QUERY BREAKPOINTS === */
+  /* Custom breakpoints for responsive panel layouts.
+   * Generates @panel-compact:, @panel-medium:, @mobile: Tailwind utility prefixes. */
   --container-3xs: 16rem;           /* 256px */
   --container-panel-compact: 28rem; /* 448px — PANEL_MIN_WIDTH */
   --container-panel-medium: 40rem;  /* 640px */
   --container-mobile: 48rem;        /* 768px — mobile breakpoint */
 }
 
+/* Global styles - MUST be in @layer base so utilities can override */
 @layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  html {
+    font-size: var(--font-size-base);
+  }
+
   html, body, #root {
     height: 100%;
     overflow: hidden;
   }
+
+  body {
+    font-family: var(--font-default);
+    background: transparent;
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  /* Focus ring styles - override Tailwind ring utilities */
+  *:focus-visible {
+    outline: none;
+    --tw-ring-offset-width: var(--ring-offset);
+    --tw-ring-width: var(--ring-width);
+    --tw-ring-color: var(--ring);
+  }
 }
 
-/* Onboarding step styling */
-:root {
-  --step-icon-size: 4rem;
-  --step-icon-inner-size: 2rem;
-  --step-icon-radius: 1rem;
-  --step-title-size: 1.5rem;
-  --step-description-max-width: 24rem;
-  --step-actions-gap: 0.75rem;
-  --step-content-gap: 1.5rem;
-  --step-actions-margin: 2rem;
+/* Override Tailwind ring width utilities to use theme variable */
+@layer utilities {
+  .ring-1, .ring-2, .ring-\[3px\], .ring-4 {
+    --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+    --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(var(--ring-width) + var(--tw-ring-offset-width)) var(--tw-ring-color);
+    box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000);
+  }
+
+  /* Thin horizontal scrollbar for panel stack */
+  .panel-scroll::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  /* Hide scrollbar but keep scrolling */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Hide scrollbar until parent .group is hovered */
+  .scrollbar-hover::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-hover::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-hover::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 4px;
+  }
+  .group:hover .scrollbar-hover::-webkit-scrollbar-thumb {
+    background: var(--border);
+  }
+  .group:hover .scrollbar-hover::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  /* Mask fade utilities - for fading content at edges over transparent/image backgrounds */
+  .mask-fade-y {
+    mask-image: linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);
+  }
+
+  .mask-fade-bottom {
+    mask-image: linear-gradient(to bottom, black 0%, black calc(100% - 32px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black calc(100% - 32px), transparent 100%);
+  }
+
+  /* Custom shadow utilities
+     - Border layer (1px ring) uses foreground color with --shadow-border-opacity
+     - Blur/spread layers use black with --shadow-blur-opacity
+     - Dark mode has stronger values for visibility */
+  .shadow-thin {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px;
+  }
+
+  /* Semantic inset separators for table rows/headers (border-like, but shadow-based) */
+  .shadow-bottom-border {
+    box-shadow: inset 0 -1.5px 0 var(--color-border);
+  }
+
+  .shadow-bottom-border-thin {
+    box-shadow: inset 0 -1px 0 var(--color-border);
+  }
+
+  .shadow-minimal {
+    box-shadow: var(--shadow-minimal);
+  }
+
+  .shadow-dragging {
+    box-shadow: var(--shadow-dragging);
+  }
+
+  .shadow-middle {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 3px 3px -1.5px,
+      rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 6px 6px -3px;
+  }
+
+  /* Tinted shadow using CSS variable - use with style={{ '--shadow-color': 'r, g, b' }} */
+  .shadow-tinted {
+    --shadow-color: 0, 0, 0;
+    box-shadow:
+      rgba(var(--shadow-color), 0) 0px 0px 0px 0px,
+      rgba(var(--shadow-color), 0) 0px 0px 0px 0px,
+      rgba(var(--shadow-color), calc(var(--shadow-border-opacity) * 1.5)) 0px 0px 0px 1px,
+      rgba(var(--shadow-color), var(--shadow-border-opacity)) 0px 1px 1px -0.5px,
+      rgba(var(--shadow-color), var(--shadow-blur-opacity)) 0px 3px 3px -1.5px,
+      rgba(var(--shadow-color), calc(var(--shadow-blur-opacity) * 0.67)) 0px 6px 6px -3px;
+  }
+
+  /* Dark mode: outline only, no blur glow
+     Uses uniform lightness (0.5) for consistent border visibility across all colors */
+  .dark .shadow-tinted {
+    box-shadow:
+      rgba(var(--shadow-color), 0) 0px 0px 0px 0px,
+      rgba(var(--shadow-color), 0) 0px 0px 0px 0px,
+      oklch(from rgb(var(--shadow-color)) 0.425 c h / 0.6) 0px 0px 0px 1px,
+      rgba(var(--shadow-color), 0) 0px 1px 1px -0.5px,
+      rgba(var(--shadow-color), 0) 0px 3px 3px -1.5px,
+      rgba(var(--shadow-color), 0) 0px 6px 6px -3px;
+  }
+
+  .shadow-strong {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 3px 3px -1.5px,
+      rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 6px 6px -3px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 12px 12px -6px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 24px 24px -12px;
+  }
+
+  .shadow-panel-focused {
+    position: relative;
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 3px 3px 1px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.5)) 0px 6px 6px 2px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.5)) 0px 12px 12px 3px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 24px 24px 4px;
+  }
+
+  /* Gradient border: lighter at top, stronger at bottom */
+  .shadow-panel-focused::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      to bottom,
+      rgba(var(--foreground-rgb), 0.1),
+      rgba(var(--foreground-rgb), 0.3)
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Ensure content sits above the ::before pseudo-element */
+  .shadow-panel-focused > * {
+    position: relative;
+    z-index: 2;
+  }
+
+  .shadow-modal-small {
+    box-shadow: var(--shadow-modal-small);
+  }
+
+  /* =============================================================================
+     UNIFIED POPOVER STYLING
+
+     Use this class for all dropdowns, popovers, dialogs, and floating menus
+     to ensure consistent appearance across the app. Matches the vibrancy style:
+     - Semi-transparent dark background with blur
+     - 8px corner radius
+     - Layered shadow (shadow-modal-small)
+     - No visible border
+  ============================================================================= */
+  .popover-styled {
+    background: var(--background);
+    color: var(--foreground);
+    border-radius: 8px;
+    border: none;
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 3px 3px 0px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 6px 6px 0px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 12px 12px 0px,
+      rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 24px 24px 0px;
+  }
 }
 
 /* Draggable title bar region for transparent window */
@@ -117,24 +845,8 @@ html[data-scenic] .field-surface {
    Target panels by their shadow classes (shadow-middle, shadow-strong).
 ============================================================================= */
 
-html[data-scenic] .shell-card {
-  /* Shell cards (list + content) are paper on solid themes and glass in scenic mode */
-  background: var(--background);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-/* Sticky list group headers are paper on solid themes. On glass an opaque band would show, so they
-   stay clear and frost whatever scrolls beneath them instead. */
-html[data-scenic] [data-slot="list-group-header"] {
-  background: transparent;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-html[data-scenic] .shadow-middle,
-html[data-scenic] .shadow-strong,
-html[data-scenic] .input-container {
+  html[data-scenic] .shadow-middle,
+  html[data-scenic] .shadow-strong {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   position: relative;
@@ -152,10 +864,8 @@ html[data-scenic] .input-container {
 /* Scenic mode: Gradient border effect for glass panels
    Uses a pseudo-element with a white linear gradient (40% at top, 5% at bottom).
    The mask-composite technique creates a border-only effect from a filled gradient. */
-html[data-scenic] .shell-card::before,
 html[data-scenic] .shadow-middle::before,
-html[data-scenic] .shadow-strong::before,
-html[data-scenic] .input-container::before {
+html[data-scenic] .shadow-strong::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -180,14 +890,18 @@ html[data-scenic] .input-container::before {
    Without this, interactive elements (buttons, dropdowns) in the header area
    can be visually obscured or have click issues due to stacking context with backdrop-filter.
    Creates explicit stacking for direct children so they sit above ::before (z-index: 1). */
-html[data-scenic] .shell-card > *,
 html[data-scenic] .shadow-middle > *,
-html[data-scenic] .shadow-strong > *,
-html[data-scenic] .input-container > * {
+html[data-scenic] .shadow-strong > * {
   position: relative;
   z-index: 2;
 }
 
+
+/* Scenic mode: Popovers get glass effect too */
+html[data-scenic] .popover-styled {
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
 
 /* Scenic mode: Fullscreen overlay background gets glass effect
    Applied to the AI response fullscreen view background so it blends
@@ -203,6 +917,127 @@ html[data-scenic]:not(.dark) .fullscreen-overlay-background {
 
 html.dark[data-scenic] .fullscreen-overlay-background {
   background: color-mix(in srgb, var(--foreground-3) 60%, transparent);
+}
+
+/* =============================================================================
+   DISABLE ANIMATIONS FOR DIALOGS, DROPDOWNS, AND POPOVERS
+
+   Radix UI (used by shadcn/ui) applies animations via data-state attributes.
+   This globally disables enter/exit animations for overlay components.
+
+   To re-enable for specific components, use: animation: revert !important;
+============================================================================= */
+
+/* Dialog overlay (backdrop) */
+[data-radix-dialog-overlay] {
+  animation: none !important;
+}
+
+/* Dialog content */
+[role="dialog"][data-state],
+[data-radix-dialog-content] {
+  animation: none !important;
+}
+
+/* Dropdown menu content */
+[data-radix-menu-content],
+[data-radix-dropdown-menu-content] {
+  animation: none !important;
+}
+
+/* Popover content */
+[data-radix-popover-content] {
+  animation: none !important;
+}
+
+/* Select content */
+[data-radix-select-content] {
+  animation: none !important;
+}
+
+/* Tooltip content (if you want tooltips instant too) */
+[data-radix-tooltip-content] {
+  animation: none !important;
+}
+
+/* Context menu content */
+[data-radix-context-menu-content] {
+  animation: none !important;
+}
+
+/* Alert dialog */
+[data-radix-alert-dialog-overlay],
+[data-radix-alert-dialog-content] {
+  animation: none !important;
+}
+
+/* The artifact history dialog keeps its content mounted through the exit animation. */
+@keyframes artifact-versions-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes artifact-versions-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes artifact-versions-dialog-in {
+  from { opacity: 0; scale: 0.98; }
+  to { opacity: 1; scale: 1; }
+}
+
+@keyframes artifact-versions-dialog-out {
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.98; }
+}
+
+.artifact-versions-overlay[data-state="open"] {
+  animation: artifact-versions-overlay-in 200ms ease-out both !important;
+}
+
+.artifact-versions-overlay[data-state="closed"] {
+  animation: artifact-versions-overlay-out 180ms ease-in both !important;
+}
+
+.artifact-versions-dialog[data-state="open"] {
+  animation: artifact-versions-dialog-in 210ms cubic-bezier(0.2, 0, 0, 1) both !important;
+}
+
+.artifact-versions-dialog[data-state="closed"] {
+  animation: artifact-versions-dialog-out 180ms ease-in both !important;
+}
+
+/* Keep version actions frameless even when focused; text/icon emphasis marks keyboard focus. */
+.artifact-versions-dialog [data-slot="dialog-close"][data-state="open"],
+.artifact-versions-dialog [data-slot="dialog-close"]:focus:not(:focus-visible) {
+  background: transparent;
+}
+
+.artifact-versions-dialog button:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
+.artifact-versions-dialog button:focus-visible {
+  outline: none;
+  box-shadow: none;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.artifact-versions-dialog [data-slot="dialog-close"]:focus-visible {
+  background: transparent;
+  opacity: 1;
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-versions-overlay[data-state],
+  .artifact-versions-dialog[data-state] {
+    animation: none !important;
+  }
 }
 
 /* Fix ScrollArea internal div preventing content shrink
@@ -251,87 +1086,181 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 
 
 /* =============================================================================
-   SONNER TOASTS
-   Floating material with a leading status icon (spec §7.10), transform/opacity-only motion.
-   Placement and stack policy live in components/ui/sonner.tsx.
+   SESSION LIST - SEPARATOR VISIBILITY
+
+   Hide separators when session items are hovered or selected.
+   Uses :has() to target adjacent sibling separators.
 ============================================================================= */
 
-/* Width comes from sonner's --width (desktop) or its mobile rule (compact), never a fixed
-   override: a fixed width overflows the zoomed WebUI viewport in compact. */
-[data-sonner-toast] {
-  -webkit-app-region: no-drag !important;
-  background: var(--surface-floating) !important;
-  color: var(--text) !important;
-  border: none !important;
-  border-radius: var(--radius-lg) !important;
-  box-shadow: var(--elev-2) !important;
-  font-size: var(--fs-label) !important;
-  line-height: var(--lh-label) !important;
-  gap: 10px !important;
-  min-height: 44px;
-  /* Right padding keeps text clear of the inline close button */
-  padding: 10px 44px 10px 12px !important;
+/* Hide own separator when item is hovered or selected */
+.session-item:hover > .session-separator,
+.session-item[data-selected] > .session-separator {
+  opacity: 0;
 }
 
-/* Enter on the base spring, fades for opacity; never height (transform/opacity only). */
-:root [data-sonner-toast] {
-  transition:
-    transform var(--spring-base-dur) var(--spring-base),
-    opacity var(--dur-base) var(--ease-out),
-    box-shadow var(--dur-micro) var(--ease-out-subtle) !important;
+/* Hide next item's separator when current item is hovered or selected */
+.session-item:hover + .session-item > .session-separator,
+.session-item[data-selected] + .session-item > .session-separator {
+  opacity: 0;
 }
-@media (prefers-reduced-motion: reduce) {
-  :root:not([data-motion="full"]) [data-sonner-toast] {
-    transition: opacity var(--dur-fast) var(--ease-out) !important;
+
+/* =============================================================================
+   SOURCES LIST - SEPARATOR VISIBILITY
+
+   Hide separators when source items are hovered or selected.
+   Same logic as session list.
+============================================================================= */
+
+/* Hide own separator when item is hovered or selected */
+.source-item:hover > .source-separator,
+.source-item[data-selected] > .source-separator {
+  opacity: 0;
+}
+
+/* Hide next item's separator when current item is hovered or selected */
+.source-item:hover + .source-item > .source-separator,
+.source-item[data-selected] + .source-item > .source-separator {
+  opacity: 0;
+}
+
+/* =============================================================================
+   IMPORT LIST - SEPARATOR VISIBILITY
+
+   Hide separators when import items are hovered or selected.
+   Same logic as session list.
+============================================================================= */
+
+/* Hide own separator when item is hovered or selected */
+.import-item:hover > .import-separator,
+.import-item[data-selected] > .import-separator {
+  opacity: 0;
+}
+
+/* Hide next item's separator when current item is hovered or selected */
+.import-item:hover + .import-item > .import-separator,
+.import-item[data-selected] + .import-item > .import-separator {
+  opacity: 0;
+}
+
+/* Toast animation - scale and fade in */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: scale(0.75);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
-:root[data-motion="reduced"] [data-sonner-toast] {
-  transition: opacity var(--dur-fast) var(--ease-out) !important;
-}
-/* While swiping, the toast follows the pointer 1:1 (sonner's own reset loses to the rules above) */
-:root [data-sonner-toast][data-swiping="true"] {
-  transition: none !important;
+
+/* =============================================================================
+   SHIMMER ANIMATION FOR OPTIMISTIC UI
+
+   Subtle shimmer effect for messages awaiting backend confirmation.
+   Uses a gradient sweep to indicate pending state without being distracting.
+============================================================================= */
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
-/* Leading status icon: the only status color on the toast (title stays in the text color) */
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.animate-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(from var(--foreground) l c h / 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Browser loading line — accent gradient sliding left→right */
+@keyframes shimmer-loading {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-shimmer-loading {
+  animation: shimmer-loading 1.2s linear infinite;
+}
+
+/* Text shimmer - subtle opacity pulse for inline text (title regeneration, etc.) */
+.animate-shimmer-text {
+  animation: shimmer-text 1.2s ease-in-out infinite;
+}
+
+@keyframes shimmer-text {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* =============================================================================
+   SHAKE ANIMATION
+
+   Horizontal shake for invalid actions (e.g., trying to disable last mode).
+============================================================================= */
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+  20%, 40%, 60%, 80% { transform: translateX(2px); }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+@keyframes editPopoverFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* =============================================================================
+   SONNER TOAST OVERRIDES
+
+   Override sonner's inline box-shadow with our design system shadow.
+============================================================================= */
+
+[data-sonner-toast] {
+  box-shadow: var(--shadow-modal-small) !important;
+  background-color: oklch(from var(--popover) l c h / 0.8) !important;
+  -webkit-app-region: no-drag !important;
+  /* Fixed width to ensure text truncation works */
+  width: 356px !important;
+}
+
+/* Hide icon container to remove leftover padding */
 [data-sonner-toast] [data-icon] {
-  width: 16px !important;
-  height: 16px !important;
-  margin: 0 !important;
-  align-self: flex-start;
-  /* Optically centre on the title's first line */
-  margin-top: calc((var(--lh-label) - 16px) / 2) !important;
-  color: var(--text-secondary);
-}
-[data-sonner-toast] [data-icon] svg {
-  width: 16px;
-  height: 16px;
-  margin: 0 !important;
-}
-[data-sonner-toast][data-type="success"] [data-icon] {
-  color: var(--success-text);
-}
-[data-sonner-toast][data-type="error"] [data-icon] {
-  color: var(--destructive-text);
-}
-[data-sonner-toast][data-type="warning"] [data-icon] {
-  color: var(--info-text);
+  display: none !important;
 }
 
-/* Single-line title with ellipsis */
+/* Single line title with ellipsis overflow */
 [data-sonner-toast] [data-title] {
-  font-weight: 500 !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   min-width: 0 !important;
-  line-height: var(--lh-label) !important;
 }
 
 /* Description wraps up to 2 lines, then truncates */
 [data-sonner-toast] [data-description] {
-  color: var(--text-secondary) !important;
-  line-height: var(--lh-label) !important;
   display: -webkit-box !important;
   -webkit-box-orient: vertical !important;
   -webkit-line-clamp: 2 !important;
@@ -339,61 +1268,113 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   min-width: 0 !important;
 }
 
-/* Keep content inside the toast bounds */
+/* Ensure content area doesn't overflow toast bounds */
 [data-sonner-toast] [data-content] {
-  flex: 1 1 auto;
   min-width: 0 !important;
   overflow: hidden !important;
-  gap: 0 !important;
 }
 
-/* Action / cancel: the secondary button (raised, elev-1) */
+/* Description (subtitle) at 70% opacity */
+[data-sonner-toast] [data-description] {
+  color: inherit !important;
+  opacity: 0.7 !important;
+}
+
 [data-sonner-toast] [data-button],
 [data-sonner-toast] [data-cancel] {
-  height: var(--h-control-sm) !important;
-  padding: 0 8px !important;
-  border-radius: var(--radius-sm) !important;
-  background: var(--surface-raised) !important;
-  box-shadow: var(--elev-1) !important;
-  color: var(--text) !important;
-  font-size: var(--fs-label-sm) !important;
-  font-weight: 500 !important;
+  background-color: var(--background) !important;
+  box-shadow: var(--shadow-minimal) !important;
+  color: oklch(from var(--foreground) l c h / 0.7) !important;
+  transition: color 0.15s ease !important;
 }
+
 [data-sonner-toast] [data-button]:hover,
 [data-sonner-toast] [data-cancel]:hover {
-  background: color-mix(in srgb, var(--surface-raised), var(--fg-base) 4%) !important;
+  color: var(--foreground) !important;
 }
 
-/* Close button: an inline ghost icon button at the right edge, always visible */
+/* Close button styling - move to top right, show only on hover */
 [data-sonner-toast] [data-close-button] {
   left: unset !important;
-  right: 8px !important;
-  top: 50% !important;
-  width: var(--h-control) !important;
-  height: var(--h-control) !important;
-  transform: translateY(-50%) !important;
+  right: -14px !important;
+  opacity: 0 !important;
+  transition: opacity 0.15s ease, color 0.15s ease !important;
+  background-color: var(--background) !important;
+  color: oklch(from var(--foreground) l c h / 0.7) !important;
   border: none !important;
-  border-radius: var(--radius-md) !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--text-tertiary) !important;
-  transition: background-color var(--dur-micro) var(--ease-out-subtle), color var(--dur-micro) var(--ease-out-subtle) !important;
-}
-[data-sonner-toast] [data-close-button] svg {
-  width: 14px;
-  height: 14px;
-}
-[data-sonner-toast] [data-close-button]:hover {
-  background: var(--fill-hover) !important;
-  color: var(--text) !important;
+  box-shadow:
+    rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+    var(--shadow-minimal) !important;
 }
 
-[data-sonner-toast]:focus-visible,
-[data-sonner-toast] [data-close-button]:focus-visible,
-[data-sonner-toast] [data-button]:focus-visible,
-[data-sonner-toast] [data-cancel]:focus-visible {
-  outline: 2px solid var(--focus-ring) !important;
-  outline-offset: 2px !important;
+[data-sonner-toast].group:hover [data-close-button],
+[data-sonner-toast]:hover [data-close-button] {
+  opacity: 1 !important;
+}
+
+[data-sonner-toast] [data-close-button]:hover {
+  color: var(--foreground) !important;
+}
+
+[data-sonner-toast]:focus-visible {
+  box-shadow:
+    var(--shadow-modal-small),
+    0 0 0 2px rgba(var(--foreground-rgb), 0.18) !important;
+}
+
+[data-sonner-toast] [data-close-button]:focus-visible {
+  box-shadow:
+    var(--shadow-minimal),
+    0 0 0 2px rgba(var(--foreground-rgb), 0.18) !important;
+}
+
+/* Tinted backgrounds for toast states - use linear-gradient to layer
+   the tint color on top of the base popover background in one property.
+   Title and description get subtle color tinting via [data-title] and [data-description]. */
+[data-sonner-toast][data-type="error"] {
+  background: linear-gradient(rgba(var(--destructive-rgb), 0.07), rgba(var(--destructive-rgb), 0.07)),
+    oklch(from var(--popover) l c h / 0.8) !important;
+}
+
+[data-sonner-toast][data-type="error"] [data-title],
+[data-sonner-toast][data-type="error"] [data-description] {
+  color: color-mix(in srgb, rgb(var(--foreground-rgb)) 70%, rgb(var(--destructive-rgb))) !important;
+}
+
+[data-sonner-toast][data-type="warning"] {
+  background: linear-gradient(rgba(var(--info-rgb), 0.07), rgba(var(--info-rgb), 0.07)),
+    oklch(from var(--popover) l c h / 0.8) !important;
+}
+
+[data-sonner-toast][data-type="warning"] [data-title],
+[data-sonner-toast][data-type="warning"] [data-description] {
+  color: color-mix(in srgb, rgb(var(--foreground-rgb)) 70%, rgb(var(--info-rgb))) !important;
+}
+
+[data-sonner-toast][data-type="success"] {
+  background: linear-gradient(rgba(var(--success-rgb), 0.07), rgba(var(--success-rgb), 0.07)),
+    oklch(from var(--popover) l c h / 0.8) !important;
+}
+
+[data-sonner-toast][data-type="success"] [data-title],
+[data-sonner-toast][data-type="success"] [data-description] {
+  color: color-mix(in srgb, rgb(var(--foreground-rgb)) 70%, rgb(var(--success-rgb))) !important;
+}
+
+/* Dark mode: stronger tints since dark backgrounds absorb color more */
+.dark [data-sonner-toast][data-type="error"] {
+  background: linear-gradient(rgba(var(--destructive-rgb), 0.15), rgba(var(--destructive-rgb), 0.15)),
+    oklch(from var(--popover) l c h / 0.8) !important;
+}
+
+.dark [data-sonner-toast][data-type="warning"] {
+  background: linear-gradient(rgba(var(--info-rgb), 0.15), rgba(var(--info-rgb), 0.15)),
+    oklch(from var(--popover) l c h / 0.8) !important;
+}
+
+.dark [data-sonner-toast][data-type="success"] {
+  background: linear-gradient(rgba(var(--success-rgb), 0.15), rgba(var(--success-rgb), 0.15)),
+    oklch(from var(--popover) l c h / 0.8) !important;
 }
 
 /* ============================================================================
@@ -506,20 +1487,6 @@ html.dark[data-scenic] .fullscreen-overlay-background {
     min-height: 44px;
   }
 
-  /* The back button starts at the panel edge (PanelHeader pl-0) and pads its 24px chevron 8px, so the
-     chevron's INK (x 8–16 of the glyph) lands on the 16px gutter with the page content below. */
-  .panel-header-btn.panel-header-back {
-    padding-left: 8px;
-    padding-right: 12px;
-  }
-
-  /* The chat header's status glyph groups with the title: a 36×44 target (8px around its 20px
-     glyph) instead of a 44px square that pushed the title 30px away from the glyph. */
-  .panel-header-btn.panel-header-status {
-    min-width: 36px;
-    padding-inline: 8px;
-  }
-
   /* Compact panel header icons: keep desktop icons at their caller-provided
      size, but make compact-mode icons read clearly inside the 44px target. */
   [data-compact] .panel-header-btn > svg {
@@ -527,30 +1494,14 @@ html.dark[data-scenic] .fullscreen-overlay-background {
     height: 24px;
   }
 
-  /* Session/source/skill list rows: touch height (desktop 36/54px → ≥ 60px), larger type */
+  /* Session/source/skill list rows (desktop: py-3 = 12px → 16px) */
   .entity-row-btn {
-    min-height: 60px;
-    padding-top: 11px;
-    padding-bottom: 11px;
-  }
-  .entity-row-btn [data-slot="entity-row-title"] {
-    font-size: var(--fs-copy);
-    line-height: var(--lh-label-lg);
-  }
-  .entity-row-btn [data-slot="entity-row-subtitle"],
-  .entity-row-btn [data-slot="entity-row-meta"] {
-    font-size: var(--fs-label);
-    line-height: var(--lh-label);
+    padding-top: 16px;
+    padding-bottom: 16px;
   }
 
   /* TopBar icon buttons: +, ?, nav arrows (desktop: 28×28 → 36×36) */
   .header-icon-btn {
-    width: 36px;
-    height: 36px;
-  }
-
-  /* IconButton primitive: 28px → 36px touch target */
-  [data-slot="icon-button"] {
     width: 36px;
     height: 36px;
   }
@@ -638,7 +1589,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
    fixed so the App content area reads the same variable for its padding-top.
    ========================================================================== */
 :root {
-  --topbar-height: 44px;
+  --topbar-height: 48px;
 }
 @media (max-width: 768px) {
   :root {
@@ -659,3 +1610,197 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   min-height: 31px;
   padding: 6px 8px;
 }
+
+/* Task authoring follows its panel width, including side-by-side app panes. */
+.task-editor { container: task-editor / inline-size; }
+.task-editor [hidden] { display: none !important; }
+.task-editor-authoring { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr); }
+.task-editor-tabs { order: 3; flex-basis: 100%; }
+.task-editor-dialog > [data-slot="dialog-header"] { flex-shrink: 0; text-align: left; padding-right: 1.5rem; }
+.task-editor-dialog .task-editor-dialog-footer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+@container task-editor (min-width: 960px) {
+  .task-editor-tabs { order: 0; flex-basis: auto; margin-left: 1rem; }
+}
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-template-columns: minmax(0, 1fr); overflow-y: auto; align-content: start; }
+  .task-editor-definition, .task-editor-nodes { overflow: visible; }
+  .task-editor-node-list { overflow: visible; flex: auto; }
+  .task-editor-actions { gap: 0.5rem; }
+  .task-editor-divider { display: none; }
+}
+@container task-editor (max-width: 440px) {
+  .task-editor-actions { flex-basis: 100%; margin-left: 0; }
+  .task-editor-tabs { width: 100%; }
+  .task-editor-tabs > button { flex: 1; padding-inline: 0.5rem; }
+}
+.task-workbench { container: task-workbench / inline-size; }
+.task-workbench-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.task-workbench-grid.has-inspector { grid-template-columns: minmax(0, 1fr) clamp(400px, 32cqi, 560px); }
+.task-workbench-grid > .task-node-inspector { grid-column: 2; grid-row: 1 / -1; }
+@container task-workbench (max-width: 760px) {
+  .task-workbench-grid.has-inspector { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .task-workbench-grid > .task-node-inspector { grid-column: 1; }
+  .task-node-inspector { position: absolute; inset: 0 0 0 auto; width: min(560px, 100%); z-index: 5; box-shadow: -8px 0 24px color-mix(in srgb, var(--foreground) 8%, transparent); }
+}
+.task-editor-subview-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-auto-rows: max-content; }
+}
+@container task-workbench (max-width: 560px) {
+  .task-graph-overview { display: none; }
+}
+
+/* Automatic task observer: retain Selection's surfaces and PRO accent. */
+.automatic-task-graph-dialog {
+  --task-graph-window-inset: 20px;
+  width: min(1680px, calc(100vw - 40px));
+  height: calc(100dvh - var(--task-graph-window-inset) * 2);
+  top: 50%;
+}
+/* Scoped exception to the global dialog animation reset. Radix retains the
+   observer until the exit animation ends, then restores the trigger focus. */
+@keyframes task-graph-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes task-graph-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes task-graph-dialog-in {
+  from { opacity: 0; scale: 0.985; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes task-graph-dialog-out {
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.985; }
+}
+.automatic-task-graph-overlay[data-state="open"] {
+  animation: task-graph-overlay-in 240ms ease-out both !important;
+}
+.automatic-task-graph-overlay[data-state="closed"] {
+  animation: task-graph-overlay-out 180ms ease-in both !important;
+}
+.automatic-task-graph-dialog[data-state="open"] {
+  animation: task-graph-dialog-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+.automatic-task-graph-dialog[data-state="closed"] {
+  animation: task-graph-dialog-out 180ms ease-in both !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .automatic-task-graph-dialog[data-state="open"] { animation-name: task-graph-overlay-in !important; }
+  .automatic-task-graph-dialog[data-state="closed"] { animation-name: task-graph-overlay-out !important; }
+  .automatic-task-graph-dialog[data-state], .automatic-task-graph-overlay[data-state] { animation-duration: 100ms !important; }
+}
+/* Match top/bottom gaps, clear native controls, and blur all background chrome. */
+.automatic-task-graph-dialog[data-native-caption="true"] {
+  --task-graph-window-inset: max(var(--topbar-height, 48px), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 48px)));
+}
+.task-graph-close { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; color: var(--muted-foreground); outline: none; transition: color 140ms ease-out; }
+.task-graph-close:hover, .task-graph-close:focus-visible { color: var(--foreground); }
+.task-graph-close:focus-visible { outline: 2px solid var(--pro-accent); outline-offset: 2px; }
+.task-workbench {
+  --task-graph-accent: var(--pro-accent);
+  --task-graph-complete: var(--success);
+  --task-graph-connector: color-mix(in srgb, var(--foreground) 26%, transparent);
+}
+.task-graph-canvas {
+  position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-radius: 12px;
+  background-color: var(--card); background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 12%, transparent) 0.8px, transparent 1px);
+  background-size: 28px 28px; cursor: grab; touch-action: none;
+}
+.task-graph-canvas[data-panning="true"] { cursor: grabbing; }
+.task-graph-canvas:focus-visible { outline: 2px solid var(--task-graph-accent); outline-offset: -3px; }
+.task-graph-stage { position: absolute; inset: 0 auto auto 0; transform-origin: 0 0; }
+.task-graph-canvas[data-transitioning="true"] .task-graph-stage { transition: transform 220ms cubic-bezier(.2,.8,.2,1); }
+.task-graph-connections { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.task-flow-edge-path { stroke-linecap: round; stroke-dasharray: 6 6; animation: task-flow-edge-dashes 2400ms linear infinite; }
+@keyframes task-flow-edge-dashes { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -12; } }
+.task-workbench[data-motion-paused="true"] .task-flow-edge-path,
+.task-workbench [inert] .task-flow-edge-path { animation-play-state: paused; }
+.task-flow-edge-label { fill: var(--foreground); font-size: 11px; paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
+.task-graph-node-position { position: absolute; }
+.task-graph-canvas-hint { position: absolute; left: 16px; top: 16px; pointer-events: none; font-size: 12px; color: var(--muted-foreground); }
+.task-graph-controls { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); cursor: default; }
+.task-graph-controls button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--muted-foreground); outline: none; transition: color 140ms ease-out; }
+.task-graph-controls button:hover { color: var(--foreground); }
+.task-graph-controls button:focus-visible { color: var(--foreground); outline: 2px solid var(--task-graph-accent); outline-offset: -2px; }
+.task-graph-controls button:disabled { opacity: 0.35; }
+.task-graph-zoom { width: 42px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.task-graph-overview { position: absolute; right: 16px; bottom: 16px; width: 148px; height: 88px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); pointer-events: none; }
+.task-graph-overview-node { fill: color-mix(in srgb, var(--foreground) 20%, var(--popover)); }
+.task-graph-overview-node[data-selected="true"] { fill: var(--task-graph-accent); }
+.task-flow-node {
+  display: block; text-align: left; position: relative; cursor: pointer;
+  width: 288px;
+  height: 128px;
+  padding: 16px;
+  color: var(--foreground);
+  background: var(--popover);
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, var(--popover));
+  outline: none;
+  transition: background-color 180ms ease-out, border-color 180ms ease-out;
+}
+.task-flow-node:hover { border-color: color-mix(in srgb, var(--task-graph-accent) 45%, var(--popover)); }
+.task-flow-node[data-state="running"] { background: color-mix(in srgb, var(--task-graph-accent) 6%, var(--popover)); }
+.task-flow-node[data-selected="true"] { background: color-mix(in srgb, var(--task-graph-accent) 4%, var(--popover)); }
+.task-flow-node:focus-visible:not([data-selected="true"]) {
+  outline: 2px solid var(--task-graph-accent);
+  outline-offset: 3px;
+}
+.task-flow-node-selection { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); pointer-events: none; }
+.task-flow-node-selection rect { fill: none; stroke: var(--task-graph-accent); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 1.25 1.25; animation: task-flow-node-selection-dashes 60s linear infinite; }
+@keyframes task-flow-node-selection-dashes { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+.task-workbench[data-motion-paused="true"] .task-flow-node-selection rect,
+.task-workbench [aria-hidden="true"] .task-flow-node-selection rect { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .task-flow-node-selection rect { animation: none; } }
+.task-flow-node-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 11px; }
+.task-flow-node-kind { display: inline-flex; min-width: 0; align-items: center; gap: 5px; color: var(--task-graph-accent); white-space: nowrap; }
+.task-flow-node-kind > svg { flex-shrink: 0; }
+.task-flow-node-state { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 9999px; background: color-mix(in srgb, currentColor 8%, transparent); white-space: nowrap; }
+.task-flow-node-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 40px; font-size: 15px; font-weight: 600; line-height: 20px; }
+.task-flow-node-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: color-mix(in srgb, var(--foreground) 65%, var(--popover)); margin-top: 6px; }
+.task-flow-node-instances { font-size: 10px; color: var(--muted-foreground); }
+.task-workbench[data-motion-paused="true"] .task-flow-node-state .animate-spin { animation-play-state: paused; }
+.task-graph-run-status { border-radius: 6px; padding: 3px 6px; white-space: nowrap; background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+.task-workbench .text-muted-foreground { color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); }
+.task-inspector-title { font-size: 18px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.task-inspector-section:not(:first-child) { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.task-inspector-label { margin-bottom: 12px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--foreground); }
+.task-inspector-section-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.task-inspector-section-heading .task-inspector-label { margin-bottom: 0; }
+.task-inspector-item-title { margin-bottom: 8px; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--foreground); }
+.task-inspector-execution + .task-inspector-execution { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.task-inspector-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+.task-inspector-fields dt { margin-bottom: 4px; font-size: 12px; line-height: 18px; color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); }
+.task-inspector-fields dd { font-size: 13px; line-height: 20px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--foreground); overflow-wrap: anywhere; }
+.task-inspector-copy { font-size: 13px; line-height: 1.75; color: color-mix(in srgb, var(--foreground) 85%, var(--popover)); }
+.task-inspector-tabs { position: relative; display: flex; width: 100%; height: 52px; padding: 6px; gap: 4px; border-radius: 12px; background: color-mix(in srgb, var(--foreground) 5%, var(--popover)); }
+.task-inspector-tabs [data-slot="tabs-trigger"] { position: relative; z-index: 1; flex: 1; min-width: 0; height: 40px; padding: 0 6px; gap: 0; border-radius: 8px; background: transparent; box-shadow: none; color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); transition: color 140ms ease-out; }
+.task-inspector-tabs [data-slot="tabs-trigger"]:hover { color: var(--foreground); }
+.task-inspector-tabs [data-slot="tabs-trigger"][aria-selected="true"] { color: var(--pro-accent); }
+.task-inspector-tabs [data-slot="tabs-trigger"]:focus-visible { box-shadow: none; outline: none; color: var(--pro-accent); }
+.task-inspector-tabs [data-slot="tabs-trigger"]:focus-visible svg { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--pro-accent) 65%, transparent)); stroke-width: 2.5; }
+.task-inspector-tab-indicator { position: absolute; top: 6px; left: 0; height: 40px; border-radius: 8px; pointer-events: none; background: color-mix(in srgb, var(--pro-accent) 14%, var(--popover)); }
+.task-inspector-tab-indicator[data-phase="stretch"] { transition: transform 190ms cubic-bezier(0.32, 0.72, 0.24, 1), width 190ms cubic-bezier(0.32, 0.72, 0.24, 1); }
+.task-inspector-tab-indicator[data-phase="settle"] { transition: transform 420ms cubic-bezier(0.28, 1.28, 0.36, 1), width 420ms cubic-bezier(0.24, 1.34, 0.38, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .task-inspector-tab-indicator[data-phase] { transition: none; }
+}
+.task-inspector-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; border-radius: 6px; color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); font-size: 12px; text-align: left; outline: none; transition: color 140ms ease-out; }
+.task-inspector-back:hover { color: var(--foreground); }
+.task-inspector-back:focus-visible { outline: 2px solid var(--pro-accent); outline-offset: 2px; }
+.task-node-inspector { animation: task-inspector-enter 180ms cubic-bezier(.2,.7,.2,1); }
+@keyframes task-inspector-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+@media (max-width: 600px) {
+  .automatic-task-graph-dialog { --task-graph-window-inset: 16px; width: calc(100vw - 16px); }
+}
+@media (prefers-reduced-motion: reduce) { .task-flow-node, .task-graph-canvas[data-transitioning="true"] .task-graph-stage { transition: none; } .task-node-inspector, .task-flow-edge-path { animation: none; } }

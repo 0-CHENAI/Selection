@@ -1,31 +1,17 @@
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import type { BackendHostRuntimeContext } from '../types.ts';
-import { setPathToClaudeCodeExecutable } from '../../options.ts';
-
-/**
- * When set, the resolver walks further up from the .app bundle to find SDK,
- * interceptor, and bun in the monorepo / on the system PATH.
- * Intended for local `electron:dist:mac` builds that skip `build-dmg.sh`.
- */
-const IS_DEV_RUNTIME = !!process.env.CRAFT_DEV_RUNTIME;
 
 export interface ResolvedBackendRuntimePaths {
   /**
-   * Absolute path to the native `claude` binary (since SDK 0.2.113).
-   * In packaged builds this is the per-platform binary copied out of
-   * `node_modules/@anthropic-ai/claude-agent-sdk-{platform}-{arch}/`.
-   * Field is named `claudeCliPath` for back-compat — semantically it is
-   * the SDK executable, JS or native.
-   */
-  claudeCliPath?: string;
-  /**
-   * Source/bundle path for the network interceptor preloaded into the **Pi**
-   * subprocess. Not used for Claude anymore — the new native SDK binary
-   * doesn't accept `--preload`.
+   * Source/bundle path for the network interceptor preloaded into the Pi
+   * subprocess.
    */
   interceptorBundlePath?: string;
+  sessionServerPath?: string;
+  bridgeServerPath?: string;
   piServerPath?: string;
   nodeRuntimePath?: string;
   bundledRuntimePath?: string;
@@ -60,88 +46,54 @@ function resolveUpwards(base: string, relativePath: string, maxLevels = 4): stri
 
 function resolveBundledRuntimePath(hostRuntime: BackendHostRuntimeContext): string | undefined {
   const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
-  const bunBasePath = process.platform === 'win32'
-    ? (hostRuntime.resourcesPath || hostRuntime.appRootPath)
-    : hostRuntime.appRootPath;
-  const bunPath = join(bunBasePath, 'vendor', 'bun', bunBinary);
-  if (existsSync(bunPath)) return bunPath;
+  // Windows extraResources copies bun to resources/app/vendor/bun/bun.exe.
+  // macOS ships it under appRoot/vendor/bun. Check every known layout
+  // instead of a platform-only guess that misses the packaged Windows path.
+  const shippedBun = firstExistingPath([
+    process.env.CRAFT_BUN,
+    process.env.CRAFT_RESOURCES_BASE
+      ? join(process.env.CRAFT_RESOURCES_BASE, 'vendor', 'bun', bunBinary)
+      : undefined,
+    join(hostRuntime.appRootPath, 'vendor', 'bun', bunBinary),
+    hostRuntime.resourcesPath
+      ? join(hostRuntime.resourcesPath, 'app', 'vendor', 'bun', bunBinary)
+      : undefined,
+    hostRuntime.resourcesPath
+      ? join(hostRuntime.resourcesPath, 'vendor', 'bun', bunBinary)
+      : undefined,
+  ].filter((candidate): candidate is string => !!candidate));
+  if (shippedBun) return shippedBun;
+
+  // Packaged apps must use the runtime shipped with the application.
+  if (hostRuntime.isPackaged) return undefined;
+
+  // Dev launches may inherit a minimal PATH. Resolve the standard Bun
+  // installation locations before relying on an external command locator.
+  const configuredBun = firstExistingPath([
+    process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, 'bin', bunBinary) : undefined,
+    join(homedir(), '.bun', 'bin', bunBinary),
+  ].filter((candidate): candidate is string => !!candidate));
+  if (configuredBun) return configuredBun;
 
   // Non-packaged (headless server, dev mode): fall back to system bun via PATH.
   // Packaged apps must ship their own bundled bun — never resolve from PATH
   // to avoid picking up an incompatible system install.
-  if (!hostRuntime.isPackaged) {
-    try {
-      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-      const systemBun = execFileSync(whichCmd, ['bun'], { encoding: 'utf-8' }).trim();
-      if (systemBun && existsSync(systemBun)) return systemBun;
-    } catch { /* system bun not found */ }
-  }
+  try {
+    const whichCmd = process.platform === 'win32'
+      ? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'where.exe')
+      : 'which';
+    const systemBun = execFileSync(whichCmd, ['bun'], { encoding: 'utf-8' })
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean);
+    if (systemBun && existsSync(systemBun)) return systemBun;
+  } catch { /* system bun not found */ }
   return undefined;
 }
 
-/**
- * Compute the per-platform optional-dependency package name shipped by the
- * Claude Agent SDK (since 0.2.113), e.g. `claude-agent-sdk-darwin-arm64`.
- *
- * NOTE on Linux musl: this returns the glibc variant. AppImage targets glibc
- * and that is the only Linux flavour we ship for the desktop app. The headless
- * server in Docker (which may run on Alpine/musl) is a separate concern —
- * track in Phase 2 when we look at server packaging.
- */
-function platformBinaryPkg(): string | undefined {
-  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  if (process.platform === 'darwin') return `claude-agent-sdk-darwin-${arch}`;
-  if (process.platform === 'win32') return `claude-agent-sdk-win32-${arch}`;
-  if (process.platform === 'linux') return `claude-agent-sdk-linux-${arch}`;
-  return undefined;
-}
-
-function nativeBinaryName(): string {
-  return process.platform === 'win32' ? 'claude.exe' : 'claude';
-}
-
-/**
- * Resolve the per-platform native `claude` binary shipped by the SDK as an
- * optional dependency. Replaces the old `cli.js` lookup (SDK ≥ 0.2.113).
- *
- * Search order:
- *   1. Stable build alias `@anthropic-ai/claude-agent-sdk-binary` — this is
- *      what the platform build scripts (build-dmg.sh etc.) populate before
- *      electron-builder runs, so packaged builds always find the binary at a
- *      single, arch-agnostic path regardless of how it was sourced.
- *   2. Per-platform optional-dep package name (`-darwin-arm64`, etc.) —
- *      what plain `bun install` produces in dev / monorepo / CI.
- *   3. Dev-runtime walk-up across both lookups for ad-hoc local builds
- *      (`electron:dist:dev:mac`).
- */
-function resolveClaudeBinaryPath(hostRuntime: BackendHostRuntimeContext): string | undefined {
-  const binaryName = nativeBinaryName();
-  const aliasRel = join('node_modules', '@anthropic-ai', 'claude-agent-sdk-binary', binaryName);
-  const pkg = platformBinaryPkg();
-  const platformRel = pkg
-    ? join('node_modules', '@anthropic-ai', pkg, binaryName)
-    : undefined;
-
-  const candidates: string[] = [
-    join(hostRuntime.appRootPath, aliasRel),
-    join(hostRuntime.appRootPath, '..', '..', aliasRel),
-  ];
-  if (platformRel) {
-    candidates.push(
-      join(hostRuntime.appRootPath, platformRel),
-      join(hostRuntime.appRootPath, '..', '..', platformRel),
-    );
-  }
-
-  const result = firstExistingPath(candidates);
-  if (result) return result;
-
-  // Dev runtime: walk further up from .app bundle to reach monorepo root
-  if (IS_DEV_RUNTIME) {
-    return resolveUpwards(hostRuntime.appRootPath, aliasRel, 10)
-      ?? (platformRel ? resolveUpwards(hostRuntime.appRootPath, platformRel, 10) : undefined);
-  }
-  return undefined;
+function processJavaScriptRuntimePath(): string | undefined {
+  const executable = basename(process.execPath).toLowerCase();
+  return /^(bun|node)(\.exe)?$/.test(executable) ? process.execPath : undefined;
 }
 
 function resolveInterceptorBundlePath(hostRuntime: BackendHostRuntimeContext): string | undefined {
@@ -180,10 +132,8 @@ function resolveServerPath(hostRuntime: BackendHostRuntimeContext, serverName: s
 }
 
 /**
- * Locate ripgrep. Sourced from `@vscode/ripgrep` since SDK 0.2.113 stopped
- * shipping `vendor/ripgrep/<platform>/rg` (the binary is now compiled into
- * the native `claude` executable, but our search service in
- * `packages/server-core/src/services/search.ts` still calls it directly).
+ * Locate ripgrep. Sourced from `@vscode/ripgrep` for the search service in
+ * `packages/server-core/src/services/search.ts`.
  */
 function resolveRipgrepPath(hostRuntime: BackendHostRuntimeContext): string | undefined {
   const binaryName = process.platform === 'win32' ? 'rg.exe' : 'rg';
@@ -218,10 +168,15 @@ export function resolveBackendRuntimePaths(hostRuntime: BackendHostRuntimeContex
   const bundledRuntimePath = hostRuntime.nodeRuntimePath || resolveBundledRuntimePath(hostRuntime);
 
   return {
-    claudeCliPath: resolveClaudeBinaryPath(hostRuntime),
     interceptorBundlePath: resolveInterceptorBundlePath(hostRuntime),
+    sessionServerPath: resolveServerPath(hostRuntime, 'session-mcp-server'),
+    bridgeServerPath: resolveServerPath(hostRuntime, 'bridge-mcp-server'),
     piServerPath: resolveServerPath(hostRuntime, 'pi-agent-server'),
-    nodeRuntimePath: hostRuntime.nodeRuntimePath || bundledRuntimePath || process.execPath,
+    // Never silently use electron.exe as a JavaScript runtime. Without
+    // ELECTRON_RUN_AS_NODE it treats the Pi server file as an Electron app.
+    nodeRuntimePath: hostRuntime.nodeRuntimePath
+      || bundledRuntimePath
+      || (!hostRuntime.isPackaged ? processJavaScriptRuntimePath() : undefined),
     bundledRuntimePath,
   };
 }
@@ -232,28 +187,3 @@ export function resolveBackendHostTooling(hostRuntime: BackendHostRuntimeContext
   };
 }
 
-/**
- * Configure SDK globals from host runtime context.
- *
- * Since SDK 0.2.113 the SDK spawns a native binary; the only override we
- * need is `pathToClaudeCodeExecutable`. The Bun executable / `--preload`
- * interceptor mechanism that used to live here no longer applies — the
- * binary doesn't accept Bun-specific flags.
- *
- * When `strict` is true (default), throws if the SDK binary can't be found.
- * When `strict` is false, missing paths are silently skipped (the SDK will
- * try its own auto-discovery via optional-dep node_modules resolution).
- */
-export function applyAnthropicRuntimeBootstrap(
-  hostRuntime: BackendHostRuntimeContext,
-  paths: ResolvedBackendRuntimePaths,
-  options?: { strict?: boolean },
-): void {
-  const strict = options?.strict ?? true;
-
-  if (paths.claudeCliPath) {
-    setPathToClaudeCodeExecutable(paths.claudeCliPath);
-  } else if (strict) {
-    throw new Error('Claude Agent SDK native binary not found. The app package may be corrupted.');
-  }
-}

@@ -12,8 +12,8 @@ Explore mode is a read-only mode that blocks potentially destructive operations.
 Custom permission rules let you allow specific operations that would otherwise be blocked.
 
 Permission files are located at:
-- Workspace: `~/.craft-agent/workspaces/{slug}/permissions.json`
-- Source: `~/.craft-agent/workspaces/{slug}/sources/{source}/permissions.json`
+- Workspace: `~/.selection/workspaces/{slug}/permissions.json`
+- Source: `~/.selection/workspaces/{slug}/sources/{source}/permissions.json`
 
 ## Auto-Scoping for Source Permissions
 
@@ -50,7 +50,7 @@ The system converts it to `mcp__<sourceSlug>__.*list` internally. This means:
   ],
   "allowedWritePaths": [
     "/tmp/**",
-    "~/.craft-agent/**"
+    "~/.selection/**"
   ],
   "blockedCommandHints": [
     {
@@ -98,8 +98,6 @@ For **workspace-level** permissions.json (global rules), use full patterns:
 }
 ```
 
-In the app-level `default.json`, plain lowercase words (`get`, `list`, `search`, ...) are **read verbs**, not regexes: a tool counts as read-only when a word of its own name (the part after `mcp__<source>__`) is one of them and no word is a write verb (`create`, `update`, `delete`, `send`, `run`, `mark`, ...). So `get_issue` and `slack_get_channel_history` are allowed, while `delete_account` (contains "count"), `send_thread_reply` (contains "read") and `get_or_create_issue` are not. `status`, `info`, `count` and `exists` count only as the first word. Entries with regex syntax keep regex semantics.
-
 ### allowedApiEndpoints
 
 Fine-grained rules for API source requests.
@@ -140,13 +138,13 @@ Additional tools to block (rarely needed).
 
 ### allowedWritePaths
 
-Glob patterns for directories where writes are allowed. Applies in **Explore** and **Ask to Edit** mode: writes to a matching path run without a prompt, writes elsewhere are blocked in Explore and prompt in Ask to Edit. Use it to let automations run in Ask to Edit instead of Execute.
+Glob patterns for directories where writes are allowed.
 
 ```json
 {
   "allowedWritePaths": [
     "/tmp/**",
-    "~/.craft-agent/**",
+    "~/.selection/**",
     "/path/to/project/output/**"
   ]
 }
@@ -190,19 +188,15 @@ Fields:
 ## Default Behavior in Explore Mode
 
 **Blocked by default:**
-- Bash commands (except read-only commands listed below), and Monitor running such a command
+- Bash commands (except read-only commands listed below)
 - Write, Edit, MultiEdit tools
 - MCP tools with write semantics (create, update, delete)
 - API POST/PUT/DELETE requests
-- Subagents with `isolation` (a git worktree or a cloud environment)
-- Every tool not allowed below, including ones Claude Code adds in new releases (e.g. `EnterWorktree`, `CronCreate`), `SendMessage` (it can reach other Claude sessions on the machine) and `Workflow`
 
 **Allowed by default:**
-- Read, Glob, Grep, LSP (and Pi's Find, Ls)
+- Read, Glob, Grep
 - WebFetch, WebSearch
-- Subagents (`Agent`/`Task`); their own tool calls get the same checks
-- ToolSearch and MCP resource reads
-- Task tracking: TodoWrite, TaskCreate/TaskGet/TaskList/TaskUpdate, ListAgents, TaskStop
+- TodoWrite
 - Browser tools (`browser_*` and `mcp__session__browser_*`)
 - MCP tools with read semantics (list, get, search)
 - Plans folder writes (session plans only)
@@ -228,11 +222,6 @@ These commands are allowed in Explore mode without custom configuration:
 Notes:
 - `echo` is allowed for literal output formatting (e.g. `echo ---`), but redirects and command substitution are still blocked.
 - `awk` family commands are allowed for read-only text processing, but dangerous execution primitives (for example `system(...)`, command-pipe `getline`, or `print | "cmd"`) are blocked.
-- `sed -n` is allowed only with print-style scripts: `-i`/`--in-place`, `-f`, the `w`/`W`/`e` commands and the `s///w`/`s///e` flags are blocked.
-- `sort` is blocked with `-o`/`--output` and `--compress-program`.
-- `gh api` is allowed only for GET: `-X`/`--method` with any other method is blocked, and so are `-f`/`-F`/`--field`/`--raw-field`/`--input` without `--method GET` (they switch the request to POST). `gh api graphql` is allowed unless the query is a `mutation` or cannot be inspected.
-
-These argument checks run in code, so they apply even to an older `default.json` that still has the broader patterns.
 
 ### Compound Commands
 
@@ -258,23 +247,6 @@ These constructs are always blocked, even if the base command is allowed:
 | **Control characters** | newlines, carriage returns | Act as command separators |
 
 Example: `git status > file.txt` is blocked because `>` could overwrite files.
-
-## Ask Mode: "Always Allow"
-
-"Always Allow" remembers, for the rest of the session, exactly the key the permission check computed for that prompt:
-
-| Prompt | Remembered |
-|--------|------------|
-| Bash: CLIs with subcommands | The words before the first flag, up to three: `git commit`, `npm install lodash`, `aws s3 ls` (not `aws s3 rb`), `gh pr merge 12` |
-| Bash: single-purpose commands | The name: `mkdir`, `touch`, `open` |
-| Bash: everything else | The exact command, since flags or arguments decide what it does (`tar -tf` vs `tar -xf`, `psql -c "<SQL>"`). This includes interpreters and runners (`python script.py`, `npm run build`, `docker run ...`, `npx ...`) |
-| curl / wget | Every host the call contacts |
-| File write | The folder the file is written into |
-| MCP / API mutation | The tool / the method and path |
-
-Nothing is remembered for dangerous commands (`rm`, `sudo`, `git push`, `git reset`, `git stash`, `kubectl delete`, `terraform apply`, `npm publish`, ...), for a destructive verb among a CLI's leading words (`aws s3 rm`, `gh repo delete`, `docker volume rm`), for chains, pipes, redirects or substitutions, for wrappers that run another command (`env`, `xargs`, `pkexec`, ...), when a flag comes before the subcommand (`git -C dir push`), or for `gh api` (its method is a flag). A remembered key never auto-allows a chained command: approving `git commit` does not approve `git commit -m x && rm -rf ~`.
-
-Sessions created with `spawn_session` can be stricter than the session that spawned them, never looser: a requested mode above the parent's is lowered to it.
 
 ## Cascading Rules
 

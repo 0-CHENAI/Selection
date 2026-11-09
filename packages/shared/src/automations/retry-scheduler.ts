@@ -63,15 +63,18 @@ export interface RetryQueueEntry {
 
 export interface RetrySchedulerOptions {
   workspaceRootPath: string;
+  isMatcherActive: (matcherId: string) => boolean;
 }
 
 export class RetryScheduler {
   private readonly workspaceRootPath: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
+  private readonly isMatcherActive: (matcherId: string) => boolean;
 
   constructor(options: RetrySchedulerOptions) {
     this.workspaceRootPath = options.workspaceRootPath;
+    this.isMatcherActive = options.isMatcherActive;
   }
 
   /**
@@ -159,6 +162,8 @@ export class RetryScheduler {
       const remaining: RetryQueueEntry[] = [];
 
       for (const entry of entries) {
+        // Retired, removed, or disabled rules must not execute persisted retries.
+        if (!this.isMatcherActive(entry.matcherId)) continue;
         if (entry.nextRetryAt > now) {
           // Not due yet — keep in queue
           remaining.push(entry);

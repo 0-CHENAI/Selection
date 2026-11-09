@@ -15,7 +15,8 @@ import type { LoadedSource, ApiConfig } from './types.ts';
 import { isMultiHeaderCredential, type ApiCredential } from './credential-manager.ts';
 import { isSourceUsable } from './storage.ts';
 import { createApiServer, type SummarizeCallback } from './api-tools.ts';
-import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ApiServerConfig } from '../mcp/mcp-pool.ts';
 import { debug } from '../utils/debug.ts';
 
 /**
@@ -52,8 +53,8 @@ export interface SourceWithCredential {
 export interface BuiltServers {
   /** MCP server configs keyed by source slug */
   mcpServers: Record<string, McpServerConfig>;
-  /** In-process API servers keyed by source slug */
-  apiServers: Record<string, ReturnType<typeof createSdkMcpServer>>;
+  /** In-process API servers keyed by source slug (pool expects { type: 'sdk', instance }) */
+  apiServers: Record<string, ApiServerConfig>;
   /** Sources that failed to build (missing auth, etc.) */
   errors: Array<{ sourceSlug: string; error: string }>;
 }
@@ -134,7 +135,14 @@ export class SourceServerBuilder {
     }
 
     // 3. Auth token (highest priority — OAuth/bearer overrides everything)
-    if (mcp.authType !== 'none') {
+    // headerNames uses a structured credential whose values were already merged
+    // above. Do not also serialize that JSON credential as a Bearer token.
+    if (mcp.headerNames?.length) {
+      if (source.config.isAuthenticated && (!credential || !isMultiHeaderCredential(credential))) {
+        debug(`[SourceServerBuilder] Source ${source.config.slug} needs header re-authentication`);
+        return null;
+      }
+    } else if (mcp.authType !== 'none') {
       if (token) {
         mergedHeaders = { ...mergedHeaders, Authorization: `Bearer ${token}` };
       } else if (source.config.isAuthenticated) {
@@ -166,7 +174,7 @@ export class SourceServerBuilder {
     sessionPath?: string,
     summarize?: SummarizeCallback,
     getCredential?: () => Promise<ApiCredential | null>
-  ): Promise<ReturnType<typeof createSdkMcpServer> | null> {
+  ): Promise<McpServer | null> {
     if (source.config.type !== 'api') return null;
     if (!source.config.api) {
       debug(`[SourceServerBuilder] API source ${source.config.slug} missing api config`);
@@ -268,9 +276,8 @@ export class SourceServerBuilder {
     const config: ApiConfig = {
       name: source.config.slug,
       baseUrl: api.baseUrl,
-      // documentation is no longer inlined into the tool description (see #683
-      // and api-tools.ts:buildToolDescription). The model reads guide.md via
-      // the prerequisite-manager-enforced Read instead.
+      // Documentation stays out of the per-request tool description (#683).
+      // Meaningful source guides are delivered to the model lazily instead.
       defaultHeaders: api.defaultHeaders,
     };
 
@@ -320,7 +327,7 @@ export class SourceServerBuilder {
     getCredentialForSource?: (source: LoadedSource) => (() => Promise<ApiCredential | null>) | undefined
   ): Promise<BuiltServers> {
     const mcpServers: Record<string, McpServerConfig> = {};
-    const apiServers: Record<string, ReturnType<typeof createSdkMcpServer>> = {};
+    const apiServers: Record<string, ApiServerConfig> = {};
     const errors: BuiltServers['errors'] = [];
 
     for (const { source, token, credential } of sourcesWithCredentials) {
@@ -353,7 +360,7 @@ export class SourceServerBuilder {
             getCredential
           );
           if (server) {
-            apiServers[source.config.slug] = server;
+            apiServers[source.config.slug] = { type: 'sdk', instance: server };
           }
         }
       } catch (error) {

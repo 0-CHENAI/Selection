@@ -7,17 +7,10 @@
  * Styling follows SessionList/SourcesListPanel patterns for visual consistency.
  */
 
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, AppWindow } from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-} from '@/components/ui/styled-dropdown'
-import { DropdownMenuProvider } from '@/components/ui/menu-context'
 import { cn } from '@/lib/utils'
+import { Separator } from '@/components/ui/separator'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { SettingsSubpage } from '../../../shared/types'
 import { SETTINGS_ITEMS } from '../../../shared/menu-schema'
@@ -54,79 +47,60 @@ interface SettingsItemRowProps {
 }
 
 /**
- * SettingsItemRow - Individual settings item with dropdown menu
- * Tracks menu open state to keep "..." button visible when menu is open
+ * SettingsItemRow - Selects a settings section in the current window.
  */
-function SettingsItemRow({ item, isSelected, onSelect }: SettingsItemRowProps) {
-  const { t } = useTranslation()
-  const [menuOpen, setMenuOpen] = useState(false)
+function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRowProps) {
   const Icon = item.icon
-
-  // Open settings page in a new window via deep link
-  const handleOpenInNewWindow = () => {
-    window.electronAPI.openUrl(`craftagents://settings/${item.id}?window=focused`)
-  }
 
   return (
     <div className="settings-item" data-selected={isSelected || undefined}>
-      {/* Same anatomy as the other list rows (EntityRow): icon · title / description, mail-style full-bleed
-          fill on hover/selection, a hairline from the text edge; the "⋯" button is a named sibling
-          revealed on hover/focus. */}
-      <div className="settings-content relative group select-none after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:left-[calc(var(--gutter)+26px)] after:h-px after:bg-separator in-data-[selected]:after:hidden">
+      {/* Separator - only show if not first */}
+      {!isFirst && (
+        <div className="settings-separator pl-12 pr-4">
+          <Separator />
+        </div>
+      )}
+      {/* Wrapper for button with proper margins */}
+      <div className="settings-content relative select-none pl-2 mr-2">
+        {/* Icon - positioned absolutely for consistent alignment */}
+        <div className="absolute left-[20px] top-[14px] z-10">
+          <Icon
+            className={cn(
+              'w-4 h-4 shrink-0',
+              isSelected ? 'text-foreground' : 'text-muted-foreground'
+            )}
+          />
+        </div>
+        {/* Main content button */}
         <button
           type="button"
           onClick={onSelect}
           className={cn(
-            'entity-row-btn flex w-full items-start gap-2.5 py-[9px] pl-gutter pr-9 text-left text-label -outline-offset-2',
-            'transition-[background-color] duration-micro ease-out-subtle hover:duration-instant',
-            isSelected ? 'bg-fill-selected' : 'hover:bg-fill-hover'
+            'flex w-full items-start gap-2 pl-2 pr-4 py-3 text-left text-sm outline-none rounded-[8px]',
+            // Fast hover transition (75ms vs default 150ms)
+            'transition-[background-color] duration-75',
+            isSelected
+              ? 'bg-foreground/5 hover:bg-foreground/7'
+              : 'hover:bg-foreground/2'
           )}
         >
-          <Icon
-            className={cn(
-              'size-4 shrink-0 mt-px',
-              isSelected ? 'text-foreground' : 'text-tertiary'
-            )}
-          />
-          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-            <span data-slot="entity-row-title" className="font-medium text-foreground truncate">
+          {/* Spacer for icon */}
+          <div className="w-6 h-5 shrink-0" />
+          {/* Content column */}
+          <div className="flex flex-col min-w-0 flex-1">
+            <span
+              className={cn(
+                'font-medium',
+                isSelected ? 'text-foreground' : 'text-foreground/80'
+              )}
+            >
               {item.label}
             </span>
-            <span data-slot="entity-row-subtitle" className="text-label-sm text-secondary line-clamp-1">
+            <span className="text-xs text-foreground/60 line-clamp-1">
               {item.description}
             </span>
           </div>
         </button>
-        <div
-          data-touch-reveal="true"
-          className={cn(
-            'absolute right-3 top-1.5 z-10',
-            menuOpen
-              ? 'opacity-100'
-              : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
-          )}
-        >
-          <DropdownMenu modal={true} onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-label={t('common.more')}
-                className="inline-grid place-items-center size-6 rounded-sm text-secondary hover:bg-fill-pressed hover:text-foreground data-[state=open]:bg-fill-pressed data-[state=open]:text-foreground"
-              >
-                <MoreHorizontal className="size-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <StyledDropdownMenuContent align="end">
-              <DropdownMenuProvider>
-                <StyledDropdownMenuItem onClick={handleOpenInNewWindow}>
-                  <AppWindow className="h-3.5 w-3.5" />
-                  <span className="flex-1">{t("sessionMenu.openInNewWindow")}</span>
-                </StyledDropdownMenuItem>
-              </DropdownMenuProvider>
-            </StyledDropdownMenuContent>
-          </DropdownMenu>
-        </div>
       </div>
     </div>
   )
@@ -151,7 +125,7 @@ export default function SettingsNavigator({
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto">
-        <div className="pt-1 pb-2">
+        <div className="pt-2">
           {settingsItems.map((item, index) => (
             <SettingsItemRow
               key={item.id}

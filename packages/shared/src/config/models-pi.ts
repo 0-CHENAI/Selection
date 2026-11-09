@@ -16,6 +16,7 @@
 import { getProviders, getModels } from '@earendil-works/pi-ai/compat';
 import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
+import { thinkingFieldsFromUpstream } from '../agent/thinking-capabilities.ts';
 import { fromPiProviderId, toPiProviderId } from './pi-provider-ids.ts';
 
 // ============================================
@@ -28,15 +29,25 @@ import { fromPiProviderId, toPiProviderId } from './pi-provider-ids.ts';
 function piModelToDefinition(m: Model<Api>): ModelDefinition {
   const lastPart = m.name.split(/[\s-]/).pop() ?? m.name;
   const shortName = m.name.length > 20 ? lastPart : m.name;
+  const compat = m.compat as { supportsReasoningEffort?: boolean; thinkingFormat?: string } | undefined;
+  const thinking = thinkingFieldsFromUpstream({
+    id: m.id,
+    provider: m.provider,
+    reasoning: m.reasoning,
+    thinkingLevelMap: m.thinkingLevelMap as Record<string, string | null> | undefined,
+    api: m.api,
+    supportsReasoningEffort: compat?.supportsReasoningEffort,
+    thinkingFormat: compat?.thinkingFormat,
+  });
 
   return {
     id: `pi/${m.id}`,
     name: m.name,
     shortName,
-    description: `${m.provider} model via Craft Agents Backend`,
+    description: `${m.provider} model via Selection Backend`,
     provider: 'pi',
     contextWindow: m.contextWindow,
-    supportsThinking: m.reasoning,
+    ...thinking,
   };
 }
 
@@ -148,7 +159,6 @@ const PI_PROVIDER_DISPLAY: Partial<Record<string, { label: string; placeholder: 
   'amazon-bedrock':         { label: 'Amazon Bedrock',     placeholder: 'AKIA...' },
   'azure-openai-responses': { label: 'Azure OpenAI',       placeholder: 'Paste your key here...' },
   'vercel-ai-gateway':      { label: 'Vercel AI Gateway',  placeholder: 'Paste your key here...' },
-  'cloudflare-ai-gateway':  { label: 'Cloudflare AI Gateway', placeholder: 'Cloudflare API token' },
   'huggingface':            { label: 'Hugging Face',       placeholder: 'hf_...' },
   'minimax':                { label: 'Minimax',            placeholder: 'Paste your key here...' },
   'kimi-coding':            { label: 'Kimi (Coding)',      placeholder: 'sk-kimi-...' },
@@ -161,6 +171,7 @@ const PI_PROVIDER_DISPLAY: Partial<Record<string, { label: string; placeholder: 
  * Providers to EXCLUDE from the Pi API key dropdown.
  */
 const PI_EXCLUDED_PROVIDERS: Set<string> = new Set([
+  'anthropic',
   'github-copilot',
   'openai-codex',
   'google-vertex',
@@ -194,7 +205,7 @@ export function getPiApiKeyProviders(): PiProviderInfo[] {
       };
     })
     .sort((a, b) => {
-      const priority = ['anthropic', 'google', 'openai'];
+      const priority = ['google', 'openai'];
       const ai = priority.indexOf(a.key);
       const bi = priority.indexOf(b.key);
       if (ai !== -1 && bi !== -1) return ai - bi;

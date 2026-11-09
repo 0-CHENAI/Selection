@@ -10,6 +10,9 @@ import * as React from 'react'
 import { createContext, useContext, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import type { ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
+import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
+import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { ContentBadge } from '@craft-agent/core'
 import type {
   Session,
   Workspace,
@@ -57,8 +60,6 @@ export interface AppShellContextType {
   enabledSources?: LoadedSource[]
   /** All skills for this workspace - provided by AppShell component (for @mentions) */
   skills?: LoadedSkill[]
-  /** User-defined chat starter prompts from workspace config */
-  chatStarters?: Array<{ label: string; prompt: string }>
   /** Working directory of the active session — needed for project-level skill resolution */
   activeSessionWorkingDirectory?: string
   /** All label configs (tree) for label menu and badge display */
@@ -71,6 +72,10 @@ export interface AppShellContextType {
    * filters — and selects the session. Used by kanban tile/subtask clicks + post-create.
    */
   onJumpToTaskSessions?: (sessionId: string, scope: { labelId: string; projectId?: string }) => void
+  /** Show a project-bound session in its project list, including newly created branches. */
+  onJumpToProjectSessions?: (projectId: string, sessionId?: string, newPanel?: boolean) => void
+  /** Sidebar/project-navigator include used to bind a new orchestration (#261). */
+  orchestrationProjectId?: string | null
   /** Enabled permission modes for Shift+Tab cycling */
   enabledModes?: PermissionMode[]
   /** Dynamic todo states from workspace config (provided by AppShell, defaults to empty) */
@@ -82,7 +87,7 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
-  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@craft-agent/core').ContentBadge[]) => void
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest, office?: import('@craft-agent/shared/protocol').OfficeRequest) => boolean | void | Promise<boolean | void>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void
@@ -110,14 +115,21 @@ export interface AppShellContextType {
     requestId: string,
     response: CredentialResponse
   ) => void
+  onRespondToClarification?: (
+    sessionId: string,
+    requestId: string,
+    response: ClarificationResponseInput
+  ) => void
 
   // File/URL handlers - these can open in tabs or external apps
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
+  officeCollaboration?: { sessionId: string; available: boolean; active: boolean; choosing: boolean; onToggle: () => void }
 
   // Workspace
   onSelectWorkspace: (id: string, openInNewWindow?: boolean) => void | Promise<void>
-  onRefreshWorkspaces?: () => void
+  /** Reload the workspace list (e.g. after rename). Resolves when state is updated. */
+  onRefreshWorkspaces?: () => void | Promise<void>
 
   // App actions
   onOpenSettings: () => void
@@ -130,6 +142,8 @@ export interface AppShellContextType {
 
   // Input draft callback
   onInputChange: (sessionId: string, value: string) => void
+  /** Save a complete draft before navigating to a newly created session. */
+  onPrepareSessionDraft?: (sessionId: string, draft: import('@craft-agent/shared/config').SessionDraft) => Promise<void>
 
   // Attachment draft callback — persists attachment refs per session
   onAttachmentsChange: (sessionId: string, attachments: FileAttachment[]) => void
@@ -149,9 +163,6 @@ export interface AppShellContextType {
   /** Whether this panel is the focused panel (for multi-panel visual differentiation) */
   isFocusedPanel?: boolean
 
-  /** The panel-stack entry this subtree renders in (set by PanelSlot; the same session can be open in two panels) */
-  panelId?: string
-
   /** Whether the shell is currently in compact/narrow mode */
   isCompactMode?: boolean
 
@@ -170,6 +181,8 @@ export interface AppShellContextType {
   // Automation management
   /** Test an automation by ID — executes its actions and returns results */
   onTestAutomation?: (automationId: string) => void
+  /** Dry-run matcher evaluation for an automation by ID */
+  onSimulateMatchAutomation?: (automationId: string) => void
   /** Toggle an automation's enabled state by ID */
   onToggleAutomation?: (automationId: string) => void
   /** Duplicate an automation by ID — clones config with " Copy" suffix */
@@ -183,9 +196,6 @@ export interface AppShellContextType {
   /** Replay (re-execute) webhook actions for a failed automation */
   onReplayAutomation?: (automationId: string, event: string) => void
 }
-
-/** Window event (detail: `{ workspaceId }`) asking AppShell to reload that workspace's settings. */
-export const WORKSPACE_SETTINGS_CHANGED_EVENT = 'craft:workspace-settings-changed'
 
 const AppShellContext = createContext<AppShellContextType | null>(null)
 

@@ -9,9 +9,11 @@ import {
   mkdirSync,
   rmSync,
   copyFileSync,
+  chmodSync,
   cpSync,
   lstatSync,
   readdirSync,
+  readFileSync,
 } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -41,6 +43,36 @@ export const BUN_VERSION = 'bun-v1.3.9';
  * Update this when upgrading uv. Check latest at: https://github.com/astral-sh/uv/releases
  */
 export const UV_VERSION = '0.10.6';
+
+interface OfficecliBuildManifest {
+  tag: string;
+  assets: Record<string, { name: string; url: string; sha256: string }>;
+}
+
+/** One reviewed manifest is the source of truth for runtime and build assets. */
+const OFFICECLI_MANIFEST = JSON.parse(readFileSync(
+  join(import.meta.dir, '../../apps/electron/resources/officecli/officecli-manifest.json'),
+  'utf8',
+)) as OfficecliBuildManifest;
+
+export const OFFICECLI_VERSION = OFFICECLI_MANIFEST.tag;
+const OFFICECLI_ASSET: Record<string, string> = Object.fromEntries(
+  Object.entries(OFFICECLI_MANIFEST.assets).map(([key, asset]) => [key, asset.name]),
+);
+const OFFICECLI_ASSET_URL: Record<string, string> = Object.fromEntries(
+  Object.entries(OFFICECLI_MANIFEST.assets).map(([key, asset]) => [key, asset.url]),
+);
+export const OFFICECLI_SHA256: Record<string, string> = Object.fromEntries(
+  Object.entries(OFFICECLI_MANIFEST.assets).map(([key, asset]) => [key, asset.sha256]),
+);
+
+/** Desktop installers that must ship officecli even when built on another host. */
+export const OFFICECLI_DESKTOP_TARGETS: Array<{ platform: Platform; arch: Arch }> = [
+  { platform: 'darwin', arch: 'arm64' },
+  { platform: 'darwin', arch: 'x64' },
+  { platform: 'win32', arch: 'x64' },
+  { platform: 'linux', arch: 'x64' },
+];
 
 /**
  * Get platform key for resources/bin folder naming.
@@ -99,14 +131,87 @@ export async function verifySha256(filePath: string, expectedHash: string): Prom
   return hash.toLowerCase() === expectedHash.toLowerCase();
 }
 
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+/**
+ * Download a file with Bun's built-in fetch implementation.
+ * This is the fallback on Windows installations where PowerShell exposes a
+ * `curl` alias but no curl.exe exists for child processes.
+ */
+async function fetchDownload(dest: string, url: string): Promise<void> {
+  const response = await fetch(url, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    tls: process.env.CURL_INSECURE === '1'
+      ? { rejectUnauthorized: false }
+      : undefined,
+  });
+
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Download failed with HTTP ${response.status}: ${url}`);
+  }
+
+  await Bun.write(dest, response);
+}
+
+/**
+ * Download a file, trying each URL until one succeeds.
+ * Uses curl when a real executable is available and otherwise falls back to
+ * Bun fetch. The historical export name is retained for build-script API
+ * compatibility.
+ */
+export async function curlDownload(dest: string, urls: string[]): Promise<string> {
+  const curlPath = Bun.which('curl');
+  const curlInsecure = process.env.CURL_INSECURE === '1' ? ['-k'] : [];
+  let lastError: unknown;
+
+  for (const url of urls) {
+    console.log(`  Downloading ${url}...`);
+
+    if (curlPath) {
+      try {
+        await $`${curlPath} -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 -o ${dest} ${url}`;
+        return url;
+      } catch (err) {
+        lastError = err;
+      }
+    } else {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          await fetchDownload(dest, url);
+          return url;
+        } catch (err) {
+          lastError = err;
+          if (attempt < 3) {
+            console.warn(`  Download attempt ${attempt} failed, retrying...`);
+            await Bun.sleep(2_000);
+          }
+        }
+      }
+    }
+
+    console.warn('  Download failed, trying next mirror');
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Failed to download ${dest}`);
+}
+
 /**
  * Download and verify Bun binary
- * Uses curl for downloads (more reliable in CI than fetch + Bun.write)
+ * Uses the shared downloader so local Windows builds do not require curl.exe.
  */
 export async function downloadBun(config: BuildConfig): Promise<void> {
   const { platform, arch, electronDir } = config;
   const bunDownload = getBunDownloadName(platform, arch);
   const vendorDir = join(electronDir, 'vendor', 'bun');
+  const bunBinary = platform === 'win32' ? 'bun.exe' : 'bun';
+  const destPath = join(vendorDir, bunBinary);
+
+  if (existsSync(destPath)) {
+    console.log(`Bun already present at ${destPath}`);
+    return;
+  }
 
   console.log(`Downloading Bun ${BUN_VERSION} for ${platform}-${arch}...`);
 
@@ -118,19 +223,35 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
   mkdirSync(tempDir, { recursive: true });
 
   try {
-    const zipUrl = `https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${bunDownload}.zip`;
+    const zipName = `${bunDownload}.zip`;
+    const zipUrl = `https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${zipName}`;
     const checksumUrl = `https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt`;
+    const zipMirrors = [
+      zipUrl,
+      `https://npmmirror.com/mirrors/bun/${BUN_VERSION}/${zipName}`,
+      `https://registry.npmmirror.com/-/binary/bun/${BUN_VERSION}/${zipName}`,
+    ];
+    const checksumMirrors = [
+      checksumUrl,
+      `https://npmmirror.com/mirrors/bun/${BUN_VERSION}/SHASUMS256.txt`,
+      `https://registry.npmmirror.com/-/binary/bun/${BUN_VERSION}/SHASUMS256.txt`,
+    ];
 
-    // Download files using curl (more reliable in CI than fetch + Bun.write)
-    const zipPath = join(tempDir, `${bunDownload}.zip`);
+    const zipPath = join(tempDir, zipName);
     const checksumPath = join(tempDir, 'SHASUMS256.txt');
-
-    console.log(`  Downloading ${zipUrl}...`);
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${zipPath} ${zipUrl}`;
+    const cachedZip = join(electronDir, '.cache', 'downloads', zipName);
+    if (existsSync(cachedZip)) {
+      console.log(`  Using cached ${cachedZip}`);
+      copyFileSync(cachedZip, zipPath);
+    } else {
+      await curlDownload(zipPath, zipMirrors);
+      mkdirSync(dirname(cachedZip), { recursive: true });
+      copyFileSync(zipPath, cachedZip);
+    }
     console.log('  Download complete');
 
     console.log('  Downloading checksums...');
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${checksumPath} ${checksumUrl}`;
+    await curlDownload(checksumPath, checksumMirrors);
 
     // Verify checksum
     console.log('  Verifying checksum...');
@@ -152,18 +273,16 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
 
     // Extract
     console.log('  Extracting...');
-    await $`unzip -o ${zipPath} -d ${tempDir}`.quiet();
+    await extractArchive(zipPath, tempDir);
 
     // Copy binary
-    const bunBinary = platform === 'win32' ? 'bun.exe' : 'bun';
     const sourcePath = join(tempDir, bunDownload, bunBinary);
-    const destPath = join(vendorDir, bunBinary);
 
     copyFileSync(sourcePath, destPath);
 
     // Make executable on Unix
     if (platform !== 'win32') {
-      await $`chmod +x ${destPath}`.quiet();
+      chmodSync(destPath, 0o755);
     }
 
     console.log(`  Bun installed to ${destPath} ✓`);
@@ -189,6 +308,52 @@ function findFileRecursive(root: string, fileName: string): string | null {
     }
   }
   return null;
+}
+
+function windowsSystemExecutable(fileName: string): string | null {
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!windowsRoot) return null;
+
+  const executable = join(windowsRoot, 'System32', fileName);
+  return existsSync(executable) ? executable : null;
+}
+
+async function runExecutable(executable: string, args: string[]): Promise<void> {
+  const child = Bun.spawn([executable, ...args], {
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    throw new Error(`${executable} exited with code ${exitCode}`);
+  }
+}
+
+async function extractArchive(archivePath: string, destination: string): Promise<void> {
+  if (process.platform === 'win32') {
+    // Bun's shell can run with a restricted PATH even when Windows system
+    // tools exist. Resolve bsdtar by absolute path so ZIP and tar.gz archives
+    // work without requiring PowerShell, unzip, or a PATH modification.
+    const tar = Bun.which('tar.exe')
+      ?? Bun.which('tar')
+      ?? windowsSystemExecutable('tar.exe');
+    if (!tar) {
+      throw new Error('Unable to extract archive: Windows tar.exe was not found');
+    }
+    await runExecutable(tar, ['-xf', archivePath, '-C', destination]);
+    return;
+  }
+
+  const executableName = archivePath.endsWith('.zip') ? 'unzip' : 'tar';
+  const executable = Bun.which(executableName);
+  if (!executable) {
+    throw new Error(`Unable to extract archive: ${executableName} was not found`);
+  }
+
+  const args = archivePath.endsWith('.zip')
+    ? ['-o', archivePath, '-d', destination]
+    : ['-xzf', archivePath, '-C', destination];
+  await runExecutable(executable, args);
 }
 
 /**
@@ -224,11 +389,10 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     const checksumPath = join(tempDir, `${uvDownload}.sha256`);
     const extractDir = join(tempDir, 'extract');
 
-    console.log(`  Downloading ${assetUrl}...`);
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${assetPath} ${assetUrl}`;
+    await curlDownload(assetPath, [assetUrl]);
 
     console.log('  Downloading checksum...');
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${checksumPath} ${checksumUrl}`;
+    await curlDownload(checksumPath, [checksumUrl]);
 
     console.log('  Verifying checksum...');
     const checksumContent = await Bun.file(checksumPath).text();
@@ -245,12 +409,7 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
 
     mkdirSync(extractDir, { recursive: true });
 
-    if (uvDownload.endsWith('.zip')) {
-      // Use PowerShell on Windows for consistent extraction support.
-      await $`powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${assetPath}' -DestinationPath '${extractDir}' -Force"`;
-    } else {
-      await $`tar -xzf ${assetPath} -C ${extractDir}`;
-    }
+    await extractArchive(assetPath, extractDir);
 
     const extractedUv = findFileRecursive(extractDir, uvBinaryName);
     if (!extractedUv) {
@@ -259,12 +418,92 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
 
     copyFileSync(extractedUv, targetPath);
     if (platform !== 'win32') {
-      await $`chmod +x ${targetPath}`.quiet();
+      chmodSync(targetPath, 0o755);
     }
 
     console.log(`  uv installed to ${targetPath} ✓`);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Download and verify the OfficeCLI binary into
+ * resources/bin/<platform-arch>/officecli(.exe).
+ */
+export async function downloadOfficecli(config: BuildConfig): Promise<void> {
+  const { platform, arch, electronDir } = config;
+  const platformKey = getPlatformKey(platform, arch);
+  const assetName = OFFICECLI_ASSET[platformKey];
+  const releaseUrl = OFFICECLI_ASSET_URL[platformKey];
+  const expectedHash = OFFICECLI_SHA256[platformKey];
+  if (!assetName || !releaseUrl || !expectedHash) {
+    throw new Error(`No OfficeCLI build for ${platformKey}`);
+  }
+
+  const destName = platform === 'win32' ? 'officecli.exe' : 'officecli';
+  const targetDir = join(electronDir, 'resources', 'bin', platformKey);
+  const targetPath = join(targetDir, destName);
+  const stampPath = join(targetDir, 'officecli.version');
+
+  if (existsSync(targetPath) && existsSync(stampPath)) {
+    const stamped = (await Bun.file(stampPath).text()).trim();
+    if (stamped === OFFICECLI_VERSION && await verifySha256(targetPath, expectedHash)) {
+      console.log(`officecli ${OFFICECLI_VERSION} already present at ${targetPath}`);
+      return;
+    }
+    console.warn(`Cached officecli failed version or checksum verification at ${targetPath}; downloading again.`);
+  }
+
+  console.log(`Downloading officecli ${OFFICECLI_VERSION} for ${platformKey}...`);
+  mkdirSync(targetDir, { recursive: true });
+
+  const tempDir = join(electronDir, '.officecli-download-temp');
+  rmSync(tempDir, { recursive: true, force: true });
+  mkdirSync(tempDir, { recursive: true });
+
+  try {
+    const assetPath = join(tempDir, assetName);
+    await curlDownload(assetPath, [
+      releaseUrl,
+      `https://ghproxy.net/${releaseUrl}`,
+    ]);
+    if (!(await verifySha256(assetPath, expectedHash))) {
+      throw new Error(`officecli checksum verification failed for ${assetName}`);
+    }
+
+    copyFileSync(assetPath, targetPath);
+    if (platform !== 'win32') {
+      chmodSync(targetPath, 0o755);
+    }
+    if (process.platform === 'darwin' && platform === 'darwin') {
+      try {
+        await $`xattr -dr com.apple.quarantine ${targetPath}`.quiet();
+      } catch {
+        // No quarantine xattr is fine
+      }
+    }
+    if (process.platform === 'win32') {
+      const escaped = targetPath.replace(/'/g, "''");
+      try {
+        await $`powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '${escaped}'"`.quiet();
+      } catch {
+        // Unblock is best-effort; MOTW may already be absent
+      }
+    }
+    await Bun.write(stampPath, `${OFFICECLI_VERSION}\n`);
+    console.log(`  officecli installed to ${targetPath} ✓`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+/** Fetch every desktop officecli binary so Mac/Windows installers can be built from either host. */
+export async function downloadOfficecliDesktopTargets(
+  base: Omit<BuildConfig, 'platform' | 'arch'>,
+): Promise<void> {
+  for (const target of OFFICECLI_DESKTOP_TARGETS) {
+    await downloadOfficecli({ ...base, ...target });
   }
 }
 
@@ -294,110 +533,156 @@ export function cleanBuildArtifacts(config: BuildConfig): void {
  * Install dependencies
  * On Windows, uses hoisted linker to avoid .bun symlink directory
  */
+function collectEsbuildBinaries(dir: string, found: string[]): void {
+  if (!existsSync(dir)) return;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectEsbuildBinaries(full, found);
+      continue;
+    }
+    if (entry.isFile() && entry.name === 'esbuild' && full.includes(`${join('bin', 'esbuild')}`)) {
+      found.push(full);
+    }
+  }
+}
+
+/**
+ * macOS 26+ kills ad-hoc/linker-signed Go binaries (esbuild) with
+ * `SIGKILL (Code Signature Invalid)`. Re-sign after bun install so local
+ * packaging can run. Vite vendors its own copy under node_modules/vite.
+ */
+export function resignNativeBuildTools(rootDir: string): void {
+  if (process.platform !== 'darwin') return;
+
+  const bins: string[] = [];
+  collectEsbuildBinaries(join(rootDir, 'node_modules'), bins);
+
+  for (const bin of bins) {
+    if (!existsSync(bin) || lstatSync(bin).isSymbolicLink()) continue;
+    try {
+      execSync(`codesign --force --sign - --timestamp=none ${JSON.stringify(bin)}`, {
+        stdio: 'pipe',
+      });
+      console.log(`Re-signed ${bin}`);
+    } catch (err) {
+      console.warn(`Failed to re-sign ${bin}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+const RIPGREP_PREBUILT_VERSION = 'v15.0.1';
+
+function hostRipgrepAsset(): { asset: string; binary: string } {
+  if (process.platform === 'win32') {
+    return {
+      asset: `ripgrep-${RIPGREP_PREBUILT_VERSION}-x86_64-pc-windows-msvc.zip`,
+      binary: 'rg.exe',
+    };
+  }
+  if (process.platform === 'darwin') {
+    const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+    return { asset: `ripgrep-${RIPGREP_PREBUILT_VERSION}-${triple}.tar.gz`, binary: 'rg' };
+  }
+  const triple = process.arch === 'arm64' ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl';
+  return { asset: `ripgrep-${RIPGREP_PREBUILT_VERSION}-${triple}.tar.gz`, binary: 'rg' };
+}
+
+function findFileNamed(dir: string, fileName: string): string | null {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isFile() && entry.name === fileName) return path;
+    if (entry.isDirectory()) {
+      const nested = findFileNamed(path, fileName);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/** Seed @vscode/ripgrep's host binary from release assets when GitHub API postinstall 403s. */
+export async function seedHostRipgrepBinary(rootDir: string, electronDir: string): Promise<boolean> {
+  const { asset, binary } = hostRipgrepAsset();
+  const pkgDir = join(rootDir, 'node_modules', '@vscode', 'ripgrep');
+  const dest = join(pkgDir, 'bin', binary);
+  if (existsSync(dest)) return true;
+  if (!existsSync(pkgDir)) return false;
+
+  const tmp = join(electronDir, '.rg-host-download');
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  mkdirSync(dirname(dest), { recursive: true });
+
+  try {
+    console.log(`Seeding host ripgrep ${RIPGREP_PREBUILT_VERSION} (${asset})...`);
+    const archivePath = join(tmp, asset);
+    const cached = join(electronDir, '.cache', 'downloads', asset);
+    if (existsSync(cached)) {
+      copyFileSync(cached, archivePath);
+    } else {
+      await curlDownload(archivePath, [
+        `https://github.com/microsoft/ripgrep-prebuilt/releases/download/${RIPGREP_PREBUILT_VERSION}/${asset}`,
+        `https://npmmirror.com/mirrors/ripgrep-prebuilt/${RIPGREP_PREBUILT_VERSION}/${asset}`,
+        `https://gitclone.com/github.com/microsoft/ripgrep-prebuilt/releases/download/${RIPGREP_PREBUILT_VERSION}/${asset}`,
+      ]);
+      mkdirSync(dirname(cached), { recursive: true });
+      copyFileSync(archivePath, cached);
+    }
+    if (asset.endsWith('.zip')) {
+      await $`unzip -o ${archivePath} -d ${tmp}`.quiet();
+    } else {
+      await $`tar -xzf ${archivePath} -C ${tmp}`.quiet();
+    }
+    const found = findFileNamed(tmp, binary);
+    if (!found) throw new Error(`${binary} not found in ${asset}`);
+    copyFileSync(found, dest);
+    if (process.platform !== 'win32') chmodSync(dest, 0o755);
+    console.log(`  Seeded ${dest}`);
+    return true;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 export async function installDependencies(config: BuildConfig): Promise<void> {
-  const { rootDir, platform } = config;
+  const { rootDir, electronDir, platform } = config;
 
-  if (platform === 'win32') {
-    // Use hoisted linker on Windows - Bun's default isolated mode creates
-    // node_modules/.bun/ with symlinks that esbuild can't traverse on Windows
-    // ("Access is denied" errors with junction points)
-    // Hoisted mode creates flat npm-style node_modules without .bun
-    console.log('Installing dependencies (Windows hoisted mode)...');
-    await $`cd ${rootDir} && bun install --linker=hoisted`.quiet();
-  } else {
-    console.log('Installing dependencies...');
-    await $`cd ${rootDir} && bun install`.quiet();
-  }
-}
+  const install = async () => {
+    if (platform === 'win32') {
+      // Use hoisted linker on Windows - Bun's default isolated mode creates
+      // node_modules/.bun/ with symlinks that esbuild can't traverse on Windows
+      // ("Access is denied" errors with junction points)
+      // Hoisted mode creates flat npm-style node_modules without .bun
+      console.log('Installing dependencies (Windows hoisted mode)...');
+      await $`cd ${rootDir} && bun install --linker=hoisted`.quiet();
+    } else {
+      console.log('Installing dependencies...');
+      await $`cd ${rootDir} && bun install`.quiet();
+    }
+  };
 
-/**
- * Per-platform optional-dep package name for the native `claude` binary.
- * Since SDK 0.2.113 the SDK ships only `sdk.mjs` + types; the native CLI
- * lives in a per-arch sibling package (`@anthropic-ai/claude-agent-sdk-{platform}-{arch}`).
- */
-function platformBinaryPkg(config: BuildConfig): string {
-  const { platform, arch } = config;
-  if (platform === 'darwin') return `claude-agent-sdk-darwin-${arch}`;
-  if (platform === 'win32') return `claude-agent-sdk-win32-${arch}`;
-  if (platform === 'linux') return `claude-agent-sdk-linux-${arch}`;
-  throw new Error(`Unsupported platform for SDK binary lookup: ${platform}`);
-}
-
-function nativeBinaryName(config: BuildConfig): string {
-  return config.platform === 'win32' ? 'claude.exe' : 'claude';
-}
-
-/**
- * Copy SDK from root node_modules:
- *   1. The thin core (`claude-agent-sdk`) — universal sdk.mjs + types.
- *   2. The matching arch's binary package, staged at the stable alias
- *      `claude-agent-sdk-binary/` so electron-builder.yml stays arch-agnostic
- *      and the runtime resolver finds the binary regardless of host arch.
- */
-export function copySDK(config: BuildConfig): void {
-  const { rootDir, electronDir } = config;
-  const sdkScope = join(electronDir, 'node_modules', '@anthropic-ai');
-
-  const sdkSource = join(rootDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk');
-  const sdkDest = join(sdkScope, 'claude-agent-sdk');
-
-  if (!existsSync(sdkSource)) {
-    throw new Error(`SDK core not found at ${sdkSource}. Run 'bun install' first.`);
+  try {
+    await install();
+  } catch (error) {
+    console.warn('bun install failed; seeding host ripgrep if present and retrying once...');
+    try {
+      await seedHostRipgrepBinary(rootDir, electronDir);
+    } catch (seedError) {
+      console.warn('Could not seed host ripgrep:', seedError);
+    }
+    await install();
   }
 
-  console.log('Copying SDK core...');
-  mkdirSync(sdkScope, { recursive: true });
-  if (existsSync(sdkDest)) {
-    rmSync(sdkDest, { recursive: true, force: true });
+  const binaryName = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  if (!existsSync(join(rootDir, 'node_modules', '@vscode', 'ripgrep', 'bin', binaryName))) {
+    await seedHostRipgrepBinary(rootDir, electronDir);
   }
-  cpSync(sdkSource, sdkDest, { recursive: true, dereference: true });
-
-  const pkg = platformBinaryPkg(config);
-  const binSource = join(rootDir, 'node_modules', '@anthropic-ai', pkg);
-  if (!existsSync(binSource)) {
-    throw new Error(
-      `SDK native binary package not found at ${binSource}. ` +
-      `For cross-arch builds run \`npm pack @anthropic-ai/${pkg}@<sdk-version>\` ` +
-      `to fetch it, or use the platform build script (build-dmg.sh / build-linux.sh / build-win.ps1) ` +
-      `which handles the cross-fetch automatically.`,
-    );
-  }
-
-  const aliasDest = join(sdkScope, 'claude-agent-sdk-binary');
-  console.log(`Staging SDK native binary (${pkg}) as claude-agent-sdk-binary alias...`);
-  if (existsSync(aliasDest)) {
-    rmSync(aliasDest, { recursive: true, force: true });
-  }
-  cpSync(binSource, aliasDest, { recursive: true, dereference: true });
-}
-
-/**
- * Verify the native binary was copied correctly (real file, expected size).
- * Since SDK 0.2.113 the binary is ~210 MB; anything under 50 MB is suspect.
- */
-export function verifySDKCopy(config: BuildConfig): void {
-  const { electronDir } = config;
-  const binaryPath = join(
-    electronDir,
-    'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary',
-    nativeBinaryName(config),
-  );
-
-  if (!existsSync(binaryPath)) {
-    throw new Error(`SDK verification failed: native binary not found at ${binaryPath}`);
-  }
-
-  const stats = lstatSync(binaryPath);
-  if (stats.isSymbolicLink()) {
-    throw new Error('SDK verification failed: native binary is a symlink (should be real file)');
-  }
-
-  const size = stats.size;
-  if (size < 50_000_000) {
-    throw new Error(`SDK verification failed: native binary too small (${size} bytes, expected ~210 MB)`);
-  }
-
-  console.log(`  SDK copy verified: native binary is ${(size / 1024 / 1024).toFixed(1)} MB`);
 }
 
 /**
@@ -446,6 +731,10 @@ export function copyInterceptor(config: BuildConfig): void {
   mkdirSync(destDir, { recursive: true });
   copyFileSync(interceptorSource, join(destDir, 'unified-network-interceptor.ts'));
 
+  for (const dependency of ['answer-preview-context.ts', 'answer-argument-stream.ts']) {
+    copyFileSync(join(sourceDir, dependency), join(destDir, dependency));
+  }
+
   // Also copy shared infrastructure (imported by unified-network-interceptor.ts at runtime)
   const commonSource = join(sourceDir, 'interceptor-common.ts');
   if (existsSync(commonSource)) {
@@ -483,6 +772,26 @@ export function copyInterceptorBundle(config: BuildConfig): void {
 }
 
 /**
+ * Copy Session MCP Server to packaged app resources.
+ * The session server provides session-scoped tools (SubmitPlan, config_validate, etc.) for agent sessions.
+ */
+export function copySessionServer(config: BuildConfig): void {
+  const { rootDir, electronDir } = config;
+
+  const sessionSource = join(rootDir, 'packages', 'session-mcp-server', 'dist', 'index.js');
+  const sessionDest = join(electronDir, 'resources', 'session-mcp-server', 'index.js');
+
+  if (!existsSync(sessionSource)) {
+    console.warn(`Warning: Session server not found at ${sessionSource}. Session-scoped tools will not work.`);
+    return;
+  }
+
+  console.log('Copying Session MCP Server...');
+  mkdirSync(dirname(sessionDest), { recursive: true });
+  copyFileSync(sessionSource, sessionDest);
+}
+
+/**
  * Map our Platform type to koffi's directory naming convention.
  * koffi uses: darwin_arm64, darwin_x64, linux_x64, win32_x64, etc.
  */
@@ -493,26 +802,43 @@ function koffiPlatformDir(platform: Platform, arch: Arch): string {
 /**
  * Copy Pi Agent Server to packaged app resources.
  *
- * The bun build uses --external koffi so the bare import resolves through
- * node_modules at runtime. We copy the koffi npm package next to index.js
- * with only the target platform's native binary (~4MB instead of ~80MB).
+ * The bundle requires a dedicated image resize Worker and Photon WASM, and uses --external
+ * koffi so the bare import resolves through node_modules at runtime. We copy
+ * the Worker, WASM, and Koffi runtime next to index.js, limiting Koffi to the
+ * target platform's native binary (~4MB instead of ~80MB).
  */
 export function copyPiAgentServer(config: BuildConfig): void {
   const { rootDir, electronDir, platform, arch } = config;
 
   const piSourceDir = join(rootDir, 'packages', 'pi-agent-server', 'dist');
   const piDestDir = join(electronDir, 'resources', 'pi-agent-server');
+  const photonWasmName = 'photon_rs_bg.wasm';
+  const imageResizeWorkerName = 'image-resize-worker.js';
+  const photonWasmSource = join(piSourceDir, photonWasmName);
+  const imageResizeWorkerSource = join(piSourceDir, imageResizeWorkerName);
 
   if (!existsSync(join(piSourceDir, 'index.js'))) {
     console.warn(`Warning: Pi agent server not found at ${piSourceDir}/index.js. Pi SDK sessions will not work.`);
     return;
   }
+  if (!existsSync(photonWasmSource)) {
+    throw new Error(
+      `Pi Agent Server Photon WASM not found at ${photonWasmSource}. Run bun run build in packages/pi-agent-server.`,
+    );
+  }
+  if (!existsSync(imageResizeWorkerSource)) {
+    throw new Error(
+      `Pi Agent Server image resize Worker not found at ${imageResizeWorkerSource}. Run bun run build in packages/pi-agent-server.`,
+    );
+  }
 
   console.log('Copying Pi Agent Server...');
   mkdirSync(piDestDir, { recursive: true });
 
-  // 1. Copy index.js
+  // 1. Copy the bundle and its image-processing runtime.
   copyFileSync(join(piSourceDir, 'index.js'), join(piDestDir, 'index.js'));
+  copyFileSync(imageResizeWorkerSource, join(piDestDir, imageResizeWorkerName));
+  copyFileSync(photonWasmSource, join(piDestDir, photonWasmName));
 
   // 2. Copy koffi npm package (external import, resolved via node_modules at runtime)
   const koffiSource = join(rootDir, 'node_modules', 'koffi');
@@ -541,26 +867,43 @@ export function copyPiAgentServer(config: BuildConfig): void {
   if (existsSync(nativeSrc)) {
     mkdirSync(nativeDest, { recursive: true });
     cpSync(nativeSrc, nativeDest, { recursive: true });
-    const size = lstatSync(join(nativeSrc, readdirSync(nativeSrc)[0])).size;
-    console.log(`  Copied index.js + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
+    const [nativeBinary] = readdirSync(nativeSrc);
+    if (!nativeBinary) {
+      throw new Error(`Koffi native binary directory is empty: ${nativeSrc}`);
+    }
+    const size = lstatSync(join(nativeSrc, nativeBinary)).size;
+    console.log(`  Copied index.js + image Worker + Photon WASM + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
   } else {
     console.warn(`  Warning: koffi native binary not found for ${targetDir}`);
     cpSync(join(koffiSource, 'build'), join(koffiDest, 'build'), { recursive: true });
-    console.log('  Copied index.js + koffi (all platforms as fallback)');
+    console.log('  Copied index.js + image Worker + Photon WASM + koffi (all platforms as fallback)');
   }
 }
 
 /**
- * Build the Pi agent server subprocess.
+ * Build MCP servers (session) and Pi agent server.
  * Shared across all platforms to avoid drift.
  */
-export function buildSubprocessServers(config: BuildConfig): void {
+export function buildMcpServers(config: BuildConfig): void {
   const { rootDir } = config;
 
+  const sessionDir = join(rootDir, 'packages', 'session-mcp-server');
+  const sessionOut = join(sessionDir, 'dist', 'index.js');
   const piDir = join(rootDir, 'packages', 'pi-agent-server');
   const piOut = join(piDir, 'dist', 'index.js');
 
-  console.log('Building Pi agent server...');
+  console.log('Building MCP servers...');
+
+  mkdirSync(join(sessionDir, 'dist'), { recursive: true });
+
+  execSync(
+    `bun build ${join(sessionDir, 'src', 'index.ts')} --outfile ${sessionOut} --target node --format cjs`,
+    { cwd: rootDir, stdio: 'inherit' }
+  );
+
+  if (!existsSync(sessionOut)) {
+    throw new Error(`Session MCP server output not found at ${sessionOut}`);
+  }
 
   // Pi agent server uses --target=bun --format=esm because its Pi SDK deps are ESM-only.
   // --target=node --format=cjs leaves ESM deps as external require() calls that fail at runtime.
@@ -569,10 +912,7 @@ export function buildSubprocessServers(config: BuildConfig): void {
   // Optional: skip if package directory is missing (e.g., not synced to OSS).
   if (existsSync(join(piDir, 'src'))) {
     mkdirSync(join(piDir, 'dist'), { recursive: true });
-    execSync(
-      `bun build ${join(piDir, 'src', 'index.ts')} --outdir ${join(piDir, 'dist')} --target bun --format esm --external koffi`,
-      { cwd: rootDir, stdio: 'inherit', shell: true }
-    );
+    execSync('bun run build', { cwd: piDir, stdio: 'inherit' });
     if (!existsSync(piOut)) {
       throw new Error(`Pi agent server output not found at ${piOut}`);
     }
@@ -582,33 +922,28 @@ export function buildSubprocessServers(config: BuildConfig): void {
 }
 
 /**
- * Build the WhatsApp worker subprocess (Baileys + Node runtime bundle).
- * Output ships as an extraResource at resources/messaging-whatsapp-worker/worker.cjs
- * and is spawned by WhatsAppAdapter. See electron-builder.yml `extraResources`.
+ * Verify MCP helper servers and Pi agent server are present in packaged resources.
  */
-export function buildWhatsAppWorker(config: BuildConfig): void {
-  const { rootDir } = config;
-  const workerOut = join(rootDir, 'packages', 'messaging-whatsapp-worker', 'dist', 'worker.cjs');
-
-  console.log('Building WhatsApp worker...');
-
-  execSync('bun run build:wa-worker', { cwd: rootDir, stdio: 'inherit', shell: true });
-
-  if (!existsSync(workerOut)) {
-    throw new Error(`WhatsApp worker output not found at ${workerOut}`);
-  }
-}
-
-/**
- * Verify the Pi agent server is present in packaged resources.
- */
-export function verifySubprocessServersExist(config: BuildConfig): void {
+export function verifyMcpServersExist(config: BuildConfig): void {
   const { electronDir } = config;
 
+  const sessionPath = join(electronDir, 'resources', 'session-mcp-server', 'index.js');
   const piPath = join(electronDir, 'resources', 'pi-agent-server', 'index.js');
+  const imageResizeWorkerPath = join(electronDir, 'resources', 'pi-agent-server', 'image-resize-worker.js');
+  const photonWasmPath = join(electronDir, 'resources', 'pi-agent-server', 'photon_rs_bg.wasm');
 
+  if (!existsSync(sessionPath)) {
+    throw new Error(`Session MCP server not found at ${sessionPath}`);
+  }
   if (!existsSync(piPath)) {
     console.warn(`Warning: Pi agent server not found at ${piPath}. Pi SDK sessions will not work.`);
+    return;
+  }
+  if (!existsSync(photonWasmPath)) {
+    throw new Error(`Pi Agent Server Photon WASM not found at ${photonWasmPath}`);
+  }
+  if (!existsSync(imageResizeWorkerPath)) {
+    throw new Error(`Pi Agent Server image resize Worker not found at ${imageResizeWorkerPath}`);
   }
 }
 
@@ -699,10 +1034,10 @@ export async function loadEnvFile(config: BuildConfig): Promise<void> {
 export function getArtifactName(platform: Platform, arch: Arch): string {
   switch (platform) {
     case 'darwin':
-      return `Craft-Agents-${arch}.dmg`;
+      return `Selection-${arch}.dmg`;
     case 'win32':
-      return `Craft-Agents-${arch}.exe`;
+      return `Selection-${arch}.exe`;
     case 'linux':
-      return `Craft-Agents-${arch}.AppImage`;
+      return `Selection-${arch}.AppImage`;
   }
 }

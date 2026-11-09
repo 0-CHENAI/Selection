@@ -1,21 +1,34 @@
+import { ArtifactVersions } from '../../reliability/artifact-versions'
+import { sessionArtifactRecord, withHistoricalAnswerTitles } from '../../reliability/conversation-artifact-versions'
+import { fileFingerprint } from '../../../../shared/src/agent/backend/pi/file-operation-receipts'
+import { existsSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises'
 import { isAbsolute, join, resolve, dirname, parse as parsePath } from 'path'
 import { homedir } from 'os'
 import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
-import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult } from '@craft-agent/shared/protocol'
+import { OFFICE_CASE_PREVIEW_SESSION, RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
-import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
-import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { resizeImageForAPI, inspectImageBuffer, isHeicMime, isHeicBuffer, decodeHeicToJpeg } from '@craft-agent/server-core/services'
-import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
-import { MarkItDown } from 'markitdown-js'
+import { HeicPreviewUnavailableError, heicCacheKey, isHeicImage, readFileAttachment, resolveImageSendPolicy, tryConvertHeicToJpeg } from '@craft-agent/shared/utils'
+import { getSessionAttachmentsPath, loadSession as loadStoredSession, validateSessionId } from '@craft-agent/shared/sessions'
+import { getLlmConnection, getWorkspaceByNameOrId } from '@craft-agent/shared/config'
+import { storeAttachmentImage } from './attachment-image'
+import { sanitizeFilename, resolveWorkspaceIdForFileAccess, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@craft-agent/server-core/transport'
 
 export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.artifacts.OFFICE_FILES,
+  RPC_CHANNELS.artifacts.OFFICE_PREVIEW,
+  RPC_CHANNELS.artifacts.BODY_FEEDBACK,
+  RPC_CHANNELS.artifacts.MANAGE,
+  RPC_CHANNELS.artifacts.FEEDBACK,
+  RPC_CHANNELS.artifacts.FEEDBACK_LIST,
+  RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT,
+  RPC_CHANNELS.artifacts.CLEANUP,
+  RPC_CHANNELS.artifacts.PREVIEW,
   RPC_CHANNELS.file.READ,
   RPC_CHANNELS.file.READ_DATA_URL,
   RPC_CHANNELS.file.READ_PREVIEW_DATA_URL,
@@ -26,15 +39,193 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.file.STORE_ATTACHMENT,
   RPC_CHANNELS.file.GENERATE_THUMBNAIL,
   RPC_CHANNELS.fs.SEARCH,
+  RPC_CHANNELS.fs.STAT_PATH,
   RPC_CHANNELS.fs.LIST_DIRECTORY,
 ] as const
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.artifacts.OFFICE_FILES, async (ctx, sessionId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = typeof sessionId === 'string' && await deps.sessionManager.getSession(sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getOfficeFiles) throw new Error('Office discovery is unavailable')
+    return deps.sessionManager.getOfficeFiles(sessionId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.OFFICE_PREVIEW, async (ctx, operation: import('@craft-agent/shared/protocol').OfficePreviewOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (operation?.sessionId === OFFICE_CASE_PREVIEW_SESSION) {
+      // Empty Office home: no chat yet, so only bundled case samples, scoped to this workspace.
+      if (!workspaceId) throw new Error('Workspace required')
+      if (!deps.sessionManager.officeHomePreview) throw new Error('Office preview is unavailable')
+      return deps.sessionManager.officeHomePreview(operation, workspaceId, ctx.clientId)
+    }
+    const session = operation && await deps.sessionManager.getSession(operation.sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.officePreview) throw new Error('Office preview is unavailable')
+    return deps.sessionManager.officePreview(operation, ctx.clientId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.BODY_FEEDBACK, async (ctx, sessionId: string, sourceMessageId: string, annotationId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getBodyFeedbackDetails) throw new Error('Body feedback history is unavailable')
+    if (typeof sourceMessageId !== 'string' || typeof annotationId !== 'string') throw new Error('Invalid feedback identity')
+    return deps.sessionManager.getBodyFeedbackDetails(sessionId, sourceMessageId, annotationId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.CLEANUP, async (ctx, sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string) => {
+    if (typeof requestId !== 'string' || !requestId.trim() || !Array.isArray(versionIds)
+      || !versionIds.length || versionIds.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid cleanup request')
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.cleanupArtifactVersions) throw new Error('Artifact cleanup is unavailable')
+    return deps.sessionManager.cleanupArtifactVersions(sessionId, artifactId, expectedVersion, versionIds, requestId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT, async (ctx, sessionId: string, artifactId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getArtifactFeedbackContext) throw new Error('Feedback input declarations are unavailable')
+    return deps.sessionManager.getArtifactFeedbackContext(sessionId, artifactId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.PREVIEW, async (ctx, artifactId: string, versionId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+    const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
+    const record = store.read(artifactId)
+    await validateWorkspaceFilePath(record.path, workspaceId)
+    return store.preview(artifactId, versionId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK_LIST, async (ctx, sessionId: string, artifactId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.listArtifactFeedback) throw new Error('Artifact feedback history is unavailable')
+    return deps.sessionManager.listArtifactFeedback(sessionId, artifactId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK, async (ctx, operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(operation.sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.artifactFeedback) throw new Error('Artifact feedback is unavailable')
+    return deps.sessionManager.artifactFeedback(operation)
+  })
+  server.handle(RPC_CHANNELS.artifacts.MANAGE, async (ctx, operation: import('@craft-agent/shared/protocol').ArtifactOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+    if (operation.type === 'restoreForSession') {
+      const session = await deps.sessionManager.getSession(operation.sessionId)
+      if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+      if (!deps.sessionManager.restoreArtifactVersionForSession) throw new Error('Artifact restoration is unavailable')
+      return deps.sessionManager.restoreArtifactVersionForSession(operation.sessionId, operation.artifactId,
+        operation.expectedVersion, operation.versionId)
+    }
+    const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
+    const titled = (record: import('../../reliability/artifact-versions').ArtifactRecord) => {
+      const sessions = new Map<string, ReturnType<typeof loadStoredSession>>()
+      return withHistoricalAnswerTitles(record, (sourceRunId, versionId) => {
+        const separator = sourceRunId.lastIndexOf('/')
+        const sessionId = separator < 1 ? sourceRunId : sourceRunId.slice(0, separator)
+        try { validateSessionId(sessionId) } catch { return undefined }
+        if (!sessions.has(sessionId)) {
+          try { sessions.set(sessionId, loadStoredSession(workspace.rootPath, sessionId)) }
+          catch { sessions.set(sessionId, null) }
+        }
+        const session = sessions.get(sessionId)
+        if (separator < 1) return session?.hidden && session.parentSessionId
+          ? session.messages.findLast(message => message.type === 'assistant' && !message.isIntermediate && message.phase !== 'intermediate')?.content
+          : undefined
+        return session?.messages.find(message => message.type === 'assistant'
+          && message.artifactVersions?.some(ref => ref.versionId === versionId))?.content
+      })
+    }
+    if (operation.type === 'register') {
+      if (operation.alternativePaths !== undefined && (!Array.isArray(operation.alternativePaths)
+        || operation.alternativePaths.some(path => typeof path !== 'string' || !path))) throw new Error('Invalid artifact paths')
+      const session = operation.sessionId ? await deps.sessionManager.getSession(operation.sessionId) : undefined
+      if (operation.sessionId && (!session || session.workspaceId !== workspaceId)) throw new Error('Session does not belong to this workspace')
+      if (operation.versionId && (!session || !session.messages.some(message =>
+        message.artifactVersions?.some(ref => ref.versionId === operation.versionId)))) throw new Error('Version is not referenced by this session')
+      let record: import('../../reliability/artifact-versions').ArtifactRecord
+      if (operation.versionId) {
+        const referenced = store.findByVersionId(operation.versionId)
+        if (!referenced) throw new Error('Artifact version not found')
+        await validateWorkspaceFilePath(referenced.path, workspaceId)
+        record = store.refreshMovedRecord(referenced.id)
+        await validateWorkspaceFilePath(record.path, workspaceId)
+      } else {
+        const paths = []
+        for (const path of [operation.path, ...(operation.alternativePaths ?? [])]) paths.push(await validateWorkspaceFilePath(path, workspaceId))
+        record = store.register(paths[0]!, undefined, paths.slice(1))
+      }
+      const titledRecord = titled(record)
+      const shown = session ? sessionArtifactRecord(titledRecord, session.messages) : titledRecord
+      return { ...shown, currentFileAvailable: store.hasCurrentFile(record.id) }
+    }
+    const record = store.read(operation.artifactId)
+    if (operation.type === 'relocate') {
+      const relocated = store.relocate(record.id, await validateWorkspaceFilePath(operation.path, workspaceId), operation.expectedVersion)
+      // A location change also invalidates consumers retaining the old path.
+      if (relocated.path !== record.path || relocated.currentVersion !== record.currentVersion) deps.sessionManager.notifyArtifactApplied?.(workspaceId)
+      return relocated
+    }
+    if (operation.type === 'read') {
+      await validateWorkspaceFilePath(record.path, workspaceId)
+      const current = store.refreshMovedRecord(record.id)
+      await validateWorkspaceFilePath(current.path, workspaceId)
+      return { ...titled(store.reconcile(current.id)), currentFileAvailable: store.hasCurrentFile(current.id) }
+    }
+    await validateWorkspaceFilePath(record.path, workspaceId)
+    if (operation.type === 'restore') {
+      const restored = store.restore(record.id, operation.expectedVersion, operation.versionId)
+      deps.sessionManager.notifyArtifactApplied?.(workspaceId)
+      return restored
+    }
+    throw new Error('Unknown artifact operation')
+  })
+  // Exact lookup for generated links. Search results are ranked and capped, so
+  // they cannot reliably prove that a particular file or directory exists.
+  server.handle(RPC_CHANNELS.fs.STAT_PATH, async (ctx, requestedPath: string): Promise<FilePathStat | null> => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const safePath = await validateWorkspaceFilePath(requestedPath, workspaceId)
+    try {
+      const info = await stat(safePath)
+      const type = info.isFile() ? 'file' : info.isDirectory() ? 'directory' : null
+      return type ? { path: safePath, type } : null
+    } catch (error) {
+      if (error instanceof Error && 'code' in error
+        && ((error as NodeJS.ErrnoException).code === 'ENOENT'
+          || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) {
+        const workspace = workspaceId ? getWorkspaceByNameOrId(workspaceId) : undefined
+        const storage = workspace && join(workspace.rootPath, 'artifacts', 'versions')
+        if (!workspace || !storage || !existsSync(storage)) return null
+        const store = new ArtifactVersions(storage, hostname(), workspace.id)
+        const registered = store.findByPath(safePath)
+        if (registered) await validateWorkspaceFilePath(registered.path, workspaceId)
+        const record = registered && store.refreshMovedRecord(registered.id)
+        if (!record || record.path === safePath) return null
+        const currentPath = await validateWorkspaceFilePath(record.path, workspaceId)
+        const currentVersion = record.versions.find(version => version.id === record.currentVersion)!
+        const fingerprint = fileFingerprint(currentPath)
+        if (!fingerprint || fingerprint.hash !== currentVersion.hash || fingerprint.size !== currentVersion.size) {
+          throw new Error('Artifact content changed; inspect its versions before opening the relocated file')
+        }
+        return { path: currentPath, type: 'file' }
+      }
+      throw error
+    }
+  })
+
   // Read a file (with path validation to prevent traversal attacks)
   server.handle(RPC_CHANNELS.file.READ, async (ctx, path: string) => {
     try {
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(path, getWorkspaceAllowedDirs(workspaceId))
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+      const safePath = await validateWorkspaceFilePath(path, workspaceId)
       const content = await readFile(safePath, 'utf-8')
       return content
     } catch (error) {
@@ -53,13 +244,13 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay and markdown image blocks.
   server.handle(RPC_CHANNELS.file.READ_DATA_URL, async (ctx, path: string) => {
     try {
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(path, getWorkspaceAllowedDirs(workspaceId))
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+      const safePath = await validateWorkspaceFilePath(path, workspaceId)
       const buffer = await readFile(safePath)
       const ext = safePath.split('.').pop()?.toLowerCase() ?? ''
 
       // Map previewable image extensions to MIME types.
-      // HEIC/HEIF/TIFF are intentionally excluded — no Chromium codec, opened externally instead.
+      // HEIC/HEIF are transcoded to JPEG so Chromium can preview them.
       const mimeMap: Record<string, string> = {
         png: 'image/png',
         jpg: 'image/jpeg',
@@ -71,10 +262,16 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         ico: 'image/x-icon',
         avif: 'image/avif',
       }
+      if (isHeicImage({ mimeType: mimeMap[ext], name: safePath, bytes: buffer })) {
+        const jpeg = await tryConvertHeicToJpeg(buffer, undefined, heicCacheKey(safePath, buffer))
+        if (!jpeg) throw new HeicPreviewUnavailableError()
+        return `data:image/jpeg;base64,${jpeg.toString('base64')}`
+      }
       const mime = mimeMap[ext] || 'application/octet-stream'
       const base64 = buffer.toString('base64')
       return `data:${mime};base64,${base64}`
     } catch (error) {
+      if (error instanceof HeicPreviewUnavailableError) throw error
       const message = error instanceof Error ? error.message : 'Unknown error'
       deps.platform.logger.error('readFileDataUrl error:', message)
       throw new Error(`Failed to read file as data URL: ${message}`)
@@ -85,10 +282,16 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Returns a PNG data URL resized to fit within maxSize×maxSize.
   server.handle(RPC_CHANNELS.file.READ_PREVIEW_DATA_URL, async (ctx, path: string, maxSize = 64) => {
     try {
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(path, getWorkspaceAllowedDirs(workspaceId))
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+      const safePath = await validateWorkspaceFilePath(path, workspaceId)
       const size = Number.isFinite(maxSize) ? Math.max(16, Math.min(256, Math.floor(maxSize))) : 64
-      const preview = await deps.platform.imageProcessor.process(safePath, {
+      let source: Buffer | string = safePath
+      const original = await readFile(safePath)
+      if (isHeicImage({ name: safePath, bytes: original })) {
+        const jpeg = await tryConvertHeicToJpeg(original, undefined, heicCacheKey(safePath, original))
+        if (jpeg) source = jpeg
+      }
+      const preview = await deps.platform.imageProcessor.process(source, {
         resize: { width: size, height: size },
         fit: 'inside',
         format: 'png',
@@ -105,8 +308,8 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   // The WS transport codec preserves Uint8Array payloads over JSON envelopes.
   server.handle(RPC_CHANNELS.file.READ_BINARY, async (ctx, path: string) => {
     try {
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(path, getWorkspaceAllowedDirs(workspaceId))
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+      const safePath = await validateWorkspaceFilePath(path, workspaceId)
       const buffer = await readFile(safePath)
       // Return as Uint8Array (serializes to ArrayBuffer over IPC)
       return new Uint8Array(buffer)
@@ -124,7 +327,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       filters: [
         // Allow all files by default - the agent can figure out how to handle them
         { name: 'All Files', extensions: ['*'] },
-        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'heic', 'heif'] },
         { name: 'Documents', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'md', 'rtf'] },
         { name: 'Code', extensions: ['js', 'ts', 'tsx', 'jsx', 'py', 'json', 'css', 'html', 'xml', 'yaml', 'yml', 'sh', 'sql', 'go', 'rs', 'rb', 'php', 'java', 'c', 'cpp', 'h', 'swift', 'kt'] },
       ]
@@ -135,16 +338,28 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Read file and return as FileAttachment with Quick Look thumbnail
   server.handle(RPC_CHANNELS.file.READ_ATTACHMENT, async (ctx, path: string) => {
     try {
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(path, getWorkspaceAllowedDirs(workspaceId))
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+      const safePath = await validateWorkspaceFilePath(path, workspaceId)
       // Use shared utility that handles file type detection, encoding, etc.
       const attachment = await readFileAttachment(safePath)
       if (!attachment) return null
 
+      let thumbSource: Buffer | string = safePath
+      if (attachment.base64 && isHeicImage({ mimeType: attachment.mimeType, name: attachment.name })) {
+        const original = Buffer.from(attachment.base64, 'base64')
+        const jpeg = await tryConvertHeicToJpeg(original, undefined, heicCacheKey(safePath, original))
+        if (jpeg) {
+          attachment.base64 = jpeg.toString('base64')
+          attachment.mimeType = 'image/jpeg'
+          attachment.size = jpeg.length
+          thumbSource = jpeg
+        }
+      }
+
       // Generate thumbnail for image preview
       // Only works for image formats the processor supports — PDFs/Office files get icon fallback
       try {
-        const thumbBuffer = await deps.platform.imageProcessor.process(safePath, {
+        const thumbBuffer = await deps.platform.imageProcessor.process(thumbSource, {
           resize: { width: 200, height: 200 },
           format: 'png',
         })
@@ -210,7 +425,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
   })
 
-  // Store an attachment to disk and generate thumbnail/markdown conversion
+  // Store an attachment to disk and generate image thumbnails when applicable.
   // This is the core of the persistent file attachment system
   server.handle(RPC_CHANNELS.file.STORE_ATTACHMENT, async (ctx, sessionId: string, attachment: FileAttachment): Promise<StoredAttachment> => {
     // Track files we've written for cleanup on error
@@ -223,7 +438,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
 
       // Get workspace slug from the calling window
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
       if (!workspaceId) {
         throw new Error('Cannot determine workspace for attachment storage')
       }
@@ -244,15 +459,19 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       // Generate unique ID for this attachment
       const id = randomUUID()
       const safeName = sanitizeFilename(attachment.name)
-      let storedFileName = `${id}_${safeName}`
-      let storedPath = join(attachmentsDir, storedFileName)
+      const storedFileName = `${id}_${safeName}`
+      const storedPath = join(attachmentsDir, storedFileName)
 
       // Track if image was resized (for return value)
       let wasResized = false
       let finalSize = attachment.size
       let resizedBase64: string | undefined
-      // May change below: HEIC/HEIF is transcoded to JPEG (nothing downstream can read HEIC).
-      let finalMimeType = attachment.mimeType
+      let originalPath: string | undefined
+      let originalWidth: number | undefined
+      let originalHeight: number | undefined
+      let sentWidth: number | undefined
+      let sentHeight: number | undefined
+      let outputMimeType: string | undefined
 
       // 1. Save the file (with image validation and resizing)
       if (attachment.base64) {
@@ -263,119 +482,37 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
           throw new Error(`Attachment corrupted: size mismatch (expected ${attachment.size}, got ${decoded.length})`)
         }
 
-        // For images: validate and resize if needed for Claude API compatibility
+        // Images are validated and maybe downscaled. The model payload stays the
+        // downscaled file; the original sibling is written only when that happens.
         if (attachment.type === 'image') {
-          // HEIC/HEIF (iOS photos/screenshots) can't be decoded by Chromium, the
-          // model API, or our thumbnailer — transcode to JPEG up front so every
-          // downstream step (validate, resize, thumbnail, upload) sees plain JPEG.
-          if (isHeicMime(attachment.mimeType) || isHeicBuffer(decoded)) {
-            try {
-              decoded = await decodeHeicToJpeg(decoded)
-            } catch (heicError) {
-              const reason = heicError instanceof Error ? heicError.message : String(heicError)
-              throw new Error(`Could not decode HEIC/HEIF image "${attachment.name}": ${reason}`)
-            }
-            finalMimeType = 'image/jpeg'
-            finalSize = decoded.length
-            resizedBase64 = decoded.toString('base64')
-            // Store with a .jpg name so re-reads and the agent's Read tool see JPEG.
-            const jpegName = `${safeName.replace(/\.[^.]+$/, '')}.jpg`
-            storedFileName = `${id}_${jpegName}`
-            storedPath = join(attachmentsDir, storedFileName)
-          }
-
-          const imageInspection = await inspectImageBuffer(decoded, deps.platform.imageProcessor)
-          const imageSize = imageInspection.status === 'ok'
-            ? { width: imageInspection.width, height: imageInspection.height }
+          const storedSession = loadStoredSession(workspaceRootPath, sessionId)
+          const connection = storedSession?.llmConnection
+            ? getLlmConnection(storedSession.llmConnection)
             : null
-
-          // Determine if we should resize
-          let shouldResize = false
-          let targetSize: { width: number; height: number } | undefined
-
-          if (imageInspection.status === 'processor_unavailable') {
-            deps.platform.logger.warn('Image processing unavailable while validating attachment:', imageInspection.error?.message ?? 'unknown error')
-            if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-              throw new Error('Image processing is unavailable, so oversized images cannot be validated or resized automatically. Please attach a smaller image.')
-            }
-          } else if (imageInspection.status === 'invalid_image') {
-            throw new Error(imageInspection.error?.message || 'Invalid or unsupported image file')
-          } else {
-            // Validate image for Claude API
-            const validation = validateImageForClaudeAPI(decoded.length, imageSize!.width, imageSize!.height)
-
-            shouldResize = validation.needsResize ?? false
-            targetSize = validation.suggestedSize
-
-            if (!validation.valid && validation.errorCode === 'dimension_exceeded') {
-              // Image exceeds 8000px limit - calculate resize to fit within limits
-              const maxDim = IMAGE_LIMITS.MAX_DIMENSION
-              const scale = Math.min(maxDim / imageSize!.width, maxDim / imageSize!.height)
-              targetSize = {
-                width: Math.floor(imageSize!.width * scale),
-                height: Math.floor(imageSize!.height * scale),
-              }
-              shouldResize = true
-              deps.platform.logger.info(`Image exceeds ${maxDim}px limit (${imageSize!.width}x${imageSize!.height}), will resize to ${targetSize.width}x${targetSize.height}`)
-            } else if (!validation.valid && validation.errorCode === 'size_exceeded') {
-              // File >5MB — try resize+compress instead of rejecting
-              shouldResize = true
-              deps.platform.logger.info(`Image exceeds 5MB (${(decoded.length / 1024 / 1024).toFixed(1)}MB), will attempt resize`)
-            } else if (!validation.valid) {
-              throw new Error(validation.error)
-            }
-          }
-
-          // If resize is needed (either recommended or required), do it now
-          if (shouldResize) {
-            const isPhoto = finalMimeType === 'image/jpeg'
-
-            if (targetSize) {
-              // Dimension-exceeded: resize to specific target dimensions
-              deps.platform.logger.info(`Resizing image from ${imageSize!.width}x${imageSize!.height} to ${targetSize.width}x${targetSize.height}`)
-              try {
-                decoded = await deps.platform.imageProcessor.process(decoded, {
-                  resize: { width: targetSize.width, height: targetSize.height },
-                  format: isPhoto ? 'jpeg' : 'png',
-                  quality: isPhoto ? IMAGE_LIMITS.JPEG_QUALITY_HIGH : undefined,
-                })
-                wasResized = true
-                finalSize = decoded.length
-
-                // Re-validate final size after resize
-                if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-                  decoded = await deps.platform.imageProcessor.process(decoded, { format: 'jpeg', quality: IMAGE_LIMITS.JPEG_QUALITY_FALLBACK })
-                  finalSize = decoded.length
-                  if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-                    throw new Error(`Image still too large after resize (${(decoded.length / 1024 / 1024).toFixed(1)}MB). Please use a smaller image.`)
-                  }
-                }
-              } catch (resizeError) {
-                deps.platform.logger.error('Image resize failed:', resizeError)
-                const reason = resizeError instanceof Error ? resizeError.message : String(resizeError)
-                throw new Error(`Image too large (${imageSize!.width}x${imageSize!.height}) and automatic resize failed: ${reason}. Please manually resize it before attaching.`)
-              }
-            } else {
-              // Size-exceeded or optimal resize — use shared utility for full pipeline
-              const result = await resizeImageForAPI(decoded, { isPhoto })
-              if (!result) {
-                throw new Error(`Image too large (${(decoded.length / 1024 / 1024).toFixed(1)}MB) and could not be compressed enough. Please use a smaller image.`)
-              }
-              decoded = result.buffer
-              wasResized = true
-              finalSize = decoded.length
-            }
-
-            deps.platform.logger.info(`Image resized: ${attachment.size} -> ${finalSize} bytes (${Math.round((1 - finalSize / attachment.size) * 100)}% reduction)`)
-
-            // Store resized base64 to return to renderer
-            // This is used when sending to Claude API instead of original large base64
-            resizedBase64 = decoded.toString('base64')
-          }
+          const saved = await storeAttachmentImage({
+            bytes: decoded,
+            mimeType: attachment.mimeType,
+            declaredSize: attachment.size,
+            attachmentsDir,
+            storedFileName,
+            processor: deps.platform.imageProcessor,
+            logger: deps.platform.logger,
+            policy: resolveImageSendPolicy(connection),
+          })
+          wasResized = saved.wasResized
+          finalSize = saved.finalSize
+          resizedBase64 = saved.resizedBase64
+          originalPath = saved.originalPath
+          originalWidth = saved.originalWidth
+          originalHeight = saved.originalHeight
+          sentWidth = saved.sentWidth
+          sentHeight = saved.sentHeight
+          outputMimeType = saved.outputMimeType
+          filesToCleanup.push(...saved.writtenPaths)
+        } else {
+          await writeFile(storedPath, decoded)
+          filesToCleanup.push(storedPath)
         }
-
-        await writeFile(storedPath, decoded)
-        filesToCleanup.push(storedPath)
       } else if (attachment.text) {
         // Text files - save as UTF-8
         await writeFile(storedPath, attachment.text, 'utf-8')
@@ -384,66 +521,49 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         throw new Error('Attachment has no content (neither base64 nor text)')
       }
 
-      // 2. Generate thumbnail (images only — PDFs/Office get icon fallback)
+      // 2. Generate thumbnails for real images only. PDFs and Office files use
+      // their UI icon fallback without attempting an image decode.
       let thumbnailPath: string | undefined
       let thumbnailBase64: string | undefined
-      const thumbFileName = `${id}_thumb.png`
-      const thumbPath = join(attachmentsDir, thumbFileName)
-      try {
-        const pngBuffer = await deps.platform.imageProcessor.process(storedPath, {
-          resize: { width: 200, height: 200 },
-          format: 'png',
-        })
-        await writeFile(thumbPath, pngBuffer)
-        thumbnailPath = thumbPath
-        thumbnailBase64 = pngBuffer.toString('base64')
-        filesToCleanup.push(thumbPath)
-      } catch (thumbError) {
-        // Thumbnail generation failed (non-image or corrupt) — icon fallback
-        deps.platform.logger.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
-      }
-
-      // 3. Convert Office files to markdown (for sending to Claude)
-      // This is required for Office files - Claude can't read raw Office binary
-      let markdownPath: string | undefined
-      if (attachment.type === 'office') {
-        const mdFileName = `${id}_${safeName}.md`
-        const mdPath = join(attachmentsDir, mdFileName)
+      if (attachment.type === 'image') {
+        const thumbFileName = `${id}_thumb.png`
+        const thumbPath = join(attachmentsDir, thumbFileName)
         try {
-          const markitdown = new MarkItDown()
-          const result = await markitdown.convert(storedPath)
-          if (!result || !result.textContent) {
-            throw new Error('Conversion returned empty result')
-          }
-          await writeFile(mdPath, result.textContent, 'utf-8')
-          markdownPath = mdPath
-          filesToCleanup.push(mdPath)
-          deps.platform.logger.info(`Converted Office file to markdown: ${mdPath}`)
-        } catch (convertError) {
-          // Conversion failed - throw so user knows the file can't be processed
-          // Claude can't read raw Office binary, so a failed conversion = unusable file
-          const errorMsg = convertError instanceof Error ? convertError.message : String(convertError)
-          deps.platform.logger.error('Office to markdown conversion failed:', errorMsg)
-          throw new Error(`Failed to convert "${attachment.name}" to readable format: ${errorMsg}`)
+          const pngBuffer = await deps.platform.imageProcessor.process(storedPath, {
+            resize: { width: 200, height: 200 },
+            format: 'png',
+          })
+          await writeFile(thumbPath, pngBuffer)
+          thumbnailPath = thumbPath
+          thumbnailBase64 = pngBuffer.toString('base64')
+          filesToCleanup.push(thumbPath)
+        } catch (thumbError) {
+          // Corrupt or unsupported images use the standard icon fallback.
+          deps.platform.logger.info('Image thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
         }
       }
 
+      // Office documents stay as the original binary. Do not eagerly generate a
+      // Markdown sidecar here: it adds upload latency and previously caused the
+      // model to bypass officecli. If officecli reports the document
+      // unsupported, the agent can invoke markitdown against storedPath on demand.
+
       // Return StoredAttachment metadata
       // Include wasResized flag so UI can show notification
-      // Include resizedBase64 so renderer uses the resized/normalized image for Claude API
+      // Include resizedBase64 so renderer uses resized image for Claude API
       return {
         id,
         type: attachment.type,
         name: attachment.name,
-        mimeType: finalMimeType, // May differ from input (HEIC/HEIF normalized to JPEG)
+        mimeType: outputMimeType ?? attachment.mimeType,
         size: finalSize, // Use final size (may differ if resized)
         originalSize: wasResized ? attachment.size : undefined, // Track original if resized
         storedPath,
         thumbnailPath,
         thumbnailBase64,
-        markdownPath,
         wasResized,
-        resizedBase64, // Set when image was resized or format-normalized (HEIC→JPEG); used for Claude API
+        resizedBase64, // Only set when wasResized=true, used for Claude API
+        ...(originalPath ? { originalPath, originalWidth, originalHeight, sentWidth, sentHeight } : {}),
       }
     } catch (error) {
       // Clean up any files we've written before the error
@@ -462,9 +582,23 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Parallel BFS walk that skips ignored directories BEFORE entering them,
   // avoiding reading node_modules/etc. contents entirely. Uses withFileTypes
   // to get entry types without separate stat calls.
+  //
+  // Ranking (higher first): exact name → name prefix → name contains → path
+  // contains. We walk more candidates than we return so a short query does not
+  // fill the budget with shallow weak matches and hide a better deeper hit.
   server.handle(RPC_CHANNELS.fs.SEARCH, async (_ctx, basePath: string, query: string) => {
     deps.platform.logger.info('[FS_SEARCH] called:', basePath, query)
     const MAX_RESULTS = 50
+    // Soft cap on how many candidates to score before early-stopping the walk.
+    // Higher than MAX_RESULTS so weak shallow matches can be displaced by
+    // stronger deeper ones (e.g. "app.tsx" when query is "app").
+    const MAX_CANDIDATES = 400
+    // Limit tree breadth for very short *ASCII* queries (1–2 chars) so we don't
+    // walk the entire monorepo. CJK characters are far more selective even at
+    // length 1, so allow a full-depth walk for non-ASCII queries.
+    const trimmedQuery = query.trim()
+    const isAsciiShort = /^[\x00-\x7F]{1,2}$/.test(trimmedQuery)
+    const MAX_DIRS = isAsciiShort ? 200 : 2000
 
     // Directories to never recurse into
     const SKIP_DIRS = new Set([
@@ -473,14 +607,89 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       '.idea', '.vscode', 'coverage', '.nyc_output', '.turbo', 'out',
     ])
 
-    const lowerQuery = query.toLowerCase()
-    const results: Array<{ name: string; path: string; type: 'file' | 'directory'; relativePath: string }> = []
+    const lowerQuery = query.trim().toLowerCase()
+
+    type Scored = {
+      name: string
+      path: string
+      type: 'file' | 'directory'
+      relativePath: string
+      score: number
+    }
+
+    // Empty query: seed the @ menu with a short alphabetical listing of the
+    // working directory so the popup is not blank before the user types.
+    // Prefer root-level entries; if the root is sparse, walk one level deeper.
+    if (!lowerQuery) {
+      const DEFAULT_LIMIT = 20
+      try {
+        const collectLevel = async (relDir: string) => {
+          const absDir = relDir ? join(basePath, relDir) : basePath
+          let entries: import('fs').Dirent[] = []
+          try {
+            entries = await readdir(absDir, { withFileTypes: true })
+          } catch {
+            return [] as Scored[]
+          }
+          const items: Scored[] = []
+          for (const entry of entries) {
+            const name = entry.name
+            if (name.startsWith('.') || SKIP_DIRS.has(name)) continue
+            const relativePath = relDir ? `${relDir}/${name}` : name
+            items.push({
+              name,
+              path: join(basePath, relativePath),
+              type: entry.isDirectory() ? 'directory' : 'file',
+              relativePath,
+              score: 0,
+            })
+          }
+          return items
+        }
+
+        let items = await collectLevel('')
+        // If root is mostly empty (or only a couple of dirs), add children of
+        // top-level directories so the menu has enough to show.
+        if (items.length < DEFAULT_LIMIT) {
+          const rootDirs = items.filter(i => i.type === 'directory').slice(0, 8)
+          const nested = await Promise.all(rootDirs.map(d => collectLevel(d.relativePath)))
+          items = items.concat(nested.flat())
+        }
+
+        items.sort((a, b) => {
+          // Files first for a denser "pick a file" feel, then A–Z by name
+          if (a.type !== b.type) return a.type === 'file' ? -1 : 1
+          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        })
+
+        const results = items.slice(0, DEFAULT_LIMIT).map(({ score: _score, ...rest }) => rest)
+        deps.platform.logger.info('[FS_SEARCH] empty-query default listing:', results.length, 'results')
+        return results
+      } catch (err) {
+        deps.platform.logger.error('[FS_SEARCH] empty-query error:', err)
+        return []
+      }
+    }
+
+    /** 5 exact, 4 name-prefix, 3 name-contains, 2 path-contains, 0 no match */
+    const scoreMatch = (name: string, relativePath: string): number => {
+      const lowerName = name.toLowerCase()
+      const lowerRelative = relativePath.toLowerCase()
+      if (lowerName === lowerQuery) return 5
+      if (lowerName.startsWith(lowerQuery)) return 4
+      if (lowerName.includes(lowerQuery)) return 3
+      if (lowerRelative.includes(lowerQuery)) return 2
+      return 0
+    }
+
+    const candidates: Scored[] = []
+    let dirsVisited = 0
 
     try {
       // BFS queue: each entry is a relative path prefix ('' for root)
       let queue = ['']
 
-      while (queue.length > 0 && results.length < MAX_RESULTS) {
+      while (queue.length > 0 && candidates.length < MAX_CANDIDATES && dirsVisited < MAX_DIRS) {
         // Process current level: read all directories in parallel
         const nextQueue: string[] = []
 
@@ -497,10 +706,11 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         )
 
         for (const { relDir, entries } of dirResults) {
-          if (results.length >= MAX_RESULTS) break
+          if (candidates.length >= MAX_CANDIDATES || dirsVisited >= MAX_DIRS) break
+          dirsVisited++
 
           for (const entry of entries) {
-            if (results.length >= MAX_RESULTS) break
+            if (candidates.length >= MAX_CANDIDATES) break
 
             const name = entry.name
             // Skip hidden files/dirs and ignored directories
@@ -514,15 +724,14 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
               nextQueue.push(relativePath)
             }
 
-            // Check if name or path matches the query
-            const lowerName = name.toLowerCase()
-            const lowerRelative = relativePath.toLowerCase()
-            if (lowerName.includes(lowerQuery) || lowerRelative.includes(lowerQuery)) {
-              results.push({
+            const score = scoreMatch(name, relativePath)
+            if (score > 0) {
+              candidates.push({
                 name,
                 path: join(basePath, relativePath),
                 type: isDir ? 'directory' : 'file',
                 relativePath,
+                score,
               })
             }
           }
@@ -531,13 +740,17 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         queue = nextQueue
       }
 
-      // Sort: directories first, then by name length (shorter = better match)
-      results.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-        return a.name.length - b.name.length
+      // Prefer stronger matches, then shorter names, then files over dirs of equal score
+      candidates.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score
+        if (a.name.length !== b.name.length) return a.name.length - b.name.length
+        if (a.type !== b.type) return a.type === 'file' ? -1 : 1
+        return a.name.localeCompare(b.name)
       })
 
-      deps.platform.logger.info('[FS_SEARCH] returning', results.length, 'results')
+      const results = candidates.slice(0, MAX_RESULTS).map(({ score: _score, ...rest }) => rest)
+
+      deps.platform.logger.info('[FS_SEARCH] returning', results.length, 'results of', candidates.length, 'candidates')
       return results
     } catch (err) {
       deps.platform.logger.error('[FS_SEARCH] error:', err)

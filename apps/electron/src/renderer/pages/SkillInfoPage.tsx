@@ -8,12 +8,15 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Check, X, Minus } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { toast } from 'sonner'
 import { SkillMenu } from '@/components/app-shell/SkillMenu'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
+import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
 import { routes, navigate } from '@/lib/navigate'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
@@ -22,7 +25,6 @@ import {
   Info_Section,
   Info_Table,
   Info_Markdown,
-  Info_HeaderMenu,
 } from '@/components/info'
 import type { LoadedSkill } from '../../shared/types'
 
@@ -35,7 +37,10 @@ interface SkillInfoPageProps {
 export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory }: SkillInfoPageProps) {
   const { t } = useTranslation()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
+  const skillRef = useRef<LoadedSkill | null>(null)
+  skillRef.current = skill
   const [loading, setLoading] = useState(true)
+  const [exportOpen, setExportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const activeWorkspace = useActiveWorkspace()
   const canRevealLocally = !activeWorkspace?.remoteServer
@@ -43,40 +48,43 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   // Load skill data
   useEffect(() => {
     let isMounted = true
+    let loadGeneration = 0
     setLoading(true)
     setError(null)
 
     const loadSkill = async () => {
+      const generation = ++loadGeneration
       try {
         const skills = await window.electronAPI.getSkills(workspaceId, workingDirectory)
 
-        if (!isMounted) return
+        if (!isMounted || generation !== loadGeneration) return
 
         // Find the skill by slug
         const found = skills.find((s) => s.slug === skillSlug)
         if (found) {
           setSkill(found)
-        } else {
+          setError(null)
+        } else if (!skillRef.current) {
+          setSkill(null)
           setError(t('skillInfo.notFound'))
         }
       } catch (err) {
-        if (!isMounted) return
+        if (!isMounted || generation !== loadGeneration) return
         setError(err instanceof Error ? err.message : t('skillInfo.failedToLoad'))
       } finally {
-        if (isMounted) setLoading(false)
+        if (isMounted && generation === loadGeneration) setLoading(false)
       }
     }
 
-    loadSkill()
-
-    // Subscribe to skill changes
-    const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId, skills) => {
+    // Broadcast payloads can belong to a different session working directory.
+    // Re-read this page's scoped catalog. A transient miss during a rewrite
+    // must not unmount an open config popover (#394).
+    const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId) => {
       if (changedWorkspaceId !== workspaceId) return
-      const updated = skills.find((s) => s.slug === skillSlug)
-      if (updated) {
-        setSkill(updated)
-      }
+      void loadSkill()
     })
+
+    void loadSkill()
 
     return () => {
       isMounted = false
@@ -104,7 +112,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     try {
       if (skill.source !== 'workspace') return
       await window.electronAPI.deleteSkill(workspaceId, skillSlug)
-      toast.success(t('skillInfo.deletedSkill', { name: skill.metadata.name }))
+      toast.success(t('skillInfo.deletedSkill', { name: resolveSkillTitle(skill) }))
       navigate(routes.view.skills())
     } catch (err) {
       toast.error(t('skillInfo.failedToDelete'), {
@@ -118,9 +126,13 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     window.electronAPI.openUrl(`craftagents://skills/skill/${skillSlug}?window=focused`)
   }, [skillSlug])
 
-  // Get skill name for header
-  const skillName = skill?.metadata.name || skillSlug
+  const skillName = skill ? resolveSkillTitle(skill) : skillSlug
   const canDeleteSkill = skill?.source === 'workspace'
+  const rename = useDisplayTitleRename('skill', workspaceId, workingDirectory)
+  const renameTarget = skill && {
+    displayTitle: skill.displayTitle,
+    defaultTitle: skill.metadata.name,
+  }
 
   // Format path to show just the skill-relative portion (skills/{slug}/)
   const formatPath = (path: string) => {
@@ -145,26 +157,31 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   }
 
   return (
+    <>
     <Info_Page
       loading={loading}
       error={error ?? undefined}
       empty={!skill && !loading && !error ? t('skillInfo.notFound') : undefined}
     >
-      {/* The name lives in the hero; the header carries the actions menu (same items as before) */}
       <Info_Page.Header
-        actions={
-          <Info_HeaderMenu>
-            <SkillMenu
-              skillSlug={skillSlug}
-              skillName={skillName}
-              onOpenInNewWindow={handleOpenInNewWindow}
-              onShowInFinder={handleOpenInFinder}
-              canShowInFinder={canRevealLocally}
-              onDelete={canDeleteSkill ? handleDelete : undefined}
-              canDelete={canDeleteSkill}
-              deleteLabel={canDeleteSkill ? t('skillInfo.deleteSkill') : t('skillInfo.managedByProject')}
-            />
-          </Info_HeaderMenu>
+        title={skillName}
+        titleMenu={
+          <SkillMenu
+            skillSlug={skillSlug}
+            skillName={skillName}
+            onOpenInNewWindow={handleOpenInNewWindow}
+            onShowInFinder={handleOpenInFinder}
+            onRename={() => skill && renameTarget && rename.start(skill.slug, renameTarget)}
+            onExport={skill?.source === 'workspace' ? () => setExportOpen(true) : undefined}
+            canShowInFinder={canRevealLocally}
+            onDelete={canDeleteSkill ? handleDelete : undefined}
+            canDelete={canDeleteSkill}
+            deleteLabel={canDeleteSkill
+              ? t('skillInfo.deleteSkill')
+              : skill?.source === 'bundled'
+                ? t('skillInfo.managedByApp')
+                : t('skillInfo.managedByProject')}
+          />
         }
       />
 
@@ -173,42 +190,49 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           {/* Hero: Avatar, title, and description */}
           <Info_Page.Hero
             avatar={<SkillAvatar skill={skill} fluid workspaceId={workspaceId} />}
-            title={skill.metadata.name}
+            title={resolveSkillTitle(skill)}
             tagline={skill.metadata.description}
+            onTitleClick={() => renameTarget && rename.start(skill.slug, renameTarget)}
           />
 
           {/* Metadata */}
           <Info_Section
             title={t('skillInfo.metadata')}
             actions={
-              // EditPopover for AI-assisted metadata editing (name, description in frontmatter)
-              <EditPopover
-                trigger={<EditButton />}
-                {...getEditConfig('skill-metadata', skill.path)}
-                secondaryAction={{
-                  label: t('common.editFile'),
-                  filePath: `${skill.path}/SKILL.md`,
-                }}
-              />
+              skill.source === 'bundled' ? undefined : (
+                <EditPopover
+                  trigger={<EditButton />}
+                  {...getEditConfig('skill-metadata', skill.path)}
+                  secondaryAction={{
+                    label: t('common.editFile'),
+                    filePath: `${skill.path}/SKILL.md`,
+                  }}
+                />
+              )
             }
           >
             <Info_Table>
-              <Info_Table.Row label={t('common.slug')}>
-                <span className="font-mono text-mono-ui">{skill.slug}</span>
+              <Info_Table.Row label={t('displayTitle.label')}>
+                <DisplayTitleField
+                  customTitle={skill.displayTitle}
+                  onRename={() => renameTarget && rename.start(skill.slug, renameTarget)}
+                />
               </Info_Table.Row>
-              <Info_Table.Row label={t('common.name')}>{skill.metadata.name}</Info_Table.Row>
+              <Info_Table.Row label={t('common.originalName')}>{skill.metadata.name}</Info_Table.Row>
+              <Info_Table.Row label={t('common.slug')} value={skill.slug} />
               <Info_Table.Row label={t('common.description')}>
                 {skill.metadata.description}
               </Info_Table.Row>
               <Info_Table.Row label={t('common.source')}>
                 {skill.source === 'project' ? t('skillInfo.sourceProject') :
                  skill.source === 'global' ? t('skillInfo.sourceGlobal') :
+                 skill.source === 'bundled' ? t('skillInfo.sourceBundled') :
                  t('skillInfo.sourceWorkspace')}
               </Info_Table.Row>
               <Info_Table.Row label={t('common.location')}>
                 <button
                   onClick={handleLocationClick}
-                  className="-my-1 cursor-pointer rounded-xs py-1 text-left font-mono text-mono-ui [overflow-wrap:anywhere] hover:underline"
+                  className="hover:underline cursor-pointer text-left"
                 >
                   {formatPath(skill.path)}
                 </button>
@@ -224,39 +248,32 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           {/* Permission Modes */}
           {skill.metadata.alwaysAllow && skill.metadata.alwaysAllow.length > 0 && (
             <Info_Section title={t('skillInfo.permissionModes')}>
-              <div className="space-y-2 px-3.5 py-3">
-                <p className="text-label-sm text-tertiary">
+              <div className="space-y-2 px-4 py-3">
+                <p className="text-xs text-muted-foreground mb-3">
                   {t('skillInfo.permissionModesDesc')}
                 </p>
-                <div className="overflow-hidden rounded-md shadow-elev-0">
-                  <table className="w-full text-label">
+                <div className="rounded-[8px] border border-border/50 overflow-hidden">
+                  <table className="w-full text-sm">
                     <tbody>
-                      <tr className="border-b border-subtle">
-                        <td className="w-[140px] px-3 py-2 font-medium text-secondary">{t('skillInfo.explore')}</td>
+                      <tr className="border-b border-border/30">
+                        <td className="px-3 py-2 font-medium text-muted-foreground w-[140px]">{t('skillInfo.explore')}</td>
                         <td className="px-3 py-2 flex items-center gap-2">
-                          <X className="size-3.5 shrink-0 text-destructive" aria-hidden />
-                          <span className="text-foreground">{t('skillInfo.exploreDesc')}</span>
+                          <X className="h-3.5 w-3.5 text-destructive shrink-0" />
+                          <span className="text-foreground/80">{t('skillInfo.exploreDesc')}</span>
                         </td>
                       </tr>
-                      <tr className="border-b border-subtle">
-                        <td className="px-3 py-2 font-medium text-secondary">{t('skillInfo.askToEdit')}</td>
+                      <tr className="border-b border-border/30">
+                        <td className="px-3 py-2 font-medium text-muted-foreground">{t('skillInfo.askToEdit')}</td>
                         <td className="px-3 py-2 flex items-center gap-2">
-                          <Check className="size-3.5 shrink-0 text-success" aria-hidden />
-                          <span className="text-foreground">{t('skillInfo.askToEditDesc')}</span>
-                        </td>
-                      </tr>
-                      <tr className="border-b border-subtle">
-                        <td className="px-3 py-2 font-medium text-secondary">{t('mode.guarded')}</td>
-                        <td className="px-3 py-2 flex items-center gap-2">
-                          <Minus className="size-3.5 shrink-0 text-tertiary" aria-hidden />
-                          <span className="text-foreground">{t('skillInfo.guardedDesc')}</span>
+                          <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                          <span className="text-foreground/80">{t('skillInfo.askToEditDesc')}</span>
                         </td>
                       </tr>
                       <tr>
-                        <td className="px-3 py-2 font-medium text-secondary">{t('skillInfo.auto')}</td>
+                        <td className="px-3 py-2 font-medium text-muted-foreground">{t('skillInfo.auto')}</td>
                         <td className="px-3 py-2 flex items-center gap-2">
-                          <Minus className="size-3.5 shrink-0 text-tertiary" aria-hidden />
-                          <span className="text-foreground">{t('skillInfo.autoDesc')}</span>
+                          <Minus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-foreground/80">{t('skillInfo.autoDesc')}</span>
                         </td>
                       </tr>
                     </tbody>
@@ -270,15 +287,16 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           <Info_Section
             title={t('skillInfo.instructions')}
             actions={
-              // EditPopover for AI-assisted editing with "Edit File" as secondary action
-              <EditPopover
-                trigger={<EditButton />}
-                {...getEditConfig('skill-instructions', skill.path)}
-                secondaryAction={{
-                  label: t('common.editFile'),
-                  filePath: `${skill.path}/SKILL.md`,
-                }}
-              />
+              skill.source === 'bundled' ? undefined : (
+                <EditPopover
+                  trigger={<EditButton />}
+                  {...getEditConfig('skill-instructions', skill.path)}
+                  secondaryAction={{
+                    label: t('common.editFile'),
+                    filePath: `${skill.path}/SKILL.md`,
+                  }}
+                />
+              )
             }
           >
             <Info_Markdown maxHeight={540} fullscreen>
@@ -289,5 +307,14 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         </Info_Page.Content>
       )}
     </Info_Page>
+    <ResourceTransferDialog
+      open={exportOpen}
+      mode="export"
+      workspaceId={workspaceId}
+      initialSelection={[{ type: 'skill', id: skillSlug }]}
+      onOpenChange={setExportOpen}
+    />
+    {rename.dialog}
+    </>
   )
 }

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { parseTaskSpec, nodeDeps, nodeTitle, type TaskSpec } from './schema.ts';
+import { parseTaskSpec, nodeDeps, nodeTitle, nodeDisplayTitle, resolveNewTaskSchemaVersion, type TaskSpec } from './schema.ts';
 import { extractRefs, interpolateRefs } from './refs.ts';
 import { validateTaskSpec, validateTaskInput, TASK_CAPS } from './validate.ts';
 import { buildGeneratorPrompt, buildRepairPrompt } from './generator-prompt.ts';
@@ -15,7 +15,10 @@ import {
   appendRunLog,
   readRunLog,
   writeNodeOutput,
+  writeNodeAttempt,
   readNodeOutput,
+  writeRunState,
+  readRunState,
   listTaskSlugs,
   type RunLogEntry,
 } from './storage.ts';
@@ -44,6 +47,16 @@ function parsed(): TaskSpec {
 // ---------------------------------------------------------------------------
 
 describe('schema', () => {
+  it('derives readable legacy labels while preserving authored titles and execution IDs', () => {
+    const node = parsed().nodes[0]!;
+    expect(nodeDisplayTitle(node)).toBe('Audit the code');
+    expect(nodeDisplayTitle({ ...node, title: '审查成本' })).toBe('审查成本');
+    expect(nodeDisplayTitle({ ...node, title: 'audit', prompt: '[skill:deep-research]\n核对成本资料。提交结构化结果 {"claims":[]}' })).toBe('核对成本资料');
+    expect(nodeDisplayTitle({ ...node, prompt: '{"claims":[]}' })).toBe('audit');
+    expect(nodeDisplayTitle({ ...node, prompt: '读取资料 ${nodes.source.output}' })).toBe('读取资料');
+    expect(nodeTitle(node)).toBe('audit');
+    expect(node.id).toBe('audit');
+  });
   it('parses a valid chain and applies defaults', () => {
     const r = parseTaskSpec(CHAIN);
     expect(r.success).toBe(true);
@@ -110,6 +123,69 @@ describe('schema', () => {
   it('rejects an invalid slug id', () => {
     const r = parseTaskSpec({ id: 'Bad Id', title: 'X', goal: 'g', nodes: [{ id: 'a', prompt: 'p' }] });
     expect(r.success).toBe(false);
+  });
+
+  it('defaults new tasks to schema_version 3 and keeps an explicit v2', () => {
+    expect(resolveNewTaskSchemaVersion(undefined)).toBe(3);
+    expect(resolveNewTaskSchemaVersion(3)).toBe(3);
+    expect(resolveNewTaskSchemaVersion(1)).toBe(3);
+    expect(resolveNewTaskSchemaVersion('3')).toBe(3);
+    expect(resolveNewTaskSchemaVersion(2)).toBe(2);
+  });
+
+  it('accepts v2 fields: schema_version, sensitive params, output metadata, when AST, retry.when array, ui.layout', () => {
+    const r = parseTaskSpec({
+      ...CHAIN,
+      schema_version: 2,
+      params: [{ name: 'token', type: 'string', sensitive: true }],
+      nodes: [
+        {
+          id: 'audit',
+          prompt: 'Audit',
+          when: { ref: 'params.token', op: 'exists' },
+          retry: { limit: 1, when: ['error', 'invalid'] },
+          outputs: [{ name: 'summary', required: true, description: 'Audit summary' }],
+        },
+      ],
+      ui: { layout: { direction: 'TB', nodes: { audit: { x: 0, y: 0 } } } },
+    });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.schema_version).toBe(2);
+    expect(r.data.params?.[0]?.sensitive).toBe(true);
+    expect(r.data.nodes[0]!.outputs?.[0]).toMatchObject({ name: 'summary', required: true });
+    expect(r.data.nodes[0]!.when).toEqual({ ref: 'params.token', op: 'exists' });
+    expect(r.data.nodes[0]!.retry?.when).toEqual(['error', 'invalid']);
+    expect(r.data.ui?.layout?.direction).toBe('TB');
+  });
+
+  it('fails closed for incomplete or silently unsupported v2 node contracts', () => {
+    const base = { schema_version: 2, id: 'strict', title: 'Strict', goal: 'g' } as const;
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'route', kind: 'route' }] }).success).toBe(false);
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'map', kind: 'map', prompt: 'map' }] }).success).toBe(false);
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'judge', kind: 'judge' }] }).success).toBe(false);
+    expect(parseTaskSpec({
+      ...base,
+      nodes: [{ id: 'replica', prompt: 'work', replicas: 2, aggregate: 'synthesize' }],
+    }).success).toBe(false);
+    expect(parseTaskSpec({
+      ...base,
+      nodes: [{ id: 'route', kind: 'route', route: { cases: [{ when: 'true', goto: 'end' }], default: 'end' }, timeout: 1 }, { id: 'end', prompt: 'end' }],
+    }).success).toBe(false);
+  });
+
+  it('rejects mixed condition AST variants instead of stripping a branch', () => {
+    const mixed = { ref: 'params.choice', op: 'exists', all: [{ ref: 'params.other', op: 'exists' }] };
+    const base = { schema_version: 2, id: 'strict-conditions', title: 'Strict conditions', goal: 'g' } as const;
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'when', prompt: 'work', when: mixed }] }).success).toBe(false);
+    expect(parseTaskSpec({
+      ...base,
+      nodes: [
+        { id: 'route', kind: 'route', route: { cases: [{ when: mixed, goto: 'end' }], default: 'end' } },
+        { id: 'end', prompt: 'end' },
+      ],
+    }).success).toBe(false);
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'loop', prompt: 'work', loop: { until: mixed, max: 2 } }] }).success).toBe(false);
   });
 });
 
@@ -206,6 +282,30 @@ describe('validate', () => {
     });
     expect(res.valid).toBe(true);
     expect(res.warnings.some((w) => w.message.includes('structured output field'))).toBe(true);
+  });
+
+  it('accepts declared v2 output fields and rejects undeclared ones', () => {
+    const base = {
+      schema_version: 2,
+      id: 'x', title: 'X', goal: 'g',
+      nodes: [
+        { id: 'a', prompt: 'p', outputs: [{ name: 'score', type: 'number' }] },
+        { id: 'b', depends_on: ['a'], prompt: 'uses ${nodes.a.output.score}' },
+      ],
+    };
+    const ok = validateTaskInput(base);
+    expect(ok.valid).toBe(true);
+    expect(ok.warnings.some((w) => w.message.includes('structured output field'))).toBe(false);
+
+    const bad = validateTaskInput({
+      ...base,
+      nodes: [
+        base.nodes[0],
+        { id: 'b', depends_on: ['a'], prompt: 'uses ${nodes.a.output.missing}' },
+      ],
+    });
+    expect(bad.valid).toBe(false);
+    expect(bad.errors.some((e) => e.message.includes('undeclared output field "missing"'))).toBe(true);
   });
 
   it('detects a dependency cycle', () => {
@@ -306,30 +406,51 @@ describe('storage', () => {
     expect(readNodeOutput(root, 'demo', 'r1', 'audit')).toEqual({ text: 'findings', params: { count: 3 } });
     expect(readNodeOutput(root, 'demo', 'r1', 'missing')).toBeNull();
   });
+
+  it('reads the latest instance attempt when the v1 file is absent', () => {
+    writeNodeAttempt(root, 'demo', 'r1', 'fan#0', 1, { text: 'first' });
+    writeNodeAttempt(root, 'demo', 'r1', 'fan#0', 2, { text: 'second' });
+    expect(readNodeOutput(root, 'demo', 'r1', 'fan#0')).toEqual({ text: 'second' });
+  });
+
+  it('writes and reads a run-state checkpoint', () => {
+    writeRunState(root, 'demo', 'r1', {
+      seq: 3,
+      revision: 1,
+      tokensUsed: 12,
+      seenDecisionIds: ['d1'],
+      invalidPatchCount: 0,
+    });
+    expect(readRunState(root, 'demo', 'r1')).toEqual({
+      seq: 3,
+      revision: 1,
+      tokensUsed: 12,
+      seenDecisionIds: ['d1'],
+      invalidPatchCount: 0,
+    });
+  });
 });
 
 describe('generator-prompt', () => {
   it('instructs the model that every reference must resolve to a declared node', () => {
     const prompt = buildGeneratorPrompt('Decompose the goal', 'My task');
     expect(prompt).toContain('${nodes.<id>.output} reference MUST point to an `id` that you actually declare');
+    expect(prompt).toContain('MUST call submit_task_definition');
+    expect(prompt).toContain('schema_version: 2 or 3 definition found only in final text is rejected');
+    expect(prompt).toContain('schema_version: 3');
+    expect(prompt).not.toContain('unless the tool is unavailable');
     expect(prompt).toContain('Goal: Decompose the goal');
     expect(prompt).toContain('Working title: My task');
   });
 
-  it('repair prompt lists each validation error and re-asserts the YAML-only contract', () => {
+  it('repair prompt lists each validation error and re-asserts structured submission', () => {
     const prompt = buildRepairPrompt([
       { path: 'nodes.design.inputs', message: 'Reference ${nodes.audit-completion-signal.output} points to unknown node "audit-completion-signal"' },
       { path: 'root', message: 'second problem' },
     ]);
     expect(prompt).toContain('- nodes.design.inputs: Reference ${nodes.audit-completion-signal.output} points to unknown node "audit-completion-signal"');
     expect(prompt).toContain('- root: second problem');
-    expect(prompt).toContain('Output ONLY the YAML');
-  });
-
-  // Found 2026-10-11: four generations in a row timed out at 180 s; the authoring turns read the
-  // project's files and a source guide before writing anything.
-  it('keeps the authoring and repair turns off tools', () => {
-    expect(buildGeneratorPrompt('Decompose the goal')).toContain('Do not use tools');
-    expect(buildRepairPrompt([{ path: 'root', message: 'x' }])).toContain('Do not use tools');
+    expect(prompt).toContain('call submit_task_definition again');
+    expect(prompt).toContain('Do not paste YAML or JSON');
   });
 });

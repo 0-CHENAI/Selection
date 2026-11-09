@@ -1,0 +1,105 @@
+import { expect, spyOn, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
+import type { PptTemplate } from '@craft-agent/shared/protocol'
+import i18next from 'i18next'
+import { I18nextProvider, initReactI18next } from 'react-i18next'
+import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
+import { galleryTemplates, TemplateGrid } from './TemplateGallery'
+import { TemplateOptions } from './TemplateOptions'
+import { consumeTemplateFlight, queueTemplateFlight } from './template-flight'
+
+const i18n = i18next.createInstance()
+await i18n.use(initReactI18next).init({ lng: 'zh-Hans', resources: { 'zh-Hans': { translation: LOCALE_REGISTRY['zh-Hans'].messages } }, interpolation: { escapeValue: false } })
+
+function render(node: ReactElement): string {
+  return renderToStaticMarkup(<I18nextProvider i18n={i18n}>{node}</I18nextProvider>)
+}
+
+const variants = [
+  { id: 'dsh-signal', title: '信号简报', cover: 'data:variant-1', referencePages: [] },
+  { id: 'dsh-monochrome', title: '极简研究', cover: 'data:variant-2', referencePages: [] },
+]
+const template: PptTemplate = { id: 'rational-brief', title: '理性简报', category: '商务', tier: 'default', canvas: '16:9', pages: 12, cover: 'data:cover', referencePages: [], variants } as PptTemplate
+
+test('clears queued flight geometry when selection has no visual source', () => {
+  const source = { x: 10, y: 20, width: 100, height: 56 } as DOMRect
+  queueTemplateFlight('test-composer', source)
+  queueTemplateFlight('test-composer')
+  expect(consumeTemplateFlight('test-composer')).toBeUndefined()
+  queueTemplateFlight('test-composer', source)
+  expect(consumeTemplateFlight('test-composer')).toBe(source)
+  expect(consumeTemplateFlight('test-composer')).toBeUndefined()
+})
+
+test('does not animate from a source left behind by an abandoned selection', () => {
+  const clock = spyOn(Date, 'now')
+  try {
+    clock.mockReturnValue(10_000)
+    queueTemplateFlight('abandoned-composer', { x: 10, y: 20, width: 100, height: 56 } as DOMRect)
+    clock.mockReturnValue(12_001)
+    expect(consumeTemplateFlight('abandoned-composer')).toBeUndefined()
+  } finally {
+    clock.mockRestore()
+  }
+})
+
+test('template cards show cover, title and category · pages without variant chips', () => {
+  const html = render(<TemplateGrid templates={[template]} compact={false} onSelect={() => {}} onPreview={() => {}} />)
+  expect(html).toContain('理性简报')
+  expect(html).toContain('data:cover')
+  expect(html).not.toContain('ppt-template-variants')
+  expect(html).not.toContain('ppt-variant-')
+  expect(html).not.toContain('信号简报')
+  expect(html).not.toContain('极简研究')
+})
+
+test('a personal template card shows conversion counts and hides the english id', () => {
+  const custom: PptTemplate = {
+    id: 'custom-0123456789abcdef',
+    title: '公司模板',
+    category: '自定义',
+    canvas: '16:9',
+    pages: 10,
+    cover: 'data:cover',
+    referencePages: [],
+    diagnostics: { faithful: 8, approximate: 1, retained: 0, unsupported: 1 },
+  }
+  const html = render(<TemplateGrid templates={[custom]} compact={false} onSelect={() => {}} onPreview={() => {}} onChanged={() => {}} />)
+  expect(html).toContain('公司模板')
+  expect(html).toContain('保真 8')
+  expect(html).toContain('近似 1')
+  expect(html).toContain('不支持 1')
+  expect(html).toContain('有对象需要人工复核')
+  expect(html).not.toContain('>custom-0123456789abcdef<')
+  expect(html).not.toContain('ppt-template-variants')
+})
+
+test('a selected variant still marks its parent card as selected', () => {
+  const html = render(<TemplateGrid templates={[template]} compact={false} selectedId="dsh-signal" onSelect={() => {}} onPreview={() => {}} />)
+  expect(html).toContain('aria-pressed="true"')
+})
+
+test('variants stay selectable from the selected template options', () => {
+  const html = render(<TemplateOptions request={{ templateId: 'rational-brief' } as never} themes={[]} variants={variants} baseTemplate={{ id: template.id, title: template.title }} onChange={() => {}} />)
+  expect(html).toContain('理性简报')
+  expect(html).toContain('信号简报')
+  expect(html).toContain('极简研究')
+})
+
+test('every template in the tab is shown in the grid, none folded behind 更多模板', () => {
+  const card = (id: string, category: PptTemplate['category'], tier: 'default' | 'more') =>
+    ({ id, title: id, category, tier, canvas: '16:9', pages: 12, cover: 'data:cover', referencePages: [] }) as PptTemplate
+  const all = [card('a', '商务', 'default'), card('b', '技术', 'default'), card('c', '商务', 'more'), card('d', '咨询', 'more')]
+  expect(galleryTemplates(all, 'all', '').map(item => item.id)).toEqual(['a', 'b', 'c', 'd'])
+  expect(galleryTemplates(all, '商务', '').map(item => item.id)).toEqual(['a', 'c'])
+  expect(galleryTemplates(all, 'all', ' D ').map(item => item.id)).toEqual(['d'])
+  const html = render(<TemplateGrid templates={[{ ...all[2]!, note: '单独放在更多模板。' }]} compact={false} onSelect={() => {}} onPreview={() => {}} />)
+  expect(html).toContain('商务 · 12 页')
+  expect(html).not.toContain('单独放在更多模板')
+  const source = readFileSync(join(import.meta.dir, 'TemplateGallery.tsx'), 'utf8')
+  expect(source).not.toContain('ppt-more-templates')
+  expect(source).not.toContain('<details')
+})

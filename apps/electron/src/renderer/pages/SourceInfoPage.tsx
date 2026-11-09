@@ -11,8 +11,11 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
-import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { SourceMenu } from '@/components/app-shell/SourceMenu'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
+import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
+import { cn } from '@/lib/utils'
 import { routes, navigate } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { toast } from 'sonner'
@@ -22,13 +25,9 @@ import {
   Info_Table,
   Info_Alert,
   Info_Markdown,
-  Info_HeaderMenu,
-  Info_StatePill,
-  Info_TechnicalDetails,
   PermissionsDataTable,
   ToolsDataTable,
   type PermissionRow,
-  type StatePillTone,
   type ToolRow,
 } from '@/components/info'
 import type { LoadedSource, McpToolWithPermission } from '../../shared/types'
@@ -137,27 +136,6 @@ function buildToolsData(tools: McpToolWithPermission[]): ToolRow[] {
 }
 
 /**
- * Hero state pill: the source's connection status (same derivation as the list and the avatar dot)
- * as a tone + the list's plain-language label. Unknown stored statuses read as failed.
- */
-function getStatePill(source: LoadedSource, localMcpEnabled: boolean, t: (key: string) => string): { tone: StatePillTone; label: string } {
-  const status = deriveConnectionStatus(source, localMcpEnabled)
-  switch (status) {
-    case 'connected': return { tone: 'ok', label: t('sourcesList.statusConnected') }
-    case 'needs_auth': return { tone: 'warn', label: t('sourcesList.statusAuthRequired') }
-    case 'untested': return { tone: 'off', label: t('sourcesList.statusNotTested') }
-    case 'local_disabled': return { tone: 'off', label: t('sourcesList.statusDisabled') }
-    default: return { tone: 'bad', label: t('sourcesList.statusDisconnected') }
-  }
-}
-
-const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
-  mcp: 'sourcesList.typeMcp',
-  api: 'sourcesList.typeApi',
-  local: 'sourcesList.typeLocal',
-}
-
-/**
  * Get contextual description for Connection section based on source type
  */
 function getConnectionDescription(source: LoadedSource, t: (key: string) => string): string {
@@ -198,6 +176,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
   const { navigateToSource } = useNavigation()
   const [source, setSource] = useState<LoadedSource | null>(null)
   const [loading, setLoading] = useState(true)
+  const [exportOpen, setExportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [permissionsConfig, setPermissionsConfig] = useState<PermissionsConfigFile | null>(null)
   const [mcpTools, setMcpTools] = useState<McpToolWithPermission[] | null>(null)
@@ -249,6 +228,17 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     if (!source || source.config.type !== 'mcp') {
       setMcpTools(null)
       setMcpToolsError(null)
+      return
+    }
+    if (
+      source.config.connectionStatus === 'connecting'
+      || source.config.connectionStatus === 'needs_auth'
+      || source.config.connectionStatus === 'failed'
+      || source.config.connectionStatus === 'untested'
+    ) {
+      setMcpTools(null)
+      setMcpToolsError(null)
+      setMcpToolsLoading(source.config.connectionStatus === 'connecting')
       return
     }
 
@@ -364,7 +354,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     if (!source) return
     try {
       await window.electronAPI.deleteSource(workspaceId, sourceSlug)
-      toast.success(t('sourceInfo.deletedSource', { name: source.config.name }))
+      toast.success(t('sourceInfo.deletedSource', { name: resolveSourceTitle(source) }))
       navigateToSource() // Navigate to source list, preserving filter
       onDelete?.()
     } catch (err) {
@@ -379,55 +369,63 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     window.electronAPI.openUrl(`craftagents://sources/source/${sourceSlug}?window=focused`)
   }, [sourceSlug])
 
-  // Get source name for header
-  const sourceName = source?.config.name || sourceSlug
+  const handleRetryConnection = useCallback(async () => {
+    try {
+      await window.electronAPI.retryMcpConnection(workspaceId, sourceSlug)
+    } catch (error) {
+      toast.error(t('sourcesList.statusConnectionFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [sourceSlug, t, workspaceId])
 
-  const statePill = source ? getStatePill(source, localMcpEnabled, t) : null
-  const typeLabelKey = source ? SOURCE_TYPE_LABEL_KEYS[source.config.type] : undefined
+  const sourceName = source ? resolveSourceTitle(source) : sourceSlug
+  const rename = useDisplayTitleRename('source', workspaceId)
+  const renameTarget = source && {
+    displayTitle: source.displayTitle,
+    defaultTitle: source.config.name,
+  }
 
   return (
+    <>
     <Info_Page
       loading={loading}
       error={error ?? undefined}
       empty={!source && !loading && !error ? t('sourceInfo.notFound') : undefined}
     >
-      {/* The name lives in the hero; the header carries the actions menu (same items as before) */}
       <Info_Page.Header
-        actions={
-          <Info_HeaderMenu>
-            <SourceMenu
-              sourceSlug={sourceSlug}
-              sourceName={sourceName}
-              onOpenInNewWindow={handleOpenInNewWindow}
-              onShowInFinder={handleOpenSourceFolder}
-              onDelete={handleDelete}
-            />
-          </Info_HeaderMenu>
+        title={sourceName}
+        titleMenu={
+          <SourceMenu
+            sourceSlug={sourceSlug}
+            sourceName={sourceName}
+            onOpenInNewWindow={handleOpenInNewWindow}
+            onShowInFinder={handleOpenSourceFolder}
+            onRename={() => source && renameTarget && rename.start(source.config.slug, renameTarget)}
+            onExport={() => setExportOpen(true)}
+            onDelete={handleDelete}
+            onRetryConnection={source?.config.type === 'mcp'
+              && (source.config.connectionStatus === 'failed'
+                || (source.config.connectionStatus === 'needs_auth' && Boolean(source.config.connectionError)))
+              ? () => void handleRetryConnection()
+              : undefined}
+          />
         }
       />
 
       {source && (
         <Info_Page.Content>
-          {/* Hero: mark, name, state pill, type and tagline */}
+          {/* Hero: Avatar, title, and tagline */}
           <Info_Page.Hero
             avatar={<SourceAvatar source={source} fluid />}
-            title={source.config.name}
-            meta={statePill && <Info_StatePill tone={statePill.tone}>{statePill.label}</Info_StatePill>}
-            // Type and tagline share one text run (mockup "MCP server · …") so a wrap never strands the dot
-            tagline={[typeLabelKey ? t(typeLabelKey) : null, source.config.tagline].filter(Boolean).join(' · ') || null}
+            title={resolveSourceTitle(source)}
+            tagline={source.config.tagline}
+            onTitleClick={() => renameTarget && rename.start(source.config.slug, renameTarget)}
           />
-
-          {/* Connection error: plain banner, raw text under Technical details */}
-          {source.config.connectionError && (
-            <Info_Alert variant="error" icon={<AlertCircle />}>
-              <Info_Alert.Title>{t('sourceInfo.connectionErrorTitle', { name: source.config.name })}</Info_Alert.Title>
-              <Info_TechnicalDetails className="mt-1.5">{source.config.connectionError.trim()}</Info_TechnicalDetails>
-            </Info_Alert>
-          )}
 
           {/* Disabled Warning */}
           {source.config.mcp?.transport === 'stdio' && !localMcpEnabled && (
-            <Info_Alert variant="warning" icon={<AlertCircle />}>
+            <Info_Alert variant="warning" icon={<AlertCircle className="h-4 w-4" />}>
               <Info_Alert.Title>{t('sourceInfo.sourceDisabled')}</Info_Alert.Title>
               <Info_Alert.Description>
                 {t('sourceInfo.localMcpDisabled')}
@@ -451,13 +449,39 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
               />
             }
           >
-            <Info_Table>
+            <Info_Table
+              footer={source.config.connectionError && (
+                <div className="px-4 py-2 border-t border-border/30 bg-destructive/5">
+                  <div className="flex items-start gap-2 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span className="flex-1">{source.config.connectionError}</span>
+                    {source.config.type === 'mcp' && (
+                      <button
+                        type="button"
+                        className="shrink-0 font-medium underline-offset-2 hover:underline focus-visible:underline"
+                        onClick={() => void handleRetryConnection()}
+                      >
+                        {t('common.retry')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            >
+              <Info_Table.Row label={t('displayTitle.label')}>
+                <DisplayTitleField
+                  customTitle={source.displayTitle}
+                  onRename={() => renameTarget && rename.start(source.config.slug, renameTarget)}
+                />
+              </Info_Table.Row>
+              <Info_Table.Row label={t('common.originalName')} value={source.config.name} />
+              <Info_Table.Row label={t('common.slug')} value={source.config.slug} />
               <Info_Table.Row label={t('common.type')} value={source.config.type.toUpperCase()} />
               {sourceUrl && (
                 <Info_Table.Row label={t('common.url')}>
                   <button
                     onClick={handleOpenUrl}
-                    className="-my-1 block w-full rounded-xs py-1 text-left font-mono text-mono-ui text-foreground [overflow-wrap:anywhere] hover:underline"
+                    className="truncate hover:underline text-foreground focus:outline-none focus-visible:underline text-left block w-full"
                   >
                     {sourceUrl}
                   </button>
@@ -492,7 +516,6 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
           {source.config.type === 'mcp' && (
             <Info_Section
               title={t('sourceInfo.tools')}
-              count={mcpTools && !mcpToolsLoading && !mcpToolsError ? toolsData.length : undefined}
               description={t('sourceInfo.toolsDesc')}
               actions={
                 // EditPopover for AI-assisted tool permissions editing
@@ -506,21 +529,11 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
                 />
               }
             >
-              {mcpToolsError && mcpToolsError !== 'Source requires authentication' ? (
-                // Plain message; the raw transport error stays under Technical details (never shown twice)
-                <div className="px-3.5 py-3">
-                  <p className="text-label text-secondary">{t('sourceInfo.failedToLoadTools')}</p>
-                  {mcpToolsError.trim() !== t('sourceInfo.failedToLoadTools') && (
-                    <Info_TechnicalDetails className="mt-1">{mcpToolsError.trim()}</Info_TechnicalDetails>
-                  )}
-                </div>
-              ) : (
-                <ToolsDataTable
-                  data={toolsData}
-                  loading={mcpToolsLoading}
-                  error={mcpToolsError ?? undefined}
-                />
-              )}
+              <ToolsDataTable
+                data={toolsData}
+                loading={mcpToolsLoading}
+                error={mcpToolsError ?? undefined}
+              />
             </Info_Section>
           )}
 
@@ -570,5 +583,14 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         </Info_Page.Content>
       )}
     </Info_Page>
+    <ResourceTransferDialog
+      open={exportOpen}
+      mode="export"
+      workspaceId={workspaceId}
+      initialSelection={[{ type: 'source', id: sourceSlug }]}
+      onOpenChange={setExportOpen}
+    />
+    {rename.dialog}
+    </>
   )
 }

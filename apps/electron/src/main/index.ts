@@ -4,10 +4,12 @@ import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
+import { applyAppIdentity } from './app-identity'
 import { createHash, randomUUID } from 'crypto'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
-import { redactSensitiveHeadersInPlace, redactSensitiveKeysInPlace } from '@craft-agent/shared/utils'
+
+applyAppIdentity()
 
 // Initialize Sentry error tracking as early as possible after app import.
 // Only enabled in production (packaged) builds to avoid noise during development.
@@ -27,19 +29,30 @@ Sentry.init({
   enabled: !!process.env.SENTRY_ELECTRON_INGEST_URL,
 
   // Scrub sensitive data before sending to Sentry.
-  // Shared logic in @craft-agent/shared/utils redaction.ts (also used by the
-  // renderer hook and the Pages action audit log) — keep semantics there.
+  // Removes authorization headers, API keys/tokens, and credential-like values.
   beforeSend(event) {
     // Scrub request headers (authorization, cookies)
     if (event.request?.headers) {
-      redactSensitiveHeadersInPlace(event.request.headers)
+      const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key']
+      for (const header of sensitiveHeaders) {
+        if (event.request.headers[header]) {
+          event.request.headers[header] = '[REDACTED]'
+        }
+      }
     }
 
     // Scrub breadcrumb data that may contain sensitive values
     if (event.breadcrumbs) {
       for (const breadcrumb of event.breadcrumbs) {
         if (breadcrumb.data) {
-          redactSensitiveKeysInPlace(breadcrumb.data)
+          for (const key of Object.keys(breadcrumb.data)) {
+            const lowerKey = key.toLowerCase()
+            if (lowerKey.includes('token') || lowerKey.includes('key') ||
+                lowerKey.includes('secret') || lowerKey.includes('password') ||
+                lowerKey.includes('credential') || lowerKey.includes('auth')) {
+              breadcrumb.data[key] = '[REDACTED]'
+            }
+          }
         }
       }
     }
@@ -59,8 +72,6 @@ Sentry.init({
 // the system prompt's "Preferred language" line, and the native menu.
 import { setupI18n, i18n, SUPPORTED_LANGUAGE_CODES, type LanguageCode } from '@craft-agent/shared/i18n'
 import { getPersistedUiLanguage, setPersistedUiLanguage } from '@craft-agent/shared/config'
-import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
-import { registerDefaultZoomIpc } from './zoom'
 setupI18n()
 const persistedUiLanguage = getPersistedUiLanguage()
 if (persistedUiLanguage) {
@@ -77,9 +88,8 @@ import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@craft-agent/server-core/sessions'
-import { PageThumbnailer } from './page-thumbnailer'
 import { registerAllRpcHandlers } from './handlers/index'
-import { registerCoreRpcHandlers, cleanupRpcClientResources } from '@craft-agent/server-core/handlers/rpc'
+import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@craft-agent/server-core/handlers/rpc'
 import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
@@ -87,7 +97,8 @@ import { bootstrapServer, releaseServerLock } from '@craft-agent/server-core/boo
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@craft-agent/messaging-gateway'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
-import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
+import { setSearchPlatform, setImageProcessor, setOfficePageCaptureHost } from '@craft-agent/server-core/services'
+import { createElectronOfficeCaptureHost } from './office-render-host'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
@@ -159,6 +170,10 @@ if (isDebugMode) {
   const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
   if (existsSync(bunBinary)) {
     process.env.CRAFT_BUN = bunBinary
+  } else if (app.isPackaged) {
+    mainLog.warn('Bundled Bun runtime missing; Pi sessions will not start.', {
+      expectedBunPath: bunBinary,
+    })
   }
 
   process.env.CRAFT_SCRIPTS = scriptsDir
@@ -174,9 +189,38 @@ if (isDebugMode) {
   process.env.CRAFT_CLI_DOC_PATH = process.env.CRAFT_COMMANDS_DOC_PATH
   process.env.CRAFT_AGENT_VERSION = app.getVersion()
   // Prepend both generic wrappers dir and platform uv dir:
-  // - binDir exposes wrapper commands (pdf-tool, docx-tool, ...)
+  // - binDir exposes non-Office wrapper commands (pdf-tool, img-tool, ...)
   // - uvPlatformDir exposes raw `uv` for direct shell usage / debugging
   process.env.PATH = `${binDir}${delimiter}${uvPlatformDir}${delimiter}${process.env.PATH}`
+
+  const officecliBinary = join(uvPlatformDir, process.platform === 'win32' ? 'officecli.exe' : 'officecli')
+  const officecliWrapper = join(binDir, process.platform === 'win32' ? 'officecli.cmd' : 'officecli')
+  if (existsSync(officecliBinary) && existsSync(officecliWrapper)) {
+    process.env.CRAFT_OFFICECLI = officecliWrapper
+  } else {
+    delete process.env.CRAFT_OFFICECLI
+    mainLog.warn('Bundled officecli runtime or trusted wrapper missing; Word/Excel/PowerPoint edits via officecli will fail.', {
+      expectedOfficecliPath: officecliBinary,
+      expectedOfficecliWrapper: officecliWrapper,
+    })
+  }
+
+  const officecliResourceCandidates = [
+    join(resourcesBase, 'dist', 'resources', 'officecli'),
+    join(resourcesBase, 'resources', 'officecli'),
+  ]
+  const officecliResources = officecliResourceCandidates.find(candidate =>
+    existsSync(join(candidate, 'officecli-manifest.json')),
+  )
+  if (officecliResources) {
+    process.env.CRAFT_OFFICECLI_RESOURCES = officecliResources
+  } else {
+    delete process.env.CRAFT_OFFICECLI_RESOURCES
+    mainLog.warn('Bundled officecli resources missing; built-in OfficeCLI skills will not load.', {
+      kind: app.isPackaged ? 'packaging_misconfigured' : 'resources_missing',
+      expectedOfficecliResourcePaths: officecliResourceCandidates,
+    })
+  }
 
   if (!bundledUvExists) {
     mainLog.warn('Bundled uv binary missing, CLI document tools may fail unless uv is available on PATH.', {
@@ -195,6 +239,17 @@ if (isDebugMode) {
 registerPiModelResolver((piAuthProvider) =>
   piAuthProvider ? getPiModelsForAuthProvider(piAuthProvider) : getAllPiModels()
 )
+
+void import('@craft-agent/shared/config/models-dev-thinking-cache')
+  .then(({ loadModelsDevThinkingCache }) => loadModelsDevThinkingCache())
+  .catch((error: unknown) => {
+    console.warn('[thinking] models.dev catalog unavailable', error)
+  })
+void import('@craft-agent/shared/config/thinking-probe-store')
+  .then(({ loadThinkingProbeStore }) => loadThinkingProbeStore())
+  .catch((error: unknown) => {
+    console.warn('[thinking] probe cache unavailable', error)
+  })
 
 // Custom URL scheme for deeplinks (e.g., craftagents://auth-complete)
 // Supports multi-instance dev: CRAFT_DEEPLINK_SCHEME env var (craftagents1, craftagents2, etc.)
@@ -217,10 +272,6 @@ let messagingHandle: MessagingBootstrapHandle | null = null
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
 
-// Set app name early (before app.whenReady) to ensure correct macOS menu bar title
-// Supports multi-instance dev: CRAFT_APP_NAME env var (e.g., "Craft Agents [1]")
-app.setName(process.env.CRAFT_APP_NAME || 'Craft Agents')
-
 // Register as default protocol client for craftagents:// URLs
 // This must be done before app.whenReady() on some platforms
 if (process.defaultApp) {
@@ -235,6 +286,7 @@ if (process.defaultApp) {
 
 // Apply network proxy settings early (Node-level only — Electron sessions require app.whenReady)
 import { applyConfiguredProxySettings } from './network-proxy'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 void applyConfiguredProxySettings()
 
 // Accept self-signed / untrusted certificates when connecting to a user-configured remote server.
@@ -386,6 +438,9 @@ app.whenReady().then(async () => {
       appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
       resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged,
+      nodeRuntimePath: process.env.CRAFT_BUN && existsSync(process.env.CRAFT_BUN)
+        ? process.env.CRAFT_BUN
+        : undefined,
     },
   })
 
@@ -402,10 +457,10 @@ app.whenReady().then(async () => {
   // Ensure default permissions file exists (copies bundled default.json on first run)
   ensureDefaultPermissions()
 
-  // Seed tool icons to ~/.craft-agent/tool-icons/ (copies bundled SVGs on first run)
+  // Seed tool icons to ~/.selection/tool-icons/ (copy missing files; refresh Selection swan)
   ensureToolIcons()
 
-  // Seed preset themes to ~/.craft-agent/themes/ (copies bundled theme JSONs on first run)
+  // Seed preset themes to ~/.selection/themes/ (copies bundled theme JSONs on first run)
   ensurePresetThemes()
 
   // Register thumbnail:// protocol handler (scheme was registered earlier, before app.whenReady)
@@ -424,8 +479,8 @@ app.whenReady().then(async () => {
     // In packaged app, resources are at dist/resources/ (same level as __dirname)
     // In dev, resources are at ../resources/ (sibling of dist/)
     const dockIconPath = [
-      join(__dirname, 'resources/icon.png'),
-      join(__dirname, '../resources/icon.png'),
+      join(__dirname, 'resources/icon-dock.png'),
+      join(__dirname, '../resources/icon-dock.png'),
     ].find(p => existsSync(p))
 
     if (dockIconPath) {
@@ -448,8 +503,6 @@ app.whenReady().then(async () => {
   try {
     // Initialize window manager
     windowManager = new WindowManager()
-    const windows = windowManager
-    registerDefaultZoomIpc(() => windows.getAllWindows().map(managed => managed.window))
 
     // Create the application menu (needs windowManager for New Window action)
     createApplicationMenu(windowManager)
@@ -530,13 +583,6 @@ app.whenReady().then(async () => {
 
     // Dialog bridge — preload capability handlers use ipcRenderer.invoke to
     // call main-process-only dialog APIs (dialog, BrowserWindow).
-    ipcMain.handle('__dialog:showMessageBox', async (event, spec) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-        || BrowserWindow.getFocusedWindow()
-        || BrowserWindow.getAllWindows()[0]
-      const result = await dialog.showMessageBox(win, spec)
-      return { response: result.response }
-    })
     ipcMain.handle('__dialog:showOpenDialog', async (event, spec) => {
       const win = BrowserWindow.fromWebContents(event.sender)
         || BrowserWindow.getFocusedWindow()
@@ -650,16 +696,8 @@ app.whenReady().then(async () => {
         createSessionManager: () => {
           const sm = new SessionManager()
           sm.setBrowserPaneManager(browserPaneManager!)
-          // Page preview posters: offscreen capture is Electron-main-only. On
-          // capture, nudge the watcher so the pages:changed push carries the
-          // fresh thumbnail pointer to open grids.
-          const pageThumbnailer = new PageThumbnailer({
-            log: (m) => mainLog.info(m),
-            onCaptured: ({ workspaceRootPath, slug }) => {
-              sm.notifyConfigFileChange(workspaceRootPath, `pages/${slug}/page.json`)
-            },
-          })
-          sm.setPageThumbnailer((req) => pageThumbnailer.enqueue(req))
+          // office_render: same OfficeCLI HTML as the Office preview panel, captured offscreen.
+          setOfficePageCaptureHost(createElectronOfficeCaptureHost())
           return sm
         },
         bindRpcServer: (sm, server) => sm.setRpcServer(server),
@@ -677,19 +715,8 @@ app.whenReady().then(async () => {
               return ws ? join(ws.rootPath, 'messaging') : undefined
             },
             // Route messaging diagnostics through the dedicated messaging log
-            // at ~/.craft-agent/logs/messaging-gateway.log.
+            // at ~/.selection/logs/messaging-gateway.log.
             logger: messagingGatewayLog,
-            // WhatsApp worker runs under Electron's embedded Node via
-            // ELECTRON_RUN_AS_NODE (WhatsAppAdapter defaults nodeBin to
-            // process.execPath). In dev we resolve worker.cjs from the
-            // monorepo; in packaged builds it's shipped via extraResources
-            // (see apps/electron/electron-builder.yml).
-            whatsapp: {
-              workerEntry: app.isPackaged
-                ? join(process.resourcesPath, 'messaging-whatsapp-worker', 'worker.cjs')
-                : join(process.cwd(), 'packages', 'messaging-whatsapp-worker', 'dist', 'worker.cjs'),
-              pairingMode: 'qr',
-            },
           })
           return {
             sessionManager: sm,
@@ -728,7 +755,7 @@ app.whenReady().then(async () => {
           for (const [wcId, cId] of clientMap) {
             if (cId === clientId) { clientMap.delete(wcId); break }
           }
-          cleanupRpcClientResources(clientId)
+          cleanupSessionFileWatchForClient(clientId)
         },
       })
 
@@ -770,10 +797,32 @@ app.whenReady().then(async () => {
 
       // IPC handlers — preload uses sendSync to get WS connection details
 
-      // Remove workspace from config (cleanup stale entries)
+      // Remove workspace: unload runtime (watchers/agents) then registry + disk folder
       ipcMain.handle('workspace:remove', async (_event, workspaceId: string) => {
+        if (typeof workspaceId !== 'string' || !workspaceId.trim()) {
+          return false
+        }
+        const id = workspaceId.trim()
+
+        // Release file watchers / agents before recursive delete (avoids EBUSY / locked files)
+        if (sessionManager) {
+          try {
+            await sessionManager.unloadWorkspace(id)
+          } catch (err) {
+            mainLog.warn(`[workspace:remove] unloadWorkspace failed for ${id}:`, err)
+          }
+        }
+
+        if (messagingHandle) {
+          try {
+            await messagingHandle.registry.removeWorkspace(id)
+          } catch (err) {
+            mainLog.warn(`[workspace:remove] messaging cleanup failed for ${id}:`, err)
+          }
+        }
+
         const { removeWorkspace: remove } = await import('@craft-agent/shared/config')
-        return remove(workspaceId)
+        return remove(id)
       })
 
       // Cross-server RPC — invoke a channel on an arbitrary remote server
@@ -1132,7 +1181,7 @@ app.whenReady().then(async () => {
         type: 'error',
         title: 'Update failed',
         message: 'The update could not be installed.',
-        detail: 'Craft Agents will restart now. The update will be retried on the next launch.',
+        detail: 'Selection will restart now. The update will be retried on the next launch.',
       })
       app.relaunch()
       app.exit(0)
@@ -1251,7 +1300,7 @@ async function performQuitCleanup(): Promise<void> {
   // Stop all model refresh timers
   getModelRefreshService().stopAll()
 
-  // Stop messaging gateways so the WhatsApp worker subprocess exits cleanly.
+  // Stop messaging gateways before the app exits.
   if (messagingHandle) {
     try {
       await messagingHandle.dispose()

@@ -1,10 +1,10 @@
 import * as React from 'react'
 import { ChevronDown } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import { FadingText } from '@/components/ui/fading-text'
 import { cn } from '@/lib/utils'
-import { COMPOSER_CHIP } from './composer-styles'
 
-export interface FreeFormInputContextBadgeProps {
+export interface FreeFormInputContextBadgeProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
   /** Left area - fully customizable (icon, avatar stack, etc.) */
   icon: React.ReactNode
   /** Label text - shown in expanded state or collapsed with selection */
@@ -13,10 +13,13 @@ export interface FreeFormInputContextBadgeProps {
   isExpanded?: boolean
   /** Whether there's an active selection (affects collapsed state styling and shows label) */
   hasSelection?: boolean
+  /**
+   * Collapsed selection draws a filled chip (`bg-background` + hairline).
+   * Working-directory marks pass false so the folder name stays borderless.
+   */
+  selectionChrome?: boolean
   /** Show chevron indicator (for dropdowns) - only visible in expanded state */
   showChevron?: boolean
-  /** Click handler */
-  onClick?: () => void
   /** Tooltip content - can be string or ReactNode for rich content */
   tooltip?: React.ReactNode
   /** Whether the badge is currently "open" (e.g., dropdown is shown) */
@@ -29,19 +32,19 @@ export interface FreeFormInputContextBadgeProps {
   buttonRef?: React.RefObject<HTMLButtonElement>
   /** Data attribute for tutorials */
   'data-tutorial'?: string
+  /** Native tooltip. Prefer `tooltip` when the badge is not itself a popover trigger. */
+  title?: string
+  'data-testid'?: string
 }
 
 /**
- * FreeFormInputContextBadge - Unified context chip for Sources and Folder selectors
- * (mockup `.cx-bar .chip-btn`): a ghost 28px pill, secondary label, tertiary icon.
+ * FreeFormInputContextBadge - Unified context badge for Sources, Files, and Folder selectors
  *
  * Visual States:
- * - Expanded: Icon + Label + Chevron (placeholder label in tertiary when nothing is selected)
- * - Collapsed (no selection): Icon only, a 28px round target
- * - Collapsed (has selection): Icon + Label (ellipsized on overflow)
- * - Open: fill-hover (like hover)
- *
- * The label carries `data-badge-label` so a compact toolbar can hide it (icon-only) with CSS.
+ * - Expanded: Icon + Label + Chevron, no background, hover shows background
+ * - Collapsed (no selection): Icon only, no background, hover shows background
+ * - Collapsed (has selection): Icon + Label (fading), bg-background + hairline unless selectionChrome is false
+ * - Open: bg-foreground/5 (like hover)
  */
 export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, FreeFormInputContextBadgeProps>(
   function FreeFormInputContextBadge(
@@ -50,6 +53,7 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
       label,
       isExpanded = false,
       hasSelection = false,
+      selectionChrome = true,
       showChevron = false,
       onClick,
       tooltip,
@@ -58,6 +62,9 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
       className,
       buttonRef,
       'data-tutorial': dataTutorial,
+      title,
+      'data-testid': dataTestId,
+      ...rest
     },
     ref
   ) {
@@ -66,48 +73,57 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
 
     // Show label in expanded state OR in collapsed state with selection
     const showLabel = isExpanded || hasSelection
+    const filledSelection = !isExpanded && hasSelection && selectionChrome
 
     const button = (
       <button
+        {...rest}
         ref={mergedRef as React.Ref<HTMLButtonElement>}
         type="button"
         aria-label={label}
-        aria-expanded={isOpen || undefined}
         onClick={onClick}
         disabled={disabled}
         data-tutorial={dataTutorial}
+        data-testid={dataTestId}
+        title={title}
         className={cn(
-          COMPOSER_CHIP,
-          // Shrinks in tight toolbars; icon-only chips stay a round 28px target
-          'shrink',
-          !showLabel && 'w-control shrink-0 justify-center px-0',
-          isOpen && 'bg-fill-hover text-foreground',
+          // Base styles - shrink + min-w-0 allows badge to compress in tight layouts
+          "input-toolbar-btn inline-flex items-center gap-1.5 h-7 rounded-[6px] text-[13px] text-foreground transition-colors select-none shrink min-w-0",
+          "disabled:opacity-50 disabled:pointer-events-none",
+          // Padding: more padding when showing label
+          showLabel ? "px-2" : "px-1.5",
+          // Collapsed with selection: visible background + thin 1px border + margin
+          filledSelection && "bg-background border border-foreground/5 mx-0.5",
+          // Hover state (when not already showing a filled selection chip)
+          !filledSelection && "hover:bg-foreground/5",
+          // Open state (dropdown shown)
+          isOpen && "bg-foreground/5",
           className
         )}
       >
         {/* Icon area */}
-        <span className="flex shrink-0 items-center">
+        <span className="shrink-0 flex items-center">
           {icon}
         </span>
 
         {/* Label - in expanded state or collapsed with selection */}
         {showLabel && (
           isExpanded ? (
-            // Expanded: simple truncate; a placeholder label (no selection) reads tertiary
-            <span data-badge-label className={cn('min-w-0 max-w-[120px] shrink truncate', !hasSelection && 'text-tertiary')}>
+            // Expanded: simple truncate, placeholder (no selection) gets 60% opacity
+            <span className={cn("truncate max-w-[120px] min-w-0 shrink", !hasSelection && "opacity-50")}>
               {label}
             </span>
           ) : (
-            // Preserve a visible truncation affordance instead of fading mid-word.
-            <span data-badge-label className="max-w-[140px] min-w-0 shrink truncate">
+            // Collapsed with selection: fading text with max width
+            <FadingText className="max-w-[140px] min-w-0 shrink" fadeWidth={20}>
               {label}
-            </span>
+            </FadingText>
           )
         )}
 
         {/* Optional chevron - only in expanded state */}
         {isExpanded && showChevron && (
-          <ChevronDown data-badge-label className="size-3.5 shrink-0" />
+          <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
         )}
       </button>
     )

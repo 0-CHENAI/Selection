@@ -4,6 +4,8 @@ export type AnnotationIslandView = 'compact' | 'confirm-follow-up'
 export type AnnotationIslandMode = 'edit' | 'view'
 
 export type AnchoredSelection = TextAnnotationSelection & {
+  /** Ephemeral source snapshot captured when the user selects; never serialized. */
+  sourceContent?: string
   anchorX: number
   anchorY: number
 }

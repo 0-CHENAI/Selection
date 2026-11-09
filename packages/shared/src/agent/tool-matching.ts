@@ -14,7 +14,7 @@
  * Together these eliminate the need for FIFO matching, parent stacks, and orphan recovery.
  */
 
-import type { AgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent, AgentToolResultContent } from '@craft-agent/core/types';
 import { toolMetadataStore } from '../interceptor-common.ts';
 import { createLogger } from '../utils/debug.ts';
 import { isParentTaskTool } from '../utils/toolNames.ts';
@@ -265,6 +265,7 @@ export function extractToolResults(
       const entry = toolIndex.getEntry(toolUseId);
 
       const resultStr = serializeResult(block.content);
+      const content = normalizeToolResultContent(block.content);
       const isError = block.is_error ?? isToolResultError(block.content);
 
       events.push({
@@ -272,16 +273,15 @@ export function extractToolResults(
         toolUseId,
         toolName: entry?.name,
         result: resultStr,
+        ...(content ? { content } : {}),
         isError,
         input: entry?.input,
         turnId,
         parentToolUseId: sdkParentToolUseId ?? undefined,
       });
 
-      // Detect background tasks/shells from results. Only the session's own agent: a subagent's
-      // background task (a sidechain result, with a parent tool use) belongs to that subagent,
-      // which the SDK notifies itself; tracking it here produced phantom completion prompts.
-      if (entry && sdkParentToolUseId === null) {
+      // Detect background tasks/shells from results
+      if (entry) {
         const bgEvents = detectBackgroundEvents(toolUseId, entry, resultStr, isError, turnId);
         events.push(...bgEvents);
       }
@@ -304,6 +304,7 @@ export function extractToolResults(
     const entry = toolIndex.getEntry(toolUseId);
 
     const resultStr = serializeResult(toolUseResultValue);
+    const content = normalizeToolResultContent(toolUseResultValue);
     const isError = isToolResultError(toolUseResultValue);
 
     events.push({
@@ -311,6 +312,7 @@ export function extractToolResults(
       toolUseId,
       toolName: entry?.name,
       result: resultStr,
+      ...(content ? { content } : {}),
       isError,
       input: entry?.input,
       turnId,
@@ -382,10 +384,56 @@ function extractToolMetadata(toolBlock: ToolUseBlock, sessionDir?: string): { in
   return { intent, displayName };
 }
 
-/** Serialize a tool result value to string, handling circular references */
+/** Normalize MCP/Pi and Anthropic base64 blocks for live event transport. */
+export function normalizeToolResultContent(value: unknown): AgentToolResultContent[] | undefined {
+  const candidate = value && typeof value === 'object' && !Array.isArray(value)
+    && Array.isArray((value as { content?: unknown }).content)
+    ? (value as { content: unknown[] }).content
+    : value;
+  const items = Array.isArray(candidate) ? candidate : [candidate];
+  const blocks: AgentToolResultContent[] = [];
+  for (const item of items) {
+    if (typeof item === 'string') {
+      blocks.push({ type: 'text', text: item });
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (record.type === 'text' && typeof record.text === 'string') {
+      blocks.push({ type: 'text', text: record.text });
+      continue;
+    }
+    if (record.type !== 'image') continue;
+    if (typeof record.data === 'string' && typeof record.mimeType === 'string') {
+      blocks.push({ type: 'image', data: record.data, mimeType: record.mimeType });
+      continue;
+    }
+    const source = record.source;
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      const sourceRecord = source as Record<string, unknown>;
+      if (
+        sourceRecord.type === 'base64'
+        && typeof sourceRecord.data === 'string'
+        && typeof sourceRecord.media_type === 'string'
+      ) {
+        blocks.push({ type: 'image', data: sourceRecord.data, mimeType: sourceRecord.media_type });
+      }
+    }
+  }
+  return blocks.length > 0 ? blocks : undefined;
+}
+
+/** Serialize a tool result without ever copying inline image Base64 into session text. */
 export function serializeResult(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === undefined || value === null) return '';
+  const content = normalizeToolResultContent(value);
+  if (content?.some(block => block.type === 'image')) {
+    return content.map(block => block.type === 'text'
+      ? block.text
+      : '[Inline tool image omitted from session JSONL; use the artifact path and metadata in the text result.]')
+      .join('\n');
+  }
   try {
     return JSON.stringify(value, null, 2);
   } catch {

@@ -1,11 +1,11 @@
 import { readFile, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
 import { RPC_CHANNELS, type FileAttachment, type SendMessageOptions, type SessionEvent } from '@craft-agent/shared/protocol'
+import { isOriginalFullResolutionAttachment } from '@craft-agent/shared/utils/image-attachment'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@craft-agent/shared/agent/thinking-levels'
-import { isPermissionMode, PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/modes'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -71,6 +71,8 @@ async function scanSessionDirectory(dirPath: string): Promise<import('@craft-age
     if (entry.name === 'session.jsonl' || entry.name.startsWith('.')) continue
 
     const fullPath = join(dirPath, entry.name)
+    // The full-resolution sibling is for cropping, not a second user attachment.
+    if (!entry.isDirectory() && isOriginalFullResolutionAttachment(fullPath)) continue
 
     if (entry.isDirectory()) {
       // Recursively scan subdirectory
@@ -112,10 +114,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.SEND_MESSAGE,
   RPC_CHANNELS.sessions.CANCEL,
   RPC_CHANNELS.sessions.KILL_SHELL,
-  RPC_CHANNELS.sessions.GET_BACKGROUND_TASK_OUTPUT,
-  RPC_CHANNELS.sessions.STOP_BACKGROUND_TASK,
+  RPC_CHANNELS.tasks.GET_OUTPUT,
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
+  RPC_CHANNELS.sessions.RESPOND_TO_CLARIFICATION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,
@@ -139,7 +141,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Waits for initialization to complete so sessions are never returned empty during startup
   server.handle(RPC_CHANNELS.sessions.GET, async (ctx) => {
     try {
-      await sessionManager.waitForSessionsLoaded()
+      await sessionManager.waitForInit()
     } catch (error) {
       log.error('GET_SESSIONS continuing after initialization failure:', error)
     }
@@ -167,7 +169,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Get unread summary across all workspaces
   server.handle(RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY, async () => {
     try {
-      await sessionManager.waitForSessionsLoaded()
+      await sessionManager.waitForInit()
     } catch (error) {
       log.error('GET_UNREAD_SUMMARY continuing after initialization failure:', error)
     }
@@ -189,9 +191,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@craft-agent/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('rpc.createSession', { workspaceId })
-    // The renderer adds the session synchronously from this return value (App.tsx handleCreateSession),
-    // so suppress the broadcast to avoid a redundant hydrate round-trip.
-    const session = await sessionManager.createSession(workspaceId, options, { emitCreatedEvent: false })
+    // Other windows and RPC clients need the same metadata before processing events arrive.
+    // The creating renderer already deduplicates session_created against its returned session.
+    const session = await sessionManager.createSession(workspaceId, options)
     end()
     return session
   })
@@ -265,16 +267,20 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.cancelProcessing(sessionId, silent)
   })
 
-  // Background tasks: what one has written so far (the task chip's card), and stopping one.
-  // `sessions:killShell` is the older name of the stop channel (shells only).
-  server.handle(RPC_CHANNELS.sessions.GET_BACKGROUND_TASK_OUTPUT, async (_ctx, sessionId: string, taskId: string, kind?: 'agent' | 'shell' | 'workflow') => {
-    return sessionManager.getBackgroundTaskOutput(sessionId, taskId, kind)
-  })
-  server.handle(RPC_CHANNELS.sessions.STOP_BACKGROUND_TASK, async (_ctx, sessionId: string, taskId: string) => {
-    return sessionManager.stopBackgroundTask(sessionId, taskId)
-  })
+  // Kill background shell
   server.handle(RPC_CHANNELS.sessions.KILL_SHELL, async (_ctx, sessionId: string, shellId: string) => {
-    return sessionManager.stopBackgroundTask(sessionId, shellId)
+    return sessionManager.killShell(sessionId, shellId)
+  })
+
+  // Get background task output
+  server.handle(RPC_CHANNELS.tasks.GET_OUTPUT, async (_ctx, taskId: string) => {
+    try {
+      const output = await sessionManager.getTaskOutput(taskId)
+      return output
+    } catch (err) {
+      log.error('Failed to get task output:', err)
+      throw err
+    }
   })
 
   // Respond to a permission request (bash command approval)
@@ -289,6 +295,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_CLARIFICATION, async (_ctx, sessionId: string, requestId: string, response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput) => {
+    return sessionManager.respondToClarification(sessionId, requestId, response)
+  })
+
   // ==========================================================================
   // Consolidated Command Handlers
   // ==========================================================================
@@ -300,6 +310,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
+      case 'handover':
+        if (!sessionManager.handoverSession) throw new Error('Handover is unavailable')
+        return sessionManager.handoverSession(sessionId, command.operation)
       case 'flag':
         return sessionManager.flagSession(sessionId)
       case 'unflag':
@@ -319,25 +332,31 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       case 'setActiveViewing':
         // Track which session user is actively viewing (for unread state machine)
         return sessionManager.setActiveViewingSession(sessionId, command.workspaceId)
+      case 'setProgressSupervision':
+        return sessionManager.setProgressSupervision?.(sessionId, command.enabled)
+      case 'resumeExecution':
+        if (!sessionManager.resumeExecution) throw new Error('Execution recovery is not supported by this server')
+        return sessionManager.resumeExecution(sessionId)
+      case 'continueProgress':
+        return sessionManager.continueProgress?.(sessionId)
       case 'setPermissionMode':
-        // An unknown mode would fall through to Explore's checks in shouldAllowToolInMode.
-        if (!isPermissionMode(command.mode)) {
-          throw new Error(`Invalid permission mode: ${String(command.mode)}. Valid values: ${PERMISSION_MODE_ORDER.join(', ')}`)
-        }
         return sessionManager.setSessionPermissionMode(sessionId, command.mode)
+      case 'setFastMode':
+        if (typeof command.enabled !== 'boolean') throw new Error('Invalid Fast setting')
+        if (!sessionManager.setSessionFastMode) throw new Error('Fast mode is unavailable')
+        return sessionManager.setSessionFastMode(sessionId, command.enabled)
       case 'setThinkingLevel':
         // Validate thinking level before passing to session manager
         if (!isValidThinkingLevel(command.level)) {
           throw new Error(`Invalid thinking level: ${command.level}. Valid values: ${VALID_THINKING_LEVELS_LIST}`)
         }
         return sessionManager.setSessionThinkingLevel(sessionId, command.level)
-      case 'setCodingMode':
-        if (typeof command.enabled !== 'boolean') {
-          throw new Error(`Invalid coding mode value: ${String(command.enabled)}. Expected a boolean`)
-        }
-        return sessionManager.setSessionCodingMode(sessionId, command.enabled)
-      case 'continueInNewSession':
-        return sessionManager.continueSessionInNewSession(sessionId, command.codingMode === true)
+      case 'setWorkMode':
+        if (!sessionManager.setSessionWorkMode) throw new Error('Work mode selection is unavailable')
+        return sessionManager.setSessionWorkMode(sessionId, command.mode)
+      case 'officeTemplates':
+        if (!sessionManager.applyOfficeTemplates) throw new Error('Office 案例选择不可用。')
+        return sessionManager.applyOfficeTemplates(sessionId, command.body)
       case 'updateWorkingDirectory':
         return sessionManager.updateWorkingDirectory(sessionId, command.dir)
       case 'setSources':
@@ -369,7 +388,6 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       case 'refreshTitle':
         log.info(`IPC: refreshTitle received for session ${sessionId}`)
         return sessionManager.refreshTitle(sessionId)
-      // Connection selection (locked after first message)
       case 'setConnection':
         log.info(`IPC: setConnection received for session ${sessionId}, connection: ${command.connectionSlug}`)
         return sessionManager.setSessionConnection(sessionId, command.connectionSlug)
@@ -388,6 +406,18 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.removeMessageAnnotation(sessionId, command.messageId, command.annotationId)
       case 'updateAnnotation':
         return sessionManager.updateMessageAnnotation(sessionId, command.messageId, command.annotationId, command.patch)
+      case 'updateQueuedMessage':
+        return sessionManager.updateQueuedMessage(sessionId, command.messageId, command.content)
+      case 'deleteQueuedMessage':
+        return sessionManager.deleteQueuedMessage(sessionId, command.messageId)
+      case 'reorderQueuedMessages':
+        return sessionManager.reorderQueuedMessages(sessionId, command.messageIds)
+      case 'sendQueuedMessageNow':
+        return sessionManager.sendQueuedMessageNow(sessionId, command.messageId)
+      case 'regenerate':
+        return sessionManager.regenerateLastResponse(sessionId)
+      case 'retryCancelled':
+        return sessionManager.retryCancelledTurn(sessionId)
       default: {
         const _exhaustive: never = command
         throw new Error(`Unknown session command: ${JSON.stringify(command)}`)

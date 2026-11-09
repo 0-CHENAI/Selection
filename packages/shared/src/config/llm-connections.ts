@@ -16,7 +16,75 @@ import {
   ANTHROPIC_MODELS,
   normalizeDeprecatedModelId,
 } from './models';
+import {
+  connectionModelIdsMatch,
+  resolveCustomModelContextWindow,
+  resolveCustomModelMaxTokens,
+  resolveModelImageSupportFromCatalog,
+  setModelImageSupport,
+} from './model-image-support';
+import {
+  lookupKnownModelContextWindow,
+  resolveApiKeyModelContextWindow,
+} from './model-context-window.ts';
 import type { CredentialManager } from '../credentials/manager.ts';
+import { isOrderGatewayUrl } from './order-gateway.ts';
+
+/** Stable fallback label when the OAuth token does not expose a known plan. */
+export const CHATGPT_OAUTH_CONNECTION_NAME = 'ChatGPT';
+
+const CHATGPT_OAUTH_GENERATED_NAMES = new Set([
+  CHATGPT_OAUTH_CONNECTION_NAME,
+  'ChatGPT Free',
+  'ChatGPT Go',
+  'ChatGPT Plus',
+  'ChatGPT Pro',
+  'ChatGPT Pro Max',
+  'ChatGPT Team',
+  'ChatGPT Business',
+  'ChatGPT Enterprise',
+  'ChatGPT Edu',
+  'ChatGPT Edu Plus',
+  'ChatGPT Edu Pro',
+]);
+
+export function isDefaultChatGptOAuthConnectionName(name: string): boolean {
+  return CHATGPT_OAUTH_GENERATED_NAMES.has(name)
+    || name === 'ChatGPT Plus / Pro'
+    || name === 'ChatGPT Plus (via Pi)';
+}
+
+export {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  MAX_CUSTOM_CONTEXT_WINDOW,
+  MAX_CUSTOM_MAX_TOKENS,
+  MIN_CUSTOM_CONTEXT_WINDOW,
+  MIN_CUSTOM_MAX_TOKENS,
+  alignModelImageInput,
+  buildSkippedImagesNote,
+  connectionModelIdsMatch,
+  inferModelSupportsImages,
+  isUnsupportedImageInputError,
+  learnModelRejectsImages,
+  lookupKnownModelImageSupport,
+  normalizeConnectionModelId,
+  planUnsupportedImageRetry,
+  readStoredImageSupport,
+  resolveModelImageSupportFromCatalog,
+  setModelImageSupport,
+  resolveCustomModelContextWindow,
+  resolveCustomModelMaxTokens,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
+  toCustomEndpointModelPayload,
+} from './model-image-support';
+export type {
+  ImageSupportMode,
+  ImageSupportResolution,
+  ImageSupportSource,
+  ModelImageRecord,
+} from './model-image-support';
 
 // ============================================================
 // Pi Model Resolver (dependency injection to avoid Pi SDK in renderer)
@@ -92,7 +160,9 @@ export type LlmAuthType =
 /**
  * Ownership mode for a connection's model list.
  * - automaticallySyncedFromProvider: provider defaults are synced automatically.
- * - userDefined3Tier: user-picked Best/Balanced/Fast list is preserved.
+ * - userDefined3Tier: user-picked model subset is preserved.
+ *   The name is historical; new API-key setup stores the checked models,
+ *   not a Best/Balanced/Fast triple.
  */
 export type ModelSelectionMode = 'automaticallySyncedFromProvider' | 'userDefined3Tier';
 
@@ -110,12 +180,6 @@ export interface CustomEndpointConfig {
   api: CustomEndpointApi;
   /** Explicit capability hint for arbitrary endpoints — never guessed automatically. */
   supportsImages?: boolean;
-  /**
-   * Output-token cap for every model on this endpoint (positive integer; default 8192).
-   * Pi also bounds compaction summaries by it, so raise it when long sessions fail
-   * to compact. Must not exceed what the server accepts.
-   */
-  maxTokens?: number;
 }
 
 /**
@@ -128,9 +192,9 @@ export interface CustomEndpointConfig {
  * - 'queue': Hold the message; let the current turn finish naturally; replay
  *   as a new turn afterwards. No abort, no destructive interruption.
  *
- * Default is per-`providerType` via {@link defaultMidStreamBehavior}; reads
- * everywhere should go through {@link resolveMidStreamBehavior} so connections
- * created before this field existed still pick up the right default.
+ * Composer Enter always queues (#22, #23). `steer` is the queue panel's
+ * "Send now" path, not the default submit. Reads of the stored field still
+ * go through {@link resolveMidStreamBehavior}.
  */
 export type MidStreamBehavior = 'steer' | 'queue';
 
@@ -157,6 +221,10 @@ export interface LlmConnection {
   /** Custom base URL (required for *_compat providers, optional override for others) */
   baseUrl?: string;
 
+  /** Use native text for endpoints that buffer tool arguments until completion. */
+  answerDelivery?: 'tool' | 'streaming';
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+
   /** Authentication mechanism */
   authType: LlmAuthType;
 
@@ -169,7 +237,8 @@ export interface LlmConnection {
   /**
    * Ownership mode for the model list.
    * - automaticallySyncedFromProvider: provider defaults are kept in sync.
-   * - userDefined3Tier: preserve user-selected Best/Balanced/Fast list.
+   * - userDefined3Tier: preserve the models the user checked.
+   *   Historical name: this used to be the Best/Balanced/Fast triple.
    */
   modelSelectionMode?: ModelSelectionMode;
 
@@ -212,6 +281,25 @@ export interface LlmConnection {
 
   /** Timestamp when connection was last used */
   lastUsedAt?: number;
+
+  /**
+   * Total-pixel budget for images sent on this connection.
+   * When set on a DeepSeek connection, it replaces the 1024-token grid.
+   */
+  imagePixelBudget?: number;
+  /** Encoded-byte target for one image sent on this connection. */
+  imageMaxBytes?: number;
+  /** Long-edge cap, in pixels, for images sent on this connection. */
+  imageMaxDimension?: number;
+  /**
+   * Image-token family for the compaction precheck.
+   * Wins over the auth provider and API host. Never inferred from a model id.
+   */
+  imageTokenFamily?: string;
+  /** DashScope VL high-resolution mode. Raises the pixel budget and caps image tokens at 16384. */
+  vlHighResolutionImages?: boolean;
+  /** Explicit DashScope max_pixels. Also applies the 16384 image-token cap. */
+  imageMaxPixels?: number;
 }
 
 /**
@@ -238,7 +326,7 @@ export interface LlmConnectionWithStatus extends LlmConnection {
  * given the current auth flavor.
  *
  * - `codex-mini-latest` is always denied (Pi SDK rejects it outright).
- * - When `piAuthProvider === 'openai-codex'` (ChatGPT Plus/Pro OAuth or
+ * - When `piAuthProvider === 'openai-codex'` (ChatGPT OAuth or
  *   ChatGPT-JWT API key), all `*codex-mini*` variants (e.g. `gpt-5.1-codex-mini`)
  *   are denied — the ChatGPT backend refuses them with: "The '<model>' model is
  *   not supported when using Codex with a ChatGPT account."
@@ -265,31 +353,9 @@ export function isDeniedMiniModelId(modelId: string, piAuthProvider?: string): b
  * Used for mini agent, title generation, and mini completions.
  */
 export function getMiniModel(
-  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider'>,
+  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
   return findSmallModel(connection);
-}
-
-/**
- * Whether a connection is signed in with a claude.ai account (Anthropic OAuth).
- * claude.ai features such as Claude artifacts need one; an API key has no
- * claude.ai account behind it.
- */
-export function isClaudeAccountConnection(connection: Pick<LlmConnection, 'providerType' | 'authType'>): boolean {
-  return connection.providerType === 'anthropic' && connection.authType === 'oauth';
-}
-
-/**
- * The connection "Publish as Claude artifact" runs on: the default connection
- * when it is a claude.ai account, else the first one. Shared by the Pages
- * button (visibility) and the publish handler (execution).
- */
-export function findClaudeArtifactConnection<T extends Pick<LlmConnection, 'slug' | 'providerType' | 'authType'>>(
-  connections: readonly T[],
-  defaultSlug?: string | null,
-): T | undefined {
-  return connections.find(c => c.slug === defaultSlug && isClaudeAccountConnection(c))
-    ?? connections.find(isClaudeAccountConnection);
 }
 
 /**
@@ -300,7 +366,7 @@ export function findClaudeArtifactConnection<T extends Pick<LlmConnection, 'slug
  * Used for response summarization and API tool summarization.
  */
 export function getSummarizationModel(
-  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider'>,
+  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
   return findSmallModel(connection);
 }
@@ -309,16 +375,18 @@ export function getSummarizationModel(
  * Provider-aware small model resolution.
  * Shared implementation for getMiniModel() and getSummarizationModel().
  *
- *   - Pi: the best entry of PI_PREFERRED_MINI_MODELS for the auth provider
  *   - Anthropic: find "haiku"
  *   - Pi: find "mini" or "flash"
- *   - Otherwise: last model in the list
+ *   - Custom endpoints (`pi_compat`): the connection default (the model
+ *     the user selected). A Flash/mini alias may live on another worker.
+ *   - Otherwise: a haiku/mini/flash model in the enabled list, then the
+ *     user's default model, then the last enabled model.
  *
  * Skips models denied by {@link isDeniedMiniModelId} for the connection's
  * auth flavor.
  */
 function findSmallModel(
-  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider'>,
+  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
   if (!connection.models || connection.models.length === 0) return undefined;
 
@@ -330,20 +398,19 @@ function findSmallModel(
   const isAllowedModel = (m: ModelDefinition | string): boolean =>
     !isDeniedMiniModelId(toId(m), connection.piAuthProvider);
 
-  // Explicit per-provider utility models first (Pi connections)
-  const preferredMini = (isPiProvider(connection.providerType) && connection.piAuthProvider
-    && PI_PREFERRED_MINI_MODELS[connection.piAuthProvider]) || [];
-  if (preferredMini.length > 0) {
-    let best: ModelDefinition | string | undefined;
-    let bestRank = Infinity;
-    for (const m of connection.models) {
-      const rank = preferredModelRank(toId(m), preferredMini);
-      if (rank >= 0 && rank < bestRank && isAllowedModel(m)) {
-        best = m;
-        bestRank = rank;
-      }
+  // Custom endpoints: stay on the selected model. A "Flash" / "mini" alias
+  // on the same connection may still be a different local worker — the
+  // stall we just fixed. Only keyword-search when the user has not chosen
+  // a default.
+  if (isCompatProvider(connection.providerType)) {
+    const defaultId = connection.defaultModel?.trim();
+    if (defaultId) {
+      const match = connection.models.find((model) => {
+        if (!isAllowedModel(model)) return false;
+        return toId(model).toLowerCase() === defaultId.toLowerCase();
+      });
+      return match ? toId(match) : defaultId;
     }
-    if (best) return toId(best);
   }
 
   // Provider-aware keyword search
@@ -359,16 +426,29 @@ function findSmallModel(
   }
 
   if (keywords.length > 0) {
-    // Whole tokens only: a substring match made every Gemini model "mini" (ge-mini).
-    const hasKeyword = (searchStr: string) =>
-      keywords.some(k => new RegExp(`(^|[^a-z])${k}([^a-z]|$)`).test(searchStr));
-    const match = connection.models.find(m => isAllowedModel(m) && hasKeyword(toSearchStr(m)));
+    const match = connection.models.find(m => {
+      if (!isAllowedModel(m)) return false;
+      const searchStr = toSearchStr(m);
+      return keywords.some(k => searchStr.includes(k));
+    });
     if (match) {
       return toId(match);
     }
   }
 
-  // Fallback: last allowed model in the list, otherwise final entry.
+  // The model the user selected is the default. Utility calls use it when
+  // the enabled list has no haiku/mini/flash model, instead of assuming a
+  // third "fast" tier. Connections saved before that field existed still
+  // fall through to the last enabled model.
+  const defaultId = connection.defaultModel?.trim();
+  if (defaultId && !isDeniedMiniModelId(defaultId, connection.piAuthProvider)) {
+    const match = connection.models.find((model) => {
+      if (!isAllowedModel(model)) return false;
+      return connectionModelIdsMatch(toId(model), defaultId);
+    });
+    if (match) return toId(match);
+  }
+
   const fallback = [...connection.models].reverse().find(isAllowedModel);
   return fallback ? toId(fallback) : toId(connection.models[connection.models.length - 1]!);
 }
@@ -473,13 +553,37 @@ export function isCompatProvider(providerType: LlmProviderType): boolean {
 }
 
 /**
- * Check if a provider type uses the Anthropic Claude Agent SDK.
- * Only direct Anthropic API connections use the Claude SDK.
- * @param providerType - Provider type to check
- * @returns true if this provider uses the Anthropic SDK
+ * Check if a provider type is a leftover Anthropic official connection.
+ * These are no longer a supported product path (Pi + OpenAI Compatible only).
  */
 export function isAnthropicProvider(providerType: LlmProviderType): boolean {
   return providerType === 'anthropic';
+}
+
+export const UNSUPPORTED_LLM_CONNECTION_MESSAGE =
+  'This connection is no longer supported. Reconfigure it with OpenAI Compatible or another Selection Backend provider.';
+
+/**
+ * Connections that must not create a backend or stay selectable: official
+ * Anthropic login / Claude Max (`providerType: 'anthropic'`), and Pi sessions
+ * pinned to the Anthropic provider without a custom endpoint. A custom
+ * Anthropic Messages endpoint stays available, including one whose URL is
+ * https://api.anthropic.com. That path still uses the custom-endpoint runtime,
+ * not the built-in Anthropic provider.
+ *
+ * ORDER keeps its own aliases (Opus, Laufry). Older saves still store
+ * `piAuthProvider: 'anthropic'` on that gateway; that hint is not the
+ * built-in Anthropic provider and must not hide the catalog.
+ */
+export function isUnsupportedLlmConnection(
+  connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'> & { baseUrl?: string },
+): boolean {
+  if (connection.providerType === 'anthropic') return true;
+  if (connection.providerType === 'pi_compat' && isOrderGatewayUrl(connection.baseUrl)) return false;
+  const customAnthropicMessages = connection.providerType === 'pi_compat'
+    && connection.customEndpoint?.api === 'anthropic-messages';
+  if (connection.piAuthProvider === 'anthropic' && !customAnthropicMessages) return true;
+  return false;
 }
 
 /**
@@ -508,16 +612,12 @@ export function isPiProvider(providerType: LlmProviderType): boolean {
 /**
  * Default mid-stream send behavior for a given provider type.
  *
- * - 'anthropic' → 'queue': Claude's emulated steer (PreToolUse hook injection)
- *   has a real failure mode — if no tool fires before the turn ends, the steer
- *   becomes `steer_undelivered` and gets re-queued anyway, paying for the
- *   original turn's tokens for nothing. Default to queue for predictability.
- * - 'pi' / 'pi_compat' → 'steer': Pi's native `.steer()` is non-destructive
- *   (delivers after the current tool finishes, keeps full context). No
- *   downside to defaulting to immediate steering.
+ * Composer Enter always queues (#22, #23). Changing direction is the
+ * queue panel's "Send now" action. Keep the stored default on `queue`
+ * so Settings does not advertise Enter-to-steer.
  */
-export function defaultMidStreamBehavior(providerType: LlmProviderType): MidStreamBehavior {
-  return providerType === 'anthropic' ? 'queue' : 'steer';
+export function defaultMidStreamBehavior(_providerType: LlmProviderType): MidStreamBehavior {
+  return 'queue';
 }
 
 /**
@@ -559,50 +659,48 @@ export function setModelSupportsImages(
   modelId: string,
   enabled: boolean,
 ): LlmConnection {
-  if (!connection.models) return connection;
-  const idOf = (m: ModelDefinition | string) => (typeof m === 'string' ? m : m.id);
-  const idx = connection.models.findIndex(m => idOf(m) === modelId);
-  if (idx === -1) return connection;
-
-  const entry = connection.models[idx]!;
-  const nextEntry =
-    typeof entry === 'string'
-      ? { id: entry, name: entry, shortName: entry, supportsImages: enabled }
-      : { ...entry, supportsImages: enabled };
-
-  const nextModels = connection.models.slice();
-  nextModels[idx] = nextEntry as ModelDefinition;
-  return { ...connection, models: nextModels };
+  return setModelImageSupport(connection, modelId, enabled ? 'on' : 'off') as LlmConnection;
 }
 
 /**
- * Resolve whether a given model on a connection accepts image input.
+ * Whether a model on a connection should receive images.
  *
- * For `pi_compat` (custom-endpoint) connections this mirrors the precedence used
- * by Pi's `buildCustomEndpointModelDef`:
- *   per-model `supportsImages` override
- *   ?? connection-level `customEndpoint.supportsImages` default
- *   ?? false
- *
- * For non-`pi_compat` connections the renderer doesn't own the catalog — Pi SDK's
- * bundled provider definitions and Anthropic's API do. This helper conservatively
- * returns `true` there (we don't know better; the upstream decides). The
- * pre-flight banner gates on `pi_compat` separately, so this just reports what
- * the renderer can know with confidence.
+ * Renderer banners and runtime send paths both call this. Precedence lives in
+ * `resolveModelImageSupportFromCatalog`: explicit on/off, then a learned
+ * rejection, then a connection endpoint default, then the known table, then
+ * an optimistic attempt.
  */
 export function modelSupportsImages(
-  connection: Pick<LlmConnection, 'providerType' | 'models' | 'customEndpoint'>,
+  connection: Pick<LlmConnection, 'models' | 'customEndpoint'>,
   modelId: string,
 ): boolean {
-  if (!isCompatProvider(connection.providerType)) return true;
+  return resolveModelImageSupportFromCatalog({
+    modelId,
+    models: connection.models,
+    endpointSupportsImages: connection.customEndpoint?.supportsImages,
+  }).supportsImages
+}
 
-  const entry = connection.models?.find(m =>
-    (typeof m === 'string' ? m : m.id) === modelId,
-  );
-  if (entry && typeof entry !== 'string' && typeof entry.supportsImages === 'boolean') {
-    return entry.supportsImages;
-  }
-  return connection.customEndpoint?.supportsImages ?? false;
+/**
+ * Per-model context window from the connection catalog (ORDER / custom endpoints).
+ * Registry-only `getModelContextWindow` does not know these IDs.
+ */
+export function resolveConnectionModelContextWindow(
+  connection: Pick<LlmConnection, 'models'> | null | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveApiKeyModelContextWindow({
+    manual: resolveCustomModelContextWindow(connection?.models, modelId),
+    known: lookupKnownModelContextWindow(modelId),
+  });
+}
+
+/** Per-model max output tokens from the connection catalog (ORDER / custom endpoints). */
+export function resolveConnectionModelMaxTokens(
+  connection: Pick<LlmConnection, 'models'> | null | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveCustomModelMaxTokens(connection?.models, modelId);
 }
 
 /**
@@ -650,71 +748,29 @@ export function getModelsForProviderType(providerType: LlmProviderType, piAuthPr
 export const PI_PREFERRED_DEFAULTS: Record<string, string[]> = {
   // TODO(opus-4.6-sunset): drop 'claude-opus-4-6' from anthropic and amazon-bedrock
   // when Opus 4.6 is deprecated.
-  // Opus 5.5 (in the Pi catalog since SDK 0.87.1) is the default for new
-  // connections, matching the Claude Agent SDK path; older Opus generations follow.
-  anthropic: ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-fable-5-1', 'claude-fable-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-5-5', 'claude-haiku-4-5'],
-  // GPT-6 Astra entered the Pi catalog in SDK 0.85.1 for both the API-key and
-  // the ChatGPT-account (openai-codex) flows; new connections default to it.
-  // GPT-6.1 Sol (Pi 0.99.1) follows it.
-  openai: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3', 'gpt-4o'],
-  'openai-codex': ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3', 'gpt-4o'],
+  anthropic: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-fable-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  // Lead with the current GPT-6 family. Keep older ids only when this
+  // provider's Pi catalog still lists them. gpt-4* is excluded from the
+  // selectable OpenAI catalog, so it is not a preferred default.
+  openai: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3'],
+  // Codex ChatGPT catalog (Pi 1.4.0) is gpt-6.1-sol, gpt-6-*, and gpt-5.6-*.
+  // Pi 1.4.0 removed gpt-5.5 and gpt-5.3-codex-spark because the Codex backend
+  // rejects them for ChatGPT accounts. gpt-5.2 / gpt-5.1 / gpt-5 / o4-mini /
+  // o3 / gpt-4o are not in that catalog. The OpenAI API-key catalog still
+  // lists gpt-5.5, so it stays on the `openai` preferred list above.
+  'openai-codex': ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
   // Stable models first so the connection-setup test (which uses
   // getDefaultModelForConnection) lands on a reliable model.
   // gemini-3-pro-preview and gemini-3.1-pro-preview are intermittently
   // unresponsive on generateContent — verified against the live API in
   // April 2026 — and are deliberately excluded from defaults.
   google: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview'],
-  // Pi 0.86.0 replaced the retired `deepseek-v4-flash` alias (and the experimental
-  // vision variant) with `deepseek-flash`; stored ids migrate via DEPRECATED_MODEL_REPLACEMENTS.
   deepseek: ['deepseek-v4-pro', 'deepseek-flash'],
-  // K2.6 is also the utility model (PI_PREFERRED_MINI_MODELS).
   moonshotai: ['kimi-k3', 'kimi-k2.6'],
   'moonshotai-cn': ['kimi-k3', 'kimi-k2.6'],
-  'github-copilot': ['claude-sonnet-4-6', 'gpt-5', 'o4-mini', 'claude-haiku-4-5'],
-  'amazon-bedrock': ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-5-5', 'claude-haiku-4-5'],
-  // Cloudflare AI Gateway proxies Anthropic, OpenAI and Workers AI; Claude first.
-  'cloudflare-ai-gateway': ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'gpt-6-astra', 'gpt-6.1-sol', 'claude-haiku-4-5'],
+  'github-copilot': ['claude-sonnet-4.6', 'gpt-5', 'o4-mini', 'claude-haiku-4.5'],
+  'amazon-bedrock': ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
 };
-
-/**
- * Utility (mini) models per Pi auth provider, best first, for titles, summaries
- * and `call_llm`. Consulted before findSmallModel's keyword search: tier names
- * such as OpenAI's "luna" carry no "mini"/"flash", and the keyword-less fallback
- * (the last model in the list) lands on whatever the catalog appended last —
- * `gpt-6.1-sol` ($2/$10 per M tokens) for ChatGPT accounts after Pi 1.1.0, where
- * `gpt-6-luna` costs $0.10/$0.50. Same id format and matching as
- * PI_PREFERRED_DEFAULTS. A model the account cannot use is retried against other
- * candidates by the subprocess (`pi-agent-server/src/mini-model-query.ts`).
- */
-export const PI_PREFERRED_MINI_MODELS: Record<string, string[]> = {
-  openai: ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.4-nano', 'gpt-5.4-mini'],
-  'openai-codex': ['gpt-6-luna', 'gpt-5.6-luna'],
-  anthropic: ['claude-haiku-5-5', 'claude-haiku-4-5'],
-  'amazon-bedrock': ['claude-haiku-5-5', 'claude-haiku-4-5'],
-  moonshotai: ['kimi-k2.6'],
-  'moonshotai-cn': ['kimi-k2.6'],
-  'cloudflare-ai-gateway': ['claude-haiku-4-5', 'gpt-6-luna', 'gpt-5.6-luna'],
-};
-
-/**
- * Index of a model id in a preferred list (bare ids, `pi/` optional, `{id}-*`
- * snapshots and Bedrock inference profiles match their bare id), or -1.
- */
-export function preferredModelRank(id: string, preferred: readonly string[]): number {
-  const bare = id.startsWith('pi/') ? id.slice(3) : id
-  // Deprecated IDs normalize to their replacement for stored-config migration.
-  // Rank them as unranked: fromBedrockNativeId() applies the same normalization,
-  // and letting a retired snapshot (e.g. claude-opus-4-5-20251101) inherit its
-  // replacement's rank made the stable sort pick it as the connection default.
-  if (normalizeDeprecatedModelId(bare) !== bare) return -1
-  const matchIndex = (candidate: string): number =>
-    preferred.findIndex(p => candidate === p || candidate.startsWith(`${p}-`))
-  const direct = matchIndex(bare)
-  if (direct >= 0) return direct
-  // Bedrock: reverse-map the native inference-profile ID to bare, then match
-  const reversed = fromBedrockNativeId(bare)
-  return reversed !== bare ? matchIndex(reversed) : -1
-}
 
 export function getDefaultModelsForConnection(providerType: LlmProviderType, piAuthProvider?: string): Array<ModelDefinition | string> {
   if (providerType === 'pi') {
@@ -725,12 +781,23 @@ export function getDefaultModelsForConnection(providerType: LlmProviderType, piA
     // comparison and reverse Bedrock ID mapping.
     const preferred = (piAuthProvider && PI_PREFERRED_DEFAULTS[piAuthProvider]) || [];
     if (preferred.length > 0) {
-      // Unranked entries sort after every preferred model, keeping the SDK's catalog order.
-      const rank = (id: string): number => {
-        const r = preferredModelRank(id, preferred)
-        return r < 0 ? preferred.length : r
+      const findPreferredIndex = (id: string): number => {
+        const bare = id.startsWith('pi/') ? id.slice(3) : id
+        // Try direct match first (works for non-Bedrock providers)
+        const direct = preferred.findIndex(p => bare === p || bare.startsWith(`${p}-`))
+        if (direct >= 0) return direct
+        // For Bedrock: reverse-map native ID to bare, then match
+        const reversed = fromBedrockNativeId(bare)
+        if (reversed !== bare) {
+          return preferred.findIndex(p => reversed === p || reversed.startsWith(`${p}-`))
+        }
+        return -1
       }
-      models.sort((a, b) => rank(a.id) - rank(b.id));
+      models.sort((a, b) => {
+        const aPrio = findPreferredIndex(a.id) ?? preferred.length;
+        const bPrio = findPreferredIndex(b.id) ?? preferred.length;
+        return (aPrio >= 0 ? aPrio : preferred.length) - (bPrio >= 0 ? bPrio : preferred.length);
+      });
     }
     return models;
   }
@@ -768,33 +835,73 @@ export function getDefaultModelForConnection(providerType: LlmProviderType, piAu
  * @param connections        - All available connections (with status metadata)
  * @returns The resolved slug, or undefined when no connections exist
  */
+type ConnectionSlugResolveInput = Pick<LlmConnectionWithStatus, 'slug' | 'isDefault'> &
+  Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint' | 'baseUrl'>>
+
+function isListedConnectionUnsupported(
+  conn: Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint' | 'baseUrl'>>,
+): boolean {
+  return !!conn.providerType && isUnsupportedLlmConnection({
+    providerType: conn.providerType,
+    piAuthProvider: conn.piAuthProvider,
+    customEndpoint: conn.customEndpoint,
+    baseUrl: conn.baseUrl,
+  })
+}
+
 export function resolveEffectiveConnectionSlug(
   sessionConnection: string | undefined,
   workspaceDefault: string | undefined,
-  connections: Pick<LlmConnectionWithStatus, 'slug' | 'isDefault'>[],
+  connections: ConnectionSlugResolveInput[],
 ): string | undefined {
-  return sessionConnection
-    ?? workspaceDefault
-    ?? connections.find(c => c.isDefault)?.slug
-    ?? connections[0]?.slug
+  // A locked session connection is never rewritten — unavailable UI depends on
+  // seeing the original slug even when it is leftover Anthropic.
+  if (sessionConnection) return sessionConnection
+
+  if (workspaceDefault) {
+    const workspaceConn = connections.find(c => c.slug === workspaceDefault)
+    if (!workspaceConn || !isListedConnectionUnsupported(workspaceConn)) {
+      return workspaceDefault
+    }
+  }
+
+  const flaggedDefault = connections.find(c => c.isDefault)
+  if (flaggedDefault && !isListedConnectionUnsupported(flaggedDefault)) {
+    return flaggedDefault.slug
+  }
+
+  return connections.find(c => !isListedConnectionUnsupported(c))?.slug
 }
 
 /**
- * Check if a session's locked connection is unavailable (deleted/removed).
- * Returns true only when a session has an explicit llmConnection that doesn't
- * match any current connection. Sessions without a stored connection (using
- * the fallback chain) are never "unavailable".
+ * Check if a session cannot send because its effective connection is gone or
+ * leftover Anthropic. Locked sessions stay pinned to their stored slug.
+ * Unlocked sessions use the fallback chain, skipping unsupported leftovers.
  *
  * @param sessionConnection - Per-session connection slug (session.llmConnection)
  * @param connections - All available connections
- * @returns true if the session's connection no longer exists
+ * @param workspaceDefault - Workspace-level default connection slug
+ * @returns true if the session cannot use a supported connection
  */
 export function isSessionConnectionUnavailable(
   sessionConnection: string | undefined,
-  connections: Pick<LlmConnectionWithStatus, 'slug'>[],
+  connections: ConnectionSlugResolveInput[],
+  workspaceDefault?: string,
 ): boolean {
-  if (!sessionConnection) return false
-  return !connections.some(c => c.slug === sessionConnection)
+  if (sessionConnection) {
+    const locked = connections.find(c => c.slug === sessionConnection)
+    if (!locked) return true
+    return isListedConnectionUnsupported(locked)
+  }
+
+  const slug = resolveEffectiveConnectionSlug(undefined, workspaceDefault, connections)
+  if (slug) {
+    const conn = connections.find(c => c.slug === slug)
+    if (!conn) return false
+    return isListedConnectionUnsupported(conn)
+  }
+
+  return connections.some(c => isListedConnectionUnsupported(c))
 }
 
 /**
@@ -836,15 +943,10 @@ export function isValidProviderAuthCombination(
  * Source: Pi SDK registry (models.generated.js) — us.* variants
  */
 const BEDROCK_MODEL_MAP: Record<string, string> = {
-  'claude-opus-5-5': 'us.anthropic.claude-opus-5-5',
-  'claude-opus-5': 'us.anthropic.claude-opus-5',
   'claude-opus-4-8': 'us.anthropic.claude-opus-4-8',
   'claude-opus-4-7': 'us.anthropic.claude-opus-4-7',
-  'claude-fable-5-1': 'us.anthropic.claude-fable-5-1',
   'claude-fable-5': 'us.anthropic.claude-fable-5',
-  'claude-sonnet-5-5': 'us.anthropic.claude-sonnet-5-5',
   'claude-sonnet-5': 'us.anthropic.claude-sonnet-5',
-  'claude-haiku-5-5': 'us.anthropic.claude-haiku-5-5',
   'claude-sonnet-4-6': 'us.anthropic.claude-sonnet-4-6',
   'claude-haiku-4-5-20251001': 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   // Older models (for migration of existing connections)
@@ -852,16 +954,11 @@ const BEDROCK_MODEL_MAP: Record<string, string> = {
   'claude-opus-4-5-20251101': 'us.anthropic.claude-opus-4-5-20251101-v1:0',
   'claude-sonnet-4-5-20250929': 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
   // Also map base IDs (without region prefix) to US inference profiles
-  'anthropic.claude-opus-5-5': 'us.anthropic.claude-opus-5-5',
-  'anthropic.claude-opus-5': 'us.anthropic.claude-opus-5',
   'anthropic.claude-opus-4-8': 'us.anthropic.claude-opus-4-8',
   'anthropic.claude-opus-4-7': 'us.anthropic.claude-opus-4-7',
   'anthropic.claude-opus-4-6-v1': 'us.anthropic.claude-opus-4-6-v1',
-  'anthropic.claude-fable-5-1': 'us.anthropic.claude-fable-5-1',
   'anthropic.claude-fable-5': 'us.anthropic.claude-fable-5',
-  'anthropic.claude-sonnet-5-5': 'us.anthropic.claude-sonnet-5-5',
   'anthropic.claude-sonnet-5': 'us.anthropic.claude-sonnet-5',
-  'anthropic.claude-haiku-5-5': 'us.anthropic.claude-haiku-5-5',
   'anthropic.claude-sonnet-4-6': 'us.anthropic.claude-sonnet-4-6',
   'anthropic.claude-haiku-4-5-20251001-v1:0': 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   'anthropic.claude-opus-4-5-20251101-v1:0': 'us.anthropic.claude-opus-4-5-20251101-v1:0',
@@ -871,62 +968,42 @@ const BEDROCK_MODEL_MAP: Record<string, string> = {
 /** Reverse map: all known Bedrock ID variants → bare Anthropic ID */
 const BEDROCK_REVERSE_MAP: Record<string, string> = {
   // US inference profiles
-  'us.anthropic.claude-opus-5-5': 'claude-opus-5-5',
-  'us.anthropic.claude-opus-5': 'claude-opus-5',
   'us.anthropic.claude-opus-4-8': 'claude-opus-4-8',
-  'us.anthropic.claude-fable-5-1': 'claude-fable-5-1',
   'us.anthropic.claude-fable-5': 'claude-fable-5',
   'us.anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'us.anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
-  'us.anthropic.claude-sonnet-5-5': 'claude-sonnet-5-5',
   'us.anthropic.claude-sonnet-5': 'claude-sonnet-5',
-  'us.anthropic.claude-haiku-5-5': 'claude-haiku-5-5',
   'us.anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'us.anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'us.anthropic.claude-opus-4-6-v1': 'claude-opus-4-6',
   'us.anthropic.claude-opus-4-5-20251101-v1:0': 'claude-opus-4-5-20251101',
   'us.anthropic.claude-sonnet-4-5-20250929-v1:0': 'claude-sonnet-4-5-20250929',
   // EU inference profiles
-  'eu.anthropic.claude-opus-5-5': 'claude-opus-5-5',
-  'eu.anthropic.claude-opus-5': 'claude-opus-5',
   'eu.anthropic.claude-opus-4-8': 'claude-opus-4-8',
-  'eu.anthropic.claude-fable-5-1': 'claude-fable-5-1',
   'eu.anthropic.claude-fable-5': 'claude-fable-5',
   'eu.anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'eu.anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
-  'eu.anthropic.claude-sonnet-5-5': 'claude-sonnet-5-5',
   'eu.anthropic.claude-sonnet-5': 'claude-sonnet-5',
-  'eu.anthropic.claude-haiku-5-5': 'claude-haiku-5-5',
   'eu.anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'eu.anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'eu.anthropic.claude-opus-4-6-v1': 'claude-opus-4-6',
   'eu.anthropic.claude-opus-4-5-20251101-v1:0': 'claude-opus-4-5-20251101',
   'eu.anthropic.claude-sonnet-4-5-20250929-v1:0': 'claude-sonnet-4-5-20250929',
   // Global inference profiles
-  'global.anthropic.claude-opus-5-5': 'claude-opus-5-5',
-  'global.anthropic.claude-opus-5': 'claude-opus-5',
   'global.anthropic.claude-opus-4-8': 'claude-opus-4-8',
-  'global.anthropic.claude-fable-5-1': 'claude-fable-5-1',
   'global.anthropic.claude-fable-5': 'claude-fable-5',
   'global.anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'global.anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
-  'global.anthropic.claude-sonnet-5-5': 'claude-sonnet-5-5',
   'global.anthropic.claude-sonnet-5': 'claude-sonnet-5',
-  'global.anthropic.claude-haiku-5-5': 'claude-haiku-5-5',
   'global.anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'global.anthropic.claude-opus-4-6-v1': 'claude-opus-4-6',
   // Base IDs (no region prefix)
-  'anthropic.claude-opus-5-5': 'claude-opus-5-5',
-  'anthropic.claude-opus-5': 'claude-opus-5',
   'anthropic.claude-opus-4-8': 'claude-opus-4-8',
-  'anthropic.claude-fable-5-1': 'claude-fable-5-1',
   'anthropic.claude-fable-5': 'claude-fable-5',
   'anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
-  'anthropic.claude-sonnet-5-5': 'claude-sonnet-5-5',
   'anthropic.claude-sonnet-5': 'claude-sonnet-5',
-  'anthropic.claude-haiku-5-5': 'claude-haiku-5-5',
   'anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'anthropic.claude-opus-4-6-v1': 'claude-opus-4-6',
@@ -1104,13 +1181,8 @@ export interface ResolvedAuthEnvVars {
 /**
  * Resolve authentication environment variables for an LLM connection.
  *
- * Provider-agnostic: switches on providerType to determine which env vars
- * to set and how to retrieve credentials. Shared by:
- * - `SessionManager.reinitializeAuth()` (applies to process.env)
- * - `ClaudeAgent.postInit()` (applies to process.env + envOverrides)
- *
- * Providers that handle auth internally (openai, copilot, pi) return
- * empty envVars — their auth is managed in postInit() via native mechanisms.
+ * Leftover Anthropic connections return unsupported and inject nothing.
+ * Pi / OpenAI Compatible handle credentials inside the runtime.
  *
  * @param connection - The LLM connection config
  * @param connectionSlug - Connection slug for credential lookup
@@ -1120,58 +1192,17 @@ export interface ResolvedAuthEnvVars {
  */
 export async function resolveAuthEnvVars(
   connection: LlmConnection,
-  connectionSlug: string,
-  credentialManager: CredentialManager,
-  getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null }>,
+  _connectionSlug: string,
+  _credentialManager: CredentialManager,
+  _getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null }>,
 ): Promise<ResolvedAuthEnvVars> {
   const envVars: Record<string, string> = {};
 
-  // Only Anthropic-SDK-based providers use env var auth
-  // OpenAI (Codex), Copilot, and Pi handle auth internally in their postInit()
-  if (!isAnthropicProvider(connection.providerType)) {
-    return { envVars, success: true };
+  if (isUnsupportedLlmConnection(connection)) {
+    return { envVars, success: false, warning: UNSUPPORTED_LLM_CONNECTION_MESSAGE };
   }
 
-  // Set base URL if configured
-  if (connection.baseUrl) {
-    envVars.ANTHROPIC_BASE_URL = connection.baseUrl;
-  }
-
-  const authType = connection.authType;
-
-  if (authType === 'api_key' || authType === 'api_key_with_endpoint' || authType === 'bearer_token') {
-    const apiKey = await credentialManager.getLlmApiKey(connectionSlug);
-    if (apiKey) {
-      envVars.ANTHROPIC_API_KEY = apiKey;
-    } else if (connection.baseUrl) {
-      // Keyless provider (e.g. Ollama)
-      envVars.ANTHROPIC_API_KEY = 'not-needed';
-    } else {
-      return { envVars, success: false, warning: `No API key found for: ${connectionSlug}` };
-    }
-  } else if (authType === 'oauth') {
-    if (connection.providerType === 'anthropic') {
-      // Anthropic OAuth uses getValidClaudeOAuthToken which handles token refresh
-      const tokenResult = await getValidOAuthToken(connectionSlug);
-      if (tokenResult.accessToken) {
-        envVars.CLAUDE_CODE_OAUTH_TOKEN = tokenResult.accessToken;
-      } else {
-        return { envVars, success: false, warning: `Failed to get OAuth token for: ${connectionSlug}` };
-      }
-    } else {
-      // Fallback OAuth path (should not be reached after legacy migration)
-      const llmOAuth = await credentialManager.getLlmOAuth(connectionSlug);
-      if (llmOAuth?.accessToken) {
-        envVars.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken;
-      } else {
-        return { envVars, success: false, warning: `No OAuth token found for: ${connectionSlug}` };
-      }
-    }
-  } else if (authType === 'environment') {
-    // Environment auth — credentials come from process.env, nothing to inject
-    return { envVars, success: true };
-  }
-
+  // Pi / OpenAI Compatible handle credentials inside the runtime.
   return { envVars, success: true };
 }
 

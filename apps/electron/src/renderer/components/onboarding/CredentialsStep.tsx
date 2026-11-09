@@ -5,17 +5,19 @@
  * with StepFormLayout for the onboarding wizard context.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Check, ExternalLink } from "lucide-react"
 import type { ApiSetupMethod } from "./APISetupStep"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
+import { OrderWordmark } from "@/components/icons/OrderWordmark"
+import { isOrderCredentialPrefill } from "./order-prefill"
 import {
   ApiKeyInput,
   type ApiKeyStatus,
   type ApiKeySubmitData,
-  OAuthConnect,
   type OAuthStatus,
+  type OAuthSetupMethod,
 } from "../apisetup"
 import type { CustomEndpointApi } from '@config/llm-connections'
 
@@ -28,12 +30,20 @@ interface CredentialsStepProps {
   onSubmit: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onBack: () => void
+  /**
+   * Switch the credentials step to another setup method (e.g. API key -> OAuth).
+   * When provided together with `allowOAuthSwitch`, the API-key endpoint
+   * dropdown also offers ChatGPT / GitHub Copilot account sign-in.
+   */
+  onSelectApiSetupMethod?: (method: ApiSetupMethod) => void
+  /** Offer OAuth providers from the API-key form (disabled when editing an existing connection). */
+  allowOAuthSwitch?: boolean
   // Two-step OAuth flow
   isWaitingForCode?: boolean
   onSubmitAuthCode?: (code: string) => void
   onCancelOAuth?: () => void
-  // Device flow (Copilot)
-  copilotDeviceCode?: { userCode: string; verificationUri: string }
+  // Device flow (GitHub Copilot / Kimi Code / xAI)
+  oauthDeviceCode?: { userCode: string; verificationUri: string }
   // Edit mode (pre-fill existing connection values)
   editInitialValues?: {
     apiKey?: string
@@ -41,6 +51,12 @@ interface CredentialsStepProps {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, 'auto' | 'on' | 'off'>
+    modelImageLearned?: Record<string, boolean>
+    modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
   }
 }
@@ -52,38 +68,60 @@ export function CredentialsStep({
   onSubmit,
   onStartOAuth,
   onBack,
-  isWaitingForCode,
-  onSubmitAuthCode,
-  onCancelOAuth,
-  copilotDeviceCode,
+  onSelectApiSetupMethod,
+  allowOAuthSwitch,
+  oauthDeviceCode,
   editInitialValues,
 }: CredentialsStepProps) {
   const { t } = useTranslation()
-  const isClaudeOAuth = apiSetupMethod === 'claude_oauth'
   const isChatGptOAuth = apiSetupMethod === 'pi_chatgpt_oauth'
   const isCopilotOAuth = apiSetupMethod === 'pi_copilot_oauth'
-  const isAnthropicApiKey = apiSetupMethod === 'anthropic_api_key'
+  const isKimiOAuth = apiSetupMethod === 'pi_kimi_oauth'
+  const isXaiOAuth = apiSetupMethod === 'pi_xai_oauth'
+  const isDeviceFlowOAuth = isCopilotOAuth || isKimiOAuth || isXaiOAuth
   const isPiApiKey = apiSetupMethod === 'pi_api_key'
-  const isApiKey = isAnthropicApiKey || isPiApiKey
+  const isApiKey = isPiApiKey
 
-  // Copilot device code clipboard handling
+  // Remember whether an OAuth page was reached from the API-key endpoint
+  // dropdown, so "Back" returns to that form instead of the provider list.
+  const cameFromApiKeyFormRef = useRef(false)
+  if (isApiKey) cameFromApiKeyFormRef.current = false
+
+  const canSwitchToOAuth = !!allowOAuthSwitch && !!onSelectApiSetupMethod
+  const handleSelectOAuthMethod = canSwitchToOAuth
+    ? (method: OAuthSetupMethod) => {
+        cameFromApiKeyFormRef.current = true
+        onSelectApiSetupMethod!(method)
+      }
+    : undefined
+
+  const handleOAuthBack = () => {
+    if (cameFromApiKeyFormRef.current && onSelectApiSetupMethod) {
+      cameFromApiKeyFormRef.current = false
+      onSelectApiSetupMethod('pi_api_key')
+      return
+    }
+    onBack()
+  }
+
+  // Device-flow OAuth device code clipboard handling
   const [copiedCode, setCopiedCode] = useState(false)
 
   // Auto-copy device code to clipboard when it appears
   useEffect(() => {
-    if (copilotDeviceCode?.userCode) {
-      navigator.clipboard.writeText(copilotDeviceCode.userCode).then(() => {
+    if (oauthDeviceCode?.userCode) {
+      navigator.clipboard.writeText(oauthDeviceCode.userCode).then(() => {
         setCopiedCode(true)
         setTimeout(() => setCopiedCode(false), 2000)
       }).catch(() => {
         // Clipboard write failed, user can still click to copy
       })
     }
-  }, [copilotDeviceCode?.userCode])
+  }, [oauthDeviceCode?.userCode])
 
   const handleCopyCode = () => {
-    if (copilotDeviceCode?.userCode) {
-      navigator.clipboard.writeText(copilotDeviceCode.userCode).then(() => {
+    if (oauthDeviceCode?.userCode) {
+      navigator.clipboard.writeText(oauthDeviceCode.userCode).then(() => {
         setCopiedCode(true)
         setTimeout(() => setCopiedCode(false), 2000)
       })
@@ -98,7 +136,7 @@ export function CredentialsStep({
         description={t("onboarding.credentials.connectChatGPTDesc")}
         actions={
           <>
-            <BackButton onClick={onBack} disabled={status === 'validating'} />
+            <BackButton onClick={handleOAuthBack} disabled={status === 'validating'} />
             <ContinueButton
               onClick={() => onStartOAuth?.()}
               className="gap-2"
@@ -112,16 +150,16 @@ export function CredentialsStep({
         }
       >
         <div className="space-y-4">
-          <div className="rounded-lg bg-sunken p-4 text-label text-secondary">
+          <div className="rounded-xl bg-foreground-2 p-4 text-sm text-muted-foreground">
             <p>{t("onboarding.credentials.chatGPTInstructions")}</p>
           </div>
           {status === 'error' && errorMessage && (
-            <div className="rounded-md bg-destructive-tint text-destructive text-label p-3">
+            <div className="rounded-lg bg-destructive/10 text-destructive text-sm p-3">
               {errorMessage}
             </div>
           )}
           {status === 'success' && (
-            <div className="rounded-md bg-success-tint text-success text-label p-3">
+            <div className="rounded-lg bg-success/10 text-success text-sm p-3">
               {t("onboarding.credentials.chatGPTConnected")}
             </div>
           )}
@@ -130,15 +168,44 @@ export function CredentialsStep({
     )
   }
 
-  // --- Copilot OAuth flow (device flow) ---
-  if (isCopilotOAuth) {
+  // --- Device-flow OAuth (GitHub Copilot / Kimi Code / xAI) ---
+  if (isDeviceFlowOAuth) {
+    const copy = isXaiOAuth
+      ? {
+          title: t("onboarding.credentials.connectXai"),
+          description: t("onboarding.credentials.connectXaiDesc"),
+          signIn: t("onboarding.credentials.signInXai"),
+          enterCode: t("onboarding.credentials.enterCodeOnXai"),
+          browserOpened: t("onboarding.credentials.browserOpenedXai"),
+          clickToSignIn: t("onboarding.credentials.clickToSignInXai"),
+          connected: t("onboarding.credentials.xaiConnected"),
+        }
+      : isKimiOAuth
+      ? {
+          title: t("onboarding.credentials.connectKimi"),
+          description: t("onboarding.credentials.connectKimiDesc"),
+          signIn: t("onboarding.credentials.signInKimi"),
+          enterCode: t("onboarding.credentials.enterCodeOnKimi"),
+          browserOpened: t("onboarding.credentials.browserOpenedKimi"),
+          clickToSignIn: t("onboarding.credentials.clickToSignInKimi"),
+          connected: t("onboarding.credentials.kimiConnected"),
+        }
+      : {
+          title: t("onboarding.credentials.connectGitHub"),
+          description: t("onboarding.credentials.connectGitHubDesc"),
+          signIn: t("onboarding.credentials.signInGitHub"),
+          enterCode: t("onboarding.credentials.enterCodeOnGitHub"),
+          browserOpened: t("onboarding.credentials.browserOpenedGitHub"),
+          clickToSignIn: t("onboarding.credentials.clickToSignInGitHub"),
+          connected: t("onboarding.credentials.copilotConnected"),
+        }
     return (
       <StepFormLayout
-        title={t("onboarding.credentials.connectGitHub")}
-        description={t("onboarding.credentials.connectGitHubDesc")}
+        title={copy.title}
+        description={copy.description}
         actions={
           <>
-            <BackButton onClick={onBack} disabled={status === 'validating'} />
+            <BackButton onClick={handleOAuthBack} disabled={status === 'validating'} />
             <ContinueButton
               onClick={() => onStartOAuth?.()}
               className="gap-2"
@@ -146,47 +213,55 @@ export function CredentialsStep({
               loadingText={t("onboarding.credentials.waitingForAuth")}
             >
               <ExternalLink className="size-4" />
-              {t("onboarding.credentials.signInGitHub")}
+              {copy.signIn}
             </ContinueButton>
           </>
         }
       >
         <div className="space-y-4">
-          {copilotDeviceCode ? (
-            <div className="rounded-lg bg-sunken p-4 text-label space-y-3">
-              <p className="text-secondary text-center">
-                {t("onboarding.credentials.enterCodeOnGitHub")}
+          {oauthDeviceCode ? (
+            <div className="rounded-xl bg-foreground-2 p-4 text-sm space-y-3">
+              <p className="text-muted-foreground text-center">
+                {copy.enterCode}
               </p>
               <div className="flex flex-col items-center justify-center gap-2">
                 <button
                   type="button"
                   onClick={handleCopyCode}
-                  className="text-title font-mono font-semibold tracking-widest text-foreground px-4 py-2 rounded-md bg-raised shadow-elev-1 hover:bg-fill-hover cursor-pointer"
+                  className="text-2xl font-mono font-bold tracking-widest text-foreground px-4 py-2 rounded-lg bg-background border border-border hover:bg-foreground-2 transition-colors cursor-pointer"
                 >
-                  {copilotDeviceCode.userCode}
+                  {oauthDeviceCode.userCode}
                 </button>
-                <span className={`text-label-sm text-tertiary flex items-center gap-1 transition-opacity ${copiedCode ? 'opacity-100' : 'opacity-0'}`}>
+                <span className={`text-xs text-muted-foreground flex items-center gap-1 transition-opacity ${copiedCode ? 'opacity-100' : 'opacity-0'}`}>
                   <Check className="size-3" />
                   {t("onboarding.credentials.copiedToClipboard")}
                 </span>
               </div>
-              <p className="text-tertiary text-label-sm text-center">
-                {t("onboarding.credentials.browserOpenedGitHub")}
+              <p className="text-muted-foreground text-xs text-center">
+                {copy.browserOpened}
               </p>
+              <button
+                type="button"
+                onClick={() => void window.electronAPI.openUrl(oauthDeviceCode.verificationUri)}
+                className="mx-auto flex items-center gap-1.5 text-xs text-foreground/70 transition-colors hover:text-foreground"
+              >
+                <ExternalLink className="size-3" />
+                {copy.signIn}
+              </button>
             </div>
           ) : (
-            <div className="rounded-lg bg-sunken p-4 text-label text-secondary text-center">
-              <p>{t("onboarding.credentials.clickToSignInGitHub")}</p>
+            <div className="rounded-xl bg-foreground-2 p-4 text-sm text-muted-foreground text-center">
+              <p>{copy.clickToSignIn}</p>
             </div>
           )}
           {status === 'error' && errorMessage && (
-            <div className="rounded-md bg-destructive-tint text-destructive text-label p-3 text-center">
+            <div className="rounded-lg bg-destructive/10 text-destructive text-sm p-3 text-center">
               {errorMessage}
             </div>
           )}
           {status === 'success' && (
-            <div className="rounded-md bg-success-tint text-success text-label p-3 text-center">
-              {t("onboarding.credentials.copilotConnected")}
+            <div className="rounded-lg bg-success/10 text-success text-sm p-3 text-center">
+              {copy.connected}
             </div>
           )}
         </div>
@@ -194,76 +269,14 @@ export function CredentialsStep({
     )
   }
 
-  // --- Claude OAuth flow ---
-  if (isClaudeOAuth) {
-    // Waiting for authorization code entry
-    if (isWaitingForCode) {
-      return (
-        <StepFormLayout
-          title={t("onboarding.credentials.enterAuthCode")}
-          description={t("onboarding.credentials.copyCodeInstruction")}
-          actions={
-            <>
-              <BackButton onClick={onCancelOAuth} disabled={status === 'validating'}>{t("common.cancel")}</BackButton>
-              <ContinueButton
-                type="submit"
-                form="auth-code-form"
-                disabled={false}
-                loading={status === 'validating'}
-                loadingText={t("common.connecting")}
-              />
-            </>
-          }
-        >
-          <OAuthConnect
-            status={status as OAuthStatus}
-            errorMessage={errorMessage}
-            isWaitingForCode={true}
-            onStartOAuth={onStartOAuth!}
-            onSubmitAuthCode={onSubmitAuthCode}
-            onCancelOAuth={onCancelOAuth}
-          />
-        </StepFormLayout>
-      )
-    }
-
-    return (
-      <StepFormLayout
-        title={t("onboarding.credentials.connectClaude")}
-        description={t("onboarding.credentials.claudeSubscriptionDesc")}
-        actions={
-          <>
-            <BackButton onClick={onBack} disabled={status === 'validating'} />
-            <ContinueButton
-              onClick={() => onStartOAuth?.()}
-              className="gap-2"
-              loading={status === 'validating'}
-              loadingText={t("common.connecting")}
-            >
-              <ExternalLink className="size-4" />
-              {t("onboarding.credentials.signInClaude")}
-            </ContinueButton>
-          </>
-        }
-      >
-        <OAuthConnect
-          status={status as OAuthStatus}
-          errorMessage={errorMessage}
-          isWaitingForCode={false}
-          onStartOAuth={onStartOAuth!}
-          onSubmitAuthCode={onSubmitAuthCode}
-          onCancelOAuth={onCancelOAuth}
-        />
-      </StepFormLayout>
-    )
-  }
-
   // --- API Key flow ---
-  // Determine provider type and description based on selected method
-  const providerType = isPiApiKey ? 'pi_api_key' : 'anthropic'
-  const apiKeyDescription = isPiApiKey
-    ? "Select a provider preset and enter the API key. For arbitrary Anthropic-compatible endpoints, use Anthropic API Key mode."
-    : "Enter your API key. Optionally configure a custom endpoint for OpenRouter, Ollama, or compatible APIs."
+  const providerType = 'pi_api_key'
+  const isOrderPrefill = isOrderCredentialPrefill(editInitialValues)
+  const apiKeyDescription = isOrderPrefill
+    ? t('onboarding.credentials.orderDesc')
+    : isPiApiKey
+      ? t('onboarding.credentials.piApiKeyDesc')
+      : t('onboarding.credentials.apiKeyDesc')
 
   const apiKeyInputKey = [
     apiSetupMethod,
@@ -276,7 +289,10 @@ export function CredentialsStep({
 
   return (
     <StepFormLayout
-      title={t("onboarding.credentials.apiConfiguration")}
+      iconElement={isOrderPrefill ? (
+        <OrderWordmark className="text-[4.7rem] leading-[0.85]" />
+      ) : undefined}
+      title={isOrderPrefill ? undefined : t("onboarding.credentials.apiConfiguration")}
       description={apiKeyDescription}
       actions={
         <>
@@ -297,6 +313,8 @@ export function CredentialsStep({
         errorMessage={errorMessage}
         onSubmit={onSubmit}
         providerType={providerType}
+        presetFilter={isOrderPrefill ? 'order' : undefined}
+        onSelectOAuthMethod={isOrderPrefill ? undefined : handleSelectOAuthMethod}
         initialValues={editInitialValues}
       />
     </StepFormLayout>

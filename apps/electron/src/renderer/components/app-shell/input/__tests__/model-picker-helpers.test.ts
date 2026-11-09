@@ -8,8 +8,22 @@
 import { describe, test, expect } from 'bun:test'
 import type { LlmConnection } from '@craft-agent/shared/config/llm-connections'
 import {
+  appendMissingPickerModel,
+  chosenPickerModelId,
+  connectionPinnedModelIds,
+  formatModelLimitCaption,
+  formatModelTokenLimit,
   formatTokenCount,
   groupConnectionsByProvider,
+  isOpenRouterConnection,
+  isPickerModelSelected,
+  isUnavailablePickerModel,
+  pickerModelId,
+  pickerModelMatchesQuery,
+  resolvePickerModelAction,
+  resolvePickerModels,
+  resolvePickerModelsWithLive,
+  resolveVisiblePickerModels,
   stripPiPrefixForDisplay,
 } from '../model-picker-helpers'
 
@@ -74,6 +88,36 @@ describe('formatTokenCount', () => {
   })
 })
 
+describe('formatModelTokenLimit', () => {
+  test('uses binary thousands for multiples of 1024', () => {
+    expect(formatModelTokenLimit(8_192)).toBe('8k')
+    expect(formatModelTokenLimit(65_536)).toBe('64k')
+    expect(formatModelTokenLimit(131_072)).toBe('128k')
+    expect(formatModelTokenLimit(1_048_576)).toBe('1M')
+  })
+
+  test('falls back to decimal grouping otherwise', () => {
+    expect(formatModelTokenLimit(200_000)).toBe('200k')
+    expect(formatModelTokenLimit(8_000)).toBe('8.0k')
+  })
+})
+
+describe('formatModelLimitCaption', () => {
+  const labels = { context: 'context', output: 'output' }
+
+  test('joins context and output when both are present', () => {
+    expect(formatModelLimitCaption({ contextWindow: 200_000, maxTokens: 65_536 }, labels))
+      .toBe('200k context · 64k output')
+  })
+
+  test('omits missing or empty values', () => {
+    expect(formatModelLimitCaption({ contextWindow: 131_072 }, labels)).toBe('128k context')
+    expect(formatModelLimitCaption({ maxTokens: 8_000 }, labels)).toBe('8.0k output')
+    expect(formatModelLimitCaption('Opus', labels)).toBeUndefined()
+    expect(formatModelLimitCaption({ contextWindow: 0 }, labels)).toBeUndefined()
+  })
+})
+
 // -----------------------------------------------------------------------------
 // groupConnectionsByProvider
 // -----------------------------------------------------------------------------
@@ -98,26 +142,20 @@ describe('groupConnectionsByProvider', () => {
     expect(groupConnectionsByProvider([])).toEqual([])
   })
 
-  test('groups anthropic providers into "Anthropic"', () => {
+  test('omits leftover Anthropic connections from the picker', () => {
     const a = conn('a', 'anthropic')
     const b = conn('b', 'anthropic')
-    const result = groupConnectionsByProvider([a, b])
-    expect(result).toEqual([['Anthropic', [a, b]]])
+    const piConn = conn('pi-1', 'pi')
+    expect(groupConnectionsByProvider([a, b])).toEqual([])
+    expect(groupConnectionsByProvider([piConn, a])).toEqual([['Selection Backend', [piConn]]])
   })
 
   test('preserves intra-group order', () => {
-    const a = conn('first', 'anthropic')
-    const b = conn('second', 'anthropic')
-    const c = conn('third', 'anthropic')
+    const a = conn('first', 'pi')
+    const b = conn('second', 'pi')
+    const c = conn('third', 'pi')
     const result = groupConnectionsByProvider([a, b, c])
     expect(result[0][1].map(c => c.slug)).toEqual(['first', 'second', 'third'])
-  })
-
-  test('places "Anthropic" group before pi groups (display order)', () => {
-    const piConn = conn('pi-1', 'pi')
-    const anth = conn('anthropic-1', 'anthropic')
-    const result = groupConnectionsByProvider([piConn, anth])
-    expect(result.map(([k]) => k)).toEqual(['Anthropic', 'Craft Agents Backend'])
   })
 
   test('"pi_compat" with localhost baseUrl goes to "Local"', () => {
@@ -126,30 +164,232 @@ describe('groupConnectionsByProvider', () => {
     expect(result).toEqual([['Local', [local]]])
   })
 
-  test('"pi_compat" with remote baseUrl goes to "Craft Agents Backend"', () => {
+  test('"pi_compat" with remote baseUrl goes to "Selection Backend"', () => {
     const remote = conn('openrouter', 'pi_compat', { baseUrl: 'https://openrouter.ai/api/v1' })
     const result = groupConnectionsByProvider([remote])
-    expect(result).toEqual([['Craft Agents Backend', [remote]]])
+    expect(result).toEqual([['Selection Backend', [remote]]])
   })
 
   test('drops empty groups from the output', () => {
-    const a = conn('a', 'anthropic')
+    const a = conn('a', 'pi')
     const result = groupConnectionsByProvider([a])
-    // Only "Anthropic" appears; "Local" and "Craft Agents Backend" are dropped.
     expect(result.length).toBe(1)
-    expect(result[0][0]).toBe('Anthropic')
+    expect(result[0][0]).toBe('Selection Backend')
   })
 
-  test('full mixed input — anthropic + local + remote pi_compat + pi', () => {
+  test('full mixed input — leftover anthropic is dropped, local + remote remain', () => {
     const anth = conn('a', 'anthropic')
     const local = conn('ollama', 'pi_compat', { baseUrl: 'http://127.0.0.1:1234' })
     const remote = conn('or', 'pi_compat', { baseUrl: 'https://openrouter.ai' })
     const pi = conn('p', 'pi')
     const result = groupConnectionsByProvider([anth, local, remote, pi])
     expect(result.map(([k, conns]) => [k, conns.map(c => c.slug)])).toEqual([
-      ['Anthropic', ['a']],
       ['Local', ['ollama']],
-      ['Craft Agents Backend', ['or', 'p']],
+      ['Selection Backend', ['or', 'p']],
     ])
+  })
+})
+
+describe('resolvePickerModels', () => {
+  test('returns empty when there is no connection', () => {
+    expect(resolvePickerModels(null)).toEqual([])
+    expect(resolvePickerModels(undefined)).toEqual([])
+  })
+
+  test('uses the connection catalog when present', () => {
+    const models = ['Opus', 'Laufry']
+    expect(resolvePickerModels(conn('order', 'pi_compat', { models }))).toEqual(models)
+  })
+
+  test('falls back to defaultModel for a compat connection with an empty catalog', () => {
+    expect(resolvePickerModels(conn('order', 'pi_compat', { defaultModel: 'Opus', models: [] }))).toEqual(['Opus'])
+  })
+
+  test('does not invent Anthropic models for a compat connection', () => {
+    expect(resolvePickerModels(conn('order', 'pi_compat'))).toEqual([])
+  })
+
+  test('uses the Anthropic registry when an Anthropic connection has no models', () => {
+    const models = resolvePickerModels(conn('anth', 'anthropic'))
+    expect(models.length).toBeGreaterThan(0)
+    expect(pickerModelId(models[0]!)).toMatch(/claude|sonnet|opus|haiku/i)
+  })
+})
+
+describe('resolvePickerModelsWithLive', () => {
+  const live = [
+    { id: 'pi/openrouter/horizon-beta', name: 'Horizon Beta', contextWindow: 128000, reasoning: true },
+    { id: 'pi/openrouter/stealth', name: 'Stealth', contextWindow: 200000, reasoning: false },
+  ]
+
+  test('uses the live OpenRouter catalog when the fetch succeeded', () => {
+    const models = resolvePickerModelsWithLive(
+      conn('or', 'pi', { piAuthProvider: 'openrouter', models: ['pi/only-three'] }),
+      live,
+    )
+    expect(models.map(pickerModelId)).toEqual([
+      'pi/openrouter/horizon-beta',
+      'pi/openrouter/stealth',
+    ])
+  })
+
+  test('does not keep a stored default that is missing from the live catalog', () => {
+    const models = resolvePickerModelsWithLive(
+      conn('or', 'pi', {
+        piAuthProvider: 'openrouter',
+        defaultModel: 'pi/openrouter/legacy',
+        models: ['pi/only-three'],
+      }),
+      live,
+    )
+    expect(models.map(pickerModelId)).not.toContain('pi/openrouter/legacy')
+  })
+
+  test('falls back to stored models when live catalog is empty or missing', () => {
+    const stored = conn('or', 'pi', { piAuthProvider: 'openrouter', models: ['pi/only-three'] })
+    expect(resolvePickerModelsWithLive(stored, null)).toEqual(['pi/only-three'])
+    expect(resolvePickerModelsWithLive(stored, [])).toEqual(['pi/only-three'])
+  })
+
+  test('ignores live catalog for non-OpenRouter connections', () => {
+    const models = resolvePickerModelsWithLive(
+      conn('order', 'pi_compat', { models: ['Opus'] }),
+      live,
+    )
+    expect(models).toEqual(['Opus'])
+  })
+})
+
+describe('isOpenRouterConnection', () => {
+  test('matches piAuthProvider only', () => {
+    expect(isOpenRouterConnection(conn('or', 'pi', { piAuthProvider: 'openrouter' }))).toBe(true)
+    expect(isOpenRouterConnection(conn('or', 'pi', { piAuthProvider: 'openai' }))).toBe(false)
+    expect(isOpenRouterConnection(null)).toBe(false)
+  })
+})
+
+describe('appendMissingPickerModel', () => {
+  test('does not duplicate a matching id with a different prefix', () => {
+    expect(appendMissingPickerModel(['pi/Opus'], 'Opus')).toEqual(['pi/Opus'])
+  })
+
+  test('appends when the id is absent', () => {
+    expect(appendMissingPickerModel(['pi/Opus'], 'Laufry')).toEqual(['pi/Opus', 'Laufry'])
+  })
+})
+
+describe('resolvePickerModelAction', () => {
+  const catalog = ['pi/openrouter/stealth', 'pi/openrouter/horizon-beta']
+
+  test('selects a model the provider still offers', () => {
+    expect(resolvePickerModelAction('pi/openrouter/stealth', 'pi/openrouter/legacy', catalog))
+      .toBe('select')
+  })
+
+  test('clears the current model after the provider drops it', () => {
+    expect(resolvePickerModelAction('pi/openrouter/legacy', 'pi/openrouter/legacy', catalog))
+      .toBe('clear')
+    expect(isUnavailablePickerModel(catalog, 'pi/openrouter/legacy')).toBe(true)
+  })
+
+  test('does not select a dropped model that is not current', () => {
+    expect(resolvePickerModelAction('pi/openrouter/legacy', 'pi/openrouter/stealth', catalog))
+      .toBe('ignore')
+  })
+
+  test('chosenPickerModelId maps actions to the next stored value', () => {
+    expect(chosenPickerModelId('pi/openrouter/stealth', 'pi/openrouter/legacy', catalog))
+      .toBe('pi/openrouter/stealth')
+    expect(chosenPickerModelId('pi/openrouter/legacy', 'pi/openrouter/legacy', catalog))
+      .toBe('')
+    expect(chosenPickerModelId('pi/openrouter/legacy', 'pi/openrouter/stealth', catalog))
+      .toBeUndefined()
+  })
+
+  test('appended current model stays visible in the collapsed preview', () => {
+    const models = appendMissingPickerModel(catalog, 'pi/openrouter/legacy')
+    const visible = resolveVisiblePickerModels(models, {
+      currentModel: 'pi/openrouter/legacy',
+      collapseThreshold: 1,
+    })
+    expect(visible.visible.map(pickerModelId)).toEqual(['pi/openrouter/legacy'])
+  })
+})
+
+describe('resolveVisiblePickerModels', () => {
+  const catalog = [
+    { id: 'pi/openrouter/gpt-5.5-pro', name: 'OpenAI: GPT-5.5 Pro', shortName: 'GPT-5.5 Pro', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/o1-pro', name: 'OpenAI: o1-pro', shortName: 'o1-pro', contextWindow: 1, reasoning: true, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/cheap', name: 'Cheap', shortName: 'Cheap', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/stealth', name: 'Stealth', shortName: 'Stealth', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
+    ...Array.from({ length: 20 }, (_, i) => ({
+      id: `pi/openrouter/extra-${i}`,
+      name: `Extra ${i}`,
+      shortName: `Extra ${i}`,
+      contextWindow: 1,
+      reasoning: false,
+      description: '',
+      provider: 'pi' as const,
+    })),
+  ]
+
+  test('shows the full list when the catalog is small', () => {
+    const small = catalog.slice(0, 3)
+    const result = resolveVisiblePickerModels(small, { currentModel: 'pi/openrouter/cheap' })
+    expect(result.collapsed).toBe(false)
+    expect(result.visible).toEqual(small)
+    expect(result.hiddenCount).toBe(0)
+  })
+
+  test('previews only the current and pinned models until the user searches', () => {
+    const result = resolveVisiblePickerModels(catalog, {
+      currentModel: 'pi/openrouter/cheap',
+      pinnedIds: ['pi/openrouter/stealth', 'pi/openrouter/cheap'],
+    })
+    expect(result.collapsed).toBe(true)
+    expect(result.visible.map(pickerModelId)).toEqual([
+      'pi/openrouter/cheap',
+      'pi/openrouter/stealth',
+    ])
+    expect(result.hiddenCount).toBe(catalog.length - 2)
+  })
+
+  test('search looks up matches in the full catalog', () => {
+    const result = resolveVisiblePickerModels(catalog, { query: 'stealth' })
+    expect(result.collapsed).toBe(false)
+    expect(result.visible.map(pickerModelId)).toEqual(['pi/openrouter/stealth'])
+    expect(result.matchCount).toBe(1)
+  })
+
+  test('does not offer a current model that is missing from the catalog', () => {
+    const result = resolveVisiblePickerModels(catalog, {
+      currentModel: 'pi/openrouter/legacy',
+    })
+    expect(result.visible.map(pickerModelId)).not.toContain('pi/openrouter/legacy')
+  })
+})
+
+describe('connectionPinnedModelIds', () => {
+  test('returns stored models and the default', () => {
+    expect(connectionPinnedModelIds(conn('or', 'pi', {
+      models: ['best', 'default'],
+      defaultModel: 'default',
+    }))).toEqual(['best', 'default'])
+  })
+})
+
+describe('pickerModelMatchesQuery', () => {
+  test('matches name and id', () => {
+    expect(pickerModelMatchesQuery({ id: 'pi/openrouter/stealth', name: 'Stealth', shortName: 'Stealth', contextWindow: 1, description: '', provider: 'pi' }, 'steal')).toBe(true)
+    expect(pickerModelMatchesQuery('pi/openrouter/stealth', 'openrouter/stealth')).toBe(true)
+    expect(pickerModelMatchesQuery('pi/openrouter/stealth', 'jamba')).toBe(false)
+  })
+})
+
+describe('isPickerModelSelected', () => {
+  test('matches stored IDs against runtime pi/ prefixes', () => {
+    expect(isPickerModelSelected('pi/Opus', 'Opus')).toBe(true)
+    expect(isPickerModelSelected('Opus', 'pi/Opus')).toBe(true)
+    expect(isPickerModelSelected('Opus', 'Laufry')).toBe(false)
   })
 })

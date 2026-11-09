@@ -1,6 +1,6 @@
-# Craft Agents Electron App
+# Selection Electron App
 
-The primary desktop interface for Craft Agents, built with Electron + React. Provides a multi-session inbox with chat interface for interacting with Claude via Craft workspaces.
+The primary desktop interface for Selection, built with Electron + React. Provides a multi-session inbox with chat interface for interacting with agents via Selection workspaces.
 
 ## Quick Start
 
@@ -48,35 +48,13 @@ apps/electron/
 
 ## Key Learnings & Gotchas
 
-### 1. SDK Path Resolution (CRITICAL)
+### 1. Runtime Path Resolution
 
-The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) spawns a native `claude` binary from a per-platform optional dependency (`@anthropic-ai/claude-agent-sdk-{platform}-{arch}`). Packaged Electron builds must point the SDK at the staged binary because normal optional-dependency resolution does not work inside the packaged resource layout.
+Pi is the only agent runtime. Packaged Electron builds still resolve the Pi agent server, interceptor, ripgrep, and bundled Bun from `packages/shared/src/agent/backend/internal/runtime-resolver.ts`. The Claude Agent SDK native binary is no longer staged or shipped.
 
-**Runtime resolution:** `packages/shared/src/agent/backend/internal/runtime-resolver.ts` probes the build-script alias first:
+### 2. Authentication
 
-```text
-node_modules/@anthropic-ai/claude-agent-sdk-binary/{claude,claude.exe}
-```
-
-and falls back to the real per-arch package in dev. Once resolved, `applyAnthropicRuntimeBootstrap()` calls `setPathToClaudeCodeExecutable(path)` before any Claude agents are created.
-
-### 2. Authentication Environment Setup (CRITICAL)
-
-The SDK requires authentication environment variables to be set BEFORE creating agents. The Electron app must do this explicitly during initialization.
-
-```typescript
-import { getAuthState } from '../../../src/auth/state'
-
-// In initialize():
-const authState = await getAuthState()
-const { billing } = authState
-
-if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
-  process.env.CLAUDE_CODE_OAUTH_TOKEN = billing.claudeOAuthToken
-} else if (billing.apiKey) {
-  process.env.ANTHROPIC_API_KEY = billing.apiKey
-}
-```
+Pi connections resolve credentials from the encrypted credential store at session start. Official Anthropic login / Claude Max connections stay unavailable and do not inject `ANTHROPIC_*` or `CLAUDE_CODE_OAUTH_TOKEN`. Custom Anthropic Messages endpoints are Pi-compatible connections and use the endpoint's own API key, including an official API key pointed at `https://api.anthropic.com`.
 
 ### 3. AgentEvent Type Mismatches
 
@@ -154,7 +132,7 @@ bun run sync-secrets
 
 **Creating your own OAuth credentials:**
 1. Go to [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials
-2. Create OAuth Client ID (Web application type) — add `https://thecraftagents.com/auth/callback` as an authorized redirect URI
+2. Create OAuth Client ID (Desktop app type)
 3. Enable required scopes in OAuth consent screen:
    - `https://www.googleapis.com/auth/gmail.readonly`
    - `https://www.googleapis.com/auth/userinfo.email`
@@ -180,7 +158,7 @@ If you modify `resources/icon.icon`, regenerate the Assets.car:
 ```bash
 cd apps/electron
 xcrun actool "resources/icon.icon" --compile "resources" \
-  --app-icon AppIcon --minimum-deployment-target 26.0 \
+  --app-icon icon --minimum-deployment-target 26.0 \
   --platform macosx --output-partial-info-plist /dev/null
 ```
 
@@ -205,7 +183,7 @@ DevTools opens automatically (configured in `index.ts`). Remove `mainWindow.webC
 - **AI-generated titles** - Sessions get automatic titles after first exchange
 - **Subagent support** - Load and apply agent definitions from Craft documents
 - **Shell integration** - Open URLs in browser, open files in default apps
-- **Permission modes** - Three-level permission system (Explore, Ask to Edit, Auto)
+- **Permission modes** - Three-level permission system (Explore, Smart Approval, Auto)
 - **Background tasks** - Run long-running tasks in background with progress tracking
 - **Multi-file diff** - VS Code-style window for viewing all file changes in a turn
 - **Dynamic statuses** - Workspace-customizable session workflow states

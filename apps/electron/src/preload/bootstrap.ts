@@ -18,21 +18,13 @@
 
 import '@sentry/electron/preload'
 import { contextBridge, ipcRenderer, shell, webUtils } from 'electron'
+import open from 'open'
 import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
-import {
-  createSignInRunner,
-  raceDeadline,
-  waitForJoinedOAuthFlow,
-  DEFAULT_OAUTH_FLOW_TTL_MS,
-  SIGN_IN_RESTARTED,
-  SIGN_IN_TIMED_OUT,
-  type OAuthStartResult,
-  type SourceOAuthArgs,
-  type SourceOAuthResult,
-} from '../transport/source-oauth'
+import { dispatchDetachedOpenPath, dispatchOpenPath } from './shell-capabilities'
+import { createConfirmationBridge } from './confirmation-bridge'
 import { createCallbackServer } from '@craft-agent/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@craft-agent/shared/auth/chatgpt-oauth-config'
 import {
@@ -48,6 +40,7 @@ import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from
 import type { RpcClient } from '@craft-agent/server-core/transport'
 import type { RemoteServerConfig } from '@craft-agent/core/types'
 import type { ElectronAPI } from '../shared/types'
+import { GET_WINDOW_RESIZE_STATE, WINDOW_RESIZE_STATE } from '../shared/window-resize'
 
 // ---------------------------------------------------------------------------
 // Client interface — common surface for both RoutedClient and WsRpcClient
@@ -55,6 +48,7 @@ import type { ElectronAPI } from '../shared/types'
 
 interface TransportClient extends RpcClient {
   isChannelAvailable(channel: string): boolean
+  getMaxMessageBytes(): number
   getConnectionState(): TransportConnectionState
   onConnectionStateChanged(callback: (state: TransportConnectionState) => void): () => void
   reconnectNow(): void
@@ -171,18 +165,18 @@ if (isClientOnly) {
 
 client.handleCapability(CLIENT_OPEN_EXTERNAL, (url: string) => shell.openExternal(url))
 
-client.handleCapability(CLIENT_OPEN_PATH, async (path: string) => {
-  const error = await shell.openPath(path)
-  return { error: error || undefined }
-})
+client.handleCapability(CLIENT_OPEN_PATH, (path: string) => (
+  process.platform === 'win32'
+    ? dispatchDetachedOpenPath(path, value => open(value, { wait: false }))
+    : dispatchOpenPath(path, value => shell.openPath(value))
+))
 
 client.handleCapability(CLIENT_SHOW_IN_FOLDER, (path: string) => {
   shell.showItemInFolder(path)
 })
 
-client.handleCapability(CLIENT_CONFIRM_DIALOG, async (spec: ConfirmDialogSpec) => {
-  return await ipcRenderer.invoke('__dialog:showMessageBox', spec)
-})
+const confirmationBridge = createConfirmationBridge()
+client.handleCapability(CLIENT_CONFIRM_DIALOG, (spec: ConfirmDialogSpec) => confirmationBridge.request(spec))
 
 client.handleCapability(CLIENT_OPEN_FILE_DIALOG, async (spec: FileDialogSpec) => {
   return await ipcRenderer.invoke('__dialog:showOpenDialog', spec)
@@ -201,8 +195,20 @@ client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequ
 // ---------------------------------------------------------------------------
 
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
+;(api as ElectronAPI).onConfirmDialog = handler => confirmationBridge.register(handler)
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
+;(api as ElectronAPI).getMaxMessageBytes = () => client.getMaxMessageBytes()
+
+if (process.platform === 'darwin' || process.platform === 'win32') {
+  ;(api as ElectronAPI).onWindowResizeStateChange = callback => {
+    const handler = (_event: Electron.IpcRendererEvent, resizing: boolean) => callback(resizing)
+    ipcRenderer.on(WINDOW_RESIZE_STATE, handler)
+    // A preview mounted (or renderer reloaded) mid-gesture needs current state.
+    ipcRenderer.send(GET_WINDOW_RESIZE_STATE)
+    return () => ipcRenderer.removeListener(WINDOW_RESIZE_STATE, handler)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Transport connection state logging (for remote connections)
@@ -279,9 +285,11 @@ client.onConnectionStateChanged((state) => {
 // Multi-step orchestration: callback server (local) → oauth:start (server) →
 // open browser → wait for callback → oauth:complete (server).
 // Runs client-side because the callback server must receive the redirect.
-// When another window or session is already signing in to the source, oauth:start
-// joins that flow instead: no browser, just wait for it to end.
-async function runSourceOAuth(args: SourceOAuthArgs, signal: AbortSignal): Promise<SourceOAuthResult> {
+;(api as any).performOAuth = async (args: {
+  sourceSlug: string
+  sessionId?: string
+  authRequestId?: string
+}): Promise<{ success: boolean; error?: string; email?: string }> => {
   let callbackServer: Awaited<ReturnType<typeof createCallbackServer>> | null = null
   let flowId: string | undefined
   let state: string | undefined
@@ -291,73 +299,51 @@ async function runSourceOAuth(args: SourceOAuthArgs, signal: AbortSignal): Promi
     callbackServer = await createCallbackServer({ appType: 'electron' })
     const callbackUrl = `${callbackServer.url}/callback`
 
-    // 2. Ask server to prepare the flow (PKCE, auth URL, store in flow store), or join the live one
-    const startResult: OAuthStartResult = await client.invoke('oauth:start', {
+    // 2. Ask server to prepare the flow (PKCE, auth URL, store in flow store)
+    const startResult = await client.invoke('oauth:start', {
       sourceSlug: args.sourceSlug,
       callbackUrl,
       sessionId: args.sessionId,
       authRequestId: args.authRequestId,
-      joinLive: true,
-      restart: args.restart,
     })
-    const timeoutMs = startResult.expiresInMs ?? DEFAULT_OAUTH_FLOW_TTL_MS
-    if (startResult.joined) {
-      callbackServer.close()
-      callbackServer = null
-      if (signal.aborted) return SIGN_IN_RESTARTED
-      return await waitForJoinedOAuthFlow((channel, ...rest) => client.invoke(channel, ...rest), startResult.flowId, { timeoutMs, signal })
-    }
     flowId = startResult.flowId
     state = startResult.state
-    // Restarted: end this flow (a no-op if the restart already replaced it) so nothing waits on
-    // a flow whose callback server is gone
-    const abandon = () => {
-      client.invoke('oauth:cancel', { flowId, state, error: SIGN_IN_RESTARTED.error }).catch(() => {})
-      return SIGN_IN_RESTARTED
-    }
-    if (signal.aborted) return abandon()
 
     // 3. Open browser for user consent (local — must open on the user's machine, not remote server)
     await shell.openExternal(startResult.authUrl)
 
-    // 4. Wait for OAuth provider to redirect to our callback server, but not past the flow's
-    //    lifetime (the server forgets it then) or a restart
-    const callback = await raceDeadline(callbackServer.promise, timeoutMs, signal)
-    if (!callback) {
-      if (signal.aborted) return abandon()
-      await client.invoke('oauth:cancel', { flowId, state, error: SIGN_IN_TIMED_OUT.error })
-      return SIGN_IN_TIMED_OUT
-    }
+    // 4. Wait for OAuth provider to redirect to our callback server
+    const callback = await callbackServer.promise
 
-    // 5. Check for errors from the provider (the reason reaches clients that joined the flow)
+    // 5. Check for errors from the provider
     if (callback.query.error) {
       const error = callback.query.error_description || callback.query.error
-      await client.invoke('oauth:cancel', { flowId, state, error })
+      await client.invoke('oauth:cancel', { flowId, state })
       return { success: false, error }
     }
 
     const code = callback.query.code
     if (!code) {
-      const error = 'No authorization code received'
-      await client.invoke('oauth:cancel', { flowId, state, error })
-      return { success: false, error }
+      await client.invoke('oauth:cancel', { flowId, state })
+      return { success: false, error: 'No authorization code received' }
     }
 
     // 6. Send code to server for token exchange + credential storage
     const result = await client.invoke('oauth:complete', { flowId, code, state })
     return { success: result.success, error: result.error, email: result.email }
   } catch (err) {
-    const error = err instanceof Error ? err.message : 'OAuth flow failed'
     // Clean up server-side flow on error
     if (flowId && state) {
-      client.invoke('oauth:cancel', { flowId, state, error }).catch(() => {})
+      client.invoke('oauth:cancel', { flowId, state }).catch(() => {})
     }
-    return { success: false, error }
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'OAuth flow failed',
+    }
   } finally {
     callbackServer?.close()
   }
 }
-;(api as any).performOAuth = createSignInRunner(runSourceOAuth)
 
 // ── startClaudeOAuth ─────────────────────────────────────────────────────
 // Override the channel-map stub: the server now returns authUrl without opening
@@ -444,8 +430,6 @@ async function runSourceOAuth(args: SourceOAuthArgs, signal: AbortSignal): Promi
 // App lifecycle — direct IPC (not WS RPC) since it restarts the server itself
 ;(api as ElectronAPI).relaunchApp = () => ipcRenderer.invoke('app:relaunch')
 ;(api as ElectronAPI).removeWorkspace = (workspaceId: string) => ipcRenderer.invoke('workspace:remove', workspaceId)
-;(api as ElectronAPI).getDefaultZoomLevel = () => ipcRenderer.invoke('zoom:getDefault')
-;(api as ElectronAPI).setDefaultZoomLevel = (level: number) => ipcRenderer.invoke('zoom:setDefault', level)
 ;(api as ElectronAPI).invokeOnServer = (url: string, token: string, channel: string, ...args: any[]) =>
   ipcRenderer.invoke('server:invokeOnServer', url, token, channel, ...args)
 ;(api as ElectronAPI).transferSessionToWorkspace = (sessionId: string, targetWorkspaceId: string, sessionIndex?: number, sessionCount?: number) =>
@@ -462,14 +446,6 @@ async function runSourceOAuth(args: SourceOAuthArgs, signal: AbortSignal): Promi
   vcredistMissing: process.env.CRAFT_VCREDIST_MISSING === '1',
   downloadUrl: process.env.CRAFT_VCREDIST_URL,
 })
-
-// Native window material, passed by the main process as a launch argument (window-manager.ts).
-// Read synchronously so the first paint already knows whether the canvas may be translucent.
-const WINDOW_VIBRANCY_ARG = '--craft-window-vibrancy='
-;(api as ElectronAPI).getWindowVibrancy = () => {
-  const value = process.argv.find(arg => arg.startsWith(WINDOW_VIBRANCY_ARG))?.slice(WINDOW_VIBRANCY_ARG.length)
-  return value === 'under-window' || value === 'mica' ? value : null
-}
 
 // i18n: sync language changes to main process (for native menus/dialogs)
 ;(api as ElectronAPI).changeLanguage = (lang: string) => ipcRenderer.invoke('i18n:changeLanguage', lang)

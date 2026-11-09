@@ -1,9 +1,16 @@
+export * from './anthropic-api-host.ts';
+export * from './custom-endpoint-models.ts';
+export * from './provider-model-payload.ts';
 export * from './types.ts';
-export { CONFIG_DIR, DEFAULT_CONFIG_DIR_NAME, resolveConfigDir } from './paths.ts';
+export * from './paths.ts';
 export * from './llm-connections.ts';
+export * from './order-gateway.ts';
+export * from './connection-display-name.ts';
 export * from './llm-validation.ts';
 export * from './models.ts';
 export * from './models-pi.ts';
+export * from './openrouter-catalog.ts';
+export * from './pi-provider-picker-models.ts';
 export * from './model-fetcher.ts';
 export * from './preferences.ts';
 export * from './storage.ts';

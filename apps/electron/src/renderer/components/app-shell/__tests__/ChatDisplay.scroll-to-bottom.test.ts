@@ -1,0 +1,378 @@
+import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import {
+  PROGRAMMATIC_SMOOTH_SCROLL_MS,
+  SHOW_SCROLL_BUTTON_THRESHOLD_PX,
+  STICK_TO_BOTTOM_THRESHOLD_PX,
+  FOLLOW_PAINT_SHIFT_MAX_STEP_PX,
+  applyFollowPaintTransform,
+  compensateFollowPaintShift,
+  decayFollowPaintShift,
+  forceStickToBottomState,
+  isProgrammaticScrollLocked,
+  resolveStickToBottomState,
+  shouldApplyUserScroll,
+  shouldLoadEarlierTurns,
+  followStickyViewportToBottom,
+  snapStickyViewportToBottom,
+  createStickyScrollFollow,
+  readScrollMetrics,
+  isAtBottom,
+  type ScrollMetrics,
+} from '../ChatDisplay.scroll-to-bottom'
+
+describe('virtual history preserves reader intent and streaming', () => {
+  const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
+  const body = source.match(/const handleScroll = React.useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[applyStickState\]\)/)?.[1]
+  function scroll(sticky: boolean, atBottom: boolean) {
+    expect(body).toBeDefined()
+    const viewport = { scrollTop: atBottom ? 4600 : 1000, scrollHeight: 5000, clientHeight: 400 }
+    const stickyRef = { current: sticky }
+    let updates = 0
+    const scope = {
+      scrollViewportRef: { current: viewport }, readScrollMetrics, isAtBottom,
+      ignoreScrollUnstickUntilRef: { current: 0 }, isStickToBottomRef: stickyRef, shouldApplyUserScroll,
+      applyStickState: () => { updates++; stickyRef.current = isAtBottom(viewport) },
+    }
+    new Function(...Object.keys(scope), body!)(...Object.values(scope))
+    return { sticky: stickyRef.current, updates }
+  }
+  test('layout growth alone cannot release the sticky bottom', () => {
+    expect(scroll(true, false)).toEqual({ sticky: true, updates: 0 })
+  })
+  test('reader scrolling away keeps control of the full history', () => {
+    expect(scroll(false, false)).toEqual({ sticky: false, updates: 1 })
+  })
+  test('returning to the actual bottom resumes following', () => {
+    expect(scroll(false, true)).toEqual({ sticky: true, updates: 1 })
+  })
+})
+
+/**
+ * Frame rate is not asserted in CI. Hand test: open a session of about 100 long
+ * replies, start a long answer, and scroll in the Performance panel. A single
+ * reply should not keep one span[data-stream-chunk] per token, and scrolling
+ * should not show a forced layout on every token.
+ */
+describe('streaming resize follows frames and reader intent (#328)', () => {
+  const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
+
+  test('upward wheel input suspends follow before native scrolling fires', () => {
+    const wheelBody = source.match(/const handleWheel = \(event: WheelEvent\) => \{([\s\S]*?)\n    \}/)?.[1]
+    expect(wheelBody).toBeDefined()
+    const sticky = { current: true }
+    let unlocks = 0
+    const wheel = new Function('event', 'isStickToBottomRef', 'cancelProgrammaticLock', wheelBody!)
+    wheel({ deltaY: 20 }, sticky, () => unlocks++)
+    expect(sticky.current).toBe(true)
+    wheel({ deltaY: -1 }, sticky, () => unlocks++)
+    expect(sticky.current).toBe(false)
+    expect(unlocks).toBe(2)
+  })
+
+  test('resize follows until reader pauses, including when the panel loses focus', () => {
+    let sticky = true
+    let id = 0
+    const frames = new Map<number, FrameRequestCallback>()
+    const viewport = { scrollTop: 550, scrollHeight: 1200, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => sticky, reduceMotion: () => false,
+      requestFrame: callback => { frames.set(++id, callback); return id },
+      cancelFrame: frame => { frames.delete(frame) },
+    })
+    follow.resize()
+    follow.resize()
+    expect(frames.size).toBe(1)
+    let time = 0
+    const tick = () => {
+      const [frame, callback] = frames.entries().next().value!
+      frames.delete(frame)
+      callback(time += 16.67)
+    }
+    tick()
+    expect(viewport.scrollTop).toBeGreaterThan(550)
+    expect(viewport.scrollTop).toBeLessThan(600)
+    viewport.scrollHeight += 24
+    follow.resize()
+    expect(frames.size).toBe(1)
+    for (let i = 0; frames.size && i < 100; i++) tick()
+    expect(viewport.scrollTop).toBe(624)
+    viewport.clientHeight = 400
+    follow.resize()
+    sticky = false
+    viewport.scrollTop = 300
+    tick()
+    expect(viewport.scrollTop).toBe(300)
+    expect(frames.size).toBe(0)
+    sticky = true
+    follow.resize()
+    follow.dispose()
+    expect(frames.size).toBe(0)
+  })
+
+  test('a streaming row reports its real height instead of an estimated box', () => {
+    const history = readFileSync(new URL('../ChatVirtualHistory.tsx', import.meta.url), 'utf8')
+    expect(history).toContain('data-chat-virtual-streaming')
+    expect(history).toContain('const layOutRow = active || (streaming && visible)')
+    expect(history).toContain("...(layOutRow ? {} : { contentVisibility: 'auto'")
+    expect(history).toContain('shouldMeasureVirtualScrollMargin')
+  })
+
+  test('a queued follow does not read layout for another streaming resize', () => {
+    let reads = 0
+    const viewport = {
+      scrollTop: 560,
+      get scrollHeight() { reads += 1; return 1000 },
+      clientHeight: 400,
+    }
+    let next: FrameRequestCallback | undefined
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true,
+      reduceMotion: () => false,
+      requestFrame: callback => { next = callback; return 1 },
+      cancelFrame: () => { next = undefined },
+    })
+    follow.resize()
+    const afterSchedule = reads
+    expect(afterSchedule).toBeGreaterThan(0)
+    expect(next).toBeTypeOf('function')
+    follow.resize()
+    expect(reads).toBe(afterSchedule)
+    follow.dispose()
+  })
+
+  test('uses one follow controller without translating the transcript', () => {
+    expect(source).toContain('follow.resize()')
+    expect(source).toContain('follow.dispose()')
+    expect(source).not.toContain('applyFollowPaintTransform')
+    expect(source).toContain('stickyFollowRef.current.resize(resolved)')
+  })
+
+  test('explicit smooth scrolling shares the follow loop, and instant requests cancel it', () => {
+    let nextFrame: FrameRequestCallback | undefined
+    let cancelled = 0
+    const viewport = { scrollTop: 0, scrollHeight: 4000, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined; cancelled++ },
+    })
+    follow.resize('smooth')
+    expect(viewport.scrollTop).toBe(0)
+    nextFrame!(16.67)
+    expect(viewport.scrollTop).toBeGreaterThan(0)
+    expect(viewport.scrollTop).toBeLessThan(3400)
+    viewport.scrollHeight += 24
+    const before = viewport.scrollTop
+    follow.resize()
+    expect(viewport.scrollTop).toBe(before)
+    follow.resize('instant')
+    expect(viewport.scrollTop).toBe(3424)
+    expect(nextFrame).toBeUndefined()
+    expect(cancelled).toBe(1)
+    follow.dispose()
+  })
+
+  test('the next frame follows growth that arrived after the last resize', () => {
+    let nextFrame: FrameRequestCallback | undefined
+    const viewport = { scrollTop: 1190, scrollHeight: 2000, clientHeight: 800 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined },
+    })
+    follow.resize()
+    viewport.scrollHeight = 4000
+    nextFrame!(16.67)
+    expect(viewport.scrollTop).toBeGreaterThan(1200)
+    follow.dispose()
+  })
+
+  test('reduced motion and viewport-sized bursts snap without scheduling work', () => {
+    let scheduled = 0
+    let reduced = true
+    const viewport = { scrollTop: 500, scrollHeight: 1200, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => reduced,
+      requestFrame: () => { scheduled++; return 1 }, cancelFrame: () => {},
+    })
+    follow.resize()
+    expect(viewport.scrollTop).toBe(600)
+    reduced = false
+    viewport.scrollHeight += 2000
+    follow.resize()
+    expect(viewport.scrollTop).toBe(2600)
+    expect(scheduled).toBe(0)
+    follow.dispose()
+  })
+})
+
+describe('followStickyViewportToBottom', () => {
+  test('approaches the bottom over several frames instead of snapping', () => {
+    const viewport = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+    expect(followStickyViewportToBottom(viewport, {
+      focused: true, sticky: true, reduceMotion: false, elapsedMs: 16, target: 1200,
+    })).toBe(true)
+    expect(viewport.scrollTop).toBeGreaterThan(0)
+    expect(viewport.scrollTop).toBeLessThan(400)
+  })
+
+  test('snaps when motion is reduced and leaves a reader who scrolled away', () => {
+    const reduced = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+    expect(followStickyViewportToBottom(reduced, {
+      focused: true, sticky: true, reduceMotion: true, elapsedMs: 16,
+    })).toBe(false)
+    expect(reduced.scrollTop).toBe(1200)
+
+    const away = { scrollTop: 100, scrollHeight: 2000, clientHeight: 800 }
+    expect(followStickyViewportToBottom(away, {
+      focused: true, sticky: false, reduceMotion: false, elapsedMs: 16,
+    })).toBe(false)
+    expect(away.scrollTop).toBe(100)
+  })
+})
+
+describe('follow paint shift', () => {
+  test('compensates a wrap in full then decays at most 8px per frame', () => {
+    const compensated = compensateFollowPaintShift({ shift: 0, velocity: 0 }, 24)
+    expect(compensated.shift).toBe(24)
+    const next = decayFollowPaintShift(compensated, 16.67, false)
+    expect(compensated.shift - next.shift).toBeLessThanOrEqual(FOLLOW_PAINT_SHIFT_MAX_STEP_PX + 0.01)
+    expect(next.shift).toBeGreaterThan(14)
+    expect(next.more).toBe(true)
+  })
+
+  test('clears the compositor layer when motion is reduced or lag is gone', () => {
+    expect(decayFollowPaintShift({ shift: 24, velocity: 0 }, 16, true)).toEqual({
+      shift: 0, velocity: 0, more: false,
+    })
+    const element = { style: { transform: 'translate3d(0, 12px, 0)', willChange: 'transform' } }
+    applyFollowPaintTransform(element, 12)
+    expect(element.style.transform).toBe('translate3d(0, 12px, 0)')
+    applyFollowPaintTransform(element, 0)
+    expect(element.style.transform).toBe('')
+    expect(element.style.willChange).toBe('')
+  })
+})
+
+describe('snapStickyViewportToBottom', () => {
+  test('snaps immediately when the reader is sticky or the panel is unfocused', () => {
+    const viewport = { scrollTop: 100, scrollHeight: 2000, clientHeight: 800 }
+    expect(snapStickyViewportToBottom(viewport, { focused: true, sticky: true })).toBe(true)
+    expect(viewport.scrollTop).toBe(1200)
+  })
+
+  test('leaves the viewport alone when the focused reader has scrolled away', () => {
+    const viewport = { scrollTop: 100, scrollHeight: 2000, clientHeight: 800 }
+    expect(snapStickyViewportToBottom(viewport, { focused: true, sticky: false })).toBe(false)
+    expect(viewport.scrollTop).toBe(100)
+  })
+})
+
+function metrics(overrides: Partial<ScrollMetrics> = {}): ScrollMetrics {
+  return {
+    scrollTop: 0,
+    scrollHeight: 2000,
+    clientHeight: 800,
+    ...overrides,
+  }
+}
+
+/** scrollTop that leaves `distance` pixels above the bottom of a 2000/800 viewport. */
+function away(distance: number): ScrollMetrics {
+  return metrics({ scrollTop: 2000 - 800 - distance })
+}
+
+describe('resolveStickToBottomState — leave / return / send / click (#73)', () => {
+  test('shows the button after leaving the bottom of an overflowing thread', () => {
+    const next = resolveStickToBottomState(away(80))
+    expect(next.isStickToBottom).toBe(false)
+    expect(next.showButton).toBe(true)
+  })
+
+  test('hides the button after scrolling back to the bottom', () => {
+    const next = resolveStickToBottomState(away(10), true)
+    expect(next.isStickToBottom).toBe(true)
+    expect(next.showButton).toBe(false)
+  })
+
+  test('does not flash the button in the 20–40px hysteresis band', () => {
+    const mid = away((STICK_TO_BOTTOM_THRESHOLD_PX + SHOW_SCROLL_BUTTON_THRESHOLD_PX) / 2)
+    const first = resolveStickToBottomState(mid, false)
+    expect(first.isStickToBottom).toBe(false)
+    expect(first.showButton).toBe(false)
+
+    const stillShowing = resolveStickToBottomState(mid, true)
+    expect(stillShowing.isStickToBottom).toBe(false)
+    expect(stillShowing.showButton).toBe(true)
+  })
+
+  test('clicking or sending force-sticks and hides the button', () => {
+    expect(forceStickToBottomState()).toEqual({ isStickToBottom: true, showButton: false })
+    expect(resolveStickToBottomState(away(200), true).showButton).toBe(true)
+  })
+
+  test('stays visible while new streaming content arrives away from the bottom', () => {
+    const before = resolveStickToBottomState(metrics({ scrollTop: 200, scrollHeight: 2000 }), true)
+    const after = resolveStickToBottomState(metrics({ scrollTop: 200, scrollHeight: 2600 }), true)
+    expect(before.showButton).toBe(true)
+    expect(after.showButton).toBe(true)
+    expect(after.isStickToBottom).toBe(false)
+  })
+
+  test('does not show the button when content does not overflow', () => {
+    const next = resolveStickToBottomState({
+      scrollTop: 0,
+      scrollHeight: 400,
+      clientHeight: 800,
+    })
+    expect(next.isStickToBottom).toBe(true)
+    expect(next.showButton).toBe(false)
+  })
+})
+
+describe('shouldApplyUserScroll — programmatic scroll lock', () => {
+  test('does not unstick while a smooth scroll-to-bottom is in flight', () => {
+    const now = 1_000
+    expect(shouldApplyUserScroll(now, now + PROGRAMMATIC_SMOOTH_SCROLL_MS, false)).toBe(false)
+  })
+
+  test('applies the arrived-at-bottom update even during the lock', () => {
+    const now = 1_000
+    expect(shouldApplyUserScroll(now, now + PROGRAMMATIC_SMOOTH_SCROLL_MS, true)).toBe(true)
+  })
+
+  test('resumes normal unstick after the lock expires', () => {
+    const now = 1_000
+    expect(shouldApplyUserScroll(now + PROGRAMMATIC_SMOOTH_SCROLL_MS, now + PROGRAMMATIC_SMOOTH_SCROLL_MS - 1, false)).toBe(true)
+  })
+})
+
+describe('shouldLoadEarlierTurns — do not fight scroll-to-bottom', () => {
+  test('loads older turns when the user is near the top', () => {
+    expect(shouldLoadEarlierTurns(40, false)).toBe(true)
+  })
+
+  test('skips lazy-load while a programmatic scroll-to-bottom is locked', () => {
+    expect(shouldLoadEarlierTurns(40, true)).toBe(false)
+    expect(isProgrammaticScrollLocked(1_000, 1_200)).toBe(true)
+  })
+
+  test('does not load when the user is away from the top', () => {
+    expect(shouldLoadEarlierTurns(400, false)).toBe(false)
+  })
+})
+
+ test('response bottom remains fixed through successive paragraph growth; scrolling up interrupts it', () => {
+   const viewport = { scrollTop: 400, scrollHeight: 1000, clientHeight: 600 }
+   for (const growth of [24, 160, 480, 32]) {
+     viewport.scrollHeight += growth
+     snapStickyViewportToBottom(viewport, { focused: true, sticky: true })
+     expect(viewport.scrollHeight - viewport.scrollTop).toBe(viewport.clientHeight)
+   }
+   viewport.scrollTop -= 200
+   const readingPosition = viewport.scrollTop
+   viewport.scrollHeight += 300
+   snapStickyViewportToBottom(viewport, { focused: true, sticky: false })
+   expect(viewport.scrollTop).toBe(readingPosition)
+ })

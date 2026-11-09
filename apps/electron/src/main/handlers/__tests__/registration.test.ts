@@ -23,6 +23,7 @@ mock.module('electron', () => ({
   },
   dialog: {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+    showSaveDialog: async () => ({ canceled: true }),
     showMessageBox: async () => ({ response: 0 }),
   },
   shell: {
@@ -56,7 +57,7 @@ function createMockServer(): RpcServer {
 
 function createMockDeps(): HandlerDeps {
   return {
-    sessionManager: {} as HandlerDeps['sessionManager'],
+    sessionManager: { setTaskRunnerLookup: () => {} } as unknown as HandlerDeps['sessionManager'],
     platform: {
       appRootPath: '',
       resourcesPath: '',
@@ -107,10 +108,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     transfer,
     tasks,
     projects,
-    pages,
-    decisions,
-    prWatch,
-    codingRepos,
   ] = await Promise.all([
     import('@craft-agent/server-core/handlers/rpc/auth'),
     import('@craft-agent/server-core/handlers/rpc/automations'),
@@ -130,18 +127,15 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@craft-agent/server-core/handlers/rpc/transfer'),
     import('@craft-agent/server-core/handlers/rpc/tasks'),
     import('@craft-agent/server-core/handlers/rpc/projects'),
-    import('@craft-agent/server-core/handlers/rpc/pages'),
-    import('@craft-agent/server-core/handlers/rpc/decisions'),
-    import('@craft-agent/server-core/handlers/rpc/pr-watch'),
-    import('@craft-agent/server-core/handlers/rpc/coding-repos'),
   ])
 
   // GUI handler channels (remain in electron)
-  const [browser, guiSystem, guiWorkspace, guiSettings] = await Promise.all([
+  const [browser, guiSystem, guiWorkspace, guiSettings, guiResources] = await Promise.all([
     import('../browser'),
     import('../system'),
     import('../workspace'),
     import('../settings'),
+    import('../resources'),
   ])
 
   return new Set([
@@ -163,14 +157,11 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...transfer.HANDLED_CHANNELS,
     ...tasks.HANDLED_CHANNELS,
     ...projects.HANDLED_CHANNELS,
-    ...pages.HANDLED_CHANNELS,
-    ...decisions.HANDLED_CHANNELS,
-    ...prWatch.HANDLED_CHANNELS,
-    ...codingRepos.HANDLED_CHANNELS,
     ...browser.HANDLED_CHANNELS,
     ...guiSystem.GUI_HANDLED_CHANNELS,
     ...guiWorkspace.GUI_HANDLED_CHANNELS,
     ...guiSettings.GUI_HANDLED_CHANNELS,
+    ...guiResources.HANDLED_CHANNELS,
   ])
 }
 

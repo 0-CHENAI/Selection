@@ -9,20 +9,20 @@
  * Follows the Appearance settings pattern: app-level defaults + workspace overrides.
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react'
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, IconButton } from '@/components/ui/button'
-import { HeaderMenu } from '@/components/ui/HeaderMenu'
-import { routes } from '@/lib/navigate'
-import { X, MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, RefreshCcw, Settings2, MessageSquareMore, Zap, Clock, Check, Plus } from 'lucide-react'
+import { PanelHeader } from '@/components/app-shell/PanelHeader'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { X, MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, XCircle, AlertTriangle, RefreshCcw, Settings2, MessageSquareMore, Zap, Clock, Check } from 'lucide-react'
 import type { CredentialHealthStatus, CredentialHealthIssue } from '../../../shared/types'
-import { Spinner, FullscreenOverlayBase, Tooltip, TooltipTrigger, TooltipContent, AnimatedCollapsibleContent } from '@craft-agent/ui'
+import { Spinner, FullscreenOverlayBase, Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import { useSetAtom } from 'jotai'
 import { fullscreenOverlayOpenAtom } from '@/atoms/overlay'
-import { DECISION_SETTINGS_CHANGED_EVENT } from '@/atoms/permission-modes'
+import { motion, AnimatePresence } from 'motion/react'
 import type { LlmConnectionWithStatus, ThinkingLevel, WorkspaceSettings, Workspace } from '../../../shared/types'
-import type { DecisionLayerFeature, DecisionLayerStatus, DecisionLayerSettingsPatch, DecisionProviderId, DecisionServerProbe, DecisionTestResult, DecisionToggleUsage } from '../../../shared/types'
-import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '@craft-agent/shared/agent/thinking-levels'
+import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS, modelThinkingCapability, constrainThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import {
   DropdownMenu,
@@ -37,89 +37,91 @@ import {
   StyledDropdownMenuSubContent,
 } from '@/components/ui/styled-dropdown'
 import { cn } from '@/lib/utils'
+import { windowsCaptionEdgeStyle } from '@/lib/windows-caption-inset'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 
 import {
-  SettingsPage,
   SettingsSection,
   SettingsCard,
   SettingsRow,
   SettingsMenuSelectRow,
-  SettingsToggle,
-  SettingsInput,
 } from '@/components/settings'
-import { settingsUI } from '@/components/settings/SettingsUIConstants'
 import { useOnboarding } from '@/hooks/useOnboarding'
-import { RtkUpdateDialog, type RtkStatusInfo } from '@/components/RtkUpdateDialog'
 import { useWorkspaceIcon } from '@/hooks/useWorkspaceIcon'
 import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
+import { resolveSettingsApiSetupInitialValues } from './api-setup-initial-values'
 import { RenameDialog } from '@/components/ui/rename-dialog'
-import { useAppShellContext, WORKSPACE_SETTINGS_CHANGED_EVENT } from '@/context/AppShellContext'
-import { RichTextInput, type RichTextInputHandle } from '@/components/ui/rich-text-input'
-import { InlineMentionMenu, useInlineMention, type MentionItem } from '@/components/ui/mention-menu'
-import { MentionBadge } from '@/components/ui/mention-badge'
-import { findMentionMatches } from '@/lib/mentions'
-import type { LoadedSkill, LoadedSource } from '../../../shared/types'
+import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
-import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { connectionModelIdsMatch, isUnsupportedLlmConnection, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { displayLlmConnectionName, isOrderGatewayUrl, isOrderOpenAiUrl } from '@config/order-gateway'
 import { toast } from 'sonner'
-import { Skeleton } from '@/components/ui/skeleton'
-import { loadAiSettings } from './ai-settings-loader'
-
-/** Checks with an outcome after which a feature that changed nothing is pointed out. */
-const DECISION_NO_CHANGE_MIN_CHECKS = 30
-
-/**
- * Compact token count: 1234 → "1.2K", 1234567 → "1.2M". Used by the RTK
- * efficiency meter. Locale-agnostic — the suffix is universal across the
- * 7 supported locales.
- */
-function formatTokenCount(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`
-  return `${(n / 1_000_000).toFixed(1)}M`
-}
-
-/** Auto-compact windows offered as presets (tokens); anything else in 100K–1M is "Custom". */
-const AUTO_COMPACT_PRESETS = [200_000, 400_000, 600_000]
-
-/** "350000", "350,000", "350k" or "0.35m" → tokens; null when it is not a number. */
-function parseTokenCount(text: string): number | null {
-  const match = /^([\d.]+)\s*([km]?)$/i.exec(text.trim().replace(/[,_\s](?=\d)/g, ''))
-  if (!match) return null
-  const value = Number(match[1]) * (match[2]?.toLowerCase() === 'k' ? 1_000 : match[2]?.toLowerCase() === 'm' ? 1_000_000 : 1)
-  return Number.isFinite(value) ? Math.round(value) : null
-}
+import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import {
+  appendMissingPickerModel,
+  connectionPinnedModelIds,
+  isOpenRouterConnection,
+  isUnavailablePickerModel,
+  resolvePickerModelsWithLive,
+  type LivePickerModel,
+} from '@/components/app-shell/input/model-picker-helpers'
 
 /**
- * Derive model dropdown options from a connection's models array,
- * falling back to registry models for the connection's provider type.
+ * Derive model dropdown options from a connection.
+ * OpenRouter uses the live catalog when available; other providers stay on
+ * the stored list or the bundled registry.
  */
 function getModelOptionsForConnection(
   connection: LlmConnectionWithStatus | undefined,
-): Array<{ value: string; label: string; description: string; descriptionKey?: string }> {
-  if (!connection) return []
-
-  // If connection has explicit models, use those
-  if (connection.models && connection.models.length > 0) {
-    return connection.models.map((m) => {
-      if (typeof m === 'string') {
-        return { value: m, label: getModelShortName(m), description: '' }
+  liveOpenRouter?: readonly LivePickerModel[] | null,
+  selectedValue?: string,
+): Array<{ value: string; label: string; description: string; descriptionKey?: string; unavailable?: boolean }> {
+  const catalog = resolvePickerModelsWithLive(connection, liveOpenRouter)
+  const models = appendMissingPickerModel(
+    catalog,
+    selectedValue && selectedValue !== 'global' ? selectedValue : undefined,
+  )
+  const options = models.map((m) => {
+    const value = typeof m === 'string' ? m : m.id
+    const unavailable = isUnavailablePickerModel(catalog, value)
+    if (typeof m === 'string') {
+      return {
+        value: m,
+        label: getModelShortName(m),
+        description: '',
+        descriptionKey: unavailable ? 'chat.modelPicker.unavailable' : undefined,
+        unavailable,
       }
-      // ModelDefinition object
-      const def = m as ModelDefinition
-      return { value: def.id, label: def.name, description: def.description, descriptionKey: def.descriptionKey }
-    })
+    }
+    return {
+      value: m.id,
+      label: m.name?.trim() || m.id,
+      description: m.description ?? '',
+      descriptionKey: unavailable ? 'chat.modelPicker.unavailable' : m.descriptionKey,
+      unavailable,
+    }
+  })
+
+  if (selectedValue && selectedValue !== 'global' && !options.some((option) => option.value === selectedValue)) {
+    const match = options.find((option) => connectionModelIdsMatch(option.value, selectedValue))
+    if (match) match.value = selectedValue
   }
 
-  // Fall back to registry models for this provider type
-  const registryModels = getModelsForProviderType(connection.providerType, connection.piAuthProvider)
-  return registryModels.map((m) => ({
-    value: m.id,
-    label: m.name,
-    description: m.description,
-    descriptionKey: m.descriptionKey,
-  }))
+  return options
+}
+
+function connectionThinkingLevels(connection: LlmConnectionWithStatus | undefined, modelId: string) {
+  const model = connection?.models?.find(m => connectionModelIdsMatch(typeof m === 'string' ? m : m.id, modelId))
+  const base = typeof model === 'object' ? model : (modelId ? { id: modelId } : undefined)
+  const capability = modelThinkingCapability(base ? { ...base, provider: connection?.piAuthProvider } : undefined)
+  if (capability.mode === 'unsupported') {
+    return THINKING_LEVELS.filter(level => level.id === 'off').map(level => ({ ...level, descriptionKey: 'thinking.notSupported' }))
+  }
+  if (capability.mode === 'always-on') {
+    const id = capability.requestLevel ?? 'low'
+    return THINKING_LEVELS.filter(level => level.id === id).map(level => ({ ...level, descriptionKey: 'thinking.alwaysOn' }))
+  }
+  return THINKING_LEVELS.filter(level => capability.levels.includes(level.id))
 }
 
 export const meta: DetailsPageMeta = {
@@ -155,27 +157,25 @@ function CredentialHealthBanner({ issues, onReauthenticate }: CredentialHealthBa
   if (issues.length === 0) return null
 
   return (
-    <div className="rounded-lg bg-info-tint px-3.5 py-3 inset-ring inset-ring-[var(--info-border)]">
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 mb-6">
       <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-px size-4 shrink-0 text-info" aria-hidden />
-        {/* The action wraps under the text when the panel is narrow */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-4 gap-y-2.5">
-          <div className="min-w-[min(100%,14rem)] flex-1">
-            <h4 className="text-label font-semibold text-foreground">
-              {t("settings.ai.credentialIssue")}
-            </h4>
-            <p className="mt-0.5 text-label leading-5 text-secondary">
-              {getHealthIssueMessage(issues[0], t)}
-            </p>
-          </div>
-          <Button
-            variant="primary"
-            size="md"
-            onClick={onReauthenticate}
-          >
-            {t("settings.ai.reAuthenticate")}
-          </Button>
+        <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-medium text-amber-700 dark:text-amber-400">
+            {t("settings.ai.credentialIssue")}
+          </h4>
+          <p className="mt-1 text-sm text-amber-600 dark:text-amber-300/80">
+            {getHealthIssueMessage(issues[0], t)}
+          </p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onReauthenticate}
+          className="flex-shrink-0 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+        >
+          {t("settings.ai.reAuthenticate")}
+        </Button>
       </div>
     </div>
   )
@@ -206,7 +206,6 @@ const PI_AUTH_PROVIDER_LABELS: Record<string, string> = {
   moonshotai: 'Moonshot AI',
   'moonshotai-cn': 'Moonshot AI (CN)',
   'vercel-ai-gateway': 'Vercel AI Gateway',
-  'cloudflare-ai-gateway': 'Cloudflare AI Gateway',
   'github-copilot': 'GitHub Copilot',
 }
 
@@ -230,9 +229,10 @@ interface ConnectionRowProps {
   validationError?: string
   /** True when another OAuth connection resolves to the same Anthropic account (issue #838) */
   isDuplicateAccount?: boolean
+  unsupported?: boolean
 }
 
-function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onReauthenticate, onEdit, onSetMidStreamBehavior, validationState, validationError, isDuplicateAccount }: ConnectionRowProps) {
+function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onReauthenticate, onEdit, onSetMidStreamBehavior, validationState, validationError, isDuplicateAccount, unsupported }: ConnectionRowProps) {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [piBaseUrl, setPiBaseUrl] = useState<string | undefined>(undefined)
@@ -256,11 +256,39 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
   }, [connection.providerType, connection.type, connection.piAuthProvider, connection.baseUrl])
 
   // Build description with provider, default indicator, auth status, and validation state
-  const getDescription = () => {
-    // Show validation state if not idle
-    if (validationState === 'validating') return t("settings.ai.validating")
-    if (validationState === 'success') return t("settings.ai.connectionValid")
-    if (validationState === 'error') return validationError || t("settings.ai.validationFailed")
+  const getDescription = (): ReactNode => {
+    if (validationState === 'validating') {
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <Spinner className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t("settings.ai.validating")}</span>
+        </span>
+      )
+    }
+    if (validationState === 'success') {
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0 text-success">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t("settings.ai.connectionValid")}</span>
+        </span>
+      )
+    }
+    if (validationState === 'error') {
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0 text-destructive">
+          <XCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{validationError || t("settings.ai.validationFailed")}</span>
+        </span>
+      )
+    }
+
+    if (unsupported) {
+      return t('settings.ai.unsupportedConnectionDesc')
+    }
+
+    if (isOrderGatewayUrl(connection.baseUrl)) {
+      return t('settings.ai.orderConnectionDesc')
+    }
 
     const parts: string[] = []
 
@@ -275,13 +303,17 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
         const piLabel = !isSubscription && connection.piAuthProvider
           ? PI_AUTH_PROVIDER_LABELS[connection.piAuthProvider]
           : null
-        parts.push(piLabel ?? 'Craft Agents Backend')
+        parts.push(piLabel ?? 'Selection Backend')
         break
       }
       case 'pi_compat':
-        parts.push(connection.baseUrl?.toLowerCase().includes('manifest.build')
-          ? 'Manifest'
-          : 'Craft Agents Backend Compatible')
+        if (isOrderGatewayUrl(connection.baseUrl)) {
+          parts.push(t('apiSetup.format.openaiCompatible'))
+        } else {
+          parts.push(connection.baseUrl?.toLowerCase().includes('manifest.build')
+            ? 'Manifest'
+            : 'Selection Backend Compatible')
+        }
         break
       default: parts.push(provider || 'Unknown')
     }
@@ -326,17 +358,22 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
         <div className="flex flex-col gap-0.5 min-w-0">
           <div className="flex items-center gap-1">
             <ConnectionIcon connection={connection} size={14} />
-            <span>{connection.name}</span>
+            <span>{displayLlmConnectionName(connection)}</span>
             {connection.isDefault && (
-              <span className="inline-flex h-5 items-center rounded-xs bg-fill-hover px-1.5 text-label-sm font-medium text-secondary">
+              <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium rounded-[4px] bg-background shadow-minimal text-foreground/60">
                 {t("common.default")}
+              </span>
+            )}
+            {unsupported && (
+              <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium rounded-[4px] bg-background shadow-minimal text-foreground/60">
+                {t("settings.ai.unsupportedConnection")}
               </span>
             )}
             {isDuplicateAccount && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex items-center" aria-label={t("settings.ai.duplicateAccount")}>
-                    <AlertTriangle className="size-3.5 text-info" />
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>{t("settings.ai.duplicateAccount")}</TooltipContent>
@@ -344,7 +381,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             )}
           </div>
           {oauthIdentityLine && (
-            <span className="truncate text-label-sm font-normal text-tertiary">{oauthIdentityLine}</span>
+            <span className="text-xs text-muted-foreground truncate">{oauthIdentityLine}</span>
           )}
         </div>
       )}
@@ -352,24 +389,25 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
     >
       <DropdownMenu modal={false} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <IconButton
-            aria-label={t("common.more")}
+          <button
+            className="p-1.5 rounded-md hover:bg-foreground/[0.05] data-[state=open]:bg-foreground/[0.05] transition-colors"
             data-state={menuOpen ? 'open' : 'closed'}
-            icon={<MoreHorizontal className="size-4" />}
-          />
+          >
+            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+          </button>
         </DropdownMenuTrigger>
         <StyledDropdownMenuContent align="end">
           <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onRenameClick)}>
             <Pencil className="h-3.5 w-3.5" />
             <span>{t("common.rename")}</span>
           </StyledDropdownMenuItem>
-          {!connection.isDefault && (
+          {!unsupported && !connection.isDefault && (
             <StyledDropdownMenuItem onClick={onSetDefault}>
               <Star className="h-3.5 w-3.5" />
               <span>{t("settings.ai.setAsDefault")}</span>
             </StyledDropdownMenuItem>
           )}
-          {connection.authType === 'oauth' ? (
+          {!unsupported && (connection.authType === 'oauth' ? (
             <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onReauthenticate)}>
               <RefreshCcw className="h-3.5 w-3.5" />
               <span>{t("settings.ai.reAuthenticate")}</span>
@@ -379,7 +417,8 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
               <Settings2 className="h-3.5 w-3.5" />
               <span>{t("common.edit")}</span>
             </StyledDropdownMenuItem>
-          )}
+          ))}
+          {!unsupported && (
           <StyledDropdownMenuItem
             onClick={onValidate}
             disabled={validationState === 'validating'}
@@ -387,7 +426,8 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             <CheckCircle2 className="h-3.5 w-3.5" />
             <span>{t("settings.ai.validateConnection")}</span>
           </StyledDropdownMenuItem>
-          {(() => {
+          )}
+          {!unsupported && (() => {
             const currentBehavior = resolveMidStreamBehavior(connection)
             return (
               <DropdownMenuSub>
@@ -433,6 +473,7 @@ interface WorkspaceOverrideCardProps {
   workspace: Workspace
   llmConnections: LlmConnectionWithStatus[]
   onSettingsChange: () => void
+  liveOpenRouterModels?: LivePickerModel[] | null
 }
 
 const WORKSPACE_SETTING_LABELS: Partial<Record<keyof WorkspaceSettings, string>> = {
@@ -441,8 +482,9 @@ const WORKSPACE_SETTING_LABELS: Partial<Record<keyof WorkspaceSettings, string>>
   thinkingLevel: 'workspace thinking override',
 }
 
-function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: WorkspaceOverrideCardProps) {
+function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, liveOpenRouterModels }: WorkspaceOverrideCardProps) {
   const { t } = useTranslation()
+  useThinkingCatalog()
   const [isExpanded, setIsExpanded] = useState(false)
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -490,7 +532,7 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
         description: message,
       })
     }
-  }, [workspace.id, onSettingsChange, settings])
+  }, [workspace.id, onSettingsChange, settings, t])
 
   const handleConnectionChange = useCallback((slug: string) => {
     // 'global' means use app default (clear workspace override)
@@ -524,6 +566,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
     const connSlug = settings?.defaultLlmConnection
     return connSlug ? llmConnections.find(c => c.slug === connSlug) : llmConnections.find(c => c.isDefault)
   }, [settings?.defaultLlmConnection, llmConnections])
+  const workspaceThinkingLevels = connectionThinkingLevels(workspaceEffectiveConnection,
+    settings?.model || workspaceEffectiveConnection?.defaultModel || '')
+  const effectiveWorkspaceThinking = currentThinking === 'global' ? 'global'
+    : constrainThinkingLevel(currentThinking as ThinkingLevel, workspaceThinkingLevels.map(level => level.id))
+
 
   // Get summary text for collapsed state
   const getSummary = () => {
@@ -537,54 +584,58 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
       parts.push(getModelShortName(settings.model))
     }
     if (settings?.thinkingLevel) {
-      const level = THINKING_LEVELS.find(l => l.id === settings.thinkingLevel)
+      const level = THINKING_LEVELS.find(l => l.id === effectiveWorkspaceThinking)
       parts.push(level ? t(level.nameKey) : settings.thinkingLevel)
     }
     return parts.join(' · ')
   }
 
-  // One row of the shared overrides card (the parent's SettingsCard draws the hairlines between
-  // workspaces); the collapsible body is always mounted and draws its own top hairline when open.
   return (
-    <div>
+    <SettingsCard>
       <button
         type="button"
-        aria-expanded={isExpanded}
         onClick={() => setIsExpanded(!isExpanded)}
-        className={EXPANDER_ROW_CLASS}
+        className="w-full flex items-center justify-between py-3 px-4 hover:bg-foreground/[0.02] transition-colors"
       >
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex items-center gap-3">
           <div
             className={cn(
-              'size-6 shrink-0 rounded-full overflow-hidden bg-fill-hover flex items-center justify-center',
-              'ring-1 ring-border'
+              'w-6 h-6 rounded-full overflow-hidden bg-foreground/5 flex items-center justify-center',
+              'ring-1 ring-border/50'
             )}
           >
             {iconUrl ? (
               <img src={iconUrl} alt="" className="w-full h-full object-cover" />
             ) : (
-              <span className="text-caption text-secondary">
+              <span className="text-xs font-medium text-muted-foreground">
                 {workspace.name?.charAt(0)?.toUpperCase() || 'W'}
               </span>
             )}
           </div>
-          <div className="min-w-0 text-left">
-            <div className={settingsUI.label}>{workspace.name}</div>
-            <div className={cn(settingsUI.description, '[overflow-wrap:anywhere]')}>
+          <div className="text-left">
+            <div className="text-sm font-medium">{workspace.name}</div>
+            <div className="text-xs text-muted-foreground">
               {isLoading ? t("common.loading") : getSummary()}
             </div>
           </div>
         </div>
         {isExpanded ? (
-          <ChevronDown className="size-4 shrink-0 text-tertiary" aria-hidden />
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
         ) : (
-          <ChevronRight className="size-4 shrink-0 text-tertiary" aria-hidden />
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
         )}
       </button>
 
-      {/* Expands in place: content swaps once, fades with a 4px drop (no height animation) */}
-      <AnimatedCollapsibleContent isOpen={isExpanded}>
-            <div className="border-t border-subtle py-1 pl-9">
+      <AnimatePresence initial={false}>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-border/50 px-4 py-2">
               <SettingsMenuSelectRow
                 label={t("settings.ai.connection")}
                 description={t("settings.ai.connectionDesc")}
@@ -592,11 +643,10 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
                 onValueChange={handleConnectionChange}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...llmConnections.map((conn) => ({
+                  ...llmConnections.filter((conn) => !isUnsupportedLlmConnection(conn)).map((conn) => ({
                     value: conn.slug,
                     label: conn.name,
-                    description: conn.providerType === 'anthropic' ? 'Anthropic' :
-                                 conn.providerType === 'pi' ? 'Craft Agents Backend' :
+                    description: conn.providerType === 'pi' ? 'Selection Backend' :
                                  conn.providerType || 'Unknown',
                   })),
                 ]}
@@ -606,9 +656,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
                 description={t("settings.ai.modelDesc")}
                 value={currentModel}
                 onValueChange={handleModelChange}
+                searchable
+                pinnedValues={['global', ...connectionPinnedModelIds(workspaceEffectiveConnection)]}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...getModelOptionsForConnection(workspaceEffectiveConnection).map(o => ({
+                  ...getModelOptionsForConnection(workspaceEffectiveConnection, liveOpenRouterModels, currentModel).map(o => ({
                     ...o, description: o.descriptionKey ? t(o.descriptionKey) : o.description,
                   })),
                 ]}
@@ -616,11 +668,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
               <SettingsMenuSelectRow
                 label={t("settings.ai.thinking")}
                 description={t("settings.ai.thinkingDesc")}
-                value={currentThinking}
+                value={effectiveWorkspaceThinking}
                 onValueChange={handleThinkingChange}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => ({
+                  ...workspaceThinkingLevels.map(({ id, nameKey, descriptionKey }) => ({
                     value: id,
                     label: t(nameKey),
                     description: t(descriptionKey),
@@ -628,8 +680,10 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
                 ]}
               />
             </div>
-      </AnimatedCollapsibleContent>
-    </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </SettingsCard>
   )
 }
 
@@ -637,232 +691,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
 // Helpers
 // ============================================
 
-/** Full-width row that expands a card in place (workspace overrides, decision Advanced settings). */
-const EXPANDER_ROW_CLASS = cn(
-  'w-full min-h-14 flex items-center justify-between gap-4 px-3.5 py-2.5 text-left -outline-offset-2',
-  'transition-colors duration-micro ease-out-subtle hover:bg-fill-hover hover:duration-instant'
-)
-
 /** Map a connection's provider type to the corresponding API key setup method. */
 function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMethod {
   const provider = conn.providerType || conn.type
   if (provider === 'pi' || provider === 'pi_compat') return 'pi_api_key'
-  return 'anthropic_api_key'
-}
-
-// ============================================
-// Chat Starters Section (per-workspace)
-// ============================================
-
-interface ChatStartersSectionProps {
-  workspaceId: string
-  onSettingsChange: () => void
-}
-
-/** A starter prompt with its source/skill mentions drawn as badges, as in the composer. */
-function MentionText({ text, skills, sources, workspaceId }: {
-  text: string
-  skills: LoadedSkill[]
-  sources: LoadedSource[]
-  workspaceId?: string
-}) {
-  const matches = findMentionMatches(text, skills.map(s => s.slug), sources.map(s => s.config.slug))
-  if (matches.length === 0) return <>{text}</>
-
-  const parts: React.ReactNode[] = []
-  let lastIndex = 0
-  for (const match of matches) {
-    if (match.startIndex > lastIndex) parts.push(text.slice(lastIndex, match.startIndex))
-    const skill = match.type === 'skill' ? skills.find(s => s.slug === match.id) : undefined
-    const source = match.type === 'source' ? sources.find(s => s.config.slug === match.id) : undefined
-    const label = skill?.metadata.name ?? source?.config.name ?? match.id.split('/').pop() ?? match.id
-    parts.push(
-      <MentionBadge
-        key={match.startIndex}
-        type={match.type}
-        label={label}
-        skill={skill}
-        source={source}
-        workspaceId={workspaceId}
-        className="h-5 mx-0.5 align-middle"
-      />
-    )
-    lastIndex = match.startIndex + match.fullMatch.length
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
-  return <>{parts}</>
-}
-
-function ChatStartersSection({ workspaceId, onSettingsChange }: ChatStartersSectionProps) {
-  const { t } = useTranslation()
-  const { skills = [], enabledSources: sources = [], workspaces } = useAppShellContext()
-  // Skill mentions are qualified by the workspace slug, as the composer writes them
-  const workspaceSlug = workspaces.find(w => w.id === workspaceId)?.slug ?? workspaceId
-  const [starters, setStarters] = useState<Array<{ label: string; prompt: string }>>([])
-  const [labelDraft, setLabelDraft] = useState('')
-  const [promptDraft, setPromptDraft] = useState('')
-  const [saving, setSaving] = useState(false)
-  const promptInputRef = useRef<RichTextInputHandle>(null)
-  const promptLabelId = useId()
-
-  useEffect(() => {
-    if (!window.electronAPI) return
-    window.electronAPI.getWorkspaceSettings(workspaceId).then(ws => {
-      setStarters(ws?.chatStarters ?? [])
-    }).catch(console.error)
-  }, [workspaceId])
-
-  const saveStarters = useCallback(async (next: Array<{ label: string; prompt: string }>) => {
-    if (!window.electronAPI) return false
-    setSaving(true)
-    try {
-      await window.electronAPI.updateWorkspaceSetting(workspaceId, 'chatStarters', next)
-      setStarters(next)
-      onSettingsChange()
-      window.dispatchEvent(new CustomEvent(WORKSPACE_SETTINGS_CHANGED_EVENT, { detail: { workspaceId } }))
-      return true
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Unknown error'
-      toast.error(t("toast.failedToSaveSetting", { setting: 'chat starters' }), { description: msg })
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }, [workspaceId, onSettingsChange, t])
-
-  // No basePath: starters belong to the workspace, so file mentions (relative to a session's folder) are not offered
-  const inlineMention = useInlineMention({
-    inputRef: promptInputRef,
-    skills,
-    sources,
-    onSelect: () => {},
-    workspaceId: workspaceSlug,
-  })
-
-  const handleMentionSelect = useCallback((item: MentionItem) => {
-    const { value, cursorPosition } = inlineMention.handleSelect(item)
-    setPromptDraft(value)
-    // Restore focus and caret once the badge has rendered
-    setTimeout(() => {
-      promptInputRef.current?.focus()
-      promptInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
-    }, 0)
-  }, [inlineMention])
-
-  const canAdd = labelDraft.trim().length > 0 && promptDraft.trim().length > 0
-
-  const handleAdd = useCallback(async () => {
-    const label = labelDraft.trim()
-    const prompt = promptDraft.trim()
-    if (!label || !prompt) return
-    if (await saveStarters([...starters, { label, prompt }])) {
-      setLabelDraft('')
-      setPromptDraft('')
-    }
-  }, [labelDraft, promptDraft, starters, saveStarters])
-
-  const handlePromptKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return
-    if (inlineMention.isOpen) {
-      // The open menu handles navigation and selection keys itself
-      const hasItems = inlineMention.sections.some(s => s.items.length > 0) || inlineMention.isSearching
-      if (hasItems && (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) return
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        inlineMention.close()
-        return
-      }
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      if (canAdd && !saving) void handleAdd()
-    }
-  }, [inlineMention, canAdd, saving, handleAdd])
-
-  const handleDelete = useCallback((index: number) => {
-    void saveStarters(starters.filter((_, i) => i !== index))
-  }, [starters, saveStarters])
-
-  return (
-    <SettingsSection
-      title={t("settings.ai.chatStarters.title", "Chat Starters")}
-      description={t("settings.ai.chatStarters.desc", "Custom starter prompts shown on the new chat screen. Up to 3 are displayed; extras are ignored.")}
-    >
-      <SettingsCard>
-        {starters.length === 0 && (
-          <div className="px-3.5 py-3 text-label text-tertiary">
-            {t("settings.ai.chatStarters.empty", "No custom starters — auto-generated prompts will be shown.")}
-          </div>
-        )}
-        {starters.map((starter, i) => (
-          <SettingsRow
-            key={`${i}:${starter.label}`}
-            label={starter.label}
-            description={<MentionText text={starter.prompt} skills={skills} sources={sources} workspaceId={workspaceSlug} />}
-          >
-            <IconButton
-              size="sm"
-              aria-label={t("common.delete")}
-              icon={<Trash2 className="size-3.5" />}
-              tooltip
-              onClick={() => handleDelete(i)}
-              disabled={saving}
-            />
-          </SettingsRow>
-        ))}
-        <div className="border-t border-hairline px-3.5 py-3 flex flex-col gap-3">
-          <SettingsInput
-            label={t("settings.ai.chatStarters.label", "Label")}
-            placeholder={t("settings.ai.chatStarters.labelPlaceholder", "e.g. Summarize my day")}
-            value={labelDraft}
-            onChange={setLabelDraft}
-          />
-          <div className="space-y-2">
-            <div id={promptLabelId} className={settingsUI.label}>
-              {t("settings.ai.chatStarters.prompt", "Prompt")}
-            </div>
-            <div className="field-surface rounded-md">
-              <RichTextInput
-                ref={promptInputRef}
-                aria-labelledby={promptLabelId}
-                value={promptDraft}
-                onChange={setPromptDraft}
-                onInput={(value, cursor) => inlineMention.handleInputChange(value, cursor)}
-                onKeyDown={handlePromptKeyDown}
-                placeholder={t("settings.ai.chatStarters.promptPlaceholder")}
-                skills={skills}
-                sources={sources}
-                workspaceId={workspaceSlug}
-                className="px-2.5 py-2 text-label"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void handleAdd()}
-              disabled={!canAdd || saving}
-            >
-              <Plus className="size-3.5 mr-1" />
-              {t("settings.ai.chatStarters.add", "Add Starter")}
-            </Button>
-          </div>
-        </div>
-        <InlineMentionMenu
-          open={inlineMention.isOpen}
-          onOpenChange={(open) => !open && inlineMention.close()}
-          sections={inlineMention.sections}
-          onSelect={handleMentionSelect}
-          filter={inlineMention.filter}
-          position={inlineMention.position}
-          workspaceId={workspaceId}
-          maxWidth={280}
-          isSearching={inlineMention.isSearching}
-        />
-      </SettingsCard>
-    </SettingsSection>
-  )
+  return 'pi_api_key'
 }
 
 // ============================================
@@ -870,6 +703,7 @@ function ChatStartersSection({ workspaceId, onSettingsChange }: ChatStartersSect
 // ============================================
 
 export default function AiSettingsPage() {
+  useThinkingCatalog()
   const { t } = useTranslation()
   const { llmConnections, refreshLlmConnections, activeWorkspaceId } = useAppShellContext()
 
@@ -883,6 +717,13 @@ export default function AiSettingsPage() {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, 'auto' | 'on' | 'off'>
+    modelImageLearned?: Record<string, boolean>
+    modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelThinkingModes?: Record<string, 'unsupported' | 'always-on' | 'levels'>
+    modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
   } | undefined>(undefined)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
@@ -892,37 +733,6 @@ export default function AiSettingsPage() {
 
   // Default settings state (app-level)
   const [defaultThinking, setDefaultThinking] = useState<ThinkingLevel>(DEFAULT_THINKING_LEVEL)
-  const [extendedPromptCache, setExtendedPromptCache] = useState(false)
-  const [enable1MContext, setEnable1MContext] = useState(false)
-  // Claude auto-compact window (null = model default) and default subagent model (null = session's)
-  const [autoCompactWindow, setAutoCompactWindowValue] = useState<number | null>(null)
-  const [autoCompactCustom, setAutoCompactCustom] = useState(false)
-  const [autoCompactDraft, setAutoCompactDraft] = useState('')
-  const [autoCompactError, setAutoCompactError] = useState<string | undefined>(undefined)
-  const [subagentModel, setSubagentModelValue] = useState<'haiku' | 'sonnet' | null>(null)
-  const [rtkEnabled, setRtkEnabled] = useState(false)
-  const [rtkStatus, setRtkStatus] = useState<RtkStatusInfo | null>(null)
-  const [rtkUpdateOpen, setRtkUpdateOpen] = useState(false)
-  const [rtkRechecking, setRtkRechecking] = useState(false)
-  const [rtkGain, setRtkGain] = useState<{ totalCommands: number; totalInput: number; totalOutput: number; totalSaved: number; avgSavingsPct: number; totalTimeMs: number; avgTimeMs: number } | null>(null)
-
-  // Decision model (Jev / TypeSafe System One) — opt-in decision layer.
-  // The card is always shown; everything behind it stays off until the user enables it.
-  const [decisionStatus, setDecisionStatus] = useState<DecisionLayerStatus | null>(null)
-  const [decisionAdvancedOpen, setDecisionAdvancedOpen] = useState(false)
-  const [decisionUsage, setDecisionUsage] = useState<Partial<Record<DecisionLayerFeature, DecisionToggleUsage>>>({})
-  const [decisionKeyDraft, setDecisionKeyDraft] = useState('')
-  const [decisionModelDraft, setDecisionModelDraft] = useState('')
-  const [decisionBaseUrlDraft, setDecisionBaseUrlDraft] = useState('')
-  const [decisionTesting, setDecisionTesting] = useState(false)
-  const [decisionTestResult, setDecisionTestResult] = useState<DecisionTestResult | null>(null)
-  // Local servers (Laya, custom): GET /health so the card can say whether the server is up.
-  const [decisionProbe, setDecisionProbe] = useState<DecisionServerProbe | null>(null)
-  const [decisionProbing, setDecisionProbing] = useState(false)
-  // Drafts are seeded from stored settings once (and after a provider switch),
-  // never on background refreshes, so in-progress typing is not clobbered.
-  const decisionDraftsSeededRef = useRef(false)
-
 
   // Validation state per connection
   const [validationStates, setValidationStates] = useState<Record<string, {
@@ -930,8 +740,7 @@ export default function AiSettingsPage() {
     error?: string
   }>>({})
 
-  // Reveal the initial settings and health banner together; never insert sections above controls.
-  const [settingsLoading, setSettingsLoading] = useState(true)
+  // Credential health state (for startup warning banner)
   const [credentialHealthIssues, setCredentialHealthIssues] = useState<CredentialHealthIssue[]>([])
 
   // Rename dialog state
@@ -939,33 +748,36 @@ export default function AiSettingsPage() {
   const [renamingConnection, setRenamingConnection] = useState<{ slug: string; name: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
+  // Load workspaces, default settings, and credential health
   useEffect(() => {
-    let cancelled = false
-    setSettingsLoading(true)
-    loadAiSettings(window.electronAPI, refreshLlmConnections).then((settings) => {
-      if (cancelled) return
-      setWorkspaces(settings.workspaces)
-      setDefaultThinking(settings.thinking)
-      setExtendedPromptCache(settings.extendedCache)
-      setEnable1MContext(settings.enable1M)
-      setAutoCompactWindowValue(settings.autoCompactWindow)
-      setAutoCompactCustom(settings.autoCompactWindow !== null && !AUTO_COMPACT_PRESETS.includes(settings.autoCompactWindow))
-      setAutoCompactDraft(settings.autoCompactWindow !== null ? String(settings.autoCompactWindow) : '')
-      setSubagentModelValue(settings.subagentModel)
-      setRtkEnabled(settings.rtkEnabled)
-      setRtkStatus(settings.rtkStatus)
-      setCredentialHealthIssues(settings.health.healthy ? [] : settings.health.issues)
-    }).catch((error) => {
-      if (!cancelled) console.error('Failed to load settings:', error)
-    }).finally(() => {
-      if (!cancelled) setSettingsLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [activeWorkspaceId, refreshLlmConnections])
+    const load = async () => {
+      if (!window.electronAPI) return
+      try {
+        const ws = await window.electronAPI.getWorkspaces()
+        setWorkspaces(ws)
+
+        const defaultThinkingLevel = await window.electronAPI.getDefaultThinkingLevel()
+        setDefaultThinking(defaultThinkingLevel)
+
+        // Check credential health for potential issues (corruption, machine migration)
+        const health = await window.electronAPI.getCredentialHealth()
+        if (!health.healthy) {
+          setCredentialHealthIssues(health.issues)
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error)
+      }
+    }
+    load()
+  }, [activeWorkspaceId])
 
   // Helpers to open/close the fullscreen API setup overlay
   const openApiSetup = useCallback((connectionSlug?: string) => {
     setEditingConnectionSlug(connectionSlug || null)
+    if (!connectionSlug) {
+      setIsDirectEdit(false)
+      setEditInitialValues(undefined)
+    }
     setShowApiSetup(true)
     setFullscreenOverlayOpen(true)
   }, [setFullscreenOverlayOpen])
@@ -999,6 +811,11 @@ export default function AiSettingsPage() {
     existingSlugs,
   })
 
+  const startNewApiSetup = useCallback(() => {
+    apiSetupOnboarding.reset()
+    openApiSetup()
+  }, [apiSetupOnboarding, openApiSetup])
+
   const handleApiSetupFinish = useCallback(() => {
     closeApiSetup()
     refreshLlmConnections?.()
@@ -1011,6 +828,7 @@ export default function AiSettingsPage() {
 
   // Handler for closing the modal via X button or Escape - resets state and cancels OAuth
   const handleCloseApiSetup = useCallback(() => {
+    void apiSetupOnboarding.handleCancelOAuth()
     closeApiSetup()
     apiSetupOnboarding.reset()
     setIsDirectEdit(false)
@@ -1024,9 +842,9 @@ export default function AiSettingsPage() {
     if (defaultConn) {
       openApiSetup(defaultConn.slug)
     } else {
-      openApiSetup()
+      startNewApiSetup()
     }
-  }, [llmConnections, openApiSetup])
+  }, [llmConnections, openApiSetup, startNewApiSetup])
 
   // Connection action handlers
   const handleRenameClick = useCallback((connection: LlmConnectionWithStatus) => {
@@ -1054,29 +872,43 @@ export default function AiSettingsPage() {
           refreshLlmConnections?.()
         } else {
           console.error('Failed to rename connection:', result.error)
+          toast.error(result.error || t("settings.ai.unsupportedConnectionDesc"))
         }
       }
     } catch (error) {
       console.error('Failed to rename connection:', error)
+      toast.error(t("settings.ai.unsupportedConnectionDesc"))
     }
     setRenameDialogOpen(false)
     setRenamingConnection(null)
     setRenameValue('')
-  }, [renamingConnection, renameValue, refreshLlmConnections])
+  }, [renamingConnection, renameValue, refreshLlmConnections, t])
 
   const handleReauthenticateConnection = useCallback((connection: LlmConnectionWithStatus) => {
+    if (isUnsupportedLlmConnection(connection)) {
+      toast.error(t("settings.ai.unsupportedConnectionDesc"))
+      return
+    }
     openApiSetup(connection.slug)
     apiSetupOnboarding.reset()
 
     if (connection.authType === 'oauth') {
-      const method = connection.providerType === 'pi'
-                   ? (connection.piAuthProvider === 'github-copilot' ? 'pi_copilot_oauth' : 'pi_chatgpt_oauth')
-                   : 'claude_oauth'
+      const method = connection.piAuthProvider === 'github-copilot'
+        ? 'pi_copilot_oauth'
+        : connection.piAuthProvider === 'kimi-coding'
+          ? 'pi_kimi_oauth'
+          : connection.piAuthProvider === 'xai'
+            ? 'pi_xai_oauth'
+            : 'pi_chatgpt_oauth'
       apiSetupOnboarding.handleStartOAuth(method, connection.slug)
     }
-  }, [apiSetupOnboarding, openApiSetup])
+  }, [apiSetupOnboarding, openApiSetup, t])
 
   const handleEditConnection = useCallback(async (connection: LlmConnectionWithStatus) => {
+    if (isUnsupportedLlmConnection(connection)) {
+      toast.error(t("settings.ai.unsupportedConnectionDesc"))
+      return
+    }
     // Fetch stored API key (best-effort — if IPC not available yet, skip pre-fill)
     let apiKey: string | undefined
     try {
@@ -1095,14 +927,62 @@ export default function AiSettingsPage() {
       ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .filter(Boolean)
 
+    const modelImageModes: Record<string, 'auto' | 'on' | 'off'> = {}
+    const modelImageLearned: Record<string, boolean> = {}
+    const modelImageCaps: Record<string, boolean> = {}
+    for (const entry of connection.models ?? []) {
+      if (typeof entry === 'string') continue
+      if (entry.imageSupport === 'auto' || entry.imageSupport === 'on' || entry.imageSupport === 'off') {
+        modelImageModes[entry.id] = entry.imageSupport
+      } else if (typeof entry.supportsImages === 'boolean') {
+        modelImageCaps[entry.id] = entry.supportsImages
+      }
+      if (entry.learnedSupportsImages === false) modelImageLearned[entry.id] = false
+    }
+
+    const modelContextWindows = Object.fromEntries(
+      (connection.models ?? []).flatMap((entry) => {
+        if (typeof entry === 'string' || typeof entry.contextWindow !== 'number' || entry.contextWindow <= 0) {
+          return []
+        }
+        return [[entry.id, entry.contextWindow]] as Array<[string, number]>
+      }),
+    )
+
+    const modelMaxTokens = Object.fromEntries(
+      (connection.models ?? []).flatMap((entry) => {
+        if (typeof entry === 'string' || typeof entry.maxTokens !== 'number' || entry.maxTokens <= 0) {
+          return []
+        }
+        return [[entry.id, entry.maxTokens]] as Array<[string, number]>
+      }),
+    )
+
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
+    const activePreset = isOrderGatewayUrl(connection.baseUrl)
+      ? (isOrderOpenAiUrl(connection.baseUrl) ? 'order-openai' : 'custom')
+      : isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined)
 
     setEditInitialValues({
       apiKey,
       baseUrl: connection.baseUrl,
       connectionDefaultModel: modelStr,
-      activePreset: isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined),
+      activePreset,
       models: modelIds,
+      modelImageCaps,
+      modelImageModes,
+      modelImageLearned,
+      modelThinkingLevels: Object.fromEntries((connection.models ?? []).flatMap(m => {
+        if (typeof m === 'string' || m.thinkingMode === 'always-on') return []
+        if (m.supportedThinkingLevels === undefined && m.supportsThinking === undefined && !m.thinkingMode) return []
+        const capability = modelThinkingCapability({ ...m, provider: connection.piAuthProvider })
+        return [[m.id, capability.mode === 'levels' ? capability.levels : []]]
+      })),
+      modelThinkingModes: Object.fromEntries((connection.models ?? []).flatMap(m => (
+        typeof m !== 'string' && m.thinkingMode ? [[m.id, m.thinkingMode]] : []
+      ))),
+      modelContextWindows,
+      modelMaxTokens,
       customApi: connection.customEndpoint?.api,
     })
 
@@ -1111,7 +991,7 @@ export default function AiSettingsPage() {
     setIsDirectEdit(true)
     const method = getApiKeyMethodForConnection(connection)
     apiSetupOnboarding.jumpToCredentials(method)
-  }, [apiSetupOnboarding, openApiSetup])
+  }, [apiSetupOnboarding, openApiSetup, t])
 
   const handleDeleteConnection = useCallback(async (slug: string) => {
     if (!window.electronAPI) return
@@ -1170,12 +1050,13 @@ export default function AiSettingsPage() {
       if (result.success) {
         refreshLlmConnections?.()
       } else {
+        toast.error(result.error || t("settings.ai.unsupportedConnectionDesc"))
         console.error('Failed to set default connection:', result.error)
       }
     } catch (error) {
       console.error('Failed to set default connection:', error)
     }
-  }, [refreshLlmConnections])
+  }, [refreshLlmConnections, t])
 
   // Update a connection's mid-stream send behavior (steer vs queue).
   // Uses the same saveLlmConnection RPC as other connection edits.
@@ -1206,6 +1087,10 @@ export default function AiSettingsPage() {
     return llmConnections.find(c => c.isDefault)
   }, [llmConnections])
 
+  const liveOpenRouterModels = useLiveOpenRouterModels(
+    llmConnections.some((connection) => isOpenRouterConnection(connection)),
+  )
+
   // Anthropic account UUIDs that resolve from 2+ connections (issue #838).
   // Surfaces a warning when several Claude connections share one account/quota.
   const duplicateAccountUuids = useMemo(() => {
@@ -1218,6 +1103,8 @@ export default function AiSettingsPage() {
   }, [llmConnections])
 
   const defaultModel = defaultConnection?.defaultModel ?? ''
+  const defaultThinkingLevels = connectionThinkingLevels(defaultConnection, defaultModel)
+  const effectiveDefaultThinking = constrainThinkingLevel(defaultThinking, defaultThinkingLevels.map(level => level.id))
 
   // App-level default handlers
   const handleDefaultModelChange = useCallback(async (model: string) => {
@@ -1248,816 +1135,187 @@ export default function AiSettingsPage() {
     }
   }, [defaultThinking])
 
-  const handleExtendedPromptCacheChange = useCallback(async (enabled: boolean) => {
-    setExtendedPromptCache(enabled)
-    await window.electronAPI?.setExtendedPromptCache(enabled)
-  }, [])
-
-  const handleEnable1MContextChange = useCallback(async (enabled: boolean) => {
-    setEnable1MContext(enabled)
-    await window.electronAPI?.setEnable1MContext(enabled)
-  }, [])
-
-  const saveAutoCompactWindow = useCallback(async (tokens: number | null) => {
-    const previous = autoCompactWindow
-    setAutoCompactWindowValue(tokens)
-    try {
-      await window.electronAPI?.setAutoCompactWindow(tokens)
-    } catch (error) {
-      console.error('Failed to set auto-compact window:', error)
-      setAutoCompactWindowValue(previous)
-    }
-  }, [autoCompactWindow])
-
-  const handleAutoCompactSelect = useCallback((value: string) => {
-    if (value === 'custom') {
-      setAutoCompactCustom(true)
-      setAutoCompactDraft(String(autoCompactWindow ?? 400_000))
-      return
-    }
-    setAutoCompactCustom(false)
-    setAutoCompactError(undefined)
-    void saveAutoCompactWindow(value === 'default' ? null : Number(value))
-  }, [autoCompactWindow, saveAutoCompactWindow])
-
-  const commitAutoCompactDraft = useCallback(() => {
-    const tokens = parseTokenCount(autoCompactDraft)
-    if (tokens === null || tokens < 100_000 || tokens > 1_000_000) {
-      setAutoCompactError(t("settings.ai.compactWindowInvalid"))
-      return
-    }
-    setAutoCompactError(undefined)
-    setAutoCompactDraft(String(tokens))
-    if (tokens !== autoCompactWindow) void saveAutoCompactWindow(tokens)
-  }, [autoCompactDraft, autoCompactWindow, saveAutoCompactWindow, t])
-
-  const handleSubagentModelChange = useCallback(async (value: string) => {
-    const model = value === 'haiku' || value === 'sonnet' ? value : null
-    const previous = subagentModel
-    setSubagentModelValue(model)
-    try {
-      await window.electronAPI?.setSubagentModel(model)
-    } catch (error) {
-      console.error('Failed to set subagent model:', error)
-      setSubagentModelValue(previous)
-    }
-  }, [subagentModel])
-
-  const handleRtkToggle = useCallback(async (enabled: boolean) => {
-    setRtkEnabled(enabled)
-    await window.electronAPI?.setRtkEnabled(enabled)
-  }, [])
-
-  const handleRecheckRtk = useCallback(async () => {
-    setRtkRechecking(true)
-    try {
-      const status = await window.electronAPI?.getRtkStatus({ forceRecheck: true })
-      if (status) setRtkStatus(status)
-    } finally {
-      setRtkRechecking(false)
-    }
-  }, [])
-
-  const handleGetRtk = useCallback(() => {
-    window.electronAPI?.openUrl('https://github.com/rtk-ai/rtk')
-  }, [])
-
-  const refreshRtkGain = useCallback(async () => {
-    const gain = await window.electronAPI?.getRtkGain()
-    setRtkGain(gain ?? null)
-  }, [])
-
-  // Refresh gain stats whenever rtk transitions to installed-and-enabled
-  useEffect(() => {
-    if (rtkStatus?.installed && rtkEnabled) {
-      refreshRtkGain()
-    } else {
-      setRtkGain(null)
-    }
-  }, [rtkStatus?.installed, rtkEnabled, refreshRtkGain])
-
-  // ---- Decision model (Jev) ----
-  const refreshDecisionStatus = useCallback(async (seedDrafts: boolean) => {
-    if (typeof window.electronAPI?.getDecisionLayerStatus !== 'function') return
-    try {
-      const status = await window.electronAPI.getDecisionLayerStatus()
-      setDecisionStatus(status)
-      if (seedDrafts) {
-        setDecisionModelDraft(status.settings.model ?? '')
-        setDecisionBaseUrlDraft(status.settings.baseUrl ?? '')
-        decisionDraftsSeededRef.current = true
-      }
-    } catch (error) {
-      console.error('Failed to load decision model settings:', error)
-    }
-  }, [])
-
-  // Reusable connections come from the LLM connection list, so refresh with it
-  // (background model fetches re-emit that list; only the first load seeds drafts).
-  useEffect(() => {
-    void refreshDecisionStatus(!decisionDraftsSeededRef.current)
-  }, [refreshDecisionStatus, llmConnections])
-
-  const updateDecisionSettings = useCallback(async (patch: DecisionLayerSettingsPatch) => {
-    try {
-      const next = await window.electronAPI.setDecisionLayerSettings(patch)
-      setDecisionStatus(prev => (prev ? { ...prev, settings: next } : prev))
-      setDecisionTestResult(null)
-      // Mode pickers offer Guarded mode only while it is on: let them refresh.
-      window.dispatchEvent(new Event(DECISION_SETTINGS_CHANGED_EVENT))
-      // A provider/connection switch drops the model + base URL overrides server-side
-      // (they belonged to the previous provider) — mirror that in the inputs.
-      if ('provider' in patch || 'connectionSlug' in patch) {
-        setDecisionModelDraft(next.model ?? '')
-        setDecisionBaseUrlDraft(next.baseUrl ?? '')
-      }
-    } catch (error) {
-      console.error('Failed to update decision model settings:', error)
-      toast.error(t("settings.ai.decisions.saveFailed"))
-    }
-  }, [t])
-
-  const decisionPreset = useMemo(
-    () => decisionStatus?.presets.find(p => p.id === decisionStatus.settings.provider),
-    [decisionStatus],
-  )
-  // Decision-model features for Advanced settings, grouped by what they touch.
-  // Literal t() keys keep the i18n coverage check effective.
-  // What each feature did over the last 7 days, loaded when Advanced settings opens.
-  useEffect(() => {
-    if (!decisionAdvancedOpen || typeof window.electronAPI?.getDecisionUsage !== 'function') return
-    window.electronAPI.getDecisionUsage().then(setDecisionUsage).catch((error) => console.error('Failed to load decision usage:', error))
-  }, [decisionAdvancedOpen])
-  const decisionUsageNote = (usage: DecisionToggleUsage | undefined): string | undefined => {
-    if (!usage) return undefined
-    if (usage.withOutcome === 0) return t("settings.ai.decisions.usageChecks", { calls: usage.calls, failures: usage.failures })
-    const line = t("settings.ai.decisions.usageChanged", { calls: usage.calls, changed: usage.changed, failures: usage.failures })
-    // Every extra call should earn its place: say so when a feature has had its chances and changed nothing.
-    return usage.withOutcome >= DECISION_NO_CHANGE_MIN_CHECKS && usage.changed === 0 ? `${line} · ${t("settings.ai.decisions.usageNoChange")}` : line
-  }
-
-  const decisionFeatureGroups: Array<{ id: string; title: string; toggles: Array<{ feature: DecisionLayerFeature; label: string; description: string; tooltip: string }> }> = [
-    { id: 'agent', title: t("settings.ai.decisions.groupAgent"), toggles: [
-      { feature: 'decideTool', label: t("settings.ai.decisions.featureDecideTool"), description: t("settings.ai.decisions.featureDecideToolDesc"), tooltip: t("settings.ai.decisions.featureDecideToolTooltip") },
-      { feature: 'suggestions', label: t("settings.ai.decisions.featureSuggestions"), description: t("settings.ai.decisions.featureSuggestionsDesc"), tooltip: t("settings.ai.decisions.featureSuggestionsTooltip") },
-      { feature: 'adaptiveThinking', label: t("settings.ai.decisions.featureAdaptiveThinking"), description: t("settings.ai.decisions.featureAdaptiveThinkingDesc"), tooltip: t("settings.ai.decisions.featureAdaptiveThinkingTooltip") },
-      { feature: 'largeResults', label: t("settings.ai.decisions.featureLargeResults"), description: t("settings.ai.decisions.featureLargeResultsDesc"), tooltip: t("settings.ai.decisions.featureLargeResultsTooltip") },
-      { feature: 'subagentModels', label: t("settings.ai.decisions.featureSubagentModels"), description: t("settings.ai.decisions.featureSubagentModelsDesc"), tooltip: t("settings.ai.decisions.featureSubagentModelsTooltip") },
-    ] },
-    { id: 'conversation', title: t("settings.ai.decisions.groupConversation"), toggles: [
-      { feature: 'midTurnMessages', label: t("settings.ai.decisions.featureMidTurnMessages"), description: t("settings.ai.decisions.featureMidTurnMessagesDesc"), tooltip: t("settings.ai.decisions.featureMidTurnMessagesTooltip") },
-      { feature: 'turnOutcome', label: t("settings.ai.decisions.featureTurnOutcome"), description: t("settings.ai.decisions.featureTurnOutcomeDesc"), tooltip: t("settings.ai.decisions.featureTurnOutcomeTooltip") },
-      { feature: 'smartTitles', label: t("settings.ai.decisions.featureSmartTitles"), description: t("settings.ai.decisions.featureSmartTitlesDesc"), tooltip: t("settings.ai.decisions.featureSmartTitlesTooltip") },
-    ] },
-    { id: 'permissions', title: t("settings.ai.decisions.groupPermissions"), toggles: [
-      { feature: 'guardedMode', label: t("settings.ai.decisions.featureGuardedMode"), description: t("settings.ai.decisions.featureGuardedModeDesc"), tooltip: t("settings.ai.decisions.featureGuardedModeTooltip") },
-      { feature: 'riskBadges', label: t("settings.ai.decisions.featureRiskBadges"), description: t("settings.ai.decisions.featureRiskBadgesDesc"), tooltip: t("settings.ai.decisions.featureRiskBadgesTooltip") },
-    ] },
-    { id: 'automations', title: t("settings.ai.decisions.groupAutomations"), toggles: [
-      { feature: 'semanticLabels', label: t("settings.ai.decisions.featureSemanticLabels"), description: t("settings.ai.decisions.featureSemanticLabelsDesc"), tooltip: t("settings.ai.decisions.featureSemanticLabelsTooltip") },
-      { feature: 'automationConditions', label: t("settings.ai.decisions.featureAutomationConditions"), description: t("settings.ai.decisions.featureAutomationConditionsDesc"), tooltip: t("settings.ai.decisions.featureAutomationConditionsTooltip") },
-      { feature: 'taskVerdicts', label: t("settings.ai.decisions.featureTaskVerdicts"), description: t("settings.ai.decisions.featureTaskVerdictsDesc"), tooltip: t("settings.ai.decisions.featureTaskVerdictsTooltip") },
-      { feature: 'taskRepairs', label: t("settings.ai.decisions.featureTaskRepairs"), description: t("settings.ai.decisions.featureTaskRepairsDesc"), tooltip: t("settings.ai.decisions.featureTaskRepairsTooltip") },
-    ] },
-  ]
-  // A remote server on an older version reports fewer features: show and count only what it knows.
-  const decisionReportedGroups = decisionStatus
-    ? decisionFeatureGroups
-      .map(group => ({ ...group, toggles: group.toggles.filter(({ feature }) => feature in decisionStatus.settings.features) }))
-      .filter(group => group.toggles.length > 0)
-    : []
-  const decisionReportedToggles = decisionReportedGroups.flatMap(group => group.toggles)
-  const decisionFeaturesOn = decisionReportedToggles.filter(({ feature }) => decisionStatus?.settings.features[feature]).length
-  const decisionKeySourceValue = decisionStatus?.settings.connectionSlug
-    ? `connection:${decisionStatus.settings.connectionSlug}`
-    : `provider:${decisionStatus?.settings.provider ?? 'typesafe'}`
-  const decisionKeySourceOptions = useMemo(() => {
-    if (!decisionStatus) return []
-    return [
-      ...decisionStatus.presets.map(p => ({
-        value: `provider:${p.id}`,
-        label: p.label,
-        description: p.local
-          ? (p.id === 'custom' ? t("settings.ai.decisions.customProviderDesc") : t("settings.ai.decisions.localProviderDesc"))
-          : p.baseUrl,
-      })),
-      ...decisionStatus.reusableConnections.map(c => ({
-        value: `connection:${c.slug}`,
-        label: t("settings.ai.decisions.reuseConnection", { name: c.name }),
-        description: decisionStatus.presets.find(p => p.id === c.provider)?.label ?? c.provider,
-      })),
-    ]
-  }, [decisionStatus, t])
-  const decisionHasStoredKey = !!decisionStatus && decisionStatus.providersWithKey.includes(decisionStatus.settings.provider)
-  const decisionKeyHelpUrl = decisionPreset?.dashboardUrl ?? decisionPreset?.docsUrl
-  const decisionUsesConnection = !!decisionStatus?.settings.connectionSlug
-  // Local presets (Laya, custom) expose the base URL and a server probe instead of a key hint.
-  const decisionUsesLocalProvider = !!decisionPreset?.local && !decisionUsesConnection
-  const decisionUsesCustomProvider = decisionStatus?.settings.provider === 'custom' && !decisionUsesConnection
-
-  const probeDecisionServer = useCallback(async (baseUrl?: string) => {
-    if (typeof window.electronAPI?.probeDecisionServer !== 'function') return
-    setDecisionProbing(true)
-    try {
-      setDecisionProbe(await window.electronAPI.probeDecisionServer(baseUrl ? { baseUrl } : undefined))
-    } catch (error) {
-      console.error('Failed to probe decision server:', error)
-      setDecisionProbe(null)
-    } finally {
-      setDecisionProbing(false)
-    }
-  }, [])
-
-  // Probe whenever a local provider is selected or its base URL changes on disk.
-  useEffect(() => {
-    if (!decisionUsesLocalProvider) { setDecisionProbe(null); return }
-    void probeDecisionServer()
-  }, [decisionUsesLocalProvider, decisionStatus?.settings.provider, decisionStatus?.settings.baseUrl, probeDecisionServer])
-
-  const decisionProbeDescription = decisionProbing || (decisionUsesLocalProvider && !decisionProbe)
-    ? t("common.checking")
-    : decisionProbe?.reachable && decisionProbe.health
-      ? t("settings.ai.decisions.localServerRunning", { url: decisionProbe.baseUrl, models: decisionProbe.health.loaded?.length ? decisionProbe.health.loaded.join(', ') : '—' })
-      : decisionProbe?.reachable
-        ? t("settings.ai.decisions.localServerReachable", { url: decisionProbe.baseUrl })
-        : t("settings.ai.decisions.localServerUnreachable", { url: decisionProbe?.baseUrl ?? '' })
-
-  const handleDecisionKeySourceChange = useCallback((value: string) => {
-    setDecisionKeyDraft('')
-    if (value.startsWith('connection:')) {
-      const slug = value.slice('connection:'.length)
-      const provider = decisionStatus?.reusableConnections.find(c => c.slug === slug)?.provider
-      void updateDecisionSettings({ connectionSlug: slug, ...(provider ? { provider } : {}) })
-    } else if (value.startsWith('provider:')) {
-      void updateDecisionSettings({ connectionSlug: null, provider: value.slice('provider:'.length) as DecisionProviderId })
-    }
-  }, [decisionStatus, updateDecisionSettings])
-
-  const commitDecisionField = useCallback((field: 'model' | 'baseUrl', value: string) => {
-    const current = decisionStatus?.settings[field] ?? ''
-    if (value.trim() === current) return
-    void updateDecisionSettings({ [field]: value.trim() || null })
-  }, [decisionStatus, updateDecisionSettings])
-
-  const handleSaveDecisionKey = useCallback(async () => {
-    if (!decisionStatus || !decisionKeyDraft.trim()) return
-    try {
-      await window.electronAPI.setDecisionApiKey(decisionStatus.settings.provider, decisionKeyDraft.trim())
-      setDecisionKeyDraft('')
-      toast.success(t("settings.ai.decisions.keySaved"))
-      await refreshDecisionStatus(false)
-    } catch (error) {
-      console.error('Failed to save decision model key:', error)
-      toast.error(t("settings.ai.decisions.saveFailed"))
-    }
-  }, [decisionStatus, decisionKeyDraft, refreshDecisionStatus, t])
-
-  const handleRemoveDecisionKey = useCallback(async () => {
-    if (!decisionStatus) return
-    try {
-      await window.electronAPI.deleteDecisionApiKey(decisionStatus.settings.provider)
-      toast.success(t("settings.ai.decisions.keyRemoved"))
-      await refreshDecisionStatus(false)
-    } catch (error) {
-      console.error('Failed to remove decision model key:', error)
-      toast.error(t("settings.ai.decisions.saveFailed"))
-    }
-  }, [decisionStatus, refreshDecisionStatus, t])
-
-  const handleTestDecision = useCallback(async () => {
-    setDecisionTesting(true)
-    setDecisionTestResult(null)
-    try {
-      const result = await window.electronAPI.testDecisionConnection({
-        settings: { model: decisionModelDraft.trim() || null, baseUrl: decisionBaseUrlDraft.trim() || null },
-        apiKey: decisionKeyDraft.trim() || undefined,
-      })
-      setDecisionTestResult(result)
-    } catch (error) {
-      setDecisionTestResult({ ok: false, failure: { kind: 'unavailable', message: error instanceof Error ? error.message : String(error) } })
-    } finally {
-      setDecisionTesting(false)
-    }
-  }, [decisionModelDraft, decisionBaseUrlDraft, decisionKeyDraft])
-
-  const decisionTestDescription = decisionTestResult
-    ? decisionTestResult.ok
-      ? t("settings.ai.decisions.testSuccess", { model: decisionTestResult.model, latency: decisionTestResult.latencyMs })
-      : t("settings.ai.decisions.testFailed", { message: decisionTestResult.failure.message })
-    : t("settings.ai.decisions.testDesc")
-
-
   // Refresh callback for workspace cards
   const handleWorkspaceSettingsChange = useCallback(() => {
     // Refresh context so changes propagate immediately
     refreshLlmConnections?.()
   }, [refreshLlmConnections])
 
-  if (settingsLoading) {
-    return (
-      <SettingsPage
-        title={t("settings.ai.title")}
-        description={t("settings.ai.description")}
-        actions={<HeaderMenu route={routes.view.settings('ai')} />}
-      >
-        <div role="status" aria-label={t('common.loading')} className="space-y-6">
-          <Skeleton className="h-40 rounded-lg" />
-          <Skeleton className="h-32 rounded-lg" />
-          <Skeleton className="h-40 rounded-lg" />
-        </div>
-      </SettingsPage>
-    )
-  }
-
   return (
-    <SettingsPage
-      title={t("settings.ai.title")}
-      description={t("settings.ai.description")}
-      actions={<HeaderMenu route={routes.view.settings('ai')} />}
-    >
-      {/* Credential Health Warning Banner */}
-      <CredentialHealthBanner
-        issues={credentialHealthIssues}
-        onReauthenticate={handleReauthenticate}
-      />
-
-      {/* Default Settings - only show if connections exist */}
-      {llmConnections.length > 0 && (
-      <SettingsSection title={t("settings.ai.defaultSection")} description={t("settings.ai.defaultSectionDesc")}>
-        <SettingsCard>
-          <SettingsMenuSelectRow
-            label={t("settings.ai.connection")}
-            description={t("settings.ai.connectionDesc")}
-            value={defaultConnection?.slug || ''}
-            onValueChange={handleSetDefaultConnection}
-            options={llmConnections.map((conn) => ({
-              value: conn.slug,
-              label: conn.name,
-              description: conn.providerType === 'anthropic' ? 'Anthropic API' :
-                           conn.providerType === 'pi' ? 'Craft Agents Backend' :
-                           conn.providerType === 'pi_compat' ? (conn.baseUrl?.toLowerCase().includes('manifest.build') ? 'Manifest' : 'Craft Agents Backend Compatible') :
-                           conn.providerType || 'Unknown',
-            }))}
-          />
-          <SettingsMenuSelectRow
-            label={t("settings.ai.model")}
-            description={t("settings.ai.modelDesc")}
-            value={defaultModel}
-            onValueChange={handleDefaultModelChange}
-            options={getModelOptionsForConnection(defaultConnection).map(o => ({
-              ...o, description: o.descriptionKey ? t(o.descriptionKey) : o.description,
-            }))}
-          />
-          <SettingsMenuSelectRow
-            label={t("settings.ai.thinking")}
-            description={t("settings.ai.thinkingDesc")}
-            value={defaultThinking}
-            onValueChange={(v) => handleDefaultThinkingChange(v as ThinkingLevel)}
-            options={THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => ({
-              value: id,
-              label: t(nameKey),
-              description: t(descriptionKey),
-            }))}
-          />
-        </SettingsCard>
-      </SettingsSection>
-      )}
-
-      {/* Workspace Overrides - only show if connections exist */}
-      {workspaces.length > 0 && llmConnections.length > 0 && (
-        <SettingsSection title={t("settings.ai.workspaceOverrides")} description={t("settings.ai.workspaceOverridesDesc")}>
-          {/* One card for all workspaces, like the Default group: a card per row read as clutter */}
-          <SettingsCard>
-            {workspaces.map((workspace) => (
-              <WorkspaceOverrideCard
-                key={workspace.id}
-                workspace={workspace}
-                llmConnections={llmConnections}
-                onSettingsChange={handleWorkspaceSettingsChange}
-              />
-            ))}
-          </SettingsCard>
-        </SettingsSection>
-      )}
-
-      {/* Chat Starters — per-workspace custom starter prompts */}
-      {workspaces.length > 0 && activeWorkspaceId && (
-        <ChatStartersSection
-          workspaceId={activeWorkspaceId}
-          onSettingsChange={handleWorkspaceSettingsChange}
-        />
-      )}
-
-      {/* Connections Management */}
-      <SettingsSection title={t("settings.ai.connections")} description={t("settings.ai.connectionsDesc")}>
-        <SettingsCard>
-          {llmConnections.length === 0 ? (
-            <div className="px-3.5 py-6 text-center text-label text-tertiary">
-              {t("settings.ai.noConnections")}
-            </div>
-          ) : (
-            [...llmConnections]
-              .sort((a, b) => {
-                if (a.isDefault && !b.isDefault) return -1
-                if (!a.isDefault && b.isDefault) return 1
-                return a.name.localeCompare(b.name)
-              })
-              .map((conn) => (
-              <ConnectionRow
-                key={conn.slug}
-                connection={conn}
-                isLastConnection={false}
-                onRenameClick={() => handleRenameClick(conn)}
-                onDelete={() => handleDeleteConnection(conn.slug)}
-                onSetDefault={() => handleSetDefaultConnection(conn.slug)}
-                onValidate={() => handleValidateConnection(conn.slug)}
-                onReauthenticate={() => handleReauthenticateConnection(conn)}
-                onEdit={() => handleEditConnection(conn)}
-                onSetMidStreamBehavior={(behavior) => handleSetMidStreamBehavior(conn, behavior)}
-                validationState={validationStates[conn.slug]?.state || 'idle'}
-                validationError={validationStates[conn.slug]?.error}
-                isDuplicateAccount={!!conn.oauthAccountUuid && duplicateAccountUuids.has(conn.oauthAccountUuid)}
-              />
-            ))
-          )}
-        </SettingsCard>
-        <div className="pt-0">
-          <Button variant="secondary" size="md" onClick={() => openApiSetup()}>
-            {t("settings.ai.addConnection")}
-          </Button>
-        </div>
-      </SettingsSection>
-
-      {/* Performance */}
-      <SettingsSection title={t("settings.ai.performance")} description={t("settings.ai.performanceDesc")}>
-        <SettingsCard>
-          <SettingsToggle
-            label={t("settings.ai.extendedContext")}
-            description={t("settings.ai.extendedContextDesc")}
-            checked={enable1MContext}
-            onCheckedChange={handleEnable1MContextChange}
-          />
-          <SettingsMenuSelectRow
-            label={t("settings.ai.compactWindow")}
-            description={t("settings.ai.compactWindowDesc")}
-            value={autoCompactCustom ? 'custom' : autoCompactWindow === null ? 'default' : String(autoCompactWindow)}
-            onValueChange={handleAutoCompactSelect}
-            options={[
-              { value: 'default', label: t("settings.ai.compactWindowDefault"), description: t("settings.ai.compactWindowDefaultDesc") },
-              ...AUTO_COMPACT_PRESETS.map(tokens => ({
-                value: String(tokens),
-                label: `${tokens / 1000}K`,
-                description: t(`settings.ai.compactWindowPreset${tokens / 1000}k`),
-              })),
-              { value: 'custom', label: t("settings.ai.compactWindowCustom"), description: t("settings.ai.compactWindowCustomDesc") },
-            ]}
-            menuWidth={300}
-          />
-          {autoCompactCustom && (
-            <SettingsInput
-              inCard
-              label={t("settings.ai.compactWindowTokens")}
-              value={autoCompactDraft}
-              onChange={(value) => { setAutoCompactDraft(value); setAutoCompactError(undefined) }}
-              onBlur={commitAutoCompactDraft}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitAutoCompactDraft() }}
-              placeholder="350000"
-              error={autoCompactError}
+    <div className="h-full flex flex-col">
+      <PanelHeader title={t("settings.ai.title")} />
+      <div className="flex-1 min-h-0 mask-fade-y">
+        <ScrollArea className="h-full">
+          <div className="px-5 py-7 max-w-3xl mx-auto">
+            {/* Credential Health Warning Banner */}
+            <CredentialHealthBanner
+              issues={credentialHealthIssues}
+              onReauthenticate={handleReauthenticate}
             />
-          )}
-          <SettingsMenuSelectRow
-            label={t("settings.ai.subagentModel")}
-            description={t("settings.ai.subagentModelDesc")}
-            value={subagentModel ?? 'session'}
-            onValueChange={(value) => { void handleSubagentModelChange(value) }}
-            options={[
-              { value: 'session', label: t("settings.ai.subagentModelSession"), description: t("settings.ai.subagentModelSessionDesc") },
-              { value: 'sonnet', label: 'Sonnet', description: t("settings.ai.subagentModelSonnetDesc") },
-              { value: 'haiku', label: 'Haiku', description: t("settings.ai.subagentModelHaikuDesc") },
-            ]}
-            menuWidth={300}
-          />
-          <SettingsToggle
-            label={t("settings.ai.extendedPromptCache")}
-            description={t("settings.ai.extendedPromptCacheDesc")}
-            checked={extendedPromptCache}
-            onCheckedChange={handleExtendedPromptCacheChange}
-          />
-          {rtkStatus?.installed ? (
-            <>
-              <SettingsToggle
-                label={t("settings.ai.rtk.title")}
-                description={t("settings.ai.rtk.description")}
-                checked={rtkEnabled}
-                onCheckedChange={handleRtkToggle}
-              />
-              {rtkStatus.outdated && (
-                <SettingsRow
-                  label={t("settings.ai.rtk.outdated", { version: rtkStatus.version ?? '?' })}
-                  description={t("settings.ai.rtk.outdatedDesc", { min: rtkStatus.minSafeVersion })}
-                >
-                  <Button
-                    size="md"
-                    onClick={() => setRtkUpdateOpen(true)}
-                    variant="secondary"
-                  >
-                    {t("settings.ai.rtk.update")}
-                  </Button>
-                </SettingsRow>
-              )}
-              {rtkStatus.outdated && (
-                <RtkUpdateDialog open={rtkUpdateOpen} onOpenChange={setRtkUpdateOpen} status={rtkStatus} onStatusChange={setRtkStatus} />
-              )}
-              {rtkEnabled && rtkGain && rtkGain.totalCommands > 0 && (
-                <div className="px-3.5 pb-3.5 -mt-1">
-                  <div className="flex items-center justify-between gap-2 text-label-sm text-tertiary">
-                    <span className="tabular-nums">
-                      {t("settings.ai.rtk.gainSummary", {
-                        saved: formatTokenCount(rtkGain.totalSaved),
-                        count: rtkGain.totalCommands,
-                        pct: rtkGain.avgSavingsPct.toFixed(1),
-                      })}
-                    </span>
-                    <IconButton
-                      size="sm"
-                      onClick={refreshRtkGain}
-                      aria-label={t("settings.ai.rtk.gainRefresh")}
-                      icon={<RefreshCcw className="size-3.5" />}
-                    />
-                  </div>
-                  {/* Meter: the fill scales on X (transform only, instant under reduced motion); --border-control keeps it ≥ 3:1 */}
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-fill-pressed">
-                    <div
-                      className="h-full w-full origin-left bg-[var(--border-control)] transition-transform duration-[calc(var(--dur-base)*var(--motion-scale))] ease-out"
-                      style={{ transform: `scaleX(${Math.min(100, Math.max(0, rtkGain.avgSavingsPct)) / 100})` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <SettingsRow
-              label={t("settings.ai.rtk.title")}
-              description={rtkStatus === null ? t("common.checking") : t("settings.ai.rtk.notInstalledDesc")}
-            >
-              <Button
-                size="md"
-                onClick={handleGetRtk}
-                variant="secondary"
-              >
-                {t("settings.ai.rtk.getRtk")}
-              </Button>
-              <Button
-                size="md"
-                onClick={handleRecheckRtk}
-                disabled={rtkRechecking || rtkStatus === null}
-                variant="secondary"
-              >
-                {rtkRechecking ? t("common.checking") : t("settings.ai.rtk.recheck")}
-              </Button>
-            </SettingsRow>
-          )}
-        </SettingsCard>
-      </SettingsSection>
 
-      {/* Decision model (Jev) — opt-in decision layer, off by default */}
-      {decisionStatus && (
-        <SettingsSection title={t("settings.ai.decisions.title")} description={t("settings.ai.decisions.sectionDesc")}>
-          <SettingsCard>
-            <SettingsToggle
-              label={t("settings.ai.decisions.enable")}
-              description={t("settings.ai.decisions.enableDesc")}
-              checked={decisionStatus.settings.enabled}
-              onCheckedChange={(enabled) => { void updateDecisionSettings({ enabled }) }}
-            />
-            <SettingsMenuSelectRow
-              label={t("settings.ai.decisions.keySource")}
-              description={t("settings.ai.decisions.keySourceDesc")}
-              value={decisionKeySourceValue}
-              onValueChange={handleDecisionKeySourceChange}
-              options={decisionKeySourceOptions}
-              menuWidth={340}
-            />
-            {decisionUsesLocalProvider && (
-              <SettingsInput
-                inCard
-                type="url"
-                label={t("settings.ai.decisions.baseUrl")}
-                description={decisionUsesCustomProvider ? t("settings.ai.decisions.baseUrlDesc") : t("settings.ai.decisions.baseUrlLocalDesc")}
-                value={decisionBaseUrlDraft}
-                onChange={setDecisionBaseUrlDraft}
-                onBlur={() => commitDecisionField('baseUrl', decisionBaseUrlDraft)}
-                placeholder={decisionPreset?.baseUrl || 'http://localhost:8080'}
-              />
-            )}
-            {/* Row and install hint are one card child, so no hairline separates them */}
-            {decisionUsesLocalProvider && (
-              <div>
-                <SettingsRow
-                  label={t("settings.ai.decisions.localServer")}
-                  description={decisionProbeDescription}
-                >
-                  {decisionPreset?.docsUrl && (
-                    <Button
-                      size="md"
-                      onClick={() => window.electronAPI?.openUrl(decisionPreset.docsUrl!)}
-                      variant="secondary"
-                    >
-                      {t("settings.ai.decisions.localServerDocs")}
-                    </Button>
-                  )}
-                  <Button
-                    size="md"
-                    onClick={() => { void probeDecisionServer(decisionBaseUrlDraft.trim() || undefined) }}
-                    disabled={decisionProbing}
-                    variant="secondary"
-                  >
-                    {decisionProbing ? t("common.checking") : t("settings.ai.decisions.recheck")}
-                  </Button>
-                </SettingsRow>
-                {decisionPreset?.installHint && decisionProbe && !decisionProbe.reachable && (
-                  <p className="-mt-1 px-3.5 pb-3 text-label-sm text-tertiary">
-                    {t("settings.ai.decisions.localServerInstallHint")}{' '}
-                    <code className="select-all font-mono text-mono-ui text-secondary">{decisionPreset.installHint}</code>
-                  </p>
-                )}
-              </div>
-            )}
-            {!decisionUsesConnection && (
-              decisionHasStoredKey ? (
-                <SettingsRow
-                  label={t("settings.ai.decisions.apiKey")}
-                  description={t("settings.ai.decisions.apiKeySaved")}
-                >
-                  <Button
-                    size="md"
-                    onClick={handleRemoveDecisionKey}
-                    variant="secondary"
-                  >
-                    {t("settings.ai.decisions.removeKey")}
-                  </Button>
-                </SettingsRow>
-              ) : (
-                <SettingsInput
-                  inCard
-                  type="password"
-                  label={t("settings.ai.decisions.apiKey")}
-                  description={decisionKeyHelpUrl
-                    ? t("settings.ai.decisions.apiKeyDesc", { url: decisionKeyHelpUrl })
-                    : t("settings.ai.decisions.apiKeyDescGeneric")}
-                  value={decisionKeyDraft}
-                  onChange={setDecisionKeyDraft}
-                  placeholder={decisionPreset?.keyPlaceholder}
-                  action={(
-                    <Button
-                      size="md"
-                      onClick={handleSaveDecisionKey}
-                      disabled={!decisionKeyDraft.trim()}
-                      variant="secondary"
-                    >
-                      {t("settings.ai.decisions.saveKey")}
-                    </Button>
-                  )}
-                />
-              )
-            )}
-            <SettingsInput
-              inCard
-              label={t("settings.ai.decisions.model")}
-              description={t("settings.ai.decisions.modelDesc")}
-              value={decisionModelDraft}
-              onChange={setDecisionModelDraft}
-              onBlur={() => commitDecisionField('model', decisionModelDraft)}
-              placeholder={decisionPreset?.defaultModel}
-            />
-            {/* The privacy note belongs to the test row: one card child, no hairline between */}
-            <div>
-              <SettingsRow
-                label={t("settings.ai.decisions.test")}
-                description={decisionTestDescription}
-              >
-                <Button
-                  size="md"
-                  onClick={handleTestDecision}
-                  disabled={decisionTesting}
-                  variant="secondary"
-                >
-                  {decisionTesting ? t("common.checking") : t("settings.ai.decisions.testRun")}
-                </Button>
-              </SettingsRow>
-              <p className="-mt-1 px-3.5 pb-3.5 text-label-sm text-tertiary">
-                {t("settings.ai.decisions.privacyNote")}
-              </p>
-            </div>
-          </SettingsCard>
-
-          {/* Advanced settings: what the decision model is used for, collapsed by default.
-              Same structure as the Workspace Overrides cards: the toggles expand inside the card. */}
-          <SettingsCard divided={false}>
-            <button
-              type="button"
-              aria-expanded={decisionAdvancedOpen}
-              onClick={() => setDecisionAdvancedOpen(open => !open)}
-              className={EXPANDER_ROW_CLASS}
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="size-6 shrink-0 rounded-full bg-fill-hover ring-1 ring-border flex items-center justify-center">
-                  <Settings2 className="size-3.5 text-tertiary" aria-hidden />
-                </div>
-                <div className="min-w-0 text-left">
-                  <div className={settingsUI.label}>{t("settings.ai.decisions.advanced")}</div>
-                  <div className={settingsUI.description}>
-                    {decisionStatus.settings.enabled
-                      ? t("settings.ai.decisions.advancedSummary", { on: decisionFeaturesOn, total: decisionReportedToggles.length })
-                      : t("settings.ai.decisions.advancedSummaryOff")}
-                  </div>
-                </div>
-              </div>
-              {decisionAdvancedOpen ? (
-                <ChevronDown className="size-4 shrink-0 text-tertiary" aria-hidden />
-              ) : (
-                <ChevronRight className="size-4 shrink-0 text-tertiary" aria-hidden />
+            <div className="space-y-8">
+              {/* Default Settings - only show if connections exist */}
+              {llmConnections.length > 0 && (
+              <SettingsSection title={t("settings.ai.defaultSection")} description={t("settings.ai.defaultSectionDesc")}>
+                <SettingsCard>
+                  <SettingsMenuSelectRow
+                    label={t("settings.ai.connection")}
+                    description={t("settings.ai.connectionDesc")}
+                    value={defaultConnection?.slug || ''}
+                    onValueChange={handleSetDefaultConnection}
+                    options={llmConnections.filter((conn) => !isUnsupportedLlmConnection(conn)).map((conn) => ({
+                      value: conn.slug,
+                      label: displayLlmConnectionName(conn),
+                      description: isOrderGatewayUrl(conn.baseUrl)
+                        ? t('apiSetup.format.openaiCompatible')
+                        : conn.providerType === 'pi' ? 'Selection Backend' :
+                                   conn.providerType === 'pi_compat' ? (conn.baseUrl?.toLowerCase().includes('manifest.build') ? 'Manifest' : 'Selection Backend Compatible') :
+                                   conn.providerType || 'Unknown',
+                    }))}
+                  />
+                  <SettingsMenuSelectRow
+                    label={t("settings.ai.model")}
+                    description={t("settings.ai.modelDesc")}
+                    value={defaultModel}
+                    onValueChange={handleDefaultModelChange}
+                    searchable
+                    pinnedValues={connectionPinnedModelIds(defaultConnection)}
+                    options={getModelOptionsForConnection(defaultConnection, liveOpenRouterModels, defaultModel).map(o => ({
+                      ...o, description: o.descriptionKey ? t(o.descriptionKey) : o.description,
+                    }))}
+                  />
+                  <SettingsMenuSelectRow
+                    label={t("settings.ai.thinking")}
+                    description={t("settings.ai.thinkingDesc")}
+                    value={effectiveDefaultThinking}
+                    onValueChange={(v) => handleDefaultThinkingChange(v as ThinkingLevel)}
+                    options={defaultThinkingLevels.map(({ id, nameKey, descriptionKey }) => ({
+                      value: id,
+                      label: t(nameKey),
+                      description: t(descriptionKey),
+                    }))}
+                  />
+                </SettingsCard>
+              </SettingsSection>
               )}
-            </button>
 
-            {/* Expands in place: content swaps once, fades with a 4px drop (no height animation) */}
-            <AnimatedCollapsibleContent isOpen={decisionAdvancedOpen}>
-                  <div className="border-t border-subtle">
-                    {decisionReportedGroups.map((group, index) => (
-                      <div key={group.id} className={cn(index > 0 && 'border-t border-subtle')}>
-                        <div className="px-3.5 pt-3 pb-0.5 text-label-sm font-medium text-tertiary">
-                          {group.title}
-                        </div>
-                        {group.toggles.map(({ feature, label, description, tooltip }) => (
-                          <SettingsToggle
-                            key={feature}
-                            label={label}
-                            description={description}
-                            tooltip={tooltip}
-                            note={decisionUsageNote(decisionUsage[feature])}
-                            checked={decisionStatus.settings.features[feature] ?? false}
-                            disabled={!decisionStatus.settings.enabled}
-                            onCheckedChange={(checked) => { void updateDecisionSettings({ features: { [feature]: checked } }) }}
-                          />
-                        ))}
-                      </div>
+              {/* Workspace Overrides - only show if connections exist */}
+              {workspaces.length > 0 && llmConnections.length > 0 && (
+                <SettingsSection title={t("settings.ai.workspaceOverrides")} description={t("settings.ai.workspaceOverridesDesc")}>
+                  <div className="space-y-2">
+                    {workspaces.map((workspace) => (
+                      <WorkspaceOverrideCard
+                        key={workspace.id}
+                        workspace={workspace}
+                        llmConnections={llmConnections}
+                        onSettingsChange={handleWorkspaceSettingsChange}
+                        liveOpenRouterModels={liveOpenRouterModels}
+                      />
                     ))}
                   </div>
-            </AnimatedCollapsibleContent>
-          </SettingsCard>
-        </SettingsSection>
-      )}
+                </SettingsSection>
+              )}
 
-      {/* API Setup Fullscreen Overlay */}
-      <FullscreenOverlayBase
-        isOpen={showApiSetup}
-        onClose={handleCloseApiSetup}
-        className="z-splash flex flex-col bg-navigator"
-      >
-        <OnboardingWizard
-          state={apiSetupOnboarding.state}
-          onContinue={apiSetupOnboarding.handleContinue}
-          onBack={isDirectEdit ? handleCloseApiSetup : apiSetupOnboarding.handleBack}
-          onSelectProvider={apiSetupOnboarding.handleSelectProvider}
-          onSelectApiSetupMethod={apiSetupOnboarding.handleSelectApiSetupMethod}
-          onSubmitCredential={apiSetupOnboarding.handleSubmitCredential}
-          onSubmitLocalModel={apiSetupOnboarding.handleSubmitLocalModel}
-          onStartOAuth={apiSetupOnboarding.handleStartOAuth}
-          onFinish={handleApiSetupFinish}
-          isWaitingForCode={apiSetupOnboarding.isWaitingForCode}
-          onSubmitAuthCode={apiSetupOnboarding.handleSubmitAuthCode}
-          onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}
-          copilotDeviceCode={apiSetupOnboarding.copilotDeviceCode}
-          editInitialValues={editInitialValues}
-          className="h-full"
-        />
-        <div
-          className="fixed top-0 right-0 h-[50px] flex items-center pr-5 [-webkit-app-region:no-drag]"
-          style={{ zIndex: 'var(--z-fullscreen, 350)' }}
-        >
-          <Button
-            variant="secondary"
-            size="icon"
-            onClick={handleCloseApiSetup}
-            title={t("common.closeEsc")}
-            aria-label={t("common.closeEsc")}
-            className="text-secondary hover:text-foreground"
-          >
-            <X className="size-4" />
-          </Button>
-        </div>
-      </FullscreenOverlayBase>
+              {/* Connections Management */}
+              <SettingsSection title={t("settings.ai.connections")} description={t("settings.ai.connectionsDesc")}>
+                <SettingsCard>
+                  {llmConnections.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                      {t("settings.ai.noConnections")}
+                    </div>
+                  ) : (
+                    [...llmConnections]
+                      .sort((a, b) => {
+                        if (a.isDefault && !b.isDefault) return -1
+                        if (!a.isDefault && b.isDefault) return 1
+                        return a.name.localeCompare(b.name)
+                      })
+                      .map((conn) => (
+                      <ConnectionRow
+                        key={conn.slug}
+                        connection={conn}
+                        isLastConnection={false}
+                        onRenameClick={() => handleRenameClick(conn)}
+                        onDelete={() => handleDeleteConnection(conn.slug)}
+                        onSetDefault={() => handleSetDefaultConnection(conn.slug)}
+                        onValidate={() => handleValidateConnection(conn.slug)}
+                        onReauthenticate={() => handleReauthenticateConnection(conn)}
+                        onEdit={() => handleEditConnection(conn)}
+                        onSetMidStreamBehavior={(behavior) => handleSetMidStreamBehavior(conn, behavior)}
+                        validationState={validationStates[conn.slug]?.state || 'idle'}
+                        validationError={validationStates[conn.slug]?.error}
+                        isDuplicateAccount={!!conn.oauthAccountUuid && duplicateAccountUuids.has(conn.oauthAccountUuid)}
+                        unsupported={isUnsupportedLlmConnection(conn)}
+                      />
+                    ))
+                  )}
+                </SettingsCard>
+                <div className="pt-0">
+                  <button
+                    onClick={startNewApiSetup}
+                    className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                  >
+                    {t("settings.ai.addConnection")}
+                  </button>
+                </div>
+              </SettingsSection>
 
-      {/* Rename Connection Dialog */}
-      <RenameDialog
-        open={renameDialogOpen}
-        onOpenChange={setRenameDialogOpen}
-        title={t("settings.ai.renameConnection")}
-        value={renameValue}
-        onValueChange={setRenameValue}
-        onSubmit={handleRenameSubmit}
-        placeholder={t("settings.ai.enterConnectionName")}
-      />
-    </SettingsPage>
+              {/* API Setup Fullscreen Overlay */}
+              <FullscreenOverlayBase
+                isOpen={showApiSetup}
+                onClose={handleCloseApiSetup}
+                className="z-splash flex flex-col bg-foreground-2"
+              >
+                <OnboardingWizard
+                  state={apiSetupOnboarding.state}
+                  onContinue={apiSetupOnboarding.handleContinue}
+                  onBack={isDirectEdit ? handleCloseApiSetup : apiSetupOnboarding.handleBack}
+                  onSelectProvider={apiSetupOnboarding.handleSelectProvider}
+                  onSelectApiSetupMethod={apiSetupOnboarding.handleSelectApiSetupMethod}
+                  onSubmitCredential={apiSetupOnboarding.handleSubmitCredential}
+                  onSubmitLocalModel={apiSetupOnboarding.handleSubmitLocalModel}
+                  onStartOAuth={apiSetupOnboarding.handleStartOAuth}
+                  onFinish={handleApiSetupFinish}
+                  allowOAuthSwitch={!editingConnectionSlug}
+                  isWaitingForCode={apiSetupOnboarding.isWaitingForCode}
+                  onSubmitAuthCode={apiSetupOnboarding.handleSubmitAuthCode}
+                  onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}
+                  oauthDeviceCode={apiSetupOnboarding.oauthDeviceCode}
+                  editInitialValues={resolveSettingsApiSetupInitialValues({
+                    directEdit: isDirectEdit,
+                    editInitialValues,
+                    credentialPrefill: apiSetupOnboarding.credentialPrefill,
+                  })}
+                  className="h-full"
+                />
+                <div
+                  className="fixed top-0 right-0 h-[50px] flex items-center pr-5 [-webkit-app-region:no-drag]"
+                  style={{ zIndex: 'var(--z-fullscreen, 350)', ...windowsCaptionEdgeStyle() }}
+                >
+                  <button
+                    onClick={handleCloseApiSetup}
+                    className="p-1.5 rounded-[6px] transition-all bg-background shadow-minimal text-muted-foreground/50 hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    title={t("common.closeEsc")}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </FullscreenOverlayBase>
+
+              {/* Rename Connection Dialog */}
+              <RenameDialog
+                open={renameDialogOpen}
+                onOpenChange={setRenameDialogOpen}
+                title={t("settings.ai.renameConnection")}
+                value={renameValue}
+                onValueChange={setRenameValue}
+                onSubmit={handleRenameSubmit}
+                placeholder={t("settings.ai.enterConnectionName")}
+              />
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
   )
 }

@@ -8,6 +8,7 @@ import {
   formatAttachmentBytes,
   maxAttachmentBytes,
   runtimeMaxMessageBytes,
+  utf8ByteLength,
 } from '../message-limits.ts'
 
 const pdf = (name: string, size: number) => ({ name, size, type: 'pdf' })
@@ -55,5 +56,11 @@ describe('message limits', () => {
     expect(formatAttachmentBytes(59_740_351)).toBe('59.7 MB')
     expect(formatAttachmentBytes(85_557)).toBe('86 KB')
     expect(formatAttachmentBytes(512)).toBe('512 B')
+  })
+
+  it('counts UTF-8 bytes the same way a socket frame does', () => {
+    expect(utf8ByteLength('plain')).toBe(Buffer.byteLength('plain'))
+    expect(utf8ByteLength('附件')).toBe(Buffer.byteLength('附件'))
+    expect(utf8ByteLength('😀')).toBe(Buffer.byteLength('😀'))
   })
 })

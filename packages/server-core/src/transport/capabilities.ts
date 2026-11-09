@@ -93,6 +93,9 @@ export async function requestClientShowInFolder(
 
 /** Spec for a confirmation dialog (maps to Electron's MessageBoxOptions). */
 export interface ConfirmDialogSpec {
+  /** Known business intent, localized by the initiating client. */
+  kind?: 'deleteSession' | 'logout'
+  name?: string
   type?: 'none' | 'info' | 'warning' | 'error' | 'question'
   title: string
   message: string

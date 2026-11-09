@@ -1,0 +1,16 @@
+version = 1
+name = "Selection"
+
+[setup]
+script = '''
+export PATH="$HOME/.bun/bin:$PATH"
+bun install --frozen-lockfile
+'''
+
+[[actions]]
+name = "bun dev"
+icon = "run"
+command = '''
+export PATH="$HOME/.bun/bin:$PATH"
+bun run electron:dev
+'''

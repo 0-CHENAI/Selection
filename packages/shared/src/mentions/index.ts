@@ -22,9 +22,21 @@ function joinPath(base: string, relative: string): string {
 // Constants
 // ============================================================================
 
-// Workspace ID character class for regex: word chars, spaces (NOT newlines), hyphens, dots
-// Using literal space instead of \s to avoid matching newlines which would break parsing
-export const WS_ID_CHARS = '[\\w .-]'
+/**
+ * Workspace ID character class for skill mentions: [skill:workspaceId:slug]
+ *
+ * Must allow Unicode (e.g. Chinese folder names like 巡察工作). Exclude only
+ * delimiters that would break parsing: `:`, `]`, `[`, and line breaks.
+ * (Previously restricted to ASCII `[\w .-]`, which left Chinese mentions as
+ * raw text in the composer instead of skill chips.)
+ */
+export const WS_ID_CHARS = '[^:\\]\\[\\n\\r]'
+
+/** Full skill mention: optional workspace prefix + slug */
+export function skillMentionPattern(captureSlug = true): RegExp {
+  const slug = captureSlug ? '([\\w.-]+)' : '[\\w.-]+'
+  return new RegExp(`\\[skill:(?:${WS_ID_CHARS}+:)?${slug}\\]`, 'g')
+}
 
 // ============================================================================
 // Types
@@ -83,9 +95,8 @@ export function parseMentions(
   }
 
   // Match skill mentions: [skill:slug] or [skill:workspaceId:slug]
-  // The pattern captures the last component (slug) after any number of colons
-  // Workspace IDs can contain spaces, hyphens, underscores, and dots
-  const skillPattern = new RegExp(`\\[skill:(?:${WS_ID_CHARS}+:)?([\\w-]+)\\]`, 'g')
+  // Workspace IDs may be Unicode (Chinese workspace folder names)
+  const skillPattern = skillMentionPattern(true)
   while ((match = skillPattern.exec(text)) !== null) {
     const slug = match[1]!
     if (availableSkillSlugs.includes(slug)) {
@@ -133,7 +144,7 @@ export function stripAllMentions(text: string): string {
     // Replace [source:slug] with just the slug
     .replace(/\[source:([\w-]+)\]/g, '$1')
     // Replace [skill:slug] or [skill:workspaceId:slug] with just the slug
-    .replace(new RegExp(`\\[skill:(?:${WS_ID_CHARS}+:)?([\\w-]+)\\]`, 'g'), '$1')
+    .replace(skillMentionPattern(true), '$1')
     // Note: [file:...] and [folder:...] are NOT stripped — they are content
     // that gets resolved to absolute paths by resolveFileMentions().
     .replace(/\s+/g, ' ')
@@ -156,7 +167,7 @@ export function resolveSkillMentions(
   skillNames: Map<string, string>
 ): string {
   return text.replace(
-    new RegExp(`\\[skill:(?:${WS_ID_CHARS}+:)?([\\w-]+)\\]`, 'g'),
+    skillMentionPattern(true),
     (_match, slug: string) => {
       const name = skillNames.get(slug) || slug
       return `[Mentioned skill: ${name} (slug: ${slug})]`

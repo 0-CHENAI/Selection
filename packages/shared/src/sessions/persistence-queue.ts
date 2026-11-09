@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { writeFile, rename, unlink } from 'fs/promises'
 import { dirname } from 'path'
 import type { StoredSession, SessionHeader } from './types.js'
@@ -77,7 +78,7 @@ class SessionPersistenceQueue {
     }
 
     const timer = setTimeout(() => {
-      void this.write(session.id)
+      void this.flush(session.id)
     }, this.debounceMs)
 
     this.pending.set(session.id, { data: session, timer })
@@ -154,11 +155,12 @@ class SessionPersistenceQueue {
       const finalSignature = getHeaderMetadataSignature(header)
       this.lastWrittenHeaderSignature.set(sessionId, finalSignature)
 
-      const tmpFile = filePath + '.tmp'
-      await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
-      // On Windows, rename fails if target exists. Delete first for cross-platform compatibility.
-      try { await unlink(filePath) } catch { /* ignore if doesn't exist */ }
-      await rename(tmpFile, filePath)
+      const tmpFile = `${filePath}.${randomUUID()}.tmp`
+      try {
+        await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
+        // Replace directly so the last committed transcript always remains readable.
+        await rename(tmpFile, filePath)
+      } finally { await unlink(tmpFile).catch(() => {}) }
       debug(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {
       console.error(`[PersistenceQueue] Failed to write session ${sessionId}:`, error)
@@ -168,18 +170,16 @@ class SessionPersistenceQueue {
   /**
    * Immediately flush a specific session if pending.
    * Waits for any in-progress write to complete before starting a new one
-   * to prevent race conditions on the shared .tmp file.
+   * so concurrent callers acknowledge the latest queued transcript.
    */
   async flush(sessionId: string): Promise<void> {
+    // Another waiter may publish the next writer first. Drain it too before returning
+    // so immediate saves never acknowledge a transcript that has not reached disk.
+    let inProgress: Promise<void> | undefined
+    while ((inProgress = this.writeInProgress.get(sessionId))) await inProgress
     const entry = this.pending.get(sessionId)
     if (entry) {
       clearTimeout(entry.timer)
-
-      // Wait for any in-progress write to complete first
-      const inProgress = this.writeInProgress.get(sessionId)
-      if (inProgress) {
-        await inProgress
-      }
 
       // Start new write and track it
       const writePromise = this.write(sessionId)
@@ -204,6 +204,13 @@ class SessionPersistenceQueue {
       debug(`[PersistenceQueue] Cancelled pending write for session ${sessionId}`)
     }
     this.lastWrittenHeaderSignature.delete(sessionId)
+  }
+
+  /** Drain an already-started write before the caller removes its directory. */
+  async cancelAndWait(sessionId: string): Promise<void> {
+    this.cancel(sessionId)
+    await this.writeInProgress.get(sessionId)
+    this.cancel(sessionId)
   }
 
   /**

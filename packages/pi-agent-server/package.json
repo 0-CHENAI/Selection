@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/pi-agent-server",
-  "version": "0.15.8",
+  "version": "3.2.0",
   "license": "Apache-2.0",
   "description": "Out-of-process Pi agent server communicating via JSONL over stdio",
   "type": "module",
@@ -9,15 +9,18 @@
     "pi-agent-server": "./dist/index.js"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=bun --format=esm --external koffi",
+    "build": "bun build src/index.ts --outdir=dist --target=bun --format=esm --external koffi && bun build src/tools/read/image-resize-worker.ts --outfile=dist/image-resize-worker.js --target=bun --format=esm && bun run scripts/copy-runtime-assets.ts",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "validate": "bun run typecheck && bun run build"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.1.0",
-    "@earendil-works/pi-agent-core": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "duck-duck-scrape": "^2.2.7",
+    "@craft-agent/shared": "workspace:*",
+    "fflate": "^0.8.2",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-agent-core": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@silvia-odwyer/photon-node": "0.3.4",
+    "@sinclair/typebox": "^0.34.0",
     "node-html-parser": "^6.1.0",
     "pdfjs-dist": "^5.4.0",
     "turndown": "^7.2.0"

@@ -1,29 +1,23 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, Minimize2 } from 'lucide-react'
+import { Check, Minimize2, Sparkles, Users } from 'lucide-react'
 import { Icon_Folder } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
-import {
-  INLINE_MENU_FOOTER,
-  INLINE_MENU_ITEM,
-  INLINE_MENU_ITEM_SELECTED,
-  INLINE_MENU_LIST,
-  INLINE_MENU_ORIGIN,
-  INLINE_MENU_SECTION_LABEL,
-  INLINE_MENU_SEPARATOR,
-  INLINE_MENU_SURFACE,
-} from './inline-menu-styles'
-import { DEFAULT_PERMISSION_MODES, PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, isPermissionMode, type PermissionMode } from '@craft-agent/shared/agent/modes'
+import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
+import { AGENTS_PLUGIN_NAME } from '@craft-agent/shared/skills/types'
+import type { LoadedSkill } from '../../../shared/types'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
+import { SkillAvatar } from '@/components/ui/skill-avatar'
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type SlashCommandId = PermissionMode | 'compact'
+export type SlashCommandId = PermissionMode | 'compact' | 'delegate' | 'office-edit'
 
 /** Union type for all item types in the slash menu */
-export type SlashItemType = 'command' | 'folder'
+export type SlashItemType = 'command' | 'folder' | 'skill'
 
 export interface SlashCommand {
   id: SlashCommandId
@@ -44,11 +38,22 @@ export interface SlashFolderItem {
   path: string
 }
 
+/** Skill item for the slash menu (`/` inserts a [skill:…] mention) */
+export interface SlashSkillItem {
+  id: string
+  type: 'skill'
+  label: string
+  description: string
+  skill: LoadedSkill
+}
+
+export type SlashMenuItem = SlashCommand | SlashFolderItem | SlashSkillItem
+
 /** Section with header for the inline slash menu */
 export interface SlashSection {
   id: string
   label: string
-  items: (SlashCommand | SlashFolderItem)[]
+  items: SlashMenuItem[]
 }
 
 export interface CommandGroup {
@@ -65,8 +70,8 @@ interface PermissionModeIconProps {
   className?: string
 }
 
-export function PermissionModeIcon({ mode, className }: PermissionModeIconProps) {
-  const config = PERMISSION_MODE_CONFIG[mode] ?? PERMISSION_MODE_CONFIG.ask
+function PermissionModeIcon({ mode, className }: PermissionModeIconProps) {
+  const config = PERMISSION_MODE_CONFIG[mode]
   return (
     <svg
       viewBox="0 0 24 24"
@@ -86,26 +91,19 @@ export function PermissionModeIcon({ mode, className }: PermissionModeIconProps)
 // Default Commands
 // ============================================================================
 
-// Icon size constant (16px menu icons, spec §7.10)
-const MENU_ICON_SIZE = 'size-4'
+// Icon size constant
+const MENU_ICON_SIZE = 'h-3.5 w-3.5'
 
-// Permission mode commands from centralized config, one per mode
-const PERMISSION_MODE_COMMANDS = new Map<PermissionMode, SlashCommand>(PERMISSION_MODE_ORDER.map(mode => {
-  const config = PERMISSION_MODE_CONFIG[mode] ?? PERMISSION_MODE_CONFIG.ask
-  return [mode, {
+// Generate permission mode commands from centralized config
+const permissionModeCommands: SlashCommand[] = PERMISSION_MODE_ORDER.map(mode => {
+  const config = PERMISSION_MODE_CONFIG[mode]
+  return {
     id: mode,
     label: config.displayName,
     description: config.description,
     icon: <PermissionModeIcon mode={mode} className={MENU_ICON_SIZE} />,
-  }]
-}))
-
-/** Commands for the modes a picker offers (see `useAvailablePermissionModes`), in the given order. */
-export function permissionModeCommandsFor(modes: readonly PermissionMode[]): SlashCommand[] {
-  return modes.flatMap(mode => PERMISSION_MODE_COMMANDS.get(mode) ?? [])
-}
-
-const permissionModeCommands = permissionModeCommandsFor(DEFAULT_PERMISSION_MODES)
+  }
+})
 
 const compactCommand: SlashCommand = {
   id: 'compact',
@@ -114,32 +112,44 @@ const compactCommand: SlashCommand = {
   icon: <Minimize2 className={MENU_ICON_SIZE} />,
 }
 
+const delegateCommand: SlashCommand = {
+  id: 'delegate',
+  label: 'Delegate Task',
+  description: 'Explicitly authorize agents to split this task',
+  icon: <Users className={MENU_ICON_SIZE} />,
+}
+
+/** Commands available from the `/` inline menu (modes are NOT included — use the mode badge UI). */
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
-  ...permissionModeCommands,
+  delegateCommand,
   compactCommand,
+  { id: 'office-edit', label: 'Office 交互预览', description: '选择文档中的元素，再在聊天中提出修改', icon: <Sparkles className={MENU_ICON_SIZE} /> },
 ]
 
+/** Drop the sub-agent command when Advanced → Swarm agents is off. */
+export function slashCommandsForSwarm(swarmAgentsEnabled: boolean): SlashCommand[] {
+  return swarmAgentsEnabled
+    ? DEFAULT_SLASH_COMMANDS
+    : DEFAULT_SLASH_COMMANDS.filter(command => command.id !== 'delegate')
+}
+
+/**
+ * Permission-mode groups for the mode dropdown badge (ActiveOptionBadges).
+ * Not shown in the `/` slash autocomplete.
+ */
 export const DEFAULT_SLASH_COMMAND_GROUPS: CommandGroup[] = [
   { id: 'modes', commands: permissionModeCommands },
 ]
 
 // ============================================================================
-// Shared Styles (floating menu material: inline-menu-styles.ts)
+// Shared Styles
 // ============================================================================
 
-const MENU_CONTAINER_STYLE = cn(INLINE_MENU_SURFACE, 'min-w-[200px]')
-const MENU_LIST_STYLE = INLINE_MENU_LIST
-const MENU_ITEM_STYLE = INLINE_MENU_ITEM
-const MENU_ITEM_SELECTED = INLINE_MENU_ITEM_SELECTED
-const MENU_SECTION_HEADER = INLINE_MENU_SECTION_LABEL
-
-/** Short per-mode descriptions (literal keys keep the i18n coverage check effective). */
-const MODE_DESCRIPTION_KEYS: Record<PermissionMode, string> = {
-  safe: 'mode.exploreDesc',
-  ask: 'mode.askDesc',
-  guarded: 'mode.guardedDesc',
-  'allow-all': 'mode.executeDesc',
-}
+const MENU_CONTAINER_STYLE = 'min-w-[200px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
+const MENU_LIST_STYLE = 'max-h-[260px] overflow-y-auto py-1'
+const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2 rounded-[6px] mx-1 px-2 py-1.5 text-[13px]'
+const MENU_ITEM_SELECTED = 'bg-foreground/5'
+const MENU_SECTION_HEADER = 'px-3 py-1.5 mb-0.5 text-[12px] font-medium text-muted-foreground border-b border-foreground/5'
 
 // ============================================================================
 // Shared: Filter utilities
@@ -156,8 +166,13 @@ function filterCommands(commands: SlashCommand[], filter: string): SlashCommand[
 }
 
 /** Check if an item is a folder */
-function isFolder(item: SlashCommand | SlashFolderItem): item is SlashFolderItem {
+function isFolder(item: SlashMenuItem): item is SlashFolderItem {
   return 'type' in item && item.type === 'folder'
+}
+
+/** Check if an item is a skill */
+function isSkill(item: SlashMenuItem): item is SlashSkillItem {
+  return 'type' in item && item.type === 'skill'
 }
 
 /** Filter sections by label/id, keeping sections grouped */
@@ -172,14 +187,15 @@ function filterSections(sections: SlashSection[], filter: string): SlashSection[
       items: section.items.filter(item =>
         item.label.toLowerCase().includes(lowerFilter) ||
         item.id.toLowerCase().includes(lowerFilter) ||
-        item.description?.toLowerCase().includes(lowerFilter)
+        item.description?.toLowerCase().includes(lowerFilter) ||
+        (isSkill(item) && item.skill.metadata.name.toLowerCase().includes(lowerFilter))
       ),
     }))
     .filter(section => section.items.length > 0)
 }
 
 /** Flatten sections into a single array of items */
-function flattenSections(sections: SlashSection[]): (SlashCommand | SlashFolderItem)[] {
+function flattenSections(sections: SlashSection[]): SlashMenuItem[] {
   return sections.flatMap(section => section.items)
 }
 
@@ -187,22 +203,19 @@ function flattenSections(sections: SlashSection[]): (SlashCommand | SlashFolderI
 // Shared: Command Item Content
 // ============================================================================
 
-function CommandItemContent({ command, isActive, showDescription = false }: { command: SlashCommand; isActive: boolean; showDescription?: boolean }) {
+const MODE_COMMAND_IDS = new Set<string>(['safe', 'ask', 'allow-all'])
+
+function CommandItemContent({ command, isActive }: { command: SlashCommand; isActive: boolean }) {
   const { t } = useTranslation()
-  const isMode = isPermissionMode(command.id)
-  const label = isMode ? t(`mode.${command.id}`, command.label) : command.label
-  const description = showDescription && isMode && Object.hasOwn(MODE_DESCRIPTION_KEYS, command.id)
-    ? t(MODE_DESCRIPTION_KEYS[command.id as PermissionMode])
-    : null
+  const label = command.id === 'office-edit' ? t('chat.officePreview.title') : MODE_COMMAND_IDS.has(command.id) ? t(`mode.${command.id}`, command.label) : command.label
   return (
     <>
-      <div className="shrink-0 text-secondary">{command.icon}</div>
-      <div className="flex-1 min-w-0 truncate">
-        {label}
-        {description && <span className="text-tertiary"> — {description}</span>}
-      </div>
+      <div className="shrink-0 text-muted-foreground">{command.icon}</div>
+      <div className="flex-1 min-w-0">{label}</div>
       {isActive && (
-        <Check className="size-4 shrink-0 text-secondary" aria-hidden="true" />
+        <div className="shrink-0 h-4 w-4 rounded-full bg-current flex items-center justify-center">
+          <Check className="h-2.5 w-2.5 text-white dark:text-black" strokeWidth={3} />
+        </div>
       )}
     </>
   )
@@ -222,12 +235,6 @@ export interface SlashCommandMenuProps {
   showFilter?: boolean
   filterPlaceholder?: string
   className?: string
-  /** Render without its own floating material (the host popover already draws it) */
-  bare?: boolean
-  /** Show each mode's one-line description after its name */
-  showDescriptions?: boolean
-  /** Non-interactive hint row under the list (e.g. the mode-cycling shortcut) */
-  footer?: React.ReactNode
 }
 
 export function SlashCommandMenu({
@@ -238,9 +245,6 @@ export function SlashCommandMenu({
   showFilter = false,
   filterPlaceholder,
   className,
-  bare = false,
-  showDescriptions = false,
-  footer,
 }: SlashCommandMenuProps) {
   const { t } = useTranslation()
   const effectiveFilterPlaceholder = filterPlaceholder ?? t("commands.searchCommands")
@@ -295,35 +299,34 @@ export function SlashCommandMenu({
         className={cn(
           MENU_ITEM_STYLE,
           'outline-none',
-          'data-[selected=true]:bg-fill-hover'
+          'data-[selected=true]:bg-foreground/5'
         )}
       >
-        <CommandItemContent command={cmd} isActive={isActive} showDescription={showDescriptions} />
+        <CommandItemContent command={cmd} isActive={isActive} />
       </CommandPrimitive.Item>
     )
   }
 
   return (
     <CommandPrimitive
-      label={effectiveFilterPlaceholder}
-      className={cn(bare ? 'min-w-[220px] overflow-hidden text-foreground' : MENU_CONTAINER_STYLE, className)}
+      className={cn(MENU_CONTAINER_STYLE, className)}
       shouldFilter={false}
       defaultValue={defaultValue}
     >
       {showFilter && (
-        <div className="flex h-control-xl items-center border-b border-subtle px-3">
+        <div className="border-b border-border/50 px-3 py-2">
           <CommandPrimitive.Input
             ref={inputRef}
             value={filter}
             onValueChange={setFilter}
             placeholder={effectiveFilterPlaceholder}
-            className="w-full bg-transparent text-label outline-none placeholder:text-tertiary"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
       )}
       <CommandPrimitive.List className={MENU_LIST_STYLE}>
         {allFilteredCommands.length === 0 ? (
-          <CommandPrimitive.Empty className="py-4 text-center text-label text-tertiary">
+          <CommandPrimitive.Empty className="py-4 text-center text-sm text-muted-foreground">
             No commands found
           </CommandPrimitive.Empty>
         ) : filteredGroups ? (
@@ -333,7 +336,7 @@ export function SlashCommandMenu({
               {group.commands.map(renderCommandItem)}
               {/* Separator: only show if there's another group after this one */}
               {groupIndex < filteredGroups.length - 1 && (
-                <div className={INLINE_MENU_SEPARATOR} />
+                <div className="h-px bg-border/50 my-1 mx-2" />
               )}
             </React.Fragment>
           ))
@@ -342,12 +345,6 @@ export function SlashCommandMenu({
           filteredCommands?.map(renderCommandItem)
         )}
       </CommandPrimitive.List>
-      {footer && (
-        <>
-          <div className="bg-separator h-px" />
-          <div className={INLINE_MENU_FOOTER}>{footer}</div>
-        </>
-      )}
     </CommandPrimitive>
   )
 }
@@ -363,9 +360,12 @@ export interface InlineSlashCommandProps {
   activeCommands?: SlashCommandId[]
   onSelectCommand: (commandId: SlashCommandId) => void
   onSelectFolder: (path: string) => void
+  onSelectSkill: (skill: LoadedSkill) => void
   filter?: string
   position: { x: number; y: number }
   className?: string
+  /** Workspace slug for skill avatars */
+  workspaceId?: string
 }
 
 export function InlineSlashCommand({
@@ -375,10 +375,13 @@ export function InlineSlashCommand({
   activeCommands = [],
   onSelectCommand,
   onSelectFolder,
+  onSelectSkill,
   filter = '',
   position,
   className,
+  workspaceId,
 }: InlineSlashCommandProps) {
+  const { t } = useTranslation()
   const menuRef = React.useRef<HTMLDivElement>(null)
   const listRef = React.useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = React.useState(0)
@@ -400,14 +403,16 @@ export function InlineSlashCommand({
   }, [selectedIndex])
 
   // Handle item selection
-  const handleSelect = React.useCallback((item: SlashCommand | SlashFolderItem) => {
+  const handleSelect = React.useCallback((item: SlashMenuItem) => {
     if (isFolder(item)) {
       onSelectFolder(item.path)
+    } else if (isSkill(item)) {
+      onSelectSkill(item.skill)
     } else {
       onSelectCommand(item.id)
     }
     onOpenChange(false)
-  }, [onSelectCommand, onSelectFolder, onOpenChange])
+  }, [onSelectCommand, onSelectFolder, onSelectSkill, onOpenChange])
 
   // Keyboard navigation
   // Don't attach listener when no items - allows Enter to propagate to input handler
@@ -471,8 +476,13 @@ export function InlineSlashCommand({
     <div
       ref={menuRef}
       data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, INLINE_MENU_ORIGIN, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 220, maxWidth: 260 }}
+      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+      style={{
+        left: Math.round(position.x) - 10,
+        bottom: bottomPosition,
+        width: 'min(400px, calc(100vw - 24px))',
+        maxWidth: 400,
+      }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {filteredSections.map((section, sectionIndex) => (
@@ -500,21 +510,21 @@ export function InlineSlashCommand({
                       isSelected && MENU_ITEM_SELECTED
                     )}
                   >
-                    <div className="shrink-0 text-secondary">
+                    <div className="shrink-0 text-muted-foreground">
                       <Icon_Folder className={MENU_ICON_SIZE} strokeWidth={1.75} />
                     </div>
                     <div className="flex-1 min-w-0 truncate">
                       <span>{item.label}</span>
-                      <span className="text-tertiary ml-1.5">{item.description}</span>
+                      <span className="text-muted-foreground ml-1.5">{item.description}</span>
                     </div>
                   </div>
                 )
-              } else {
-                // Command item
-                const isActive = activeCommands.includes(item.id)
+              }
+
+              if (isSkill(item)) {
                 return (
                   <div
-                    key={item.id}
+                    key={`${section.id}-${item.id}`}
                     data-selected={isSelected}
                     onClick={() => handleSelect(item)}
                     onMouseEnter={() => setSelectedIndex(itemIndex)}
@@ -523,19 +533,67 @@ export function InlineSlashCommand({
                       isSelected && MENU_ITEM_SELECTED
                     )}
                   >
-                    <CommandItemContent command={item} isActive={isActive} />
+                    <div className="shrink-0 text-muted-foreground">
+                      <SkillAvatar
+                        skill={item.skill}
+                        size="sm"
+                        workspaceId={workspaceId}
+                        fallbackIcon={Sparkles}
+                        bare
+                        chromeless
+                      />
+                    </div>
+                    <div className={cn(
+                      'min-w-0 flex-1',
+                      item.description ? 'grid grid-cols-2 gap-y-0.5' : undefined,
+                    )}>
+                      <span
+                        className={cn('block min-w-0 truncate', item.description && 'col-span-2')}
+                        title={item.label}
+                      >
+                        {item.label}
+                      </span>
+                      {item.description && (
+                        <span
+                          className="col-span-2 block min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
+                          title={item.description}
+                        >
+                          {item.description}
+                        </span>
+                      )}
+                    </div>
+                    <span className="rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0">
+                      {t('common.skill')}
+                    </span>
                   </div>
                 )
               }
+
+              // Command item
+              const isActive = activeCommands.includes(item.id)
+              return (
+                <div
+                  key={item.id}
+                  data-selected={isSelected}
+                  onClick={() => handleSelect(item)}
+                  onMouseEnter={() => setSelectedIndex(itemIndex)}
+                  className={cn(
+                    MENU_ITEM_STYLE,
+                    isSelected && MENU_ITEM_SELECTED
+                  )}
+                >
+                  <CommandItemContent command={item} isActive={isActive} />
+                </div>
+              )
             })}
 
           </React.Fragment>
         ))}
       </div>
-      {/* Always-visible footer hint for @ mentions */}
-      <div className="bg-separator h-px" />
-      <div className={INLINE_MENU_FOOTER}>
-        Use @ for skills and files
+      {/* Always-visible footer hint for @ file mentions */}
+      <div className="h-px bg-border/50 mx-2" />
+      <div className="px-3 py-2.5 select-none text-xs text-muted-foreground">
+        {t('chat.slashHintUseAtForFiles', 'Use @ for files')}
       </div>
     </div>
   )
@@ -573,13 +631,17 @@ function getFolderName(path: string): string {
 export interface UseInlineSlashCommandOptions {
   /** Ref to input element (textarea or RichTextInput handle) */
   inputRef: React.RefObject<SlashCommandInputElement | null>
-  /** Permission modes to offer (defaults to Explore, Ask, Execute) */
-  modes?: readonly PermissionMode[]
   onSelectCommand: (commandId: SlashCommandId) => void
   onSelectFolder: (path: string) => void
   activeCommands?: SlashCommandId[]
   recentFolders?: string[]
   homeDir?: string
+  /** Skills shown in the `/` menu (not in `@`) */
+  skills?: LoadedSkill[]
+  /** Workspace slug for fully-qualified skill mentions */
+  workspaceId?: string
+  /** Hide `/delegate` when the app-level Swarm switch is off. */
+  swarmAgentsEnabled?: boolean
 }
 
 export interface UseInlineSlashCommandReturn {
@@ -592,17 +654,21 @@ export interface UseInlineSlashCommandReturn {
   activeCommands: SlashCommandId[]
   handleSelectCommand: (commandId: SlashCommandId) => string
   handleSelectFolder: (path: string) => string
+  handleSelectSkill: (skill: LoadedSkill) => { value: string; cursorPosition: number }
 }
 
 export function useInlineSlashCommand({
   inputRef,
-  modes = DEFAULT_PERMISSION_MODES,
   onSelectCommand,
   onSelectFolder,
   activeCommands = [],
   recentFolders = [],
   homeDir,
+  skills = [],
+  workspaceId,
+  swarmAgentsEnabled = false,
 }: UseInlineSlashCommandOptions): UseInlineSlashCommandReturn {
+  const { t } = useTranslation()
   const [isOpen, setIsOpen] = React.useState(false)
   const [filter, setFilter] = React.useState('')
   const [position, setPosition] = React.useState({ x: 0, y: 0 })
@@ -610,22 +676,30 @@ export function useInlineSlashCommand({
   // Store current input state for handleSelect
   const currentInputRef = React.useRef({ value: '', cursorPosition: 0 })
 
-  // Build sections from commands and folders
+  // Build sections: skills → commands (no modes) → recent folders
   const sections = React.useMemo((): SlashSection[] => {
     const result: SlashSection[] = []
 
-    // Modes section
-    result.push({
-      id: 'modes',
-      label: 'Modes',
-      items: permissionModeCommandsFor(modes),
-    })
+    // Skills section (moved from @ mention menu)
+    if (skills.length > 0) {
+      result.push({
+        id: 'skills',
+        label: t('common.skills', 'Skills'),
+        items: skills.map(skill => ({
+          id: skill.slug,
+          type: 'skill' as const,
+          label: resolveSkillTitle(skill),
+          description: skill.metadata.description || '',
+          skill,
+        })),
+      })
+    }
 
-    // Commands section
+    // Commands section (compact, etc. — modes are handled by the mode badge UI)
     result.push({
       id: 'commands',
-      label: 'Commands',
-      items: [compactCommand],
+      label: t('commands.section', 'Commands'),
+      items: slashCommandsForSwarm(swarmAgentsEnabled),
     })
 
     // Recent folders section - sorted alphabetically by folder name, show all
@@ -639,7 +713,7 @@ export function useInlineSlashCommand({
 
       result.push({
         id: 'folders',
-        label: 'Recent Working Directories',
+        label: t('chat.recentWorkingDirectories', 'Recent Working Directories'),
         items: sortedFolders.map(path => ({
           id: path,
           type: 'folder' as const,
@@ -651,14 +725,15 @@ export function useInlineSlashCommand({
     }
 
     return result
-  }, [modes, recentFolders, homeDir])
+  }, [recentFolders, homeDir, skills, t])
 
   const handleInputChange = React.useCallback((value: string, cursorPosition: number) => {
     // Store current state for handleSelect
     currentInputRef.current = { value, cursorPosition }
 
     const textBeforeCursor = value.slice(0, cursorPosition)
-    const slashMatch = textBeforeCursor.match(/(?:^|\s)\/(\w*)$/)
+    // Allow Unicode skill names / hyphens (not just ASCII \w)
+    const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([^\n\[\]@\s]{0,100})?$/)
 
     // Only show menu if we have sections with items
     const hasItems = sections.some(s => s.items.length > 0)
@@ -748,6 +823,25 @@ export function useInlineSlashCommand({
     return result
   }, [onSelectFolder, slashStart])
 
+  const handleSelectSkill = React.useCallback((skill: LoadedSkill): { value: string; cursorPosition: number } => {
+    let result = ''
+    let newCursorPosition = 0
+    if (slashStart >= 0) {
+      const { value: currentValue, cursorPosition } = currentInputRef.current
+      const before = currentValue.slice(0, slashStart)
+      const after = currentValue.slice(cursorPosition)
+      // Plugin name depends on which tier the skill came from:
+      //   workspace → workspaceId, project/global → ".agents"
+      const pluginName = skill.source === 'workspace' ? workspaceId : AGENTS_PLUGIN_NAME
+      const qualifiedName = pluginName ? `${pluginName}:${skill.slug}` : skill.slug
+      const mentionText = `[skill:${qualifiedName}] `
+      result = before + mentionText + after
+      newCursorPosition = before.length + mentionText.length
+    }
+    setIsOpen(false)
+    return { value: result, cursorPosition: newCursorPosition }
+  }, [slashStart, workspaceId])
+
   const close = React.useCallback(() => {
     setIsOpen(false)
     setFilter('')
@@ -764,5 +858,6 @@ export function useInlineSlashCommand({
     activeCommands,
     handleSelectCommand,
     handleSelectFolder,
+    handleSelectSkill,
   }
 }

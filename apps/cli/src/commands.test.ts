@@ -32,14 +32,6 @@ describe('parseArgs', () => {
     expect(args.command).toBe('workspaces')
   })
 
-  it('parses --coding (off by default)', () => {
-    expect(parseArgs(['bun', 'index.ts', 'run', 'hello']).coding).toBe(false)
-    const args = parseArgs(['bun', 'index.ts', 'run', '--coding', 'fix the build'])
-    expect(args.coding).toBe(true)
-    expect(args.command).toBe('run')
-    expect(args.rest).toEqual(['fix the build'])
-  })
-
   it('parses --tls-ca', () => {
     const args = parseArgs([
       'bun', 'index.ts',
@@ -263,12 +255,12 @@ describe('shouldSetupLlmConnection', () => {
     expect(shouldSetupLlmConnection(2, { provider: 'deepseek', baseUrl: '' })).toBe(true)
   })
 
-  it('skips setup for the default anthropic provider when connections already exist', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'anthropic', baseUrl: '' })).toBe(false)
+  it('skips setup for the default openai provider when connections already exist', () => {
+    expect(shouldSetupLlmConnection(2, { provider: 'openai', baseUrl: '' })).toBe(false)
   })
 
   it('forces setup for custom endpoints', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'anthropic', baseUrl: 'https://api.example.com' })).toBe(true)
+    expect(shouldSetupLlmConnection(2, { provider: 'openai', baseUrl: 'https://api.example.com' })).toBe(true)
   })
 })
 

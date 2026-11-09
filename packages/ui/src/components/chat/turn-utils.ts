@@ -6,8 +6,29 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
-import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { storedToMessage } from '@craft-agent/core'
+import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, splitThinkDelimiter } from '@craft-agent/core'
+import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
+
+import { parseTaskListResult } from '@craft-agent/shared/utils/task-list'
+import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+
+const headingParser = unified().use(remarkParse)
+const headingCache = new WeakMap<Message, { content: string; headings: string[] }>()
+
+/** Only actual document headings identify a draft, not quotes or code examples. */
+function messageHeadings(message: Message): string[] {
+  const cached = headingCache.get(message)
+  if (cached?.content === message.content) return cached.headings
+  const headings = headingParser.parse(message.content).children.flatMap(node => {
+    if (node.type !== 'heading') return []
+    const source = message.content.slice(node.position?.start.offset, node.position?.end.offset).trim()
+    return /^#{1,6}\s/.test(source) ? [source] : []
+  })
+  headingCache.set(message, { content: message.content, headings })
+  return headings
+}
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -42,6 +63,9 @@ function stripErrorTags(content: string | undefined): string | undefined {
 /** Represents one complete assistant turn */
 export interface AssistantTurn {
   type: 'assistant'
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
+  answerRunId?: string
+  answerRoutingVersion?: 1
   turnId: string
   activities: ActivityItem[]
   response?: ResponseContent
@@ -51,6 +75,10 @@ export interface AssistantTurn {
   timestamp: number
   /** Extracted from TodoWrite tool - latest todo state in this turn */
   todos?: TodoItem[]
+  /** Successful submit_answer. Delivery is not a work-chain row. */
+  answerDelivered?: boolean
+  /** Canonical execution, distinct from each coordinator model turn's answerRunId. */
+  taskRunId?: string
 }
 
 /** Represents a user message */
@@ -74,7 +102,186 @@ export interface AuthRequestTurn {
   timestamp: number
 }
 
-export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
+/** A clarification card. It is not the final answer. */
+export interface ClarificationTurn {
+  type: 'clarification'
+  message: Message
+  timestamp: number
+}
+
+export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn | ClarificationTurn
+
+export interface PendingClarificationLayout {
+  /** Assistant header that stays visible and reads as「待澄清」. */
+  statusTurnIndex: number
+  /** Later assistant fragments in the same request, including the「已工作」strip. */
+  hiddenTurnIndexes: ReadonlySet<number>
+}
+
+/**
+ * While a clarification card is waiting, the transcript keeps one process bar:
+ * the assistant header immediately above that card. Assistant fragments that
+ * landed after the card are the duplicate collapsed chain and stay hidden
+ * until the user answers or skips.
+ */
+export function pendingClarificationLayout(turns: readonly Turn[]): PendingClarificationLayout | null {
+  let requestStart = -1
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index]?.type === 'user') {
+      requestStart = index
+      break
+    }
+  }
+  let pendingIndex = -1
+  for (let index = turns.length - 1; index > requestStart; index -= 1) {
+    const turn = turns[index]
+    if (turn?.type === 'clarification' && turn.message.clarification?.status === 'pending') {
+      pendingIndex = index
+      break
+    }
+  }
+  if (pendingIndex < 0) return null
+
+  let statusTurnIndex = -1
+  for (let index = pendingIndex - 1; index > requestStart; index -= 1) {
+    if (turns[index]?.type === 'assistant') {
+      statusTurnIndex = index
+      break
+    }
+  }
+  const hiddenTurnIndexes = new Set<number>()
+  for (let index = pendingIndex + 1; index < turns.length; index += 1) {
+    if (turns[index]?.type === 'assistant') hiddenTurnIndexes.add(index)
+  }
+  if (statusTurnIndex < 0) {
+    const fallback = hiddenTurnIndexes.values().next().value
+    if (fallback === undefined) return null
+    hiddenTurnIndexes.delete(fallback)
+    statusTurnIndex = fallback
+  }
+  return { statusTurnIndex, hiddenTurnIndexes }
+}
+
+export interface SettledClarificationGroup {
+  /** First process row, or the clarification itself when the request has no assistant turn. */
+  anchorIndex: number
+  clarificationIndexes: number[]
+}
+
+/**
+ * Answered or skipped clarifications in one user request fold into that
+ * request's first process row. A pending card keeps the waiting layout.
+ */
+export function settledClarificationGroups(turns: readonly Turn[]): SettledClarificationGroup[] {
+  const groups: SettledClarificationGroup[] = []
+  let start = 0
+  const flush = (end: number) => {
+    const clarificationIndexes: number[] = []
+    let firstAssistant = -1
+    for (let index = start; index < end; index += 1) {
+      const turn = turns[index]
+      if (turn?.type === 'assistant' && firstAssistant < 0) firstAssistant = index
+      if (turn?.type !== 'clarification') continue
+      const status = turn.message.clarification?.status
+      if (status === 'pending') return
+      if (status === 'answered' || status === 'skipped') clarificationIndexes.push(index)
+    }
+    const firstClarification = clarificationIndexes[0]
+    if (firstClarification === undefined) return
+    // The process fold is the anchor, even when the clarification message landed first.
+    groups.push({
+      anchorIndex: firstAssistant >= 0 ? firstAssistant : firstClarification,
+      clarificationIndexes,
+    })
+  }
+  turns.forEach((turn, index) => {
+    if (turn.type !== 'user') return
+    flush(index)
+    start = index + 1
+  })
+  flush(turns.length)
+  return groups
+}
+
+export function settledClarificationMessages(turns: readonly Turn[], group: SettledClarificationGroup): Message[] {
+  const messages: Message[] = []
+  for (const index of group.clarificationIndexes) {
+    const turn = turns[index]
+    if (turn?.type === 'clarification') messages.push(turn.message)
+  }
+  return messages
+}
+
+export type ProcessChainRow = ActivityItem | ActivityGroup
+
+export type ProcessChainEntry =
+  | { kind: 'step'; row: ProcessChainRow }
+  | { kind: 'clarification'; message: Message }
+
+/**
+ * Place each settled clarification where it happened among the process steps.
+ * Earlier-or-same timestamps stay ahead of it; later steps stay behind it.
+ */
+export function interleaveSettledClarifications(
+  rows: readonly ProcessChainRow[],
+  messages: readonly Message[],
+): ProcessChainEntry[] {
+  const clarifications = messages
+    .filter(message => {
+      const status = message.clarification?.status
+      return status === 'answered' || status === 'skipped'
+    })
+    .slice()
+    .sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0) || left.id.localeCompare(right.id))
+  const entries: ProcessChainEntry[] = []
+  let cursor = 0
+  for (const row of rows) {
+    const at = isActivityGroup(row) ? row.parent.timestamp : row.timestamp
+    while (cursor < clarifications.length && (clarifications[cursor]?.timestamp ?? 0) < at) {
+      const message = clarifications[cursor]
+      if (message) entries.push({ kind: 'clarification', message })
+      cursor += 1
+    }
+    entries.push({ kind: 'step', row })
+  }
+  for (const message of clarifications.slice(cursor)) entries.push({ kind: 'clarification', message })
+  return entries
+}
+
+/** Move a request's work-status strip onto the process fold that holds the clarification. */
+export function anchorClarificationWorkStatus<T>(
+  turns: readonly Turn[],
+  timings: ReadonlyMap<number, T>,
+  groups: readonly SettledClarificationGroup[] = settledClarificationGroups(turns),
+): ReadonlyMap<number, T> {
+  if (groups.length === 0) return timings
+  let next: Map<number, T> | undefined
+  for (const group of groups) {
+    let start = group.anchorIndex
+    while (start > 0 && turns[start - 1]?.type !== 'user') start -= 1
+    let end = group.anchorIndex + 1
+    while (end < turns.length && turns[end]?.type !== 'user') end += 1
+    for (const index of [...(next ?? timings).keys()]) {
+      if (index === group.anchorIndex || index < start || index >= end) continue
+      const timing = (next ?? timings).get(index)
+      if (timing === undefined) continue
+      next ??= new Map(timings)
+      next.delete(index)
+      next.set(group.anchorIndex, timing)
+    }
+  }
+  return next ?? timings
+}
+
+export function sharesUserRequest(turns: readonly Turn[], left: number, right: number): boolean {
+  if (left < 0 || right < 0 || left >= turns.length || right >= turns.length) return false
+  const start = Math.min(left, right)
+  const end = Math.max(left, right)
+  for (let index = start + 1; index <= end; index += 1) {
+    if (turns[index]?.type === 'user') return false
+  }
+  return true
+}
 
 /**
  * Build a stable UI identity key for an assistant turn card.
@@ -83,12 +290,15 @@ export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
  * - Backend turnId can be reused across visually split assistant cards
  *   (e.g., steer/interruption boundaries).
  * - Expansion state must be keyed by UI-card identity, not raw backend turnId.
+ *
+ * Do not include `response.messageId`. That id appears and disappears as
+ * pending text, intermediate rows, and tools arrive, which would remount the
+ * card and replay expand/collapse on every new element.
  */
+// Pass the index in the complete turn list, not a paginated slice. Completion
+// may replace timestamps, but must preserve both the card and expansion state.
 export function getAssistantTurnUiKey(turn: AssistantTurn, index: number): string {
-  if (turn.response?.messageId) {
-    return `assistant:msg:${turn.response.messageId}`
-  }
-  return `assistant:turn:${turn.turnId}:${turn.timestamp}:${index}`
+  return `assistant:turn:${turn.turnId}:${index}`
 }
 
 // ============================================================================
@@ -130,7 +340,7 @@ export type TurnPhase =
  *
  * Priority order (first match wins):
  * 1. complete - turn.isComplete is true
- * 2. streaming - response exists and is streaming (final response)
+ * 2. streaming - response exists and is streaming (final or pending tokens)
  * 3. tool_active - any TOOL activity has status 'running'
  * 4. awaiting - has activities but no tools running (the gap!)
  * 5. pending - no activities yet
@@ -138,6 +348,8 @@ export type TurnPhase =
  * Note: Only `type: 'tool'` activities count for tool_active phase.
  * Intermediate text (type: 'intermediate') and status activities (type: 'status')
  * with 'running' status do NOT trigger tool_active - they show "Thinking..." instead.
+ * Completed commentary may occupy `turn.response` (isCommentary) so the body
+ * card stays readable while tools continue; that does not count as streaming.
  */
 export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
   // Complete takes precedence - turn is definitively done
@@ -145,8 +357,7 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
     return 'complete'
   }
 
-  // Check if final response is streaming
-  // Note: turn.response only exists for final responses, not intermediate text
+  // Streaming tokens — pending reply or still-open commentary
   if (turn.response && turn.response.isStreaming) {
     return 'streaming'
   }
@@ -171,6 +382,129 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 }
 
 /**
+ * Commentary occupies the response card while the turn is still working.
+ * Once the turn completes, the same body is the visible final reply.
+ */
+export function isVisibleCommentaryCard(
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+  hasRunningTools = false,
+): boolean {
+  // #83: a running tool owns the work chain. Finished tools do not hide a
+  // later draft — that text is the live reply until submit_answer or the next tool.
+  return !!response?.isCommentary
+    && !isComplete
+    && !hasRunningTools
+    && hasRenderableAssistantText(response?.text)
+}
+
+/**
+ * Move a completed body off the main card and into the work chain (#83).
+ * Streaming tokens stay on the card until they reclassify as intermediate.
+ */
+export function demoteResponseToWorkChain(turn: AssistantTurn): void {
+  const response = turn.response
+  if (!response) return
+  if (hasRenderableAssistantText(response.text)) {
+    const alreadyPresent = turn.activities.some(activity =>
+      activity.id === response.messageId
+      || (activity.type === 'intermediate' && activity.content === response.text),
+    )
+    if (!alreadyPresent) {
+      turn.activities.push({
+        id: response.messageId || `intermediate-${turn.timestamp}`,
+        type: 'intermediate',
+        status: 'completed',
+        content: response.text,
+        timestamp: response.timestamp ?? response.streamStartTime ?? turn.timestamp,
+        depth: 0,
+      })
+    }
+  }
+  turn.response = undefined
+}
+
+/** A later preview or commit replaces the live draft; do not restate it in the work chain. */
+function replaceLiveDraft(turn: AssistantTurn, nextText: string): void {
+  const previous = turn.response
+  if (!previous || previous.isAnswerPreview) return
+  const draft = previous.text.trim()
+  const absorbed = turn.answerRoutingVersion !== 1 && draft.length >= 2 && nextText.trim().startsWith(draft)
+  if (absorbed || (turn.answerRoutingVersion !== 1 && previous.isStreaming)) {
+    turn.activities = turn.activities.filter(activity => activity.id !== previous.messageId)
+    turn.response = undefined
+    return
+  }
+  demoteResponseToWorkChain(turn)
+}
+
+function isLiveAnswerDraft(message: Message): boolean {
+  // An explicit-v1 run stamps its id onto later rows. Reasoning is not that draft.
+  if (isThinkingText(message)) return false
+  return message.role === 'assistant'
+    && message.answerProtocol === 'explicit-v1'
+    && !message.answerCommitted
+    && !message.answerPreview
+}
+
+function isAuthoritativeCommit(message: Message): message is Message & { answerRunId: string } {
+  return message.role === 'assistant'
+    && message.answerProtocol === 'explicit-v1'
+    && !!message.answerCommitted
+    && !!message.answerRunId
+    && hasRenderableAssistantText(message.content)
+    && !isAnswerDeliveryReceipt(message.content)
+}
+
+/**
+ * Live tokens occupy the white card. Completed process text uses `isIntermediate`.
+ * marker-v1 unclassified stays in the work chain until a final boundary.
+ */
+/** Provider reasoning uses its own sub-turn so it never becomes the reply. */
+export function isModelThinkingTurn(turnId?: string): boolean {
+  return isThinkingText({ turnId })
+}
+
+function isLiveCardStream(message: Message): boolean {
+  if (message.role !== 'assistant') return false
+  if (isThinkingText(message)) return false
+  if (!(message.isStreaming || message.isPending)) return false
+  if (!hasRenderableAssistantText(message.content)) return false
+  if (message.presentationProtocol === 'marker-v1') return false
+  // natural-v1: whether live text is the answer is unknown until the model
+  // stops, so every live stream occupies the (frameless) reply slot. Text that
+  // ends in a tool call then merges into the work chain.
+  if (isLiveAnswerDraft(message)) return true
+  // Legacy senders flag process text with isIntermediate alone (no phase).
+  return message.phase !== 'intermediate' && !message.isIntermediate
+}
+
+/** Host-committed answers: live tokens are the reply; a finished uncommitted draft is process text. */
+function classifyForTurnGrouping(message: Message): Message {
+  if (isThinkingText(message)) {
+    return message.isIntermediate && message.phase === 'intermediate'
+      ? message
+      : { ...message, isIntermediate: true, phase: 'intermediate' }
+  }
+  if (message.answerCommitted || message.answerPreview) return message
+  if (!isLiveAnswerDraft(message)) return message
+  const live = !!(message.isStreaming || message.isPending)
+  const intermediate = !live
+  return message.isIntermediate === intermediate ? message : { ...message, isIntermediate: intermediate }
+}
+
+/** The live card already shows this intermediate body — don't also insert a row. */
+export function isMirroredCommentaryActivity(
+  activity: Pick<ActivityItem, 'type' | 'id'>,
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+): boolean {
+  return activity.type === 'intermediate'
+    && isVisibleCommentaryCard(response, isComplete)
+    && activity.id === response?.messageId
+}
+
+/**
  * Determines if the "Thinking..." indicator should be shown.
  *
  * The thinking indicator appears when the turn is active but there's
@@ -186,6 +520,121 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
   // - awaiting: gap between tool completion and next action
   // - streaming but buffering: text started but not ready to display
   return phase === 'pending' || phase === 'awaiting' || (phase === 'streaming' && isBuffering)
+}
+
+/**
+ * Determines whether the generic thinking row is needed in addition to the
+ * visible work-chain activities. A running prose/status activity
+ * renders its own status, so mounting another row would duplicate it.
+ */
+export function shouldShowGenericThinkingIndicator(
+  phase: TurnPhase,
+  isBuffering: boolean,
+  renderedActivities: ReadonlyArray<Pick<ActivityItem, 'type' | 'status'>>,
+): boolean {
+  return shouldShowThinkingIndicator(phase, isBuffering)
+    && !renderedActivities.some(
+      activity => (activity.type === 'intermediate' || activity.type === 'thinking' || activity.type === 'status')
+        && activity.status === 'running',
+    )
+}
+/**
+ * Desktop `Streaming...` footer means "this card's body is still being typed".
+ * Once tools (including spawn_session) have started, progress belongs on the
+ * work chain / task bar — not a footer that makes a finished preamble look live.
+ * Keep `response.isStreaming` itself unchanged so the live card tree is not remounted.
+ */
+export function shouldShowStreamingFooter(input: {
+  isStreaming: boolean
+  compactMode?: boolean
+  isCommentary?: boolean
+  hasToolActivities?: boolean
+}): boolean {
+  return !!input.isStreaming
+    && !input.compactMode
+    && !input.isCommentary
+    && !input.hasToolActivities
+}
+
+/**
+ * Empty live thinking/commentary belongs to the status header, not the chain.
+ * A finished thinking block with no readable text (encrypted or redacted) is
+ * still a step: the row keeps its label and does not open empty details.
+ */
+export function isProcessPlaceholder(activity: Pick<ActivityItem, 'type' | 'status' | 'content'>): boolean {
+  if (activity.type !== 'intermediate' && activity.type !== 'thinking') return false
+  if (hasRenderableAssistantText(activity.content)) return false
+  return !(activity.type === 'thinking' && activity.status === 'completed')
+}
+
+export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
+  return new Set(activities
+    // Delivery is the card body, not a numbered work step.
+    .filter(activity => !isAnswerDeliveryTool(activity))
+    .filter(activity => activity.statusType !== 'compaction_complete')
+    // Empty live placeholders are transient indicators, not work records.
+    // Finished reasoning is a step, same as commentary between tools.
+    .filter(activity => !isProcessPlaceholder(activity))
+    .map(activity => activity.type === 'tool'
+      ? `tool:${activity.toolUseId ?? activity.id}`
+      : `${activity.type}:${activity.id}`)).size
+}
+
+/**
+ * Select the newest semantic progress title while a turn is doing work.
+ *
+ * Tool intents and explicit system statuses are concise title candidates.
+ * Raw thinking/intermediate bodies stay in the expanded work chain instead of
+ * being duplicated into its header (#141). Timestamps are authoritative because
+ * live activities can briefly be received out of array order; array order only
+ * breaks timestamp ties.
+ */
+export function getActiveTurnPreview(
+  activities: ActivityItem[],
+  phase: TurnPhase,
+): string | undefined {
+  // Completed orchestration chains still describe their last real operation.
+  if (phase === 'complete' && !activities.some(activity => activity.statusType === 'task_progress')) return undefined
+
+  let latest: { text: string; timestamp: number; index: number } | undefined
+
+  activities.forEach((activity, index) => {
+    if (isAnswerDeliveryTool(activity) || activity.statusType === 'task_progress') return
+    if (activity.statusType === 'task_node' && activity.status === 'pending') return
+    let toolIntent: string | undefined
+    if (activity.type === 'tool') {
+      toolIntent = activity.intent?.trim()
+      if (!toolIntent && activity.toolName) {
+        const name = activity.displayName?.trim()
+          || ((!activity.toolDisplayMeta || activity.toolDisplayMeta.category === 'native')
+            ? localizedToolLabel(activity.toolName) : undefined)
+          || activity.toolDisplayMeta?.displayName
+          || getToolDisplayName(activity.toolName)
+        // Use only recognizable input fields, never raw output or arbitrary
+        // argument JSON. Native tools often have no generated intent metadata.
+        const input = activity.toolInput
+        const detail = ['description', 'query', 'file_path', 'path', 'url', 'command', 'pattern']
+          .map(key => input?.[key])
+          .find(value => typeof value === 'string' && value.trim())
+        toolIntent = typeof detail === 'string'
+          ? `${name} · ${detail.replace(/\s+/g, ' ').trim()}`
+          : name
+      }
+    }
+    const statusText = activity.type === 'status' ? activity.content?.trim() : undefined
+    const text = toolIntent || statusText
+    if (!text) return
+
+    if (
+      !latest
+      || activity.timestamp > latest.timestamp
+      || (activity.timestamp === latest.timestamp && index > latest.index)
+    ) {
+      latest = { text, timestamp: activity.timestamp, index }
+    }
+  })
+
+  return latest?.text
 }
 
 // ============================================================================
@@ -222,11 +671,15 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     type: 'tool' as ActivityType,
     status: getToolStatus(message),
     toolName: message.toolName,
+    toolPurpose: message.toolPurpose,
+    answerRoutingVersion: message.answerRoutingVersion,
     toolUseId: message.toolUseId,  // For parent-child matching
     toolInput: message.toolInput,
     content: message.toolResult || message.content,
-    intent: message.toolIntent,
-    displayName: message.toolDisplayName,  // LLM-generated human-friendly name
+    toolResultContent: message.toolResultContent,
+    toolProgress: message.toolProgress,
+    intent: cleanToolMetadataLabel(message.toolIntent),
+    displayName: cleanToolMetadataLabel(message.toolDisplayName),  // LLM-generated human-friendly name
     toolDisplayMeta: message.toolDisplayMeta,  // Embedded metadata with base64 icon for viewer
     timestamp: message.timestamp,
     error: message.isError ? stripErrorTags(message.toolResult || message.content) : undefined,
@@ -294,34 +747,50 @@ function calculateActivityDepths(activities: ActivityItem[]): void {
  * Extract todos from TodoWrite tool results in activities.
  * Returns the latest todo state (from the most recent TodoWrite call).
  */
-function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
-  // Find all TodoWrite tool results, get the latest one
-  const todoWriteActivities = activities
-    .filter(a => a.toolName === 'TodoWrite' && a.status === 'completed' && a.content)
-    .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
-
-  const latestActivity = todoWriteActivities[0]
-  if (!latestActivity) return undefined
-
-  const latestResult = latestActivity.content
-  if (!latestResult) return undefined
-
-  try {
-    // TodoWrite result is typically a success message, but the input contains the todos
-    // We need to get the toolInput which has the todos array
-    const input = latestActivity.toolInput
-    if (input && Array.isArray(input.todos)) {
-      return input.todos.map((todo: { content: string; status: string; activeForm?: string }) => ({
-        content: todo.content,
-        status: todo.status as 'pending' | 'in_progress' | 'completed',
-        activeForm: todo.activeForm,
-      }))
+export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
+  for (const activity of [...activities].sort((a, b) => b.timestamp - a.timestamp)) {
+    if (activity.status !== 'completed' || !activity.content) continue
+    const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+    if (name === 'update_task_list') {
+      const items = parseTaskListResult(activity.content)
+      if (items) return items
+    } else if (name === 'TodoWrite' && Array.isArray(activity.toolInput?.todos)) {
+      // Read old transcripts only; TodoWrite is not the public tool contract.
+      return activity.toolInput.todos as TodoItem[]
     }
-  } catch {
-    // Failed to parse, return undefined
   }
-
   return undefined
+}
+
+function isTaskListActivity(toolName: string | undefined): boolean {
+  const name = normalizeCraftSessionToolName(toolName ?? '')
+  return name === 'update_task_list' || name === 'TodoWrite'
+}
+
+/**
+ * Stable identity for one task list's rail shape.
+ *
+ * Later `update_task_list` calls replace statuses and may append items, but
+ * they must not move nodes that are already on screen. The seed is therefore
+ * the first call that created the list, not the latest snapshot. A turn id,
+ * then the session id, cover lists whose tool call id was not persisted.
+ */
+export function taskListSeed(input: {
+  activities?: readonly Pick<ActivityItem, 'toolName' | 'toolUseId' | 'timestamp'>[]
+  turnId?: string | null
+  sessionId?: string | null
+}): string {
+  const origin = [...(input.activities ?? [])]
+    .filter(activity => isTaskListActivity(activity.toolName))
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+    .find(activity => activity.toolUseId?.trim())
+  const toolUseId = origin?.toolUseId?.trim()
+  if (toolUseId) return toolUseId
+  const turnId = input.turnId?.trim()
+  if (turnId) return turnId
+  const sessionId = input.sessionId?.trim()
+  if (sessionId) return sessionId
+  return 'task-list'
 }
 
 // ============================================================================
@@ -329,6 +798,8 @@ function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | un
 // ============================================================================
 
 export interface GroupTurnsOptions {
+  /** Consolidate host checkpoints only in the owning root; never ordinary chats or workers. */
+  isTaskOrchestrationRoot?: boolean
   /**
    * Whether the session is still actively processing.
    *
@@ -340,6 +811,142 @@ export interface GroupTurnsOptions {
    * Mirrors the messaging-gateway/renderer.ts lastAssistantText fallback.
    */
   isSessionProcessing?: boolean
+  /**
+   * Keep the latest spawn_session turn visually open while its managed Swarm
+   * workers are still running. The parent agent may be idle between its
+   * dispatch turn and the hidden aggregation turn, but the user-visible task
+   * has not completed yet.
+   */
+  isManagedSwarmRunning?: boolean
+  /**
+   * Task Conductor parent: the definition/confirmation turn is finished, but
+   * child DAG nodes are still running. Keep that latest assistant turn from
+   * showing completed chrome until the run settles.
+   */
+  isTaskOrchestrationRunning?: boolean
+}
+
+/** Normalize only Selection's own session-tool aliases, never third-party namespaces. */
+export function normalizeCraftSessionToolName(toolName: string): string {
+  if (toolName.startsWith('mcp__session__')) return toolName.slice('mcp__session__'.length)
+  if (toolName.startsWith('session__')) return toolName.slice('session__'.length)
+  return toolName
+}
+
+function isSpawnSessionToolName(toolName: string | undefined): boolean {
+  return !!toolName && normalizeCraftSessionToolName(toolName).toLowerCase() === 'spawn_session'
+}
+
+function isManagedAutomaticSpawn(activity: ActivityItem): boolean {
+  if (activity.type !== 'tool' || !isSpawnSessionToolName(activity.toolName)) return false
+  if (!activity.content) return false
+  try {
+    const result = JSON.parse(activity.content) as Record<string, unknown>
+    const keepsRunning = result.status === 'started'
+      || (result.status === 'timeout' && result.mode === 'wait')
+    return keepsRunning
+      && result.spawnReason === 'automatic'
+      && result.lifecycle === 'managed'
+  } catch {
+    return false
+  }
+}
+
+function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
+  const latestAssistant = turns[turns.length - 1]
+  if (!latestAssistant || latestAssistant.type !== 'assistant') return
+  if (!latestAssistant.activities.some(isManagedAutomaticSpawn)) return
+
+  demoteResponseToWorkChain(latestAssistant)
+  latestAssistant.isComplete = false
+  latestAssistant.isStreaming = true
+}
+
+function keepLatestTaskOrchestrationTurnOpen(turns: Turn[]): void {
+  const latestAssistant = turns[turns.length - 1]
+  if (!latestAssistant || latestAssistant.type !== 'assistant') return
+  latestAssistant.isComplete = false
+  latestAssistant.isStreaming = true
+}
+
+/** Keep coordinator acknowledgments/next steps in one work chain until a host-accepted result. */
+function consolidateOrchestrationTurns(turns: Turn[], running: boolean): Turn[] {
+  const result: Turn[] = []
+  let execution: AssistantTurn | undefined
+  let outcome: 'process' | 'delivery' = 'process'
+  let legacyVerdict = false
+  for (const turn of turns) {
+    if (turn.type !== 'assistant') {
+      execution = undefined
+      result.push(turn)
+      continue
+    }
+    const context = turn.activities.find(activity => activity.type === 'task-context'
+      && ['coordination', 'verification'].includes(activity.taskContext?.kind ?? ''))
+    // Adaptive scheduling can dispatch workers without a first checkpoint.
+    // Bind their progress to the host's accepted start receipt instead.
+    const start = turn.activities.findLast(activity => activity.type === 'tool' && activity.status === 'completed'
+      && normalizeCraftSessionToolName(activity.toolName ?? '') === 'run_task')
+    const startReceipt = start?.content ? parseOrchestrationResult(start.content) : null
+    const startRunId = typeof startReceipt?.runId === 'string' && startReceipt.runId.trim() ? startReceipt.runId : undefined
+    const runId = context?.taskContext?.runId
+      ?? context?.content?.match(/\brunId[=:]\s*"?([\w-]+)/)?.[1]
+      ?? startRunId
+    if (context || startRunId) {
+      // A pause/failure report is a user-facing boundary. A new execution must
+      // also leave the preceding run's report intact, even with no human turn.
+      if (outcome === 'delivery' || runId && execution?.taskRunId && runId !== execution.taskRunId) execution = undefined
+      outcome = 'process'
+      legacyVerdict = context?.taskContext?.kind === 'verification' && !!context.content?.includes('VERDICT: PASS')
+    }
+    if (!execution && !context && !startRunId) {
+      result.push(turn)
+      continue
+    }
+    if (!execution) {
+      execution = { ...turn, activities: [...turn.activities], taskRunId: runId }
+      result.push(execution)
+    } else {
+      demoteResponseToWorkChain(execution)
+      execution.activities.push(...turn.activities)
+      execution.response = turn.response
+      execution.isStreaming = turn.isStreaming
+      execution.isComplete = turn.isComplete
+      execution.todos = turn.todos ?? execution.todos
+      execution.taskRunId ??= runId
+    }
+    for (const activity of turn.activities) {
+      if (activity.type !== 'tool' || activity.status !== 'completed') continue
+      const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+      if (!['submit_orchestration_decision', 'submit_orchestration_patch', 'submit_task_verdict'].includes(name)) continue
+      if (execution.taskRunId && activity.toolInput?.runId && activity.toolInput.runId !== execution.taskRunId) continue
+      try {
+        const receipt = JSON.parse(activity.content ?? '') as { status?: string }
+        if (['paused', 'failed', 'stopped', 'waiting-approval', 'waiting-help'].includes(receipt.status ?? '')
+          || receipt.status === 'completed') outcome = 'delivery'
+        else outcome = 'process'
+      } catch { /* An invalid receipt cannot certify a final result. */ }
+    }
+    // Historical v1 verification used an explicit verdict line instead of a tool receipt.
+    if (legacyVerdict && /^VERDICT: (?:PASS|FAIL\b.*)$/m.test(turn.response?.text ?? '')) outcome = 'delivery'
+    if (outcome === 'process') {
+      // Keep the initial receipt's acknowledgment as the existing dashed note.
+      // Coordinator checkpoints still fold subsequent narration into the chain.
+      if (context || !startRunId) demoteResponseToWorkChain(execution)
+      execution.isComplete = !turn.isStreaming
+      execution.isStreaming = turn.isStreaming
+    } else if (execution.response) {
+      execution.isComplete = !execution.response.isStreaming && !execution.response.isCommentary
+      execution.isStreaming = !!execution.response.isStreaming
+    }
+  }
+  // Background worker activity keeps only the current chain open. Earlier
+  // stages separated by human messages/errors must not regain running chrome.
+  if (running && outcome === 'process' && execution && execution === result.at(-1)) {
+    execution.isComplete = false
+    execution.isStreaming = true
+  }
+  return result
 }
 
 /**
@@ -357,21 +964,202 @@ export interface GroupTurnsOptions {
  * as the signal: isIntermediate=true means more work coming, isIntermediate=false
  * means final response.
  */
+/**
+ * A visible body that still contains `<think>…</think>` or a bare `</think>`
+ * is process text plus an answer. Peel it before turn grouping so the
+ * chain-of-thought stays an intermediate step. This is presentation only —
+ * it does not parse marker-v1.
+ */
+export function expandLeakedThinking(message: Message): Message[] {
+  if (message.role !== 'assistant' || !message.content) return [message]
+  const split = splitThinkDelimiter(message.content)
+  if (!split) return [message]
+  const parts: Message[] = []
+  if (hasRenderableAssistantText(split.thinking)) {
+    const turnId = message.turnId?.includes('__think')
+      ? message.turnId
+      : `${message.turnId ?? message.id}__think`
+    parts.push({
+      ...message,
+      id: `${message.id}:think`,
+      content: split.thinking,
+      isIntermediate: true,
+      phase: 'intermediate',
+      isStreaming: false,
+      isPending: false,
+      streamKind: 'thinking',
+      answerCommitted: undefined,
+      answerPreview: undefined,
+      answerSalvaged: undefined,
+      turnId,
+    })
+  }
+  if (hasRenderableAssistantText(split.answer)) {
+    parts.push({ ...message, content: split.answer })
+  }
+  return parts.length > 0 ? parts : [message]
+}
+
 export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOptions = {}): Turn[] {
-  // Drop hidden messages before grouping. These are system-generated nudges that
-  // must reach the model (they drive a turn) but must never render as a bubble —
-  // e.g. the WS2 background-task-completion nudge that wakes an idle session. The
-  // assistant response they trigger has its own turnId and still renders normally.
-  const visibleMessages = messages.filter(m => !m.hidden)
+  // Peel leaked `<think>` / bare `</think>` before commit matching, so the
+  // chain-of-thought is not discarded as a prefix of the raw final body.
+  messages = messages.flatMap(expandLeakedThinking)
+  // Drop hidden and queued messages before grouping. Queued user content belongs
+  // to the composer queue until replay starts; it is not yet a transcript turn.
+  const deliveredRuns = new Set<string>()
+  const submittedRuns = new Set<string>()
+  let activeRunId: string | undefined
+  const structuredRuns = new Set(messages.filter(m => m.answerRoutingVersion === 1 && m.answerRunId).map(m => m.answerRunId))
+  // Committed answer text per run, so commentary that turns out to be the
+  // drafted opening of the final answer can be folded into the final card.
+  const committedAnswerByRun = new Map<string, string>()
+  const committedHeadingByRun = new Map<string, string>()
+  for (const message of messages) {
+    if (!message.hidden && !message.isQueued && isAuthoritativeCommit(message)) {
+      committedAnswerByRun.set(message.answerRunId, message.content.trim())
+      const heading = messageHeadings(message)[0]
+      if (heading) committedHeadingByRun.set(message.answerRunId, heading)
+    }
+  }
+  const protocolMessages = [...messages].sort((a, b) => a.timestamp - b.timestamp).flatMap(message => {
+    if (message.answerPreview && options.isSessionProcessing === false) return []
+    if (message.hidden && message.role !== 'user') return []
+    if (message.role === 'user' && !message.hidden && !message.isQueued) activeRunId = undefined
+    // A regenerated answer may use marker-v1 while the stored user message
+    // still carries an explicit-v1 run ID from its previous generation.
+    if (message.presentationProtocol === 'marker-v1') activeRunId = undefined
+    if (message.answerRunId) activeRunId = message.answerRunId
+    const runId = message.answerRunId ?? activeRunId
+    // A historical commit may contain only the tool's receipt. It cannot
+    // replace the draft or close the run, even when marked answerCommitted.
+    if (message.role === 'assistant' && message.answerProtocol === 'explicit-v1'
+      && message.answerCommitted && isAnswerDeliveryReceipt(message.content)) return []
+    const structured = !!runId && structuredRuns.has(runId)
+    if (structured && message.answerRoutingVersion !== 1) message = { ...message, answerRoutingVersion: 1 }
+    if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
+    // The model sometimes drafts its final answer as ordinary text before
+    // formally submitting it. Once that run is committed, the draft's work
+    // chain row would restate the answer's opening — keep one visible copy.
+    const committedAnswer = runId ? committedAnswerByRun.get(runId) : undefined
+    if (!structured && committedAnswer && message.role === 'assistant' && !message.answerCommitted && !message.answerPreview) {
+      const draft = message.content.trim()
+      if (draft.length >= 2 && committedAnswer.startsWith(draft)) return []
+      // Commentary carrying the answer's own top-level heading is a superseded
+      // draft of that answer (narration + rewritten body), not process notes.
+      const committedHeading = runId ? committedHeadingByRun.get(runId) : undefined
+      if (committedHeading && committedHeading.length >= 6 && messageHeadings(message).includes(committedHeading)) return []
+    }
+    if (
+      message.role === 'tool'
+      && isAnswerDeliveryTool(message)
+      && !message.isError
+      && (message.toolStatus === 'completed' || message.toolResult !== undefined)
+      && runId
+    ) {
+      submittedRuns.add(runId)
+    }
+    // After a successful submit, finished uncommitted text is not a second final.
+    // Live tokens and previews stay on the card until the committed body arrives.
+    if (
+      message.role === 'assistant'
+      && runId
+      && !structured
+      && submittedRuns.has(runId)
+      && !message.answerCommitted
+      && !message.answerPreview
+      && !message.isStreaming
+      && !message.isPending
+    ) {
+      return []
+    }
+    let normalized = message
+    if (
+      message.role === 'assistant'
+      && runId
+      && !message.answerCommitted
+      && !message.answerPreview
+      && !message.answerProtocol
+      && message.presentationProtocol !== 'marker-v1'
+      && !isThinkingText(message)
+    ) {
+      normalized = { ...message, answerProtocol: 'explicit-v1', answerRunId: runId }
+    }
+    if (isAuthoritativeCommit(normalized) && runId) deliveredRuns.add(runId)
+    return [classifyForTurnGrouping(normalized)]
+  })
+  const visibleMessages = protocolMessages.filter(m => !m.isQueued && (!m.hidden
+    || options.isTaskOrchestrationRoot && m.role === 'user'
+      && ['coordination', 'verification'].includes(m.taskContext?.kind ?? '')))
+  // message_end only closes a text segment, not the agent run. Keep its
+  // unclassified draft on the card while waiting for the delivery boundary.
+  // A subsequent tool/message naturally removes this tail-only reservation.
+  const tail = visibleMessages.at(-1)
+  if (options.isSessionProcessing && tail && isLiveAnswerDraft(tail)
+    && tail.phase !== 'intermediate' && tail.presentationProtocol !== 'marker-v1'
+    && hasRenderableAssistantText(tail.content) && !tail.isStreaming && !tail.isPending) {
+    visibleMessages[visibleMessages.length - 1] = { ...tail, isPending: true, isIntermediate: false }
+  }
   // Sort by timestamp for correct chronological order
   // This ensures correct turn grouping even if messages are added out of order during streaming
-  const sortedMessages = [...visibleMessages].sort((a, b) => a.timestamp - b.timestamp)
+  const sortedMessages = visibleMessages // Protocol normalization above already sorted chronologically.
 
   const turns: Turn[] = []
   let currentTurn: AssistantTurn | null = null
 
-  const flushCurrentTurn = (interrupted = false) => {
+  /**
+   * A misclassified "final" body flushes the work chain. If more assistant
+   * work arrives without a new user message, reopen that turn so step
+   * numbering does not restart (#81).
+   */
+  const adoptFlushedAssistantTurn = (runId?: string): AssistantTurn | null => {
+    if (currentTurn) return currentTurn
+    const lastTurn = turns[turns.length - 1]
+    if (lastTurn?.type !== 'assistant') return null
+    if (runId && lastTurn.answerRunId && runId !== lastTurn.answerRunId) return null
+    turns.pop()
+    currentTurn = lastTurn
+    currentTurn.isComplete = false
+    demoteResponseToWorkChain(currentTurn)
+    return currentTurn
+  }
+
+  const ensureOpenAssistantTurn = (
+    message: Message,
+    init: { isStreaming: boolean; isComplete?: boolean; intent?: string },
+  ): AssistantTurn => {
+    if (currentTurn?.answerRunId && message.answerRunId && currentTurn.answerRunId !== message.answerRunId) flushCurrentTurn()
+    const adopted = adoptFlushedAssistantTurn(message.answerRunId)
+    if (adopted) {
+      adopted.answerRunId ??= message.answerRunId
+      adopted.answerRoutingVersion ??= message.answerRoutingVersion
+      adopted.presentationProtocol ??= message.presentationProtocol
+      return adopted
+    }
+    currentTurn = {
+      type: 'assistant',
+      presentationProtocol: message.presentationProtocol,
+      answerRunId: message.answerRunId,
+      answerRoutingVersion: message.answerRoutingVersion,
+      turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
+      activities: [],
+      response: undefined,
+      intent: init.intent,
+      isStreaming: init.isStreaming,
+      isComplete: init.isComplete ?? false,
+      timestamp: message.timestamp,
+    }
+    return currentTurn
+  }
+
+  const flushCurrentTurn = (interrupted = false, keepEmptyTail = false) => {
     if (currentTurn) {
+      // A turn anchored only by a dropped whitespace thought has nothing to
+      // show. Keep it solely as the live tail so the thinking header persists
+      // (and the key stays put) until the next tool joins.
+      if (currentTurn.activities.length === 0 && !currentTurn.response && !keepEmptyTail) {
+        currentTurn = null
+        return
+      }
       // Sort activities by timestamp to ensure correct chronological order
       // This is necessary because buffering can delay when messages are added
       // to the array, causing commentary to appear after tools that started later
@@ -406,19 +1194,37 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Don't do this for turns with plans - the plan is the final output
       // Only promote when turn is complete (processing indicator hidden)
       const hasPlan = currentTurn.activities.some(a => a.type === 'plan')
-      if (!interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
+      // Native turns promote the last thought when nothing else landed.
+      // explicit-v1 waits for a successful submit_answer — if that finished
+      // and the committed body never arrived, keep the last real draft.
+      if (currentTurn.answerRoutingVersion !== 1 && currentTurn.presentationProtocol !== 'marker-v1' && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0
+        && (!currentTurn.answerRunId || currentTurn.answerDelivered)) {
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
           .reverse()
-          .find(a => a.type === 'intermediate' && a.content)
+          .find(a => a.type === 'intermediate' && hasRenderableAssistantText(a.content))
 
-        if (lastTextActivity?.content) {
+        const promotedText = lastTextActivity?.content
+        if (lastTextActivity && promotedText) {
           currentTurn.response = {
-            text: lastTextActivity.content,
+            text: promotedText,
             isStreaming: false,
+            timestamp: lastTextActivity.timestamp,
             messageId: lastTextActivity.id,
           }
+          // The same body has changed semantic roles from process commentary
+          // to the only available final response. Keep a single visible copy.
+          currentTurn.activities = currentTurn.activities.filter(
+            activity => activity.id !== lastTextActivity.id,
+          )
         }
+      }
+
+      // Completed turns treat leftover commentary as the visible final body.
+      // explicit-v1 still requires submit_answer; never promote an undelivered draft.
+      if (currentTurn.isComplete && currentTurn.response?.isCommentary) {
+        if (currentTurn.answerRunId) demoteResponseToWorkChain(currentTurn)
+        else currentTurn.response = { ...currentTurn.response, isCommentary: false }
       }
 
       turns.push(currentTurn)
@@ -440,11 +1246,34 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       continue
     }
 
+    if (message.role === 'clarification') {
+      if (currentTurn) currentTurn.isComplete = true
+      flushCurrentTurn()
+      turns.push({
+        type: 'clarification',
+        message,
+        timestamp: message.timestamp,
+      })
+      continue
+    }
+
     // User messages are their own turn
     if (message.role === 'user') {
       // If there's a current turn, it's complete (something follows it)
       if (currentTurn) currentTurn.isComplete = true
       flushCurrentTurn()
+      if (message.taskContext) {
+        currentTurn = {
+          type: 'assistant', turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.id,
+          answerRunId: message.answerRunId, answerRoutingVersion: message.answerRoutingVersion,
+          presentationProtocol: message.presentationProtocol, timestamp: message.timestamp,
+          isStreaming: false, isComplete: false,
+          activities: [{ id: message.id, messageId: message.id, type: 'task-context', status: 'completed',
+            content: message.content, taskContext: message.taskContext, attachments: message.attachments,
+            timestamp: message.timestamp }],
+        }
+        continue
+      }
       turns.push({
         type: 'user',
         message,
@@ -481,28 +1310,37 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       continue
     }
 
-    // Info messages with compaction_complete update the matching status activity
+    // Keep compaction inside the same work chain. A separate divider splits one
+    // job into two step groups.
     if (message.role === 'info' && message.statusType === 'compaction_complete') {
-      if (currentTurn) {
-        const statusIdx = currentTurn.activities.findIndex(
-          a => a.type === 'status' && a.statusType === 'compacting'
-        )
-        const existingActivity = currentTurn.activities[statusIdx]
-        if (statusIdx !== -1 && existingActivity) {
-          currentTurn.activities[statusIdx] = {
-            ...existingActivity,
-            status: 'completed',
-            content: message.content,
-          }
+      if (!currentTurn) {
+        currentTurn = {
+          type: 'assistant',
+          turnId: message.turnId || message.id,
+          activities: [],
+          response: undefined,
+          intent: undefined,
+          isStreaming: false,
+          isComplete: false,
+          timestamp: message.timestamp,
         }
       }
-      continue  // Don't create a separate system turn
+      currentTurn.activities.push({
+        id: message.id,
+        type: 'status',
+        status: 'completed',
+        content: message.content,
+        timestamp: message.timestamp,
+        statusType: 'compaction_complete',
+        depth: 0,
+      })
+      continue
     }
 
     // Error/info/warning messages are standalone
     if (message.role === 'error' || message.role === 'info' || message.role === 'warning') {
       // Flush current turn first (mark as interrupted if info message)
-      const isInterruption = message.role === 'info'
+      const isInterruption = message.role === 'info' || message.role === 'error'
       // For error/warning (not info), the previous turn is complete
       if (currentTurn && !isInterruption) currentTurn.isComplete = true
       flushCurrentTurn(isInterruption)
@@ -521,7 +1359,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         // Edge case: plan without preceding activities
         currentTurn = {
           type: 'assistant',
-          turnId: message.turnId || message.id,
+          turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
           activities: [],
           response: undefined,
           intent: undefined,
@@ -551,18 +1389,26 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.role === 'tool') {
       // Tool is complete if toolStatus is 'completed' OR toolResult exists (but NOT if backgrounded)
       const isToolComplete = (message.toolStatus === 'completed' || message.toolResult !== undefined) && message.toolStatus !== 'backgrounded'
-      if (!currentTurn) {
-        // Start a new turn
-        currentTurn = {
-          type: 'assistant',
-          turnId: message.turnId || message.id,
-          activities: [],
-          response: undefined,
-          intent: message.toolIntent,
-          isStreaming: !isToolComplete,
-          isComplete: false,
-          timestamp: message.timestamp,
-        }
+      const isDelivery = isAnswerDeliveryTool(message)
+      currentTurn = ensureOpenAssistantTurn(message, {
+        isStreaming: !isToolComplete,
+        intent: isDelivery ? undefined : cleanToolMetadataLabel(message.toolIntent),
+      })
+      if (
+        currentTurn.response
+        && !currentTurn.response.isAnswerPreview
+        && !isDelivery
+        && (currentTurn.response.isCommentary || currentTurn.answerRunId)
+        && !currentTurn.response.isStreaming
+      ) {
+        demoteResponseToWorkChain(currentTurn)
+      }
+      // submit_answer is the delivery channel for the streamed card, not a
+      // user-visible work step. Only a successful call unlocks salvage.
+      if (isDelivery) {
+        if (isToolComplete && !message.isError) currentTurn.answerDelivered = true
+        currentTurn.isStreaming = !isToolComplete
+        continue
       }
       // Always add to current turn (ignoring turnId differences)
       // Pass existing activities for incremental depth calculation
@@ -573,33 +1419,38 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
 
     // Assistant messages are the response part of a turn
     if (message.role === 'assistant') {
-      // Intermediate messages OR pending messages (don't know yet) are activities, not responses
-      // Pending: streaming text where we don't yet know if it's intermediate - treat as intermediate
-      // until text_complete arrives with the definitive isIntermediate flag
-      if (message.isIntermediate || message.isPending) {
-        if (!currentTurn) {
-          // Start a new turn for this intermediate message
-          currentTurn = {
-            type: 'assistant',
-            turnId: message.turnId || message.id,
-            activities: [],
-            response: undefined,
-            intent: undefined,
-            isStreaming: !!message.isPending,
-            isComplete: false,
-            timestamp: message.timestamp,
+      // Classified intermediate text is a thought-row. Live tokens stay on
+      // the card by protocol fields, not by whether tools already ran.
+      if (message.isIntermediate) {
+        // Keep an empty pending item as the live thinking indicator, but do not
+        // turn a completed whitespace-only event into a blank work-chain row.
+        if (!message.isPending && !hasRenderableAssistantText(message.content)) {
+          if (currentTurn) {
+            if (!message.isStreaming) currentTurn.isStreaming = false
+          } else if (turns[turns.length - 1]?.type !== 'assistant') {
+            // Some backends open every tool batch with a whitespace-only thought.
+            // While pending it created the turn (and its React key); keep that
+            // identity once it completes, or the card remounts when the first
+            // tool arrives and every header/row transition is cut. Empty turns
+            // are dropped at flush unless they are the live tail.
+            ensureOpenAssistantTurn(message, { isStreaming: false })
           }
+          continue
         }
+
+        currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending || !!message.isStreaming })
+        const keepOnCard = isLiveCardStream(message)
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete
         // Include parentId for intermediate messages to support nesting within subagents
         const intermediateActivity: ActivityItem = {
           id: message.id,
-          type: 'intermediate',
+          type: isThinkingText(message) ? 'thinking' : 'intermediate',
           status: message.isPending ? 'running' : 'completed',
           content: message.content,
           timestamp: message.timestamp,
           parentId: message.parentToolUseId,
+          elapsedSeconds: message.elapsedSeconds,
         }
         // Calculate depth for intermediate messages too
         if (intermediateActivity.parentId) {
@@ -608,7 +1459,28 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         } else {
           intermediateActivity.depth = 0
         }
-        currentTurn.activities.push(intermediateActivity)
+        if (!keepOnCard) currentTurn.activities.push(intermediateActivity)
+
+        // Live drafts stay on the card only. Pushing a thought-row and hiding
+        // it later still leaks the answer into the expanded work chain.
+        if (keepOnCard) {
+          currentTurn.response = {
+            text: message.content,
+            timestamp: message.timestamp,
+            isStreaming: !!(message.isStreaming || message.isPending),
+            isCommentary: false,
+            streamStartTime: (message.isStreaming || message.isPending) ? message.timestamp : undefined,
+            messageId: message.id,
+            streamKey: message.turnId ?? message.id,
+            annotations: message.annotations,
+          }
+          currentTurn.isStreaming = !!(message.isStreaming || message.isPending)
+        } else if (
+          currentTurn.response
+          && (currentTurn.response.isCommentary || currentTurn.response.messageId === message.id)
+        ) {
+          demoteResponseToWorkChain(currentTurn)
+        }
 
         // Update turn streaming state based on this message
         // If message is no longer pending/streaming, update turn state accordingly
@@ -618,34 +1490,44 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         continue
       }
 
-      // Non-intermediate assistant message = final response
-      if (!currentTurn) {
-        // This is a response-only turn (no tools)
-        currentTurn = {
-          type: 'assistant',
-          turnId: message.turnId || message.id,
-          activities: [],
-          response: undefined,
-          intent: undefined,
-          isStreaming: !!message.isStreaming,
-          isComplete: !message.isStreaming,
-          timestamp: message.timestamp,
+      // Pipe-only / empty "finals" are truncated stubs. Do not flush the work
+      // chain or replace a body the user is already reading (#81).
+      if (!message.isStreaming && !hasRenderableAssistantText(message.content)) {
+        if (currentTurn) {
+          currentTurn.isComplete = false
+          currentTurn.isStreaming = false
         }
+        continue
       }
+
+      // Non-intermediate assistant message = final response
+      currentTurn = ensureOpenAssistantTurn(message, {
+        isStreaming: !!message.isStreaming,
+        isComplete: !message.isStreaming,
+      })
+      replaceLiveDraft(currentTurn, message.content)
+      const pendingCardStream = isLiveCardStream(message) && !message.isStreaming
 
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
+        timestamp: message.timestamp,
+        isAnswerPreview: message.answerPreview,
+        answerSalvaged: message.answerSalvaged,
+        artifactVersions: message.artifactVersions,
         isStreaming: !!message.isStreaming,
+        isCommentary: pendingCardStream,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
+        completedRevealStartTime: message.isStreaming ? undefined : message.completedRevealStartTime,
         messageId: message.id,
+        streamKey: message.turnId ?? message.id,
         annotations: message.annotations,
       }
       currentTurn.isStreaming = !!message.isStreaming
-      currentTurn.isComplete = !message.isStreaming
+      currentTurn.isComplete = !message.isStreaming && !pendingCardStream
 
       // Flush when turn is complete (non-streaming = final response received)
-      if (!message.isStreaming) {
+      if (!message.isStreaming && !pendingCardStream) {
         flushCurrentTurn()
       }
       continue
@@ -666,9 +1548,158 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   }
 
   // Flush any remaining turn
-  flushCurrentTurn()
+  flushCurrentTurn(false, options.isSessionProcessing === true)
 
-  return turns
+  // Session-level orchestration metadata may lag behind the accepted answer.
+  // Only the latest run's delivery settles it; an older answer cannot settle a new run.
+  const latestTurn = turns[turns.length - 1]
+  const latestAnswerDelivered = latestTurn?.type === 'assistant'
+    && !!latestTurn.answerRunId && deliveredRuns.has(latestTurn.answerRunId)
+  const latestAnswerPreview = latestTurn?.type === 'assistant' && latestTurn.response?.isAnswerPreview
+  // A text message ending is not the agent run ending: it may still reason
+  // or call another tool. Only session completion settles the latest turn.
+  if (options.isSessionProcessing && latestTurn?.type === 'assistant' && !latestAnswerDelivered) {
+    latestTurn.isComplete = false
+  }
+  if (options.isManagedSwarmRunning && !latestAnswerDelivered && !latestAnswerPreview) {
+    keepLatestManagedSwarmTurnOpen(turns)
+  }
+  if (options.isTaskOrchestrationRunning && !latestAnswerDelivered && !latestAnswerPreview) {
+    keepLatestTaskOrchestrationTurnOpen(turns)
+  }
+
+  return unifySettledClarificationChains(foldClarificationFragments(options.isTaskOrchestrationRoot
+    ? consolidateOrchestrationTurns(turns, !!options.isTaskOrchestrationRunning || !!options.isSessionProcessing)
+    : turns))
+}
+
+/**
+ * A clarification message flushes the current turn. Commentary that lands
+ * after that flush keeps the old answer run, while the continuation starts a
+ * new one, so the two render as separate collapsed lists. Keep the later
+ * chain and pull the earlier fragment into it.
+ */
+function foldClarificationFragments(turns: Turn[]): Turn[] {
+  const folded: Turn[] = []
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index]
+    if (!turn) continue
+    if (turn.type !== 'clarification') {
+      folded.push(turn)
+      continue
+    }
+    folded.push(turn)
+    const fragments: AssistantTurn[] = []
+    while (turns[index + 1]?.type === 'assistant') {
+      index += 1
+      const fragment = turns[index]
+      if (fragment?.type === 'assistant') fragments.push(fragment)
+    }
+    const host = fragments[fragments.length - 1]
+    if (!host) continue
+    if (fragments.length === 1) {
+      folded.push(host)
+      continue
+    }
+    folded.push(absorbClarificationFragments(host, fragments.slice(0, -1)))
+  }
+  return folded
+}
+
+/**
+ * After an answer or skip, the request has one process chain again.
+ * A pending card still keeps the earlier bar and the later chain apart.
+ */
+function unifySettledClarificationChains(turns: Turn[]): Turn[] {
+  const unified: Turn[] = []
+  let index = 0
+  while (index < turns.length) {
+    const turn = turns[index]
+    if (!turn || turn.type === 'user') {
+      if (turn) unified.push(turn)
+      index += 1
+      continue
+    }
+    let end = index
+    while (end < turns.length && turns[end]?.type !== 'user') end += 1
+    const span = turns.slice(index, end)
+    const clarifications = span.filter((item): item is ClarificationTurn => item.type === 'clarification')
+    const settled = clarifications.length > 0 && clarifications.every(item => {
+      const status = item.message.clarification?.status
+      return status === 'answered' || status === 'skipped'
+    })
+    const assistants = span.filter((item): item is AssistantTurn => item.type === 'assistant')
+    if (!settled || assistants.length < 2) {
+      unified.push(...span)
+      index = end
+      continue
+    }
+    const merged = mergeSettledAssistants(assistants)
+    let placed = false
+    for (const item of span) {
+      if (item.type !== 'assistant') {
+        unified.push(item)
+        continue
+      }
+      if (!placed) {
+        unified.push(merged)
+        placed = true
+      }
+    }
+    index = end
+  }
+  return unified
+}
+
+function mergeSettledAssistants(assistants: readonly AssistantTurn[]): AssistantTurn {
+  const first = assistants[0]!
+  const last = assistants[assistants.length - 1]!
+  const activities: ActivityItem[] = []
+  const seen = new Set<string>()
+  for (const fragment of assistants) {
+    const donor: AssistantTurn = {
+      ...fragment,
+      activities: [...fragment.activities],
+      response: fragment.response ? { ...fragment.response } : undefined,
+    }
+    if (fragment !== last) demoteResponseToWorkChain(donor)
+    for (const activity of donor.activities) {
+      if (seen.has(activity.id)) continue
+      seen.add(activity.id)
+      activities.push(activity)
+    }
+  }
+  activities.sort((left, right) => left.timestamp - right.timestamp)
+  return {
+    ...last,
+    // Keep the opening card so the chain grows in place instead of becoming a second list.
+    turnId: first.turnId,
+    timestamp: first.timestamp,
+    intent: last.intent ?? first.intent,
+    activities,
+    response: last.response,
+    isStreaming: last.isStreaming,
+    isComplete: last.isComplete,
+    todos: last.todos ?? first.todos,
+  }
+}
+
+function absorbClarificationFragments(host: AssistantTurn, earlier: readonly AssistantTurn[]): AssistantTurn {
+  const activities = [...host.activities]
+  for (const fragment of earlier) {
+    const donor: AssistantTurn = {
+      ...fragment,
+      activities: [...fragment.activities],
+      response: fragment.response ? { ...fragment.response } : undefined,
+    }
+    demoteResponseToWorkChain(donor)
+    for (const activity of donor.activities) {
+      if (activities.some(existing => existing.id === activity.id)) continue
+      activities.push(activity)
+    }
+  }
+  activities.sort((left, right) => left.timestamp - right.timestamp)
+  return { ...host, activities }
 }
 
 /**
@@ -744,7 +1775,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
     lines.push('')
 
     for (const activity of turn.activities) {
-      if (activity.type === 'intermediate') {
+      if (activity.type === 'intermediate' || activity.type === 'thinking') {
         // Intermediate text (thinking/commentary)
         lines.push(`### 💭 Commentary`)
         lines.push('')
@@ -831,7 +1862,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
 export function formatActivityAsMarkdown(activity: ActivityItem): string {
   const lines: string[] = []
 
-  if (activity.type === 'intermediate') {
+  if (activity.type === 'intermediate' || activity.type === 'thinking') {
     // Commentary/thinking
     lines.push('# Commentary')
     lines.push('')
@@ -966,6 +1997,63 @@ export function computeLastChildSet(activities: ActivityItem[]): Set<string> {
 // Formatting Helpers
 // ============================================================================
 
+const ORCHESTRATION_TOOL_NAMES = new Set(['spawn_session', 'run_task'])
+const ORCHESTRATION_FINAL_TEXT_MAX = 120
+
+function parseOrchestrationResult(content: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(content.trim()) as unknown
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+/** An asynchronous start acknowledgment is progress, even if its chat turn ended. */
+export function isTaskStartAcknowledgment(activities: ActivityItem[]): boolean {
+  const start = activities.findLast(activity => activity.type === 'tool' && activity.status === 'completed'
+    && normalizeCraftSessionToolName(activity.toolName ?? '') === 'run_task')
+  const result = start?.content ? parseOrchestrationResult(start.content) : null
+  return typeof result?.runId === 'string'
+    && ['running', 'waiting-coordinator', 'verifying', 'repairing'].includes(String(result.status))
+    && !activities.some(activity => activity.taskContext?.kind === 'verification' || activity.taskContext?.kind === 'feedback'
+      || activity.type === 'tool' && activity.status === 'completed'
+        && normalizeCraftSessionToolName(activity.toolName ?? '') === 'submit_task_verdict')
+}
+
+function truncateOneLine(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= max) return oneLine
+  return `${oneLine.slice(0, max - 1).trimEnd()}…`
+}
+
+/** Thin status + id + conclusion line for spawn_session / run_task JSON results. */
+export function formatOrchestrationToolSummary(
+  toolName: string | undefined,
+  content: string | undefined,
+): string | null {
+  if (!toolName || !content) return null
+  const name = normalizeCraftSessionToolName(toolName)
+  if (!ORCHESTRATION_TOOL_NAMES.has(name)) return null
+
+  const parsed = parseOrchestrationResult(content)
+  if (!parsed) return null
+
+  const status = typeof parsed.status === 'string' ? parsed.status : null
+  const id = name === 'run_task'
+    ? (typeof parsed.runId === 'string' ? parsed.runId : null)
+    : (typeof parsed.sessionId === 'string' ? parsed.sessionId : null)
+  const finalText = typeof parsed.finalText === 'string'
+    ? truncateOneLine(parsed.finalText, ORCHESTRATION_FINAL_TEXT_MAX)
+    : null
+
+  const parts = [status, id, finalText].filter((part): part is string => Boolean(part))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 /**
  * Format duration in milliseconds to human-readable string.
  * @example formatDuration(1234) => "1.2s"
@@ -1033,11 +2121,6 @@ export interface ActivityGroup {
   children: ActivityItem[]
   /** Data from TaskOutput result (duration, tokens) */
   taskOutputData?: TaskOutputData
-  /**
-   * The subagent was launched in an earlier turn (a background agent still at work): `parent` is a
-   * stand-in carrying its toolUseId and a status derived from the rows.
-   */
-  continued?: boolean
 }
 
 /**
@@ -1045,6 +2128,32 @@ export interface ActivityGroup {
  */
 export function isActivityGroup(item: ActivityItem | ActivityGroup): item is ActivityGroup {
   return 'type' in item && item.type === 'group' && 'parent' in item && 'children' in item
+}
+
+/**
+ * Return only activity rows exposed by the current group expansion state.
+ * Collapsed children stay mounted for animation, but users cannot see them and
+ * they therefore must not suppress higher-level progress feedback.
+ */
+export function getRenderedActivityRows(
+  items: ReadonlyArray<ActivityItem | ActivityGroup>,
+  expandedGroupIds: ReadonlySet<string>,
+): ActivityItem[] {
+  const rows: ActivityItem[] = []
+
+  for (const item of items) {
+    if (!isActivityGroup(item)) {
+      rows.push(item)
+      continue
+    }
+
+    rows.push(item.parent)
+    if (expandedGroupIds.has(item.parent.id)) {
+      rows.push(...item.children)
+    }
+  }
+
+  return rows
 }
 
 /**
@@ -1083,16 +2192,13 @@ function extractTaskOutputData(activity: ActivityItem): TaskOutputData | undefin
 }
 
 /**
- * Groups activities by the subagent (Task/Agent tool) that produced them.
+ * Groups activities by their parent Task tool.
  *
- * - Top-level items keep chronological order: standalone activities and one group per subagent.
- * - A group holds every descendant of its subagent (a nested subagent's rows too), oldest first,
- *   with depth made relative to the group (its direct children at 0, so the group's rail is the
- *   only indent).
- * - Rows whose subagent was launched in an earlier turn (a background agent still at work) form a
- *   `continued` group at the position of their first row, instead of interleaving with this turn's
- *   rows under an indent that points at nothing.
- * - TaskOutput activities are hidden; their data enriches the parent Task.
+ * This transforms a flat chronological list into a grouped structure:
+ * - Maintains chronological order of top-level items (orphans and Task groups)
+ * - Each Task tool becomes a group containing its child activities
+ * - Maintains chronological order within each group
+ * - TaskOutput activities are hidden but their data enriches the parent Task
  *
  * @param activities - Flat list of activities sorted by timestamp
  * @returns Mixed array of standalone activities and activity groups
@@ -1100,35 +2206,33 @@ function extractTaskOutputData(activity: ActivityItem): TaskOutputData | undefin
 export function groupActivitiesByParent(
   activities: ActivityItem[]
 ): (ActivityItem | ActivityGroup)[] {
-  const byToolUseId = new Map<string, ActivityItem>()
+  // First, build a set of valid Task toolUseIds (parents that actually exist)
+  const taskToolUseIds = new Set<string>()
   for (const activity of activities) {
-    if (activity.toolUseId) byToolUseId.set(activity.toolUseId, activity)
-  }
-
-  // The group an activity belongs to: its topmost subagent ancestor in this turn, or the subagent
-  // outside it (`missing:` key) that its chain leads to. Null for top-level activities.
-  const groupKeyOf = (activity: ActivityItem): string | null => {
-    let key: string | null = null
-    let parentId = activity.parentId
-    for (let guard = 0; parentId && guard < 10; guard++) {
-      const parent = byToolUseId.get(parentId)
-      if (!parent) return `missing:${parentId}`
-      if (isParentTaskTool(parent.toolName ?? '')) key = parentId
-      parentId = parent.parentId
+    if (isParentTaskTool(activity.toolName ?? '') && activity.toolUseId) {
+      taskToolUseIds.add(activity.toolUseId)
     }
-    return key
   }
 
-  const descendantsByKey = new Map<string, ActivityItem[]>()
-  const keyById = new Map<string, string>()
+  // Build a map of parentId -> children for efficient lookup
+  // Only include children whose parent Task actually exists
+  const childrenByParent = new Map<string, ActivityItem[]>()
   for (const activity of activities) {
-    if (activity.toolName === 'TaskOutput') continue
-    const key = groupKeyOf(activity)
-    if (!key) continue
-    keyById.set(activity.id, key)
-    const list = descendantsByKey.get(key) ?? []
-    list.push(activity)
-    descendantsByKey.set(key, list)
+    if (activity.parentId && taskToolUseIds.has(activity.parentId)) {
+      const existing = childrenByParent.get(activity.parentId) || []
+      existing.push(activity)
+      childrenByParent.set(activity.parentId, existing)
+    }
+  }
+
+  // Build set of child activity IDs to skip (they're included in their parent's group)
+  // Activities with parentId pointing to non-existent parents are NOT added here,
+  // so they'll appear as orphan activities at root level instead of being dropped
+  const childIds = new Set<string>()
+  for (const children of childrenByParent.values()) {
+    for (const child of children) {
+      childIds.add(child.id)
+    }
   }
 
   // Build a map of task_id (agent ID) -> TaskOutput data
@@ -1151,63 +2255,53 @@ export function groupActivitiesByParent(
   const taskToAgentId = new Map<string, string>()
   for (const activity of activities) {
     if (isParentTaskTool(activity.toolName ?? '') && (activity.status === 'completed' || activity.status === 'backgrounded') && activity.content) {
-      const capturedAgentId = activity.content.match(/agentId:\s*([a-zA-Z0-9_-]+)/)?.[1]
+      // Parse agent ID from Task result - look for "agentId: xyz" pattern
+      const agentIdMatch = activity.content.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
+      const capturedAgentId = agentIdMatch?.[1]
       if (capturedAgentId && activity.toolUseId) {
         taskToAgentId.set(activity.toolUseId, capturedAgentId)
       }
     }
   }
 
-  // Descendants with depth relative to the group: `baseDepth` is the depth of the group's own row.
-  const groupChildren = (key: string, baseDepth: number): ActivityItem[] =>
-    (descendantsByKey.get(key) ?? [])
-      .slice()
-      .sort((a, b) => a.timestamp - b.timestamp)
-      .map(child => ({ ...child, depth: Math.max(0, (child.depth ?? 0) - baseDepth - 1) }))
-
+  // Build the grouped result maintaining chronological order
   const result: (ActivityItem | ActivityGroup)[] = []
-  const emittedContinued = new Set<string>()
 
   for (const activity of activities) {
-    if (activity.toolName === 'TaskOutput') continue
-
-    const key = keyById.get(activity.id)
-    if (key) {
-      // A row of a subagent launched in an earlier turn opens its `continued` group (once)
-      if (key.startsWith('missing:') && !emittedContinued.has(key)) {
-        emittedContinued.add(key)
-        const children = groupChildren(key, 0)
-        const status: ActivityItem['status'] = children.some(c => c.status === 'running' || c.status === 'pending')
-          ? 'running'
-          : children.some(c => c.status === 'error') ? 'error' : 'completed'
-        result.push({
-          type: 'group',
-          parent: {
-            id: `continued:${key.slice('missing:'.length)}`,
-            type: 'tool',
-            toolName: 'Agent',
-            toolUseId: key.slice('missing:'.length),
-            status,
-            timestamp: activity.timestamp,
-            depth: 0,
-          },
-          children,
-          continued: true,
-        })
-      }
+    // Skip activities that are children of a Task (they're in their parent's group)
+    if (childIds.has(activity.id)) {
       continue
     }
 
-    // Task/Agent tools become groups with every descendant
-    if (isParentTaskTool(activity.toolName ?? '') && activity.toolUseId) {
-      const agentId = taskToAgentId.get(activity.toolUseId)
+    // Skip TaskOutput activities - their data is attached to parent Task groups
+    if (activity.toolName === 'TaskOutput') {
+      continue
+    }
+
+    // Task/Agent tools become groups with their children
+    if (isParentTaskTool(activity.toolName ?? '')) {
+      const children = activity.toolUseId
+        ? (childrenByParent.get(activity.toolUseId) || [])
+        : []
+
+      // Look up TaskOutput data for this Task via the agent ID chain:
+      // Task.toolUseId -> agentId -> TaskOutput data
+      let taskOutputData: TaskOutputData | undefined
+      if (activity.toolUseId) {
+        const agentId = taskToAgentId.get(activity.toolUseId)
+        if (agentId) {
+          taskOutputData = taskOutputByAgentId.get(agentId)
+        }
+      }
+
       result.push({
         type: 'group',
         parent: activity,
-        children: groupChildren(activity.toolUseId, activity.depth ?? 0),
-        taskOutputData: agentId ? taskOutputByAgentId.get(agentId) : undefined,
+        children: children.sort((a, b) => a.timestamp - b.timestamp),
+        taskOutputData,
       })
     } else {
+      // Orphan activity - add directly
       result.push(activity)
     }
   }
@@ -1229,3 +2323,5 @@ export function countTotalActivities(items: (ActivityItem | ActivityGroup)[]): n
   }
   return count
 }
+
+export { stabilizeTurns, turnsShareRenderIdentity } from './turn-stability'

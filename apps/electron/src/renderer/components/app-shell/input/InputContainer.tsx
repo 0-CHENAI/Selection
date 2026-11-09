@@ -1,19 +1,15 @@
 import * as React from 'react'
-import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate } from 'motion/react'
-import { DURATION, EASE, prefersReducedMotion } from '@craft-agent/ui/motion'
+import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate, useIsPresent, useReducedMotion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import { FreeFormInput, type FreeFormInputProps } from './FreeFormInput'
 import { StructuredInput } from './StructuredInput'
 import type { RichTextInputHandle } from '@/components/ui/rich-text-input'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import type { StructuredInputState, StructuredResponse, InputMode } from './structured/types'
-import { getComposerMaxHeight } from './composer-height'
-import { useInputAvailableHeight } from '@/hooks/useInputAvailableHeight'
+import { getStructuredInputMaxHeight } from './structured-height'
 import { BackgroundFinishedChip } from '../BackgroundFinishedChip'
-import { decisionRingClass } from './structured/DecisionCard'
-import { getDecisionTone } from './structured/decision-tone'
 
-interface InputContainerProps extends Omit<FreeFormInputProps, 'inputRef' | 'maxHeight'> {
+interface InputContainerProps extends Omit<FreeFormInputProps, 'inputRef'> {
   /** Structured input state - when present, shows structured UI instead of freeform */
   structuredInput?: StructuredInputState
   /** Callback when user responds to structured input */
@@ -24,9 +20,37 @@ interface InputContainerProps extends Omit<FreeFormInputProps, 'inputRef' | 'max
   onAnimatedHeightChange?: (delta: number) => void
 }
 
-// Animation timing - synced across height and opacity (motion tokens: component swap, on-screen move)
-const TRANSITION_DURATION = DURATION.base
-const TRANSITION_EASE = EASE.standard
+// Animation timing - synced across height and opacity
+const TRANSITION_DURATION = 0.25
+const TRANSITION_EASE = [0.4, 0, 0.2, 1] as const
+
+/**
+ * Crossfade layer that disables pointer events while exiting.
+ * Without this, the outgoing freeform input stays stacked above the
+ * permission card for ~250ms and eats the first click (feels like
+ * "need to click Allow twice").
+ */
+function CrossfadeLayer({
+  className,
+  children,
+}: {
+  className?: string
+  children: React.ReactNode
+}) {
+  const isPresent = useIsPresent()
+  return (
+    <motion.div
+      className={className}
+      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: TRANSITION_DURATION, ease: TRANSITION_EASE }}
+    >
+      {children}
+    </motion.div>
+  )
+}
 
 // Fallback heights (used on first render before measurement)
 const FALLBACK_HEIGHTS: Record<InputMode | string, number> = {
@@ -52,48 +76,27 @@ export function InputContainer({
   textareaRef,
   compactMode,
   isProcessing,
+  appearance = 'prompt',
   onAnimatedHeightChange,
   ...freeFormProps
 }: InputContainerProps) {
+  const reduceMotion = !!useReducedMotion()
   const appShellContext = useOptionalAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
   const mode: InputMode = structuredInput ? 'structured' : 'freeform'
   const measureRef = React.useRef<HTMLDivElement>(null)
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const availableHeight = useInputAvailableHeight(containerRef)
   // Separate height states: freeform uses callback, structured uses measuring div
   // Use smaller fallback height for compact mode
-  const [freeformHeight, setFreeformHeight] = React.useState<number>(
-    compactMode ? FALLBACK_HEIGHTS['freeform-compact'] : FALLBACK_HEIGHTS.freeform
-  )
+  const [freeformHeight, setFreeformHeight] = React.useState<number | null>(null)
   const [structuredHeight, setStructuredHeight] = React.useState<number | null>(null)
+  const [viewportHeight, setViewportHeight] = React.useState<number>(() =>
+    typeof window === 'undefined' ? 0 : window.innerHeight
+  )
   const [isFocused, setIsFocused] = React.useState(false)
   const hasInitializedRef = React.useRef(false)
 
   // Create a stable key for the current content
   const contentKey = mode === 'freeform' ? 'freeform' : `structured-${structuredInput?.type}`
-
-  // Track mode transitions - animate height for a short period after mode change
-  const [isAnimating, setIsAnimating] = React.useState(false)
-  const prevContentKeyRef = React.useRef(contentKey)
-
-  // Detect transition synchronously during render
-  const isTransitioning = prevContentKeyRef.current !== contentKey
-
-  // Should animate if we're in a transition OR still in the animation window
-  const shouldAnimateHeight = isTransitioning || isAnimating
-
-  React.useEffect(() => {
-    if (isTransitioning) {
-      prevContentKeyRef.current = contentKey
-      setIsAnimating(true)
-      // Keep animating for the transition duration + a bit extra for measurement settle
-      const timer = setTimeout(() => {
-        setIsAnimating(false)
-      }, TRANSITION_DURATION * 1000 + 100)
-      return () => clearTimeout(timer)
-    }
-  }, [contentKey, isTransitioning])
 
   // Compact-mode collapse-during-thinking is escapable: the user can hover or
   // click the collapsed bar to bring the input back without waiting for the
@@ -113,24 +116,6 @@ export function InputContainer({
 
   const isCollapsedInCompact = compactMode && isProcessing && !expandedDuringProcessing
 
-  // Animate height when either isProcessing flips OR the user manually expands
-  // / re-collapses the input during a thinking cycle.
-  const prevIsProcessingRef = React.useRef(isProcessing)
-  const prevExpandedRef = React.useRef(expandedDuringProcessing)
-  React.useEffect(() => {
-    if (!compactMode) return
-    const isProcessingChanged = prevIsProcessingRef.current !== isProcessing
-    const expandedChanged = prevExpandedRef.current !== expandedDuringProcessing
-    prevIsProcessingRef.current = isProcessing
-    prevExpandedRef.current = expandedDuringProcessing
-    if (!isProcessingChanged && !expandedChanged) return
-    setIsAnimating(true)
-    const timer = setTimeout(() => {
-      setIsAnimating(false)
-    }, TRANSITION_DURATION * 1000 + 100)
-    return () => clearTimeout(timer)
-  }, [compactMode, isProcessing, expandedDuringProcessing])
-
   // Handle height changes from FreeFormInput (synchronous, no measuring div needed)
   const handleFreeformHeightChange = React.useCallback((height: number) => {
     setFreeformHeight(height)
@@ -142,6 +127,15 @@ export function InputContainer({
   // Handle focus changes from FreeFormInput
   const handleFocusChange = React.useCallback((focused: boolean) => {
     setIsFocused(focused)
+  }, [])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const updateViewportHeight = () => setViewportHeight(window.innerHeight)
+    updateViewportHeight()
+    window.addEventListener('resize', updateViewportHeight)
+    return () => window.removeEventListener('resize', updateViewportHeight)
   }, [])
 
   // Use ResizeObserver only for structured inputs (freeform uses onHeightChange callback)
@@ -171,17 +165,20 @@ export function InputContainer({
     return () => observer.disconnect()
   }, [contentKey, mode])
 
-  // Both modes share viewport/parent bounds. Their content scrolls internally
-  // while action rows stay outside the scroll region.
+  // Use appropriate height source based on mode. Structured prompts are clamped
+  // to viewport-aware bounds; their internals scroll so action buttons stay reachable.
   const rawTargetHeight = mode === 'freeform'
-    ? freeformHeight
+    ? (freeformHeight ?? FALLBACK_HEIGHTS[compactMode ? 'freeform-compact' : 'freeform'])
     : (structuredHeight ?? FALLBACK_HEIGHTS[structuredInput?.type ?? 'freeform'] ?? FALLBACK_HEIGHTS.freeform)
-  const maxHeight = getComposerMaxHeight(availableHeight, mode)
-  const targetHeight = Math.min(rawTargetHeight, maxHeight)
+  const structuredMaxHeight = getStructuredInputMaxHeight(viewportHeight)
+  const targetHeight = mode === 'freeform'
+    ? rawTargetHeight
+    : Math.min(rawTargetHeight, structuredMaxHeight)
 
   // Motion value for frame-synchronized height animation
   const heightMotionValue = useMotionValue(targetHeight)
   const prevAnimatedHeightRef = React.useRef(targetHeight)
+  const heightSettledRef = React.useRef(false)
 
   // Emit delta on every animation frame for scroll sync
   useMotionValueEvent(heightMotionValue, "change", (latest) => {
@@ -192,22 +189,25 @@ export function InputContainer({
     }
   })
 
-  // Animate height changes using motion value
-  React.useEffect(() => {
-    if (shouldAnimateHeight) {
-      const animation = animate(heightMotionValue, targetHeight, {
-        // Reduced motion: the size change lands at once (the content crossfade still plays)
-        duration: prefersReducedMotion() ? 0 : TRANSITION_DURATION,
-        ease: TRANSITION_EASE
-      })
-      // A keyboard resize can replace a transition before its animation settles.
-      return () => animation.stop()
-    } else {
-      // Instant update - no animation
+  // A fallback is not a measurement. Settle the first measured height before
+  // paint, including when switching between isolated NORM / PRO drafts.
+  // Later changes (typing, sending, structured prompts) retain their spring.
+  const hasMeasuredHeight = mode === 'freeform' ? freeformHeight !== null : structuredHeight !== null
+  React.useLayoutEffect(() => {
+    if (!hasMeasuredHeight) return
+    if (!heightSettledRef.current || reduceMotion) {
       heightMotionValue.set(targetHeight)
       prevAnimatedHeightRef.current = targetHeight
+      heightSettledRef.current = true
+      return
     }
-  }, [targetHeight, shouldAnimateHeight, heightMotionValue])
+    const controls = animate(heightMotionValue, targetHeight, {
+      type: 'spring',
+      bounce: 0,
+      duration: 0.25,
+    })
+    return () => controls.stop()
+  }, [targetHeight, heightMotionValue, reduceMotion, hasMeasuredHeight])
 
   const handleStructuredResponse = (response: StructuredResponse) => {
     onStructuredResponse?.(response)
@@ -219,12 +219,12 @@ export function InputContainer({
       return (
         <FreeFormInput
           {...freeFormProps}
+          appearance={appearance}
           compactMode={compactMode}
           isProcessing={isProcessing}
           isCollapsedInCompact={isCollapsedInCompact}
           onRequestExpand={handleRequestExpand}
           inputRef={forMeasuring ? undefined : textareaRef}
-          maxHeight={maxHeight}
           onHeightChange={forMeasuring ? undefined : handleFreeformHeightChange}
           onFocusChange={forMeasuring ? undefined : handleFocusChange}
           unstyled
@@ -240,12 +240,8 @@ export function InputContainer({
     )
   }
 
-  // Decision prompts draw their status ring on the composer card (info, or destructive for risky calls)
-  const decisionTone = mode === 'freeform' ? null : getDecisionTone(structuredInput)
-
   return (
-    // `peer/composer` lets the hint line under the card react to focus inside it (ChatInputZone)
-    <div ref={containerRef} className="peer/composer relative">
+    <div className="relative">
       {/* Hidden measuring div - only needed for structured inputs (freeform uses onHeightChange) */}
       {mode !== 'freeform' && (
         <div
@@ -253,47 +249,42 @@ export function InputContainer({
           className="absolute top-0 left-0 right-0 invisible pointer-events-none"
           aria-hidden="true"
         >
-          <div className="overflow-hidden rounded-xl">
+          <div className="rounded-[8px] bg-background overflow-hidden">
             {renderContent(true)}
           </div>
         </div>
       )}
 
-      {/* Visible animated container — ONE raised card (spec §7.5): radius 16, a quiet elev-1 lift
-          (hairline only in an unfocused panel; the large elev-2 blur read as a cheap drop shadow),
-          focus shown instantly as a tint ring; decision prompts swap in their status ring. */}
+      {/* Visible animated container */}
       <motion.div
         className={cn(
-          "input-container relative overflow-hidden rounded-xl bg-raised",
-          isFocusedPanel ? "shadow-elev-1" : "shadow-elev-0",
-          decisionTone
-            ? decisionRingClass(decisionTone)
-            : "focus-within:ring-1 focus-within:ring-focus/55",
+          "input-container relative rounded-[12px] overflow-hidden transition-colors",
+          mode === 'freeform' && !compactMode && appearance === 'prompt' && 'prompt-composer',
+          isFocusedPanel ? "shadow-middle" : "shadow-minimal",
+          "bg-background"
         )}
         style={{
           height: heightMotionValue,
-          maxHeight,
+          ...(mode !== 'freeform' ? { maxHeight: structuredMaxHeight } : {}),
         }}
       >
-        {/* Crossfading content - freeform anchored to bottom (for auto-grow), others fill */}
+        {/* Crossfading content - freeform anchored to bottom (for auto-grow), others fill.
+            Exiting layers use pointer-events: none so they don't steal clicks. */}
         <AnimatePresence mode="sync" initial={false}>
-          <motion.div
+          <CrossfadeLayer
             key={contentKey}
             className={mode === 'freeform' ? "absolute bottom-0 left-0 right-0" : "absolute inset-0"}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: TRANSITION_DURATION, ease: TRANSITION_EASE }}
           >
             {renderContent(false)}
-          </motion.div>
+          </CrossfadeLayer>
         </AnimatePresence>
       </motion.div>
 
-      {/* Background-completion chip — floats just above the input box, right-aligned, so it
-       * never covers the draft. Self-contained (its own atoms + navigation); renders nothing
-       * when idle. Freeform-only. The outer wrapper is `relative` and (unlike the visible box)
-       * not `overflow-hidden`, so the chip isn't clipped. */}
+      {/* Background-completion chip — floats in the input box's top-right corner.
+       * Self-contained (its own atoms + navigation); renders nothing when idle.
+       * Freeform-only so it never overlaps a structured prompt's header. The outer
+       * wrapper is `relative` and (unlike the visible box) not `overflow-hidden`,
+       * so the chip's soft shadow isn't clipped. */}
       {mode === 'freeform' && freeFormProps.sessionId && (
         <BackgroundFinishedChip sessionId={freeFormProps.sessionId} />
       )}

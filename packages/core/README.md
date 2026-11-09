@@ -1,6 +1,6 @@
 # @craft-agent/core
 
-Shared TypeScript types and utilities for Craft Agent applications.
+Shared TypeScript types and utilities for Selection applications.
 
 ## Installation
 
@@ -91,10 +91,7 @@ src/
 ## Peer Dependencies
 
 This package requires the following peer dependencies:
-- `@anthropic-ai/claude-agent-sdk` (exact version pinned in `package.json`)
 - `@modelcontextprotocol/sdk` >= 1.29.0
-
-The Claude Agent SDK also requires `@anthropic-ai/sdk` >= 0.93.0 at the app level.
 
 ## License
 

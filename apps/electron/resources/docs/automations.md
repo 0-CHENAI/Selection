@@ -1,17 +1,14 @@
 # Automations Configuration Guide
 
-This guide explains how to configure automations in Craft Agent to automate workflows based on events.
+This guide explains how to configure automations in Selection to automate workflows based on events.
 
-> **CLI-first workflow (recommended):** Use `craft-agent automation ...` commands instead of editing JSON directly.
-> - `craft-agent automation --help`
-> - Canonical command reference: [craft-cli.md](./craft-cli.md)
+> **CLI:** `craft-agent automation ...` is planned. Until it ships, edit `automations.json` in the app (Automations page → Edit File) or by hand. See [craft-cli.md](./craft-cli.md).
 
 ## What Are Automations?
 
-Automations allow you to trigger actions automatically when specific events occur in Craft Agent. You can:
+Automations allow you to trigger actions automatically when specific events occur in Selection. You can:
 - Send prompts to create agent sessions based on events
 - Send webhook HTTP requests to external services (Slack, Discord, custom APIs, etc.)
-- Run scripts from the workspace (Bun, Node or Python) with the event data in `CRAFT_*` environment variables
 - Execute actions on a schedule using cron expressions
 - Automate workflows based on permission mode changes, flags, or session status changes
 
@@ -20,25 +17,14 @@ Automations allow you to trigger actions automatically when specific events occu
 Automations are configured in `automations.json` at the root of your workspace:
 
 ```
-~/.craft-agent/workspaces/{workspaceId}/automations.json
+~/.selection/workspaces/{workspaceId}/automations.json
 ```
 
-## Recommended CLI Commands
+## Recommended workflow
 
-```bash
-craft-agent automation list
-craft-agent automation get <id>
-craft-agent automation create --event LabelAdd --matcher "^urgent$" --prompt "..."
-craft-agent automation update <id> --json '{...}'
-craft-agent automation enable <id>
-craft-agent automation disable <id>
-craft-agent automation duplicate <id>
-craft-agent automation history [<id>] --limit 20
-craft-agent automation last-executed <id>
-craft-agent automation test <id> --match "..."
-craft-agent automation lint
-craft-agent automation validate
-```
+Edit `automations.json` in the Automations UI, then use **Run Test** (executes actions) or **Simulate match** (dry-run matcher/conditions only). `craft-agent automation` CLI commands are planned and not implemented yet.
+
+Only scheduled and app-event automations are supported. On upgrade, retired runtime-event rules are removed from valid workspace configurations and never executed. Resource imports reject those event types, and pending webhook retries for inactive rules are discarded.
 
 ## Basic Structure
 
@@ -61,12 +47,12 @@ craft-agent automation validate
 
 ## Supported Events
 
-### App Events (triggered by Craft Agent)
+### App Events (triggered by Selection)
 
 | Event | Trigger | Match Value |
 |-------|---------|-------------|
-| `LabelAdd` | Label added to session | The label entry: the ID for a plain label (`bug`, not `Bug`), `id::value` for a valued one (`priority::3`; match it with `^priority(::|$)`) |
-| `LabelRemove` | Label removed from session | The label entry, as for `LabelAdd` |
+| `LabelAdd` | Label added to session | Label ID (e.g., `bug`, not `Bug`) |
+| `LabelRemove` | Label removed from session | Label ID (e.g., `bug`, not `Bug`) |
 | `LabelConfigChange` | Label configuration changed | Always matches |
 | `PermissionModeChange` | Permission mode changed | New mode name |
 | `FlagChange` | Session flagged/unflagged | `true` or `false` |
@@ -75,13 +61,11 @@ craft-agent automation validate
 
 > **Note:** `TodoStateChange` is a deprecated alias for `SessionStatusChange`. Existing configs using the old name will continue to work but will show a deprecation warning during validation.
 
-> **Only these events run actions.** Agent hook events such as `PreToolUse`, `PostToolUse`, `UserPromptSubmit` or `Stop` are not automation triggers: `automations.json` still accepts them, but no action ever runs for them. Do not create automations on them.
-
 ## Action Types
 
 ### Prompt Actions
 
-Send a prompt to Craft Agent (creates a new session for scheduled prompts).
+Send a prompt to Selection (creates a new session for scheduled prompts).
 
 ```json
 {
@@ -99,7 +83,7 @@ Send a prompt to Craft Agent (creates a new session for scheduled prompts).
 
 **Features:**
 - Use `@mentions` to reference sources or skills
-- The event's `CRAFT_*` variables are expanded (e.g., `$CRAFT_LABEL`); no other environment variables, so `$HOME` or an API key expands to nothing
+- Environment variables are expanded (e.g., `$CRAFT_LABEL`)
 
 **LLM Connection & Model:** Optionally specify which AI provider and model to use for the created session. If omitted, the workspace default connection and model are used.
 
@@ -196,52 +180,9 @@ The `auth` field is applied before custom `headers`, so you can override the gen
 
 **Security:** Webhook actions only have access to `CRAFT_*` system variables and `CRAFT_WH_*` user-defined secrets. They do **not** have access to your full system environment (e.g., `$HOME`, `$PATH`, or other process variables).
 
-### Script Actions
-
-Run a script that lives in the workspace. No session is created and no model is called, so script actions are the way to do deterministic work when an event fires: pull data, write a log, or call another program.
-
-```json
-{
-  "type": "script",
-  "script": "scripts/log-label.ts",
-  "args": ["--verbose"],
-  "runtime": "bun",
-  "timeoutMs": 60000
-}
-```
-
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `type` | `"script"` | Required | Action type |
-| `script` | string | Required | Script path relative to the workspace root. Absolute paths and paths that leave the workspace (also through symlinks) are rejected. |
-| `args` | string[] | `[]` | Extra arguments passed after the script path |
-| `runtime` | `"bun"` \| `"node"` \| `"python3"` | `"bun"` | Runtime the script runs under |
-| `timeoutMs` | number | `60000` | Per-run timeout, clamped to 1,000–900,000 ms (15 min). The script gets SIGTERM, then SIGKILL if it doesn't exit. |
-| `page` | string | - | Slug of the page this script refreshes: adds the `CRAFT_PAGE_*` variables and records the run on the page (see [pages.md](./pages.md)) |
-
-**How a script runs:**
-- It is spawned directly with its arguments, never through a shell, so `$(...)`, pipes and redirects are not interpreted.
-- The working directory is the workspace root.
-- The environment contains only `HOME` (on Windows, the basic system variables such as `USERPROFILE` and `TEMP`), the event's `CRAFT_*` variables (see [Environment Variables](#environment-variables)), `CRAFT_WORKSPACE_PATH`, and any `CRAFT_*` variables exported in your shell profile. There is **no `PATH`** and no credentials, so call other programs by absolute path (e.g. `/usr/bin/osascript`).
-- Runs of the same automation never overlap: if the previous run is still going, the new one is skipped and recorded as skipped in the history.
-- The exit code, stdout and stderr are recorded in the automation history (truncated).
-
-Example script (`scripts/log-label.ts`, run by Bun):
-
-```ts
-import { appendFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-const session = process.env.CRAFT_SESSION_NAME ?? process.env.CRAFT_SESSION_ID;
-const line = `${new Date().toISOString()} ${process.env.CRAFT_EVENT} ${process.env.CRAFT_LABEL} (${session})\n`;
-appendFileSync(join(process.env.CRAFT_WORKSPACE_PATH!, 'label-log.txt'), line);
-```
-
-> **Page data on a schedule:** to refresh a Page's data, give the page a `refresh` spec (`refresh: { cron, script }`) instead of writing a `SchedulerTick` automation. See "Scheduled refresh" in [pages.md](./pages.md); it uses the same script runner.
-
 ## Environment Variables
 
-Prompt and webhook actions expand `$VAR` and `${VAR}` in their fields; a value is inserted as it is and never expanded again. Script actions receive the same variables as environment variables (`process.env.CRAFT_LABEL`, `os.environ["CRAFT_LABEL"]`, …).
+Both prompt and webhook actions support variable expansion using `$VAR` or `${VAR}` syntax.
 
 ### System Variables (CRAFT_*)
 
@@ -259,7 +200,7 @@ These are automatically set by the automation system based on the triggering eve
 
 | Event | Variable | Description |
 |-------|----------|-------------|
-| `LabelAdd` / `LabelRemove` | `$CRAFT_LABEL` | The label entry that was added/removed (`bug`, `priority::3`) |
+| `LabelAdd` / `LabelRemove` | `$CRAFT_LABEL` | The label that was added/removed |
 | `PermissionModeChange` | `$CRAFT_OLD_MODE`, `$CRAFT_NEW_MODE` | Previous and new permission mode |
 | `FlagChange` | `$CRAFT_IS_FLAGGED` | `true` or `false` |
 | `SessionStatusChange` | `$CRAFT_OLD_STATE`, `$CRAFT_NEW_STATE` | Previous and new status |
@@ -283,7 +224,7 @@ Then reference them in `automations.json`:
   "type": "webhook",
   "url": "${CRAFT_WH_SLACK_URL}",
   "method": "POST",
-  "body": { "text": "Hello from Craft Agent!" }
+  "body": { "text": "Hello from Selection!" }
 }
 ```
 
@@ -423,11 +364,11 @@ Check fields from the event payload. Useful for filtering on specific transition
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `field` | string | Payload field name (e.g., `permissionMode`, `sessionStatus`, `labels`, `isFlagged`) |
+| `field` | string | Payload field name or dotted path (e.g., `labels`, `tool_input.command`) |
 | `value` | any | Exact match |
 | `from` | any | Previous value (for transition events) |
 | `to` | any | New value (for transition events) |
-| `contains` | string | Array membership check (e.g., check if a label is present) |
+| `contains` | string | Array membership, or substring match when the field is a string |
 | `not_value` | any | Matches anything except this value |
 
 **Transition fields:** For `permissionMode` and `sessionStatus`, `from`/`to` automatically resolve to the correct payload keys (`oldMode`/`newMode`, `oldState`/`newState`).
@@ -473,33 +414,6 @@ Combine conditions with `and`, `or`, and `not`:
 
 **Nesting depth:** Conditions can be nested up to 8 levels deep. A simplification warning is emitted at depth 4. Unknown condition types fail closed (evaluate to false).
 
-### Semantic Condition (requires the Decision Model)
-
-`conditions` can only compare fields. `semanticCondition` asks a yes/no question that the decision model (Jev, Settings > AI > Decision model, toggle "Automation conditions") answers before a prompt action starts a session:
-
-```json
-{
-  "matcher": "^needs-triage$",
-  "semanticCondition": {
-    "question": "Is the user reporting a bug or crash, rather than asking a question?",
-    "threshold": 0.6
-  },
-  "actions": [{ "type": "prompt", "prompt": "Triage the bug in session $CRAFT_SESSION_NAME" }]
-}
-```
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `question` | string | **Required.** The yes/no question, in English (max 500 characters). |
-| `threshold` | number | "Yes" probability needed to run, `0 < threshold <= 1`. Default `0.5`. |
-
-- The model sees the event (name, automation name, payload fields) and, for session events, the session's name, labels, status and its latest user and assistant messages (1,500 characters each).
-- Below the threshold the run is skipped and the automation history records it as skipped, not failed.
-- A matcher is judged once per event: all of its prompt actions run, or all are skipped.
-- **Inert without the decision model:** when it is off, unavailable or fails, the automation runs as it would without the condition.
-- **Loop guard:** an automation never runs for an event about a session it created itself (its own prompt matching a label rule would otherwise re-trigger it forever), and a chain of automation-created sessions triggering further automations stops at 3 sessions deep. Such runs are recorded as skipped.
-- It applies to prompt actions only; webhook and script actions are not gated.
-
 ## Permission Mode
 
 The `permissionMode` field controls the permission level of sessions created by prompt actions.
@@ -534,45 +448,6 @@ Prompt actions can specify labels that will be applied to the session they creat
 ```
 
 This creates a session with the "Scheduled" and "morning-briefing" labels applied automatically.
-
-## Telegram Topic Routing
-
-When a Telegram supergroup is paired in **Settings → Messaging → Telegram**, set
-`telegramTopic` on a matcher to route its spawned sessions into a dedicated
-forum topic. The topic is created on first use and reused thereafter.
-
-```json
-{
-  "matcher": "^urgent$",
-  "telegramTopic": "Urgent Alerts",
-  "actions": [
-    { "type": "prompt", "prompt": "Look at the urgent issue: $LABEL" }
-  ]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `telegramTopic` | string (1–128 chars) | Topic name. Created on first use, reused thereafter. Multiple matchers using the same value share one topic. |
-
-**Activation requirements** (all must hold; otherwise the field is silently ignored):
-
-- A Telegram supergroup is paired in Settings → Messaging → Telegram
-- The Telegram bot is connected
-- The bot has the **Manage Topics** admin permission
-
-Names are case-sensitive: `"Reports"` and `"reports"` create separate topics.
-
-### Setting up the Telegram supergroup
-
-If you haven't paired a supergroup yet:
-
-1. **Create / convert a supergroup with Topics enabled.** In Telegram, open the group → tap the group name → Edit (pencil icon) → toggle **Topics** on → Save. The group must be a forum supergroup; regular groups can't host topics.
-2. **Add the bot to the supergroup.** Group name → Add members → search for your bot's username → add.
-3. **Promote the bot to admin with "Manage Topics".** Group name → Edit → Administrators → Add Administrator → pick the bot → toggle on **Manage Topics** → Save. This is the step most people miss; without it, topic creation fails with `400: not enough rights to create a topic`.
-4. **Pair the supergroup.** In Craft Agent: Settings → Messaging → Telegram → **Pair Supergroup**. Copy the 6-digit code, then in any topic of the supergroup type `/pair <code>`. The bot confirms and the Settings row updates with the group's title.
-
-Verify by checking the supergroup row in Settings shows the group title. If automation runs fail later, `~/.craft-agent/logs/messaging-gateway.log` will show `automation_topic_bind_failed` with the underlying Telegram error.
 
 ## Complete Examples
 
@@ -842,14 +717,12 @@ A single automation can have both prompt and webhook actions. They execute in or
 
 Automations are validated when:
 1. The workspace is loaded
-2. You change automations with the `craft-agent automation` CLI (a direct Write/Edit of `automations.json` is redirected to the CLI, which validates before writing)
+2. You edit automations.json (via configuration validation)
 3. You run `config_validate` with target `automations` or `all`
-
-**An invalid automation only stops itself.** When the file is loaded, each automation is checked on its own: one that fails (an unknown action type such as the removed `command`, a bad cron or regex, an unknown event) is skipped and the others keep running. The Automations screen marks it **Not running** and its page says why; agent-event automations get the same mark, because they never run. If `automations.json` isn't valid JSON, nothing new can load: the last loaded automations keep running and the screen shows the parse error.
 
 **Using config_validate:**
 
-Ask Craft Agent to validate your automations configuration:
+Ask Selection to validate your automations configuration:
 
 ```
 Validate my automations configuration
@@ -904,7 +777,7 @@ To protect against runaway automations (e.g., an automation that indirectly trig
 | Event | Max fires / minute |
 |-------|--------------------|
 | `SchedulerTick` | 60 (1/sec) |
-| All other events (`LabelAdd`, `FlagChange`, etc.) | 10 |
+| All others (`LabelAdd`, `FlagChange`, etc.) | 10 |
 
 When a limit is hit, further events of that type are **silently dropped** for the remainder of the 60-second window. A warning is logged. The window resets automatically.
 
@@ -915,17 +788,9 @@ When a limit is hit, further events of that type are **silently dropped** for th
 ### Automation not firing
 
 1. **Check event name** - Must be exact (e.g., `LabelAdd` not `labeladd`)
-2. **Check the event is supported** - Only the events under [Supported Events](#supported-events) run actions; hook events such as `PreToolUse` or `Stop` never do
-3. **Check matcher** - Regex must match the event value
-4. **Check cron** - For SchedulerTick, verify cron expression with an online tool
-5. **Check logs** - Look for `[automations]` or `[Scheduler]` in the logs
-
-### Script not running
-
-1. **Check the path** - `script` must be relative to the workspace root and stay inside it
-2. **Check the history** - The automation history shows the exit code, stdout and stderr of each run; a run marked skipped means the previous run was still going
-3. **Check programs it calls** - Scripts get no `PATH`; call other programs by absolute path
-4. **Check the timeout** - Long-running scripts are stopped after `timeoutMs` (default 60 s)
+2. **Check matcher** - Regex must match the event value
+3. **Check cron** - For SchedulerTick, verify cron expression with an online tool
+4. **Check logs** - Look for `[automations]` or `[Scheduler]` in the logs
 
 ### Prompt not creating session
 
@@ -935,7 +800,7 @@ When a limit is hit, further events of that type are **silently dropped** for th
 ### Webhook not working
 
 1. **Check URL** — Must be a valid `http://` or `https://` URL. Other protocols (ftp, ws, etc.) are rejected at runtime with a clear error.
-2. **Check env vars** — Ensure `CRAFT_WH_*` variables are set in your shell profile and Craft Agent was restarted after adding them. URLs using `$VAR` templates are validated after variable expansion — if the variable is empty or unset, the URL will be invalid.
+2. **Check env vars** — Ensure `CRAFT_WH_*` variables are set in your shell profile and Selection was restarted after adding them. URLs using `$VAR` templates are validated after variable expansion — if the variable is empty or unset, the URL will be invalid.
 3. **Use the Test button** — Tests connectivity to the URL (note: env vars are not expanded during test)
 4. **Check method** — Some endpoints require specific HTTP methods (POST, PUT, etc.)
 5. **Check response** — The automation history shows HTTP status codes for webhook executions

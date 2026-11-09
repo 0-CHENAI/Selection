@@ -18,23 +18,20 @@ import { DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-level
  * All session-scoped options in one place.
  */
 export interface SessionOptions {
-  /** Permission mode ('safe', 'ask', 'guarded', 'allow-all') */
+  /** Permission mode ('safe', 'ask', 'allow-all') */
   permissionMode: PermissionMode
   /** Monotonic version from backend permission mode state (used to ignore stale events) */
   permissionModeVersion?: number
-  /** Mode before the last change (an approved plan leaving Explore returns to Guarded from it) */
-  previousPermissionMode?: PermissionMode
   /** Session-level thinking level — sticky, persisted. See {@link ThinkingLevel}. */
+  fastMode?: boolean
   thinkingLevel: ThinkingLevel
-  /** Coding mode — lean coding prompt and session tools; fixed once the conversation starts */
-  codingMode: boolean
 }
 
 /** Default values for new sessions */
 export const defaultSessionOptions: SessionOptions = {
   permissionMode: 'ask', // Default to ask mode (prompt for permissions)
+  fastMode: false,
   thinkingLevel: DEFAULT_THINKING_LEVEL, // Default to 'medium' level
-  codingMode: false,
 }
 
 /** Type for partial updates to session options */

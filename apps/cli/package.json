@@ -1,8 +1,8 @@
 {
   "name": "@craft-agent/cli",
-  "version": "0.15.8",
+  "version": "2.3.0",
   "license": "Apache-2.0",
-  "description": "Terminal client for Craft Agent server",
+  "description": "Terminal client for Selection server",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
@@ -20,6 +20,6 @@
   "devDependencies": {
     "typescript": "^5.8.2",
     "@types/node": "^22.0.0",
-    "@types/bun": "^1.4.2"
+    "@types/bun": "latest"
   }
 }

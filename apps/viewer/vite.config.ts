@@ -32,7 +32,7 @@ export default defineConfig({
     proxy: {
       // Proxy API requests to production R2 during local dev
       '/s/api': {
-        target: 'https://thecraftagents.com',
+        target: 'https://agents.craft.do',
         changeOrigin: true,
         secure: true,
       },

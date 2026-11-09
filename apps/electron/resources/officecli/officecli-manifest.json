@@ -1,0 +1,249 @@
+{
+  "manifestVersion": 1,
+  "version": "1.0.160",
+  "tag": "v1.0.160",
+  "tagCommit": "c56512c8c7b76fe284f09940e4cd492470099d3e",
+  "schemaCrc": "f950ee40",
+  "sourceRepository": "https://github.com/iOfficeAI/OfficeCLI",
+  "license": {
+    "spdx": "Apache-2.0",
+    "licenseFile": "1.0.160/LICENSE",
+    "licenseSha256": "7e282402a5a6db33995fe638bb3fe79013f9884d8f7d15a42e481c1e86aadda1",
+    "noticeFile": "1.0.160/NOTICE",
+    "noticeSha256": "3a4715b268e148a8e9566f5e835f766f5c95c3da4d6e5ddd908806a258a2f07b"
+  },
+  "assets": {
+    "darwin-arm64": {
+      "name": "officecli-mac-arm64",
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.160/officecli-mac-arm64",
+      "sha256": "fe2b31c6c27534dfbbf155386b6b9105420f9315bbb606335ec61490d171386d"
+    },
+    "darwin-x64": {
+      "name": "officecli-mac-x64",
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.160/officecli-mac-x64",
+      "sha256": "55b27f6d422f9e0bcd2aa40abb262606110ff957a4a5253db7a8ba0460cd81c7"
+    },
+    "linux-x64": {
+      "name": "officecli-linux-x64",
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.160/officecli-linux-x64",
+      "sha256": "baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9"
+    },
+    "linux-arm64": {
+      "name": "officecli-linux-arm64",
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.160/officecli-linux-arm64",
+      "sha256": "e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53"
+    },
+    "win32-x64": {
+      "name": "officecli-win-x64.exe",
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.160/officecli-win-x64.exe",
+      "sha256": "c590ca9d464f2b03362825b0f2615efcae33ce3fc0edaeeef29f7ddacb4c5424",
+      "schemaCrc": "c11d61e0"
+    },
+    "win32-arm64": {
+      "name": "officecli-win-arm64.exe",
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.160/officecli-win-arm64.exe",
+      "sha256": "65129df43a4eb8199f3ebf6b17b56c5311242f53c5f725f60efb0a94f8952d74"
+    }
+  },
+  "commandPolicy": {
+    "read": [
+      "status",
+      "help",
+      "view",
+      "get",
+      "query",
+      "validate",
+      "dump",
+      "raw",
+      "get-marks"
+    ],
+    "edit": [
+      "create",
+      "set",
+      "add",
+      "remove",
+      "move",
+      "swap",
+      "refresh",
+      "raw-set",
+      "add-part",
+      "batch",
+      "import",
+      "merge"
+    ],
+    "preview": [
+      "watch",
+      "unwatch",
+      "goto",
+      "mark",
+      "unmark",
+      "get-marks",
+      "selection"
+    ],
+    "lifecycle": [
+      "open",
+      "save",
+      "close"
+    ],
+    "admin": [
+      "install",
+      "update",
+      "skills",
+      "load_skill",
+      "mcp",
+      "plugins",
+      "config"
+    ]
+  },
+  "externalDependencies": [
+    {
+      "id": "katex",
+      "version": "0.16.11",
+      "license": "MIT",
+      "networkRequiredFor": [
+        "HTML equation layout and fonts"
+      ],
+      "fallback": "plain-text equation rendering",
+      "hosts": [
+        "d.officecli.ai",
+        "cdn.jsdelivr.net"
+      ]
+    },
+    {
+      "id": "three",
+      "version": "0.170.0",
+      "license": "MIT",
+      "networkRequiredFor": [
+        "interactive HTML rendering of embedded 3D models"
+      ],
+      "fallback": "static poster or missing interactive 3D layer",
+      "hosts": [
+        "d.officecli.ai",
+        "cdn.jsdelivr.net"
+      ]
+    },
+    {
+      "id": "mermaid",
+      "version": "11",
+      "license": "MIT",
+      "networkRequiredFor": [
+        "first high-fidelity diagram image render",
+        "styled Mermaid ESM render"
+      ],
+      "fallback": "cached UMD renderer or native editable shapes",
+      "hosts": [
+        "d.officecli.ai",
+        "cdn.jsdelivr.net"
+      ]
+    },
+    {
+      "id": "mermaid-layout-elk",
+      "version": "0.1",
+      "license": "MIT",
+      "networkRequiredFor": [
+        "styled Mermaid ELK layout"
+      ],
+      "fallback": "native or Dagre diagram layout",
+      "hosts": [
+        "cdn.jsdelivr.net"
+      ]
+    }
+  ],
+  "guides": {
+    "word": {
+      "directory": "officecli-docx",
+      "entry": "SKILL.md",
+      "inherits": [],
+      "contentHash": "a5a294fc04ec9983d766cec70887d563f3337e13a8a25db37d5a522bd37fc298",
+      "resourceHash": "f4c7a0a5b6e5c01283408346e07a0e8e8b6eebf2f2a5b626b03b6530228c9390"
+    },
+    "excel": {
+      "directory": "officecli-xlsx",
+      "entry": "SKILL.md",
+      "inherits": [],
+      "contentHash": "95ed125c9c06defda5a9abc9a9a1d7329e8b183c74a4a6b9b8eab2e1529ebb90",
+      "resourceHash": "5a715599fd911e51d13504e40f482c63c7d2f094aed198d03ee28e17e4713121"
+    },
+    "pptx": {
+      "directory": "officecli-pptx",
+      "entry": "SKILL.md",
+      "inherits": [],
+      "contentHash": "0d53192751d5770984f16f3c34f9923377651555c667150d7f96e16e8c9757b3",
+      "resourceHash": "0a8e1010b32fdbd9962f048cf3c373a974d5a75fd9457401700691b0e751c4ba"
+    },
+    "academic-paper": {
+      "directory": "officecli-academic-paper",
+      "entry": "SKILL.md",
+      "inherits": [
+        "word"
+      ],
+      "contentHash": "573292e01c2b9b9885c6cd24ffec5f808d88f8a1868aa0e962bcab9a479f40e5",
+      "resourceHash": "5e429aff44d5750d8535fd7d08c1172eaaefcef70041df5795c1ba492fbf0c0f"
+    },
+    "financial-model": {
+      "directory": "officecli-financial-model",
+      "entry": "SKILL.md",
+      "inherits": [
+        "excel"
+      ],
+      "contentHash": "65280bce9537ff3192bbc8fe1ad94980662929a71390b258d7f38f24772d8c9e",
+      "resourceHash": "f6cccee37cea1d550cf880e1be98c86ffe44f0c3725e516d6f41fbeda2e4de8a"
+    },
+    "data-dashboard": {
+      "directory": "officecli-data-dashboard",
+      "entry": "SKILL.md",
+      "inherits": [
+        "excel"
+      ],
+      "contentHash": "e05a3718e4d4f93c9df4d699006e5294158a91c40e1ee087d848d50d1b4d0af0",
+      "resourceHash": "0990b676957eea566fe4a864a6cf60d691c2a4dc31c0b21086d089dc811bf227"
+    },
+    "pitch-deck": {
+      "directory": "officecli-pitch-deck",
+      "entry": "SKILL.md",
+      "inherits": [
+        "pptx"
+      ],
+      "contentHash": "6b59efdc094451945fd059548771326cce4bd2e3544d0659d3d6acf0825ea2b1",
+      "resourceHash": "54adc0fedb117875d9931b6c963dc3e7d9e2cdaf7fc8ff5dc0bfb67630ec1cd1"
+    },
+    "word-form": {
+      "directory": "officecli-word-form",
+      "entry": "SKILL.md",
+      "inherits": [
+        "word"
+      ],
+      "contentHash": "6c6154954089d8b6363a7a49263c986c3795cd438092ff3b0aacf0b32017d039",
+      "resourceHash": "2a060be2acb7c4426c8a352da43e3fd1586d8edb0fd4877f4e8c770131bd042c"
+    },
+    "morph-ppt": {
+      "directory": "morph-ppt",
+      "entry": "SKILL.md",
+      "inherits": [
+        "pptx"
+      ],
+      "contentHash": "0d7e196f30061e4da8a29fb4fd3f995f6130f02708a98615e28459594a28c07a",
+      "resourceHash": "3a83ba95b6124f46a509ae8a7cd935935e567ef97020b3aafecfa32258fea25d"
+    },
+    "morph-ppt-3d": {
+      "directory": "morph-ppt-3d",
+      "entry": "SKILL.md",
+      "inherits": [
+        "morph-ppt",
+        "pptx"
+      ],
+      "contentHash": "951080c11ac0995fc3e4fb9a09a67fa6c8f02f353bf735e7ec6f6c02cab9fdad",
+      "resourceHash": "0909b9d418d75c7fd2e94f6999d2559ce251f81232f2dc4da08424271384018f"
+    }
+  },
+  "commandSchema": {
+    "file": "1.0.160/command-schema.json",
+    "sha256": "99c62cd94210964f7cdd30303c50e1036c118e52cf5bd916d4d4fdd361c78171",
+    "unclassifiedCommands": [],
+    "staleClassifications": []
+  },
+  "guideIndex": {
+    "file": "1.0.160/guide-index.json",
+    "sha256": "72bb41020aed15553d479d1dbc353d357f9af6897c9bd34c85c136cd90a4a804"
+  }
+}

@@ -80,12 +80,6 @@ export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions
       labelKey: 'sidebar.settings',
       action: { kind: 'navigate', to: 'settings' },
     },
-    {
-      id: 'help',
-      iconName: 'HelpCircle',
-      labelKey: 'menu.help',
-      action: { kind: 'navigate', to: 'help' },
-    },
   )
   if (isDebugMode) {
     rootRows.push({
@@ -141,7 +135,7 @@ export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions
   return [
     { id: 'root', titleKey: 'menu.craftMenu', rows: rootRows },
     { id: 'settings', titleKey: 'sidebar.settings', rows: settingsRows },
-    { id: 'help', titleKey: 'menu.help', rows: helpRows },
+    ...(helpRows.length > 0 ? [{ id: 'help' as const, titleKey: 'menu.help', rows: helpRows }] : []),
     { id: 'debug', titleKey: DEBUG_MENU.labelKey, rows: debugRows },
   ]
 }

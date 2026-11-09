@@ -15,6 +15,8 @@ export function normalizePanelRouteForReconcile(
   route: ViewRoute,
   resolveAutoSelection: AutoSelectionResolver,
 ): ViewRoute {
+  // Manual authoring is retired; keep old restored links useful.
+  if (route === 'board') route = 'allSessions'
   const navState = parseRouteToNavigationState(route)
   if (!navState) return route
 

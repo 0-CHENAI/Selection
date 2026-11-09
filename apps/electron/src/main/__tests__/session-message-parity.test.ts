@@ -26,6 +26,7 @@ function createFullMessage(): Message {
     toolUseId: 'tu-123',
     toolInput: { file_path: '/test.ts' },
     toolResult: 'File contents...',
+    toolResultContent: [{ type: 'image', data: 'dG9vbC1pbWFnZQ==', mimeType: 'image/png' }],
     toolStatus: 'completed',
     toolDuration: 1500,
     toolIntent: 'Reading test file',
@@ -79,9 +80,27 @@ function createFullMessage(): Message {
     authSourceUrl: 'https://linear.app',
     authPasswordRequired: false,
     authError: 'Invalid token',
+    clarification: {
+      requestId: 'clarify-1',
+      question: '范围是哪一年？',
+      ambiguity: 'scope',
+      selection: 'single',
+      options: [{ id: '2024', label: '2024' }],
+      round: 1,
+      status: 'pending',
+      originSessionId: 'session-1',
+    },
     authEmail: 'user@test.com',
     authWorkspace: 'test-workspace',
     isQueued: false,
+    queuedSkillSlugs: ['workspace:review'],
+    queuedContext: {
+      sourceSlugs: ['knowledge'],
+      model: 'model-a',
+      llmConnection: 'connection-a',
+      thinkingLevel: 'high',
+      permissionMode: 'ask',
+    },
   }
 }
 
@@ -121,12 +140,12 @@ describe('messageToStored/storedToMessage round-trip', () => {
       'isError', 'attachments', 'badges', 'annotations',
       'isIntermediate', 'turnId', 'infoLevel',
       'errorCode', 'errorTitle', 'errorDetails', 'errorOriginal', 'errorCanRetry',
-      'planPath',
+      'planPath', 'clarification',
       'authRequestId', 'authRequestType', 'authSourceSlug', 'authSourceName',
       'authStatus', 'authCredentialMode', 'authHeaderName', 'authHeaderNames',
       'authLabels', 'authDescription', 'authHint', 'authSourceUrl',
       'authPasswordRequired', 'authError', 'authEmail', 'authWorkspace',
-      'isQueued',
+      'isQueued', 'queuedSkillSlugs', 'queuedContext',
     ].sort()
 
     expect(storedKeys).toEqual(expectedKeys)
@@ -170,6 +189,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
     expect(restored.errorOriginal).toBe(original.errorOriginal)
     expect(restored.errorCanRetry).toBe(original.errorCanRetry)
     expect(restored.planPath).toBe(original.planPath)
+    expect(restored.clarification).toEqual(original.clarification)
     expect(restored.authRequestId).toBe(original.authRequestId)
     expect(restored.authRequestType).toBe(original.authRequestType)
     expect(restored.authSourceSlug).toBe(original.authSourceSlug)
@@ -187,10 +207,12 @@ describe('messageToStored/storedToMessage round-trip', () => {
     expect(restored.authEmail).toBe(original.authEmail)
     expect(restored.authWorkspace).toBe(original.authWorkspace)
     expect(restored.isQueued).toBe(original.isQueued)
+    expect(restored.queuedSkillSlugs).toEqual(original.queuedSkillSlugs)
+    expect(restored.queuedContext).toEqual(original.queuedContext)
   })
 
   it('role ↔ type mapping works for each MessageRole', () => {
-    const roles: MessageRole[] = ['user', 'assistant', 'tool', 'error', 'info', 'warning', 'plan', 'auth-request']
+    const roles: MessageRole[] = ['user', 'assistant', 'tool', 'error', 'info', 'warning', 'plan', 'auth-request', 'clarification']
 
     for (const role of roles) {
       const msg = createMinimalMessage(role)
@@ -203,12 +225,15 @@ describe('messageToStored/storedToMessage round-trip', () => {
   })
 
   it('transient fields are excluded from StoredMessage', () => {
-    const msg = createFullMessage()
+    const msg = { ...createFullMessage(), queueId: 'canonical-queue-id' }
     const stored = messageToStored(msg)
 
     // These are intentionally transient — NOT persisted
     expect(stored).not.toHaveProperty('isStreaming')
     expect(stored).not.toHaveProperty('isPending')
+    expect(stored).not.toHaveProperty('queueId')
+    expect(stored).not.toHaveProperty('toolResultContent')
+    expect(JSON.stringify(stored)).not.toContain('dG9vbC1pbWFnZQ==')
 
     // infoLevel IS persisted for info-message severity restoration after reload
     expect(stored.infoLevel).toBe(msg.infoLevel)
@@ -216,6 +241,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
     const storedKeys = Object.keys(stored)
     expect(storedKeys).not.toContain('isStreaming')
     expect(storedKeys).not.toContain('isPending')
+    expect(storedKeys).not.toContain('toolResultContent')
     expect(storedKeys).toContain('infoLevel')
   })
 

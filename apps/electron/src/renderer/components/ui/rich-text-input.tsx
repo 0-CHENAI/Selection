@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { clipboardHasFiles } from '@/lib/clipboard-files'
 import { coerceInputText } from '@/lib/input-text'
 import { cn } from '@/lib/utils'
 import { findMentionMatches, parseMentions, type MentionMatch } from '@/lib/mentions'
@@ -12,6 +13,13 @@ import {
 } from '@/lib/icon-cache'
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
+import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
+import {
+  createImeFirstKeyGate,
+  EMPTY_EDITOR_ZWSP,
+  isEmptyComposerValue,
+  isPlaceholderCaretBr,
+} from './ime-input-guards'
 
 // ============================================================================
 // Types
@@ -42,6 +50,15 @@ export function isEscapeDuringComposition(
   return Boolean(isComposingRefActive || event.isComposing || event.nativeEvent?.isComposing)
 }
 
+export function shouldShowPlaceholder(
+  controlledValue: string,
+  isEditorEmpty: boolean,
+  isComposing: boolean,
+  isImePending: boolean
+): boolean {
+  return isEmptyComposerValue(controlledValue) && isEditorEmpty && !isComposing && !isImePending
+}
+
 export interface RichTextInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onInput' | 'onPaste'> {
   /** Current text value */
   value: string
@@ -63,8 +80,6 @@ export interface RichTextInputProps extends Omit<React.HTMLAttributes<HTMLDivEle
   onPaste?: (e: React.ClipboardEvent) => void
   /** Called when pasted text exceeds line threshold - should create file attachment */
   onLongTextPaste?: (text: string) => void
-  /** Any plain-text paste, before it is inserted (or turned into an attachment) */
-  onTextPaste?: (text: string) => void
 }
 
 export interface RichTextInputHandle {
@@ -95,14 +110,14 @@ const SKILL_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" heigh
 
 const SOURCE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>`
 
-// File icon (document with folded corner) - matches UserMessageBubble style (12x12, text-tertiary)
-const FILE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-tertiary"><path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M9 16H15M9 12H10M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/></svg>`
+// File icon (document with folded corner) - matches UserMessageBubble style (12x12, text-muted-foreground)
+const FILE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M9 16H15M9 12H10M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/></svg>`
 
-// Code file icon (document with < > brackets) - matches UserMessageBubble style (12x12, text-tertiary)
-const CODE_FILE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-tertiary"><path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M10.5 12.8799C9.70024 13.2985 9.10807 13.8275 8.64232 14.5478C8.51063 14.7515 8.44479 14.8533 8.44489 15.0011C8.44498 15.1488 8.51099 15.2506 8.643 15.4542C9.1095 16.1736 9.70167 16.7028 10.5 17.1225M13.5 12.8799C14.2998 13.2985 14.8919 13.8275 15.3577 14.5478C15.4894 14.7515 15.5552 14.8533 15.5551 15.0011C15.555 15.1488 15.489 15.2506 15.357 15.4542C14.8905 16.1736 14.2983 16.7028 13.5 17.1225M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/></svg>`
+// Code file icon (document with < > brackets) - matches UserMessageBubble style (12x12, text-muted-foreground)
+const CODE_FILE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M10.5 12.8799C9.70024 13.2985 9.10807 13.8275 8.64232 14.5478C8.51063 14.7515 8.44479 14.8533 8.44489 15.0011C8.44498 15.1488 8.51099 15.2506 8.643 15.4542C9.1095 16.1736 9.70167 16.7028 10.5 17.1225M13.5 12.8799C14.2998 13.2985 14.8919 13.8275 15.3577 14.5478C15.4894 14.7515 15.5552 14.8533 15.5551 15.0011C15.555 15.1488 15.489 15.2506 15.357 15.4542C14.8905 16.1736 14.2983 16.7028 13.5 17.1225M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/></svg>`
 
-// Folder icon (open folder) - matches UserMessageBubble style (12x12, text-tertiary)
-const FOLDER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" class="shrink-0 text-tertiary"><path d="M20.5 10C20.5 9.07003 20.5 8.60504 20.3978 8.22354C20.1204 7.18827 19.3117 6.37962 18.2765 6.10222C17.895 6 17.43 6 16.5 6H13.1008C12.4742 6 12.1609 6 11.8739 5.91181C11.6824 5.85298 11.5009 5.76572 11.3353 5.65295C11.0871 5.48389 10.8914 5.23926 10.5 4.75L10.4095 4.63693C10.107 4.25881 9.9558 4.06975 9.7736 3.92674C9.54464 3.74703 9.27921 3.61946 8.99585 3.55294C8.77037 3.5 8.52825 3.5 8.04402 3.5C6.60485 3.5 5.88527 3.5 5.32008 3.74178C4.61056 4.0453 4.0453 4.61056 3.74178 5.32008C3.5 5.88527 3.5 6.60485 3.5 8.04402V10M9.46502 20.5H14.535C16.9102 20.5 18.0978 20.5 18.9301 19.8113C19.7624 19.1226 19.9846 17.9559 20.429 15.6227L20.8217 13.5613C21.1358 11.9121 21.2929 11.0874 20.843 10.5437C20.393 10 19.5536 10 17.8746 10H6.12537C4.44643 10 3.60696 10 3.15704 10.5437C2.70713 11.0874 2.8642 11.9121 3.17835 13.5613L3.57099 15.6227C4.01541 17.9559 4.23763 19.1226 5.06992 19.8113C5.90221 20.5 7.08981 20.5 9.46502 20.5Z"/></svg>`
+// Folder icon (open folder) - matches UserMessageBubble style (12x12, text-muted-foreground)
+const FOLDER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><path d="M20.5 10C20.5 9.07003 20.5 8.60504 20.3978 8.22354C20.1204 7.18827 19.3117 6.37962 18.2765 6.10222C17.895 6 17.43 6 16.5 6H13.1008C12.4742 6 12.1609 6 11.8739 5.91181C11.6824 5.85298 11.5009 5.76572 11.3353 5.65295C11.0871 5.48389 10.8914 5.23926 10.5 4.75L10.4095 4.63693C10.107 4.25881 9.9558 4.06975 9.7736 3.92674C9.54464 3.74703 9.27921 3.61946 8.99585 3.55294C8.77037 3.5 8.52825 3.5 8.04402 3.5C6.60485 3.5 5.88527 3.5 5.32008 3.74178C4.61056 4.0453 4.0453 4.61056 3.74178 5.32008C3.5 5.88527 3.5 6.60485 3.5 8.04402V10M9.46502 20.5H14.535C16.9102 20.5 18.0978 20.5 18.9301 19.8113C19.7624 19.1226 19.9846 17.9559 20.429 15.6227L20.8217 13.5613C21.1358 11.9121 21.2929 11.0874 20.843 10.5437C20.393 10 19.5536 10 17.8746 10H6.12537C4.44643 10 3.60696 10 3.15704 10.5437C2.70713 11.0874 2.8642 11.9121 3.17835 13.5613L3.57099 15.6227C4.01541 17.9559 4.23763 19.1226 5.06992 19.8113C5.90221 20.5 7.08981 20.5 9.46502 20.5Z"/></svg>`
 
 /** Known code file extensions - used to pick code file icon vs generic file icon */
 const CODE_EXTENSIONS = new Set([
@@ -143,17 +158,17 @@ function renderBadgeHTML(
     // Check for emoji marker - render as text, not image
     if (cachedIconUrl.startsWith(EMOJI_ICON_PREFIX)) {
       const emoji = cachedIconUrl.slice(EMOJI_ICON_PREFIX.length)
-      iconHtml = `<span class="h-[12px] w-[12px] flex items-center justify-center text-caption leading-none shrink-0">${emoji}</span>`
+      iconHtml = `<span class="h-[12px] w-[12px] flex items-center justify-center text-[10px] leading-none shrink-0">${emoji}</span>`
     } else {
       // Use cached icon as img (data URL or external URL)
-      iconHtml = `<img src="${cachedIconUrl}" class="h-[12px] w-[12px] rounded-xs shrink-0" alt="" />`
+      iconHtml = `<img src="${cachedIconUrl}" class="h-[12px] w-[12px] rounded-[2px] shrink-0" alt="" />`
     }
   } else {
     // Fall back to generic SVG icon based on type
     if (type === 'skill') {
-      iconHtml = `<span class="h-[12px] w-[12px] rounded-xs bg-fill-hover flex items-center justify-center text-tertiary shrink-0">${SKILL_ICON_SVG}</span>`
+      iconHtml = `<span class="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0">${SKILL_ICON_SVG}</span>`
     } else if (type === 'source') {
-      iconHtml = `<span class="h-[12px] w-[12px] rounded-xs bg-fill-hover flex items-center justify-center text-tertiary shrink-0">${SOURCE_ICON_SVG}</span>`
+      iconHtml = `<span class="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0">${SOURCE_ICON_SVG}</span>`
     } else if (type === 'file') {
       // Pick code file or generic file icon based on extension (no container, icon carries its own classes)
       iconHtml = isCodeFile(label) ? CODE_FILE_ICON_SVG : FILE_ICON_SVG
@@ -167,12 +182,23 @@ function renderBadgeHTML(
 
   // Line height is increased when badges are present (see hasMentions in component)
   // Use transform for upward shift - doesn't affect layout flow (works even at start of line)
-  return `<span contenteditable="false" data-mention="true"${titleAttr} class="mention-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-1 rounded-sm bg-raised shadow-elev-0 text-label-sm font-medium text-foreground select-none [&_*]:selection:bg-transparent selection:bg-transparent" style="vertical-align: middle; transform: translateY(-1px)">${iconHtml}<span class="truncate max-w-[200px]">${escapedLabel}</span></span>`
+  return `<span contenteditable="false" data-mention="true"${titleAttr} class="mention-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-1 rounded-[5px] bg-background shadow-minimal text-[12px] text-foreground select-none [&_*]:selection:bg-transparent selection:bg-transparent" style="vertical-align: middle; transform: translateY(-1px)">${iconHtml}<span class="truncate max-w-[200px]">${escapedLabel}</span></span>`
 }
 
 // ============================================================================
 // Helper: Extract plain text from contenteditable
 // ============================================================================
+
+function nextMeaningfulSibling(node: Node | null): Node | null {
+  let current = node
+  while (
+    current?.nodeType === Node.TEXT_NODE &&
+    current.textContent?.replace(/\u200B/g, '') === ''
+  ) {
+    current = current.nextSibling
+  }
+  return current
+}
 
 function getTextFromElement(element: HTMLElement): string {
   let text = ''
@@ -197,7 +223,9 @@ function getTextFromElement(element: HTMLElement): string {
 
       // Handle line breaks
       if (el.tagName === 'BR') {
-        text += '\n'
+        if (!isPlaceholderCaretBr(isTopLevel, text, nextMeaningfulSibling(el.nextSibling) != null)) {
+          text += '\n'
+        }
       } else if (el.tagName === 'DIV' && text.length > 0 && !text.endsWith('\n')) {
         // DIVs in contenteditable normally represent line breaks.
         // HOWEVER: When typing before a badge at position 0, browsers wrap the
@@ -209,13 +237,7 @@ function getTextFromElement(element: HTMLElement): string {
           // Check if this DIV is followed by a mention badge at top level.
           // Skip over ZWS-only text nodes - browser may preserve them between
           // the DIV wrapper and the badge span.
-          let nextSibling: Node | null = el.nextSibling
-          while (
-            nextSibling?.nodeType === Node.TEXT_NODE &&
-            nextSibling.textContent?.replace(/\u200B/g, '') === ''
-          ) {
-            nextSibling = nextSibling.nextSibling
-          }
+          const nextSibling = nextMeaningfulSibling(el.nextSibling)
           const isBrowserWrapper =
             (nextSibling as HTMLElement)?.getAttribute?.('data-mention') === 'true'
           if (!isBrowserWrapper) {
@@ -241,6 +263,51 @@ function getTextFromElement(element: HTMLElement): string {
   })
 
   return text
+}
+
+/**
+ * Give Chromium a text node to attach IME composition. Build it with DOM
+ * nodes — `innerHTML` can strip a leading ZWSP and leave a `<br>`-only
+ * editor, which InsertTexts the first Pinyin letter. Caret stays inside
+ * the ZWSP node (not at element offset 0).
+ */
+export function ensureEmptyEditorAnchor(element: HTMLElement): void {
+  if (getTextFromElement(element).length > 0) return
+
+  let textNode = Array.from(element.childNodes).find(
+    (node): node is Text =>
+      node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.includes(EMPTY_EDITOR_ZWSP))
+  )
+  if (!textNode) {
+    textNode = document.createTextNode(EMPTY_EDITOR_ZWSP)
+    const br = document.createElement('br')
+    element.replaceChildren(textNode, br)
+  }
+
+  const selection = window.getSelection()
+  if (!selection) return
+  const range = document.createRange()
+  range.setStart(textNode, Math.min(EMPTY_EDITOR_ZWSP.length, textNode.data.length))
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+function writeEditorContent(
+  element: HTMLElement,
+  text: string,
+  skills: LoadedSkill[],
+  sources: LoadedSource[],
+  workspaceId: string | undefined,
+  placeCaret: boolean
+): void {
+  if (isEmptyComposerValue(text)) {
+    const zwsp = document.createTextNode(EMPTY_EDITOR_ZWSP)
+    element.replaceChildren(zwsp, document.createElement('br'))
+    if (placeCaret) ensureEmptyEditorAnchor(element)
+    return
+  }
+  element.innerHTML = textToHTML(text, skills, sources, workspaceId)
 }
 
 // ============================================================================
@@ -399,10 +466,10 @@ function textToHTML(
 
     if (match.type === 'skill') {
       skill = skills.find(s => s.slug === match.id)
-      label = skill?.metadata.name || match.id
+      label = skill ? resolveSkillTitle(skill) : match.id
     } else if (match.type === 'source') {
       source = sources.find(s => s.config.slug === match.id)
-      label = source?.config.name || match.id
+      label = source ? resolveSourceTitle(source) : match.id
     } else if (match.type === 'file') {
       // Show filename as badge label, full path as tooltip
       label = match.id.split('/').pop() || match.id
@@ -471,23 +538,28 @@ function RotatingPlaceholder({
     // Don't rotate if only one placeholder
     if (placeholders.length <= 1) return
 
+    let fadeTimeout: ReturnType<typeof setTimeout> | undefined
     const interval = setInterval(() => {
       // Fade out
       setOpacity(0)
 
       // After fade out (300ms), swap text and fade back in
-      setTimeout(() => {
+      fadeTimeout = setTimeout(() => {
         setCurrentIndex((prev) => (prev + 1) % placeholders.length)
         setOpacity(1)
       }, 300)
     }, intervalMs)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      if (fadeTimeout !== undefined) clearTimeout(fadeTimeout)
+    }
   }, [placeholders.length, intervalMs])
 
   return (
     <div
-      className={cn('transition-opacity duration-slow ease-standard', className)}
+      aria-hidden="true"
+      className={cn('transition-opacity duration-300 ease-in-out', className)}
       style={{ opacity }}
     >
       {placeholders[currentIndex]}
@@ -510,14 +582,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       workspaceId,
       disabled = false,
       className,
-      style,
       onFocus,
       onBlur,
       onKeyDown,
       onInput,
       onPaste,
       onLongTextPaste,
-      onTextPaste,
       ...restProps
     },
     forwardedRef
@@ -525,12 +595,29 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const { t } = useTranslation()
     const safeValue = React.useMemo(() => coerceInputText(value), [value])
     const divRef = React.useRef<HTMLDivElement>(null)
-    const [isFocused, setIsFocused] = React.useState(false)
-    const isComposing = React.useRef(false)
+    // The DOM can temporarily be ahead of the controlled value while an IME is
+    // composing (notably on Windows). Track its emptiness independently so the
+    // placeholder never overlaps provisional or newly committed text.
+    const [isEditorEmpty, setIsEditorEmpty] = React.useState(
+      () => isEmptyComposerValue(safeValue)
+    )
+    // Ref for synchronous event checks; state so placeholder re-renders during IME.
+    const isComposingRef = React.useRef(false)
+    const [isComposing, setIsComposing] = React.useState(false)
+    const imeGateRef = React.useRef(createImeFirstKeyGate())
+    const [isImePending, setIsImePending] = React.useState(false)
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
     const isInternalUpdate = React.useRef(false)
+    const runInternalUpdate = (fn: () => void) => {
+      isInternalUpdate.current = true
+      try {
+        fn()
+      } finally {
+        isInternalUpdate.current = false
+      }
+    }
     // Pending cursor position to restore after external value update (e.g., after @mention selection)
     const pendingCursorRef = React.useRef<number | null>(null)
 
@@ -593,14 +680,15 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       get element() { return divRef.current },
     }), [])
 
-    // Handle input events
-    const handleInput = React.useCallback(() => {
-      if (isComposing.current) return
-      if (!divRef.current) return
+    const commitInput = React.useCallback(() => {
+      const editor = divRef.current
+      if (!editor) return
 
-      const newText = getTextFromElement(divRef.current)
-      const cursorPos = getCursorPosition(divRef.current, cursorPositionRef.current)
+      const extracted = getTextFromElement(editor)
+      const newText = isEmptyComposerValue(extracted) ? '' : extracted
+      const cursorPos = getCursorPosition(editor, cursorPositionRef.current)
 
+      setIsEditorEmpty(isEmptyComposerValue(newText))
       lastValueRef.current = newText
       cursorPositionRef.current = cursorPos
 
@@ -609,30 +697,95 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       if (newSignature !== lastMentionSignatureRef.current) {
         lastMentionSignatureRef.current = newSignature
         // Re-render with badges
-        isInternalUpdate.current = true
-        const html = textToHTML(newText, skills, sources, workspaceId)
-        divRef.current.innerHTML = html || '<br>' // Empty contenteditable needs a BR
-        // Restore cursor
-        setCursorPosition(divRef.current, cursorPos)
-        isInternalUpdate.current = false
+        runInternalUpdate(() => {
+          writeEditorContent(editor, newText, skills, sources, workspaceId, false)
+          if (newText) setCursorPosition(editor, cursorPos)
+          else ensureEmptyEditorAnchor(editor)
+        })
+      } else if (!newText && !isComposingRef.current && !imeGateRef.current.isComposing) {
+        runInternalUpdate(() => ensureEmptyEditorAnchor(editor))
       }
 
       onChange(newText)
       onInput?.(newText, cursorPos)
     }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
-    // Handle composition (IME)
+    const handleBeforeInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
+      if (isInternalUpdate.current) return
+      const native = event.nativeEvent as InputEvent
+      imeGateRef.current.onPossibleFirstInsert({
+        nativeIsComposing: Boolean(native.isComposing),
+        previousValue: lastValueRef.current,
+        insertedOrCurrent: native.data ?? '',
+        inputType: native.inputType,
+      })
+      if (imeGateRef.current.isPending) setIsImePending(true)
+    }, [])
+
+    // Handle input events
+    const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
+      if (isInternalUpdate.current) return
+      const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
+      const currentText = divRef.current ? getTextFromElement(divRef.current) : ''
+      setIsEditorEmpty(isEmptyComposerValue(currentText))
+      imeGateRef.current.onPossibleFirstInsert({
+        nativeIsComposing,
+        previousValue: lastValueRef.current,
+        insertedOrCurrent: currentText,
+        inputType: (event?.nativeEvent as InputEvent | undefined)?.inputType,
+      })
+      if (isComposingRef.current || nativeIsComposing || imeGateRef.current.isComposing) {
+        setIsImePending(false)
+        return
+      }
+      if (imeGateRef.current.shouldSkipCommit(false)) {
+        setIsImePending(true)
+        return
+      }
+      commitInput()
+    }, [commitInput])
+
+    // Handle composition (IME). During composition the React `value` stays empty
+    // (we deliberately skip onChange), but the browser shows provisional text in
+    // the contenteditable — hide the placeholder overlay so it doesn't cover IME.
     const handleCompositionStart = React.useCallback(() => {
-      isComposing.current = true
+      imeGateRef.current.onCompositionStart()
+      isComposingRef.current = true
+      setIsImePending(false)
+      setIsComposing(true)
     }, [])
 
     const handleCompositionEnd = React.useCallback(() => {
-      isComposing.current = false
-      handleInput()
-    }, [handleInput])
+      imeGateRef.current.onCompositionEnd()
+      isComposingRef.current = false
+      setIsImePending(false)
+      setIsComposing(false)
+      commitInput()
+    }, [commitInput])
+
+    const commitPendingFirstKeyIfIdle = React.useCallback(() => {
+      if (!imeGateRef.current.isPending || imeGateRef.current.isComposing || isComposingRef.current) {
+        return
+      }
+      setIsImePending(false)
+      if (imeGateRef.current.consumeDeferredCommit()) {
+        commitInput()
+      }
+    }, [commitInput])
 
     const handleKeyDownInternal = React.useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (isEscapeDuringComposition(e, isComposing.current)) {
+      imeGateRef.current.onKeyDown({
+        key: e.key,
+        keyCode: e.keyCode,
+        which: e.which,
+        isComposing: e.nativeEvent.isComposing,
+        previousValue: lastValueRef.current,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+      })
+      if (imeGateRef.current.isPending) setIsImePending(true)
+      if (isEscapeDuringComposition(e, isComposingRef.current || imeGateRef.current.isComposing)) {
         e.stopPropagation()
         return
       }
@@ -640,10 +793,14 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       onKeyDown?.(e)
     }, [onKeyDown])
 
+    const handleKeyUpInternal = React.useCallback(() => {
+      commitPendingFirstKeyIfIdle()
+    }, [commitPendingFirstKeyIfIdle])
+
     // Handle paste - delegate files to parent, manually insert plain text
     const handlePasteInternal = React.useCallback((e: React.ClipboardEvent) => {
       // Check if we have files - let parent handle that
-      const hasFiles = e.clipboardData?.files && e.clipboardData.files.length > 0
+      const hasFiles = clipboardHasFiles(e.clipboardData)
       if (hasFiles && onPaste) {
         e.preventDefault()
         onPaste(e)
@@ -655,7 +812,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       const text = e.clipboardData?.getData('text/plain')
       if (!text) return
-      onTextPaste?.(text)
 
       // Check if text is too long - convert to file attachment instead
       const lineCount = text.split('\n').length
@@ -668,61 +824,91 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       // native undo stack so CMD+Z works after paste. Manual DOM manipulation
       // (range.insertNode) bypasses the undo history.
       document.execCommand('insertText', false, text)
-    }, [onPaste, onLongTextPaste, onTextPaste])
+    }, [onPaste, onLongTextPaste])
 
     // Handle focus
     const handleFocus = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-      setIsFocused(true)
       // Tell browser to use <br> instead of <div> for line breaks.
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
+      const editor = divRef.current
+      if (editor && isEmptyComposerValue(lastValueRef.current)) {
+        runInternalUpdate(() => ensureEmptyEditorAnchor(editor))
+      }
       onFocus?.(e)
     }, [onFocus])
 
     // Handle blur
     const handleBlur = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-      setIsFocused(false)
+      commitPendingFirstKeyIfIdle()
+      if (!isComposingRef.current && !imeGateRef.current.isComposing) {
+        setIsImePending(false)
+      }
       onBlur?.(e)
-    }, [onBlur])
+    }, [commitPendingFirstKeyIfIdle, onBlur])
 
     // Sync value from props (when parent updates value externally)
     React.useEffect(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
       if (isInternalUpdate.current) return
+      if (lastValueRef.current !== safeValue && (isComposingRef.current || imeGateRef.current.shouldSkipCommit())) {
+        imeGateRef.current.reset()
+        isComposingRef.current = false
+        setIsComposing(false)
+        setIsImePending(false)
+      } else if (isComposingRef.current || imeGateRef.current.shouldSkipCommit()) {
+        return
+      }
       if (lastValueRef.current === safeValue) return
 
       // External value change - update content
       lastValueRef.current = safeValue
+      setIsEditorEmpty(isEmptyComposerValue(safeValue))
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
-      const html = textToHTML(safeValue, skills, sources, workspaceId)
-      divRef.current.innerHTML = html || '<br>'
-
-      // Restore cursor position after innerHTML update.
-      // Only restore if:
-      // 1. We have a pending position from setSelectionRange (explicit programmatic positioning), OR
-      // 2. The element is actually focused (user is actively editing)
-      // This prevents stealing focus during session changes when search is active.
-      if (pendingCursorRef.current !== null || document.activeElement === divRef.current) {
-        const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
-        setCursorPosition(divRef.current, cursorPos)
-        pendingCursorRef.current = null // Clear after use
-      }
+      const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === editor
+      runInternalUpdate(() => {
+        writeEditorContent(editor, safeValue, skills, sources, workspaceId, false)
+        if (shouldPlaceCaret) {
+          if (isEmptyComposerValue(safeValue)) {
+            ensureEmptyEditorAnchor(editor)
+            pendingCursorRef.current = null
+          } else {
+            const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
+            setCursorPosition(editor, cursorPos)
+            pendingCursorRef.current = null
+          }
+        }
+      })
     }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
-      const html = textToHTML(safeValue, skills, sources, workspaceId)
-      divRef.current.innerHTML = html || '<br>'
+      runInternalUpdate(() => {
+        writeEditorContent(
+          editor,
+          safeValue,
+          skills,
+          sources,
+          workspaceId,
+          isEmptyComposerValue(safeValue) && document.activeElement === editor
+        )
+      })
       lastValueRef.current = safeValue
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Handle selection changes to highlight badges when selected
     React.useEffect(() => {
-      // Same tint as the text selection (::selection uses --selection)
-      const getSelectionColor = () => 'var(--selection)'
+      // Get selection color from CSS variable (accent with transparency)
+      const getSelectionColor = () => {
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+        // Return accent color with 40% opacity
+        return accent ? `oklch(${accent.replace('oklch(', '').replace(')', '')} / 0.4)` : 'rgba(99, 102, 241, 0.4)'
+      }
 
       const handleSelectionChange = () => {
         if (!divRef.current) return
@@ -746,10 +932,10 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
           if (isSelected) {
             badge.style.backgroundColor = getSelectionColor()
-            badge.classList.remove('bg-raised')
+            badge.classList.remove('bg-background')
           } else {
             badge.style.backgroundColor = ''
-            badge.classList.add('bg-raised')
+            badge.classList.add('bg-background')
           }
         })
       }
@@ -758,14 +944,24 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       return () => document.removeEventListener('selectionchange', handleSelectionChange)
     }, [])
 
-    // Show placeholder when input is empty (regardless of focus state)
-    const showPlaceholder = !safeValue
+    // Show placeholder only when truly empty and not mid-IME composition.
+    // CJK IME keeps React value empty until compositionend; provisional text
+    // still lives in the contenteditable and must not sit under a placeholder.
+    const showPlaceholder = shouldShowPlaceholder(
+      safeValue,
+      isEditorEmpty,
+      isComposing,
+      isImePending
+    )
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
-      if (!placeholder) return [t("chatInput.placeholder.typeMessage")]
-      return Array.isArray(placeholder) ? placeholder : [placeholder]
-    }, [placeholder])
+      const defaultPlaceholder = t("chatInput.placeholder.typeMessage")
+      if (Array.isArray(placeholder)) {
+        return placeholder.length > 0 ? placeholder : [defaultPlaceholder]
+      }
+      return placeholder ? [placeholder] : [defaultPlaceholder]
+    }, [placeholder, t])
 
     // Check if value contains any mentions (badges) to adjust line height
     const hasMentions = React.useMemo(() => {
@@ -780,31 +976,33 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           contentEditable={!disabled}
           suppressContentEditableWarning
           tabIndex={disabled ? -1 : 0}
-          // Disable auto-capitalization/correction that breaks IME (e.g. CJK pinyin) input (#837/#878)
-          autoCapitalize="none"
-          autoCorrect="off"
           className={cn(
             'outline-none text-sm whitespace-pre-wrap break-words',
             'min-h-[1.5em]',
             disabled && 'opacity-50 cursor-not-allowed',
-            // Make text transparent when showing placeholder (so caret is still visible)
-            showPlaceholder && 'text-transparent caret-foreground',
             className
           )}
           // Use inline style for line-height to override text-sm's built-in line-height
-          style={{ lineHeight: 1.25, ...style }}
+          style={{ lineHeight: 1.25 }}
+          onBeforeInput={handleBeforeInput}
           onInput={handleInput}
           onKeyDown={handleKeyDownInternal}
+          onKeyUp={handleKeyUpInternal}
           onFocus={handleFocus}
           onBlur={handleBlur}
           onPaste={handlePasteInternal}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           aria-disabled={disabled}
-          aria-placeholder={Array.isArray(placeholder) ? placeholder[0] : placeholder}
+          aria-placeholder={placeholderArray[0]}
           role="textbox"
           aria-multiline="true"
           {...restProps}
+          // Keep these after forwarded props so callers cannot accidentally
+          // re-enable first-letter processing and break CJK IME composition.
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
         />
         {/* Rotating placeholder overlay - visible when empty, even when focused */}
         {showPlaceholder && (
@@ -812,7 +1010,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
             placeholders={placeholderArray}
             intervalMs={5000}
             className={cn(
-              'absolute inset-0 text-sm text-tertiary pointer-events-none select-none',
+              'absolute inset-0 text-sm text-muted-foreground pointer-events-none select-none',
               className
             )}
           />

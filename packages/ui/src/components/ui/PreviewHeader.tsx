@@ -11,7 +11,21 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { X, type LucideIcon } from 'lucide-react'
+import { usePlatform } from '../../context/PlatformContext'
 import { cn } from '../../lib/utils'
+
+/** Keep preview chrome left of the Windows overlay caption buttons (#356). */
+export function mergePreviewHeaderStyle(
+  height: number,
+  windowsCaptionInsetPadding: string | undefined,
+  style?: React.CSSProperties,
+): React.CSSProperties {
+  return {
+    height,
+    ...(windowsCaptionInsetPadding ? { paddingRight: windowsCaptionInsetPadding } : {}),
+    ...style,
+  }
+}
 
 /**
  * Badge variants using semantic colors
@@ -131,13 +145,14 @@ export function PreviewHeader({
   style,
 }: PreviewHeaderProps) {
   const { t } = useTranslation()
+  const { windowsCaptionInsetPadding } = usePlatform()
   return (
     <div
       className={cn(
         'shrink-0 flex items-center justify-between px-3',
         className
       )}
-      style={{ height, ...style }}
+      style={mergePreviewHeaderStyle(height, windowsCaptionInsetPadding, style)}
     >
       {/* Left side - space for traffic lights on macOS, flex-1 to balance with right side */}
       <div className="flex-1 min-w-[70px]" />

@@ -21,9 +21,7 @@ const SELECTED_STORAGE_KEY = 'playground-selected-component'
 const VARIANTS_SIDEBAR_KEY = 'playground-variants-sidebar-open'
 
 const FALLBACK_THEME_OPTIONS = [
-  { value: 'default', label: 'Craft Agents' },
-  { value: 'craft', label: 'Craft' },
-  { value: 'paper', label: 'Paper' },
+  { value: 'default', label: 'Default' },
   { value: 'catppuccin', label: 'Catppuccin' },
   { value: 'dracula', label: 'Dracula' },
   { value: 'ghostty', label: 'Ghostty' },
@@ -49,9 +47,16 @@ export function PlaygroundApp() {
     setWorkspaceColorTheme,
     setPreviewColorTheme,
     activeWorkspaceId,
+    setMode,
   } = useTheme()
+  const requestedAppearance = React.useMemo(
+    () => new URLSearchParams(window.location.search).get('appearance'),
+    [],
+  )
   const [presetThemes, setPresetThemes] = React.useState<PresetTheme[]>([])
   const [selectedId, setSelectedId] = React.useState<string | null>(() => {
+    const requested = new URLSearchParams(window.location.search).get('component')
+    if (requested && getComponentById(requested)) return requested
     // Try to restore from localStorage
     try {
       const stored = localStorage.getItem(SELECTED_STORAGE_KEY)
@@ -67,8 +72,19 @@ export function PlaygroundApp() {
     }
     return null
   })
-  const [props, setProps] = React.useState<Record<string, unknown>>({})
-  const [selectedVariant, setSelectedVariant] = React.useState<string | null>(null)
+  const [props, setProps] = React.useState<Record<string, unknown>>(() => {
+    const params = new URLSearchParams(window.location.search)
+    const component = getComponentById(params.get('component') ?? '')
+    if (!component) return {}
+    const defaults: Record<string, unknown> = {}
+    for (const prop of component.props) defaults[prop.name] = prop.defaultValue
+    const variant = component.variants?.find(entry => entry.name === params.get('variant'))
+    return { ...defaults, ...variant?.props }
+  })
+  const [selectedVariant, setSelectedVariant] = React.useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('variant')
+  })
   const [variantsSidebarOpen, setVariantsSidebarOpen] = React.useState(() => {
     try {
       const stored = localStorage.getItem(VARIANTS_SIDEBAR_KEY)
@@ -118,6 +134,10 @@ export function PlaygroundApp() {
   }, [presetThemes])
 
   React.useEffect(() => {
+    if (requestedAppearance === 'light' || requestedAppearance === 'dark') setMode(requestedAppearance)
+  }, [requestedAppearance, setMode])
+
+  React.useEffect(() => {
     return () => {
       setPreviewColorTheme(null)
     }
@@ -136,19 +156,6 @@ export function PlaygroundApp() {
     }
   }, [selectedId])
 
-  // A crashing preview must not reopen on every reload: drop it from the persisted selection
-  // (it stays selected in this tab, showing the preview's error panel).
-  const handlePreviewCrash = React.useCallback((componentId: string, error: Error) => {
-    console.error(`[Playground] Preview "${componentId}" crashed:`, error)
-    try {
-      if (localStorage.getItem(SELECTED_STORAGE_KEY) === componentId) {
-        localStorage.removeItem(SELECTED_STORAGE_KEY)
-      }
-    } catch {
-      // Ignore storage errors
-    }
-  }, [])
-
   // Persist variants sidebar state
   React.useEffect(() => {
     try {
@@ -159,6 +166,10 @@ export function PlaygroundApp() {
   }, [variantsSidebarOpen])
 
   const selectedComponent = selectedId ? (getComponentById(selectedId) ?? null) : null
+  const frameStage = React.useMemo(
+    () => new URLSearchParams(window.location.search).get('frame') === 'stage',
+    [],
+  )
 
   // Reset props when component changes
   React.useEffect(() => {
@@ -167,8 +178,13 @@ export function PlaygroundApp() {
       for (const prop of selectedComponent.props) {
         defaults[prop.name] = prop.defaultValue
       }
-      setProps(defaults)
-      setSelectedVariant(null)
+      const requestedId = new URLSearchParams(window.location.search).get('component')
+      const requestedVariant = new URLSearchParams(window.location.search).get('variant')
+      const variant = selectedComponent.id === requestedId
+        ? selectedComponent.variants?.find(entry => entry.name === requestedVariant)
+        : undefined
+      setProps({ ...defaults, ...variant?.props })
+      setSelectedVariant(variant?.name ?? null)
     }
   }, [selectedComponent])
 
@@ -204,6 +220,15 @@ export function PlaygroundApp() {
     }
 
     setColorTheme(nextTheme)
+  }
+
+  if (frameStage && selectedComponent) {
+    const Stage = selectedComponent.component
+    return (
+      <div className="h-dvh bg-background text-foreground">
+        <Stage {...props} />
+      </div>
+    )
   }
 
   return (
@@ -259,7 +284,6 @@ export function PlaygroundApp() {
           <ComponentPreview
             component={selectedComponent}
             props={props}
-            onCrash={handlePreviewCrash}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">

@@ -1,34 +1,37 @@
 import * as React from 'react'
-import { Button } from '@/components/ui/button'
 import { useTranslation } from 'react-i18next'
-import { DatabaseZap } from 'lucide-react'
+import { DatabaseZap, LoaderCircle } from 'lucide-react'
+import { toast } from 'sonner'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { EntityPanel } from '@/components/ui/entity-panel'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
-import { cn } from '@/lib/utils'
+import { EntityListBadge } from '@/components/ui/entity-list-badge'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { sourceSelection } from '@/hooks/useEntitySelection'
 import { SourceMenu } from './SourceMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
+import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig, type EditContextKey } from '@/components/ui/EditPopover'
+import { readEditPopoverTriggerAnchor } from '@/components/ui/edit-popover-layout'
+import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type { LoadedSource, SourceConnectionStatus, SourceFilter } from '../../../shared/types'
 
-/** Source type, shown as the row's trailing meta (MCP · API · Folder) */
-const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
-  mcp: 'sourcesList.typeMcp',
-  api: 'sourcesList.typeApi',
-  local: 'sourcesList.typeLocal',
+const SOURCE_TYPE_CONFIG: Record<string, { labelKey: string; colorClass: string }> = {
+  mcp: { labelKey: 'sourcesList.typeMcp', colorClass: 'bg-accent/10 text-accent' },
+  api: { labelKey: 'sourcesList.typeApi', colorClass: 'bg-success/10 text-success' },
+  local: { labelKey: 'sourcesList.typeLocal', colorClass: 'bg-info/10 text-info' },
 }
 
-/** A state other than connected replaces the description on the second line, in its status color */
-const SOURCE_STATUS_CONFIG: Record<SourceConnectionStatus, { labelKey: string; textClass: string } | null> = {
-  connected: null,
-  needs_auth: { labelKey: 'sourcesList.statusAuthRequired', textClass: 'text-info' },
-  failed: { labelKey: 'sourcesList.statusDisconnected', textClass: 'text-destructive' },
-  untested: { labelKey: 'sourcesList.statusNotTested', textClass: 'text-tertiary' },
-  local_disabled: { labelKey: 'sourcesList.statusDisabled', textClass: 'text-tertiary' },
+const SOURCE_STATUS_CONFIG: Record<string, { labelKey: string; colorClass: string } | null> = {
+  connecting: { labelKey: 'common.connecting', colorClass: 'bg-info/10 text-info' },
+  connected: { labelKey: 'sourcesList.statusConnected', colorClass: 'bg-success/10 text-success' },
+  needs_auth: { labelKey: 'sourcesList.statusAuthRequired', colorClass: 'bg-warning/10 text-warning' },
+  failed: { labelKey: 'sourcesList.statusConnectionFailed', colorClass: 'bg-destructive/10 text-destructive' },
+  untested: { labelKey: 'sourcesList.statusNotTested', colorClass: 'bg-foreground/10 text-foreground/50' },
+  local_disabled: { labelKey: 'sourcesList.statusDisabled', colorClass: 'bg-foreground/10 text-foreground/50' },
 }
 
 const SOURCE_TYPE_FILTER_LABEL_KEYS: Record<string, string> = {
@@ -46,6 +49,10 @@ export interface SourcesListPanelProps {
   selectedSourceSlug?: string | null
   localMcpEnabled?: boolean
   className?: string
+  /** Controlled open state for copy-from-workspace dialog (header button) */
+  copyFromOpen?: boolean
+  onCopyFromOpenChange?: (open: boolean) => void
+  onImportFromFile?: () => void
 }
 
 export function SourcesListPanel({
@@ -57,15 +64,37 @@ export function SourcesListPanel({
   selectedSourceSlug,
   localMcpEnabled = true,
   className,
+  copyFromOpen: copyFromOpenProp,
+  onCopyFromOpenChange,
+  onImportFromFile,
 }: SourcesListPanelProps) {
   const { t } = useTranslation()
   const { workspaces, activeWorkspaceId } = useAppShellContext()
   const hasOtherWorkspaces = workspaces.length > 1
+  const hasOtherLocalWorkspaces = workspaces.some(
+    (w) => w.id !== activeWorkspaceId && !w.remoteServer,
+  )
 
   // Send to Workspace dialog state
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
+  const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
+  const [exportResourceSlug, setExportResourceSlug] = React.useState<string | null>(null)
+  const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
+  const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
+  const rename = useDisplayTitleRename('source', activeWorkspaceId)
+  const [addSourceOpen, setAddSourceOpen] = React.useState(false)
+  const [addSourceAnchor, setAddSourceAnchor] = React.useState<{ left: number; top: number } | null>(null)
+  const addSourceButtonRef = React.useRef<HTMLButtonElement>(null)
+  const addSourceKey = sourceFilter?.kind === 'type'
+    ? `add-source-${sourceFilter.sourceType}` as EditContextKey
+    : 'add-source'
+
+  const openAddSource = React.useCallback(() => {
+    setAddSourceAnchor(readEditPopoverTriggerAnchor(addSourceButtonRef.current?.getBoundingClientRect()))
+    setAddSourceOpen(true)
+  }, [])
 
   const filteredSources = React.useMemo(() => {
     if (!sourceFilter) return sources
@@ -83,6 +112,21 @@ export function SourcesListPanel({
 
   return (
     <>
+    {workspaceRootPath && addSourceOpen && (
+      <EditPopover
+        align="center"
+        open={addSourceOpen}
+        onOpenChange={setAddSourceOpen}
+        trigger={
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed h-0 w-0"
+            style={{ left: addSourceAnchor?.left ?? 0, top: addSourceAnchor?.top ?? 0 }}
+          />
+        }
+        {...getEditConfig(addSourceKey, workspaceRootPath)}
+      />
+    )}
     <EntityPanel<LoadedSource>
       items={filteredSources}
       getId={(s) => s.config.slug}
@@ -98,56 +142,104 @@ export function SourcesListPanel({
           description={t('sourcesList.emptyDescription')}
           docKey="sources"
         >
-          {workspaceRootPath && (
-            <EditPopover
-              align="center"
-              trigger={
-                <Button variant="secondary">
-                  {t('sourcesList.addSource')}
-                </Button>
-              }
-              {...getEditConfig(
-                sourceFilter?.kind === 'type' ? `add-source-${sourceFilter.sourceType}` as EditContextKey : 'add-source',
-                workspaceRootPath
-              )}
-            />
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {workspaceRootPath && (
+              <button
+                ref={addSourceButtonRef}
+                type="button"
+                onClick={openAddSource}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('sourcesList.addSource')}
+              </button>
+            )}
+            {onImportFromFile && (
+              <button
+                type="button"
+                onClick={onImportFromFile}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('fileImport.mcpTitle')}
+              </button>
+            )}
+            {hasOtherLocalWorkspaces && (
+              <button
+                type="button"
+                onClick={() => setCopyFromOpen(true)}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('sourcesList.copyFromWorkspace')}
+              </button>
+            )}
+          </div>
         </EntityListEmptyScreen>
       }
       mapItem={(source) => {
         const connectionStatus = deriveConnectionStatus(source, localMcpEnabled)
-        const typeLabelKey = SOURCE_TYPE_LABEL_KEYS[source.config.type]
-        const statusConfig = SOURCE_STATUS_CONFIG[connectionStatus]
-        const description = source.config.tagline || source.config.provider || ''
-        const connectionError = source.config.connectionError
+        const typeConfig = SOURCE_TYPE_CONFIG[source.config.type]
+        const statusConfig = connectionStatus === 'connected' && source.config.type !== 'mcp'
+          ? null
+          : SOURCE_STATUS_CONFIG[connectionStatus]
+        const authenticating = connectionStatus === 'connecting'
+          && source.config.mcp?.authType !== undefined
+          && source.config.mcp.authType !== 'none'
+        const authFailed = connectionStatus === 'needs_auth' && Boolean(source.config.connectionError)
+        const statusLabel = authenticating
+          ? t('sourcesList.statusAuthenticating')
+          : authFailed
+            ? t('sourcesList.statusAuthFailed')
+            : statusConfig ? t(statusConfig.labelKey) : ''
+        const subtitle = source.config.tagline || source.config.provider || ''
+        const title = resolveSourceTitle(source)
         return {
           icon: <SourceAvatar source={source} size="sm" />,
-          title: source.config.name,
-          titleTrailing: typeLabelKey ? t(typeLabelKey) : undefined,
-          subtitle: statusConfig ? (
-            connectionError ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className={cn('cursor-default', statusConfig.textClass)}>{t(statusConfig.labelKey)}</span>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-xs">{connectionError}</TooltipContent>
-              </Tooltip>
-            ) : (
-              <span className={statusConfig.textClass}>{t(statusConfig.labelKey)}</span>
-            )
-          ) : description || undefined,
+          title,
+          badges: (
+            <>
+              {typeConfig && <EntityListBadge colorClass={typeConfig.colorClass}>{t(typeConfig.labelKey)}</EntityListBadge>}
+              {statusConfig && (
+                <EntityListBadge colorClass={statusConfig.colorClass} tooltip={source.config.connectionError || undefined} className="cursor-default">
+                  <span className="inline-flex items-center gap-1" role="status" aria-live="polite">
+                    {connectionStatus === 'connecting' && (
+                      <LoaderCircle className="h-3 w-3 motion-safe:animate-spin" aria-hidden="true" />
+                    )}
+                    {statusLabel}
+                  </span>
+                </EntityListBadge>
+              )}
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{source.config.slug}</span>
+              {subtitle && <span className="truncate">{subtitle}</span>}
+            </>
+          ),
           menu: (
             <SourceMenu
               sourceSlug={source.config.slug}
-              sourceName={source.config.name}
+              sourceName={title}
               onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://sources/source/${source.config.slug}?window=focused`)}
               onShowInFinder={() => window.electronAPI.showInFolder(source.folderPath)}
+              onRename={() => rename.start(source.config.slug, {
+                displayTitle: source.displayTitle,
+                defaultTitle: source.config.name,
+              })}
               onDelete={() => onDeleteSource(source.config.slug)}
               onSendToWorkspace={hasOtherWorkspaces ? () => {
                 setSendResourceSlug(source.config.slug)
-                setSendResourceLabel(source.config.name)
+                setSendResourceLabel(title)
                 setSendDialogOpen(true)
               } : undefined}
+              onExport={() => setExportResourceSlug(source.config.slug)}
+              onRetryConnection={source.config.type === 'mcp'
+                && (connectionStatus === 'failed' || authFailed)
+                ? () => {
+                  if (!activeWorkspaceId) return
+                  void window.electronAPI.retryMcpConnection(activeWorkspaceId, source.config.slug)
+                    .catch(error => {
+                      toast.error(t('sourcesList.statusConnectionFailed'), {
+                        description: error instanceof Error ? error.message : String(error),
+                      })
+                    })
+                }
+                : undefined}
             />
           ),
         }
@@ -166,6 +258,24 @@ export function SourcesListPanel({
         activeWorkspaceId={activeWorkspaceId}
       />
     )}
+
+    <CopyResourcesFromWorkspaceDialog
+      open={copyFromOpen}
+      onOpenChange={setCopyFromOpen}
+      workspaces={workspaces}
+      activeWorkspaceId={activeWorkspaceId}
+      resourceType="source"
+    />
+    {exportResourceSlug && activeWorkspaceId && (
+      <ResourceTransferDialog
+        open
+        mode="export"
+        workspaceId={activeWorkspaceId}
+        initialSelection={[{ type: 'source', id: exportResourceSlug }]}
+        onOpenChange={(isOpen) => { if (!isOpen) setExportResourceSlug(null) }}
+      />
+    )}
+    {rename.dialog}
     </>
   )
 }

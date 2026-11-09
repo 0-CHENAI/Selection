@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 import type { ActivityItem } from '../../components/chat/TurnCard'
-import { extractOverlayCards } from '../tool-parsers'
+import { extractOverlayCards, extractOverlayData } from '../tool-parsers'
 import type { OverlayData } from '../tool-parsers'
 
 function makeActivity(overrides: Partial<ActivityItem>): ActivityItem {
@@ -89,5 +89,16 @@ describe('extractOverlayCards', () => {
     if (output?.data.type === 'generic') {
       expect(output.data.content).toBe(markdownText)
     }
+  })
+
+  it('keeps thinking text as a scrollable markdown document, even when it looks like JSON', () => {
+    const content = '{ "not": "a tool result" }\n\n继续核对 **签名**。'
+    const data = extractOverlayData(makeActivity({
+      type: 'thinking',
+      toolName: undefined,
+      toolInput: undefined,
+      content,
+    }))
+    expect(data).toMatchObject({ type: 'document', content, filePath: '' })
   })
 })

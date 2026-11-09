@@ -6,11 +6,11 @@ Invoke a secondary LLM for focused subtasks. The tool loads file content automat
 
 | Use Case | Model | Features |
 |----------|-------|----------|
-| Summarize large file | haiku | `attachments` |
-| Classify content | haiku | `outputFormat: "classification"` |
-| Extract structured data | haiku | `outputSchema` |
-| Deep analysis | sonnet/opus | `thinking: true` (API key only) |
-| Parallel processing | any | Multiple calls in one message |
+| Summarize large file | current session (or a smaller model if you pass one) | `attachments` |
+| Classify content | current session (or a smaller model if you pass one) | `outputFormat: "classification"` |
+| Extract structured data | current session (or a smaller model if you pass one) | `outputSchema` |
+| Deep analysis | current session | `thinking: true` (API key only) |
+| Parallel processing | current session unless you pass `model` | Multiple calls in one message |
 
 ## Authentication Paths
 
@@ -19,12 +19,12 @@ Features depend on how you authenticate:
 | Feature | API Key | OAuth |
 |---------|---------|-------|
 | Text attachments | Yes | Yes |
-| Image attachments | Yes | No |
+| Image attachments | Included when the resolved model has vision enabled, including Selection Backend | Included when the resolved model has vision enabled. Transport name and OAuth vs API key do not reject images |
 | Structured output | Guaranteed (tool_choice) | Prompt-based |
 | Extended thinking | Yes | No |
 | All models | Yes | Yes |
 
-- **API key**: Full features via direct Anthropic SDK
+- **API key**: Full features via the configured LLM connection
 - **OAuth**: Basic features via agent-native callback
 
 ## Parameters
@@ -33,7 +33,7 @@ Features depend on how you authenticate:
 |-----------|------|-------------|
 | `prompt` | string | Instructions for the LLM (required) |
 | `attachments` | array | File/image paths to include |
-| `model` | string | Any model from the model registry. Defaults to Haiku (fastest) |
+| `model` | string | Any model from the model registry. Omit to inherit the current session model |
 | `systemPrompt` | string | Optional system prompt |
 | `maxTokens` | number | Max output tokens (1-64000, default 4096) |
 | `temperature` | number | Sampling temperature 0-1 (ignored if thinking=true) |
@@ -51,9 +51,13 @@ attachments: ["/src/auth.ts"]
 // Large file - use line range (required for files >2000 lines)
 attachments: [{ path: "/logs/app.log", startLine: 1000, endLine: 1500 }]
 
-// Mix of files and images (API key only for images)
+// Mix of files and images. Images are included when the resolved model has vision enabled.
 attachments: ["/src/component.tsx", "/designs/mockup.png"]
 ```
+
+Slide and page screenshots for PowerPoint visual QA use this path only when `imageInput` in `<session_state>` is `enabled` (or this call accepts the image). Put the PNG, JPEG, or WebP in `attachments`. If image input is unavailable, the call reports the image capability error and G4 stays blocked.
+
+Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 
 ### Line Ranges
 
@@ -68,7 +72,7 @@ The tool will tell you the file structure if you try to load a file that's too l
 ### Supported Formats
 
 - **Text files**: Any UTF-8 encoded file (`.ts`, `.js`, `.py`, `.md`, `.json`, etc.)
-- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` (max 5MB each, API key only)
+- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` (max 5MB each, when the resolved model has vision enabled)
 
 ## Output Formats
 
@@ -159,7 +163,7 @@ call_llm({
 })
 ```
 
-### Analyze Screenshot (API Key Only)
+### Analyze a screenshot (vision-capable model)
 
 ```typescript
 call_llm({
@@ -180,7 +184,7 @@ call_llm({
 | thinking + structured output | Mutually exclusive |
 | thinking + haiku | Not supported (use Sonnet/Opus) |
 | thinking + OAuth | Not supported (use API key) |
-| images + OAuth | Not supported (use API key) |
+| images + a model without vision | Rejected with the image capability error. Do not OCR the file instead |
 
 ## Error Handling
 
@@ -205,7 +209,7 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 | thinking + outputFormat | Incompatible modes | Remove one option |
 | thinking + haiku | Haiku doesn't support thinking | Use Sonnet or Opus |
 | thinking + OAuth | OAuth doesn't support thinking | Use API key or remove thinking |
-| images + OAuth | OAuth doesn't support images | Use API key or remove images |
+| images + model without vision | Vision is not enabled for the resolved model | Use a vision-capable model. For slide visual QA, report image_capability_mismatch and do not OCR |
 | thinkingBudget without thinking | Missing thinking=true | Add `thinking: true` |
 | Invalid line range | startLine > endLine | Fix range values |
 | Unknown model | Model not in registry | Check available models in settings |
@@ -221,7 +225,7 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 
 ## When NOT to Use
 
-- You can reason through it yourself without needing a cheaper model
+- You can reason through it yourself without needing a separate call
 - The task requires your conversation context
-- You need tools (Read, Bash, Glob) - use Task tool with subagents instead
+- You need tools (Read, Bash, Glob) **and** the work is worth a child session — otherwise do it in the current session. Use `spawn_session` only for explicit split/parallel work or isolation that would pollute this chat. Simple processing of text you already have still belongs in `call_llm`.
 - Simple one-liner responses that don't need isolation

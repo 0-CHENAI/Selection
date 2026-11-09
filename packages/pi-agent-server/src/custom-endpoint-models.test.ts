@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS,
   buildCustomEndpointModelDef,
+  findCustomEndpointModelEntry,
   normalizeCustomEndpointModelEntry,
   stripPiPrefix,
 } from './custom-endpoint-models.ts'
@@ -10,6 +10,11 @@ describe('normalizeCustomEndpointModelEntry', () => {
   it('strips pi/ prefixes from string model IDs', () => {
     expect(stripPiPrefix('pi/my-model')).toBe('my-model')
     expect(normalizeCustomEndpointModelEntry('pi/my-model')).toEqual({ id: 'my-model' })
+  })
+
+  it('strips custom-endpoint/ prefixes from runtime IDs', () => {
+    expect(stripPiPrefix('custom-endpoint/Opus')).toBe('Opus')
+    expect(normalizeCustomEndpointModelEntry('custom-endpoint/Opus')).toEqual({ id: 'Opus' })
   })
 
   it('preserves per-model image support when enabled', () => {
@@ -46,9 +51,11 @@ describe('normalizeCustomEndpointModelEntry', () => {
 })
 
 describe('buildCustomEndpointModelDef', () => {
-  it('defaults custom endpoint models to text-only input', () => {
+  it('defaults unknown custom endpoint models to image input and 128k/8k limits', () => {
     const model = buildCustomEndpointModelDef('my-model')
-    expect(model.input).toEqual(['text'])
+    expect(model.input).toEqual(['text', 'image'])
+    expect(model.contextWindow).toBe(131_072)
+    expect(model.maxTokens).toBe(8_192)
   })
 
   it('enables image input when the connection explicitly opts in', () => {
@@ -61,42 +68,81 @@ describe('buildCustomEndpointModelDef', () => {
     expect(model.input).toEqual(['text'])
   })
 
-  it('lets per-model overrides enable image input and custom context window', () => {
-    const model = buildCustomEndpointModelDef('vision-model', undefined, { supportsImages: true, contextWindow: 262_144 })
+  it('clamps maxTokens to the context window', () => {
+    const oversized = buildCustomEndpointModelDef('tiny-window', undefined, {
+      contextWindow: 4_096,
+      maxTokens: 65_536,
+    })
+    expect(oversized.contextWindow).toBe(4_096)
+    expect(oversized.maxTokens).toBe(4_096)
+
+    const implicitDefault = buildCustomEndpointModelDef('tiny-window', undefined, {
+      contextWindow: 4_096,
+    })
+    expect(implicitDefault.maxTokens).toBe(4_096)
+  })
+
+  it('lets per-model overrides enable image input and custom token limits', () => {
+    const model = buildCustomEndpointModelDef('vision-model', undefined, {
+      supportsImages: true,
+      contextWindow: 262_144,
+      maxTokens: 65_536,
+    })
     expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(262_144)
+    expect(model.maxTokens).toBe(65_536)
   })
 
-  // Regression: craft-agents-oss#1100 — Pi caps compaction summaries at model.maxTokens,
-  // so a fixed 8192 made long-session compaction fail on custom endpoints.
-  it('caps output at the conservative default when the connection sets no maxTokens', () => {
-    expect(buildCustomEndpointModelDef('my-model').maxTokens).toBe(DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS)
+  it('infers image input for well-known vision names when no flag is set', () => {
+    const model = buildCustomEndpointModelDef('Opus')
+    expect(model.input).toEqual(['text', 'image'])
   })
 
-  it('honors the connection-level maxTokens override', () => {
-    expect(buildCustomEndpointModelDef('my-model', { maxTokens: 32_768 }).maxTokens).toBe(32_768)
+  it('lets a connection default of false beat the name heuristic', () => {
+    const model = buildCustomEndpointModelDef('Opus', { supportsImages: false })
+    expect(model.input).toEqual(['text'])
   })
 
-  it('ignores maxTokens values that are not positive integers', () => {
-    for (const maxTokens of [0, -1, 1.5, Number.NaN, '32768' as unknown as number]) {
-      expect(buildCustomEndpointModelDef('my-model', { maxTokens }).maxTokens).toBe(DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS)
-    }
+  it('omits the OpenAI-specific store parameter for compatible custom endpoints', () => {
+    const model = buildCustomEndpointModelDef('strict-gateway', undefined, undefined, 'openai-completions')
+    expect(model.compat).toEqual({ supportsStore: false, supportsDeveloperRole: false })
   })
 
-  // Regression: craft-agents-oss#1022 — strict OpenAI-compatible gateways 400 on the
-  // `store` param. supportsStore:false makes the pi-ai driver omit it entirely.
-  it('disables the store param for openai-completions endpoints', () => {
-    const model = buildCustomEndpointModelDef('gpt-model', undefined, undefined, 'openai-completions')
-    expect((model as { compat?: { supportsStore?: boolean } }).compat).toEqual({ supportsStore: false })
+  it('keeps empty thinking signatures on Anthropic-compatible custom endpoints', () => {
+    const model = buildCustomEndpointModelDef('anthropic-gateway', undefined, undefined, 'anthropic-messages')
+    expect(model.compat).toEqual({ allowEmptySignature: true })
+  })
+})
+
+describe('findCustomEndpointModelEntry', () => {
+  it('preserves supportsImages from the stored catalog when the runtime ID is prefixed', () => {
+    expect(findCustomEndpointModelEntry('pi/Opus', [
+      { id: 'Opus', supportsImages: true },
+    ])).toEqual({
+      id: 'Opus',
+      supportsImages: true,
+    })
   })
 
-  it('does not set store compat for anthropic-messages endpoints', () => {
-    const model = buildCustomEndpointModelDef('claude-model', undefined, undefined, 'anthropic-messages')
-    expect((model as { compat?: unknown }).compat).toBeUndefined()
+  it('does not promote inferred vision onto the catalog entry', () => {
+    expect(findCustomEndpointModelEntry('custom-endpoint/Opus', ['Opus'])).toEqual({
+      id: 'Opus',
+    })
   })
 
-  it('does not set store compat when the api is unspecified', () => {
-    const model = buildCustomEndpointModelDef('some-model')
-    expect((model as { compat?: unknown }).compat).toBeUndefined()
+  it('does not invent vision for unknown names', () => {
+    expect(findCustomEndpointModelEntry('pi/Laufry', ['Laufry'])).toEqual({
+      id: 'Laufry',
+    })
+  })
+
+  it('preserves stored catalog token limits when the runtime ID is prefixed', () => {
+    expect(findCustomEndpointModelEntry('custom-endpoint/DeepSeek-V4-Flash', [
+      { id: 'DeepSeek-V4-Flash', contextWindow: 262_144, maxTokens: 65_536 },
+    ])).toEqual({
+      id: 'DeepSeek-V4-Flash',
+      contextWindow: 262_144,
+      maxTokens: 65_536,
+    })
   })
 })

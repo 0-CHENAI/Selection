@@ -8,8 +8,9 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'fs'
-import { join, relative, dirname, sep } from 'path'
+import { join, relative, dirname, sep, resolve } from 'path'
 import { debug } from './debug.ts'
+import { isPathInside, resolveFsPath } from './paths.ts'
 
 /**
  * Maximum bundle size in bytes (~100MB).
@@ -80,6 +81,9 @@ export function validateBundleFile(file: BundleFile): string | null {
   if (typeof file.contentBase64 !== 'string') {
     return `Invalid contentBase64 for ${file.relativePath}`
   }
+  if (file.contentBase64.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.contentBase64)) {
+    return `Invalid base64 encoding for ${file.relativePath}`
+  }
   if (typeof file.size !== 'number' || file.size < 0) {
     return `Invalid size for ${file.relativePath}`
   }
@@ -106,6 +110,12 @@ export interface CollectOptions {
   skipFiles?: Set<string>
   /** Directory names to skip (exact match, e.g., 'tmp') */
   skipDirs?: Set<string>
+  /** Include dotfiles/directories. Defaults to false for backwards compatibility. */
+  includeHidden?: boolean
+  /** Reject symlinks instead of silently ignoring them. */
+  rejectSymlinks?: boolean
+  /** Additional filename predicate. Returning true skips the entry. */
+  shouldSkip?: (name: string, relativePath: string, isDirectory: boolean) => boolean
 }
 
 /**
@@ -127,10 +137,17 @@ export function collectDirectoryFiles(dir: string, options?: CollectOptions): Bu
 
     const entries = readdirSync(currentDir, { withFileTypes: true })
     for (const entry of entries) {
-      // Skip hidden files and directories
-      if (entry.name.startsWith('.')) continue
-
       const fullPath = join(currentDir, entry.name)
+      const relPath = toPortableRelPath(relative(dir, fullPath))
+
+      if (!options?.includeHidden && entry.name.startsWith('.')) continue
+      if (options?.shouldSkip?.(entry.name, relPath, entry.isDirectory())) continue
+      if (entry.isSymbolicLink()) {
+        if (options?.rejectSymlinks) {
+          throw new Error(`Symlink not allowed in bundle: ${relPath}`)
+        }
+        continue
+      }
 
       if (entry.isDirectory()) {
         if (skipDirs.has(entry.name)) continue
@@ -141,10 +158,8 @@ export function collectDirectoryFiles(dir: string, options?: CollectOptions): Bu
         try {
           const content = readFileSync(fullPath)
           const stat = statSync(fullPath)
-          const relPath = relative(dir, fullPath)
-
           files.push({
-            relativePath: toPortableRelPath(relPath),
+            relativePath: relPath,
             contentBase64: content.toString('base64'),
             size: stat.size,
           })
@@ -175,6 +190,9 @@ export function collectDirectoryFiles(dir: string, options?: CollectOptions): Bu
  * @throws Error if any file fails path validation (path traversal, absolute path, etc.)
  */
 export function restoreFiles(targetDir: string, files: BundleFile[]): void {
+  // NFC-resolve so Chinese path segments match filesystem form consistently
+  const resolvedTarget = resolveFsPath(targetDir)
+
   for (const file of files) {
     const error = validateBundleFile(file)
     if (error) {
@@ -182,10 +200,10 @@ export function restoreFiles(targetDir: string, files: BundleFile[]): void {
     }
 
     const nativePath = fromPortableRelPath(file.relativePath)
-    const fullPath = join(targetDir, nativePath)
+    const fullPath = resolve(resolvedTarget, nativePath)
 
-    // Safety: ensure resolved path is inside target dir
-    if (!fullPath.startsWith(targetDir + sep) && fullPath !== targetDir) {
+    // Unicode-safe containment check (startsWith fails on trailing slashes / NFC-NFD)
+    if (!isPathInside(resolvedTarget, fullPath)) {
       throw new Error(`Path escapes target directory: ${file.relativePath}`)
     }
 
@@ -195,7 +213,7 @@ export function restoreFiles(targetDir: string, files: BundleFile[]): void {
       mkdirSync(parentDir, { recursive: true })
     }
 
-    // Decode and write
+    // Decode and write as raw bytes (preserves UTF-8 Chinese content)
     const content = Buffer.from(file.contentBase64, 'base64')
     writeFileSync(fullPath, content)
   }

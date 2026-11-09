@@ -29,14 +29,18 @@ export function FabNewChat({ onClick, className }: FabNewChatProps) {
       aria-label={t("menu.newChat")}
       className={cn(
         "fixed right-4 z-30 size-14 rounded-full",
-        // The one primary treatment (spec D5): solid accent with its solved label color, floating elevation
-        "state-overlay motion-press bg-accent-solid text-on-accent shadow-elev-2",
+        "bg-accent text-white",
         "flex items-center justify-center",
+        "shadow-strong",
+        "transition-all duration-150",
+        "hover:scale-105 hover:shadow-tinted [--shadow-color:var(--accent-rgb)]",
+        "active:scale-95",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "bottom-[calc(env(safe-area-inset-bottom,0px)+1rem)]",
         className,
       )}
     >
-      <Plus className="size-6" strokeWidth={2.5} />
+      <Plus className="size-6 text-white" strokeWidth={2.5} />
     </button>,
     document.body,
   )

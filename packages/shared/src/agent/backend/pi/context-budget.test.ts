@@ -1,0 +1,340 @@
+import { describe, expect, it } from 'bun:test';
+import { normalizeContext, type Context } from '@earendil-works/pi-ai';
+import {
+  MIN_CONTEXT_RESERVE_TOKENS,
+  buildContextBudget,
+  calculateContextBudget,
+  calculateOverflowRetryMaxTokens,
+  contextSystemFingerprint,
+  contextToolsFingerprint,
+  estimateContextInputBreakdown,
+  estimateContextInputTokens,
+  estimateLocalContextTokens,
+  estimateTextTokensConservatively,
+  parseContextOverflow,
+  type ContextUsageAnchor,
+} from './context-budget.ts';
+
+describe('context output budget', () => {
+  const contextWindow = 262_144;
+  const inputTokens = 47_570;
+  const exactAvailable = contextWindow - inputTokens - MIN_CONTEXT_RESERVE_TOKENS;
+
+  it('keeps the exact safe boundary', () => {
+    expect(calculateContextBudget(contextWindow, exactAvailable, inputTokens)).toMatchObject({
+      maxOutputTokens: exactAvailable,
+      wasReduced: false,
+    });
+  });
+
+  it('keeps one token below the safe boundary', () => {
+    expect(calculateContextBudget(contextWindow, exactAvailable - 1, inputTokens)).toMatchObject({
+      maxOutputTokens: exactAvailable - 1,
+      wasReduced: false,
+    });
+  });
+
+  it('caps one token above the safe boundary', () => {
+    expect(calculateContextBudget(contextWindow, exactAvailable + 1, inputTokens)).toMatchObject({
+      maxOutputTokens: exactAvailable,
+      wasReduced: true,
+    });
+  });
+
+  it('does not reduce ordinary short-session output limits', () => {
+    const budget = buildContextBudget(272_000, 128_000, {
+      systemPrompt: 'You are a concise assistant.',
+      messages: [{ role: 'user', content: 'Hello', timestamp: 1 }],
+    });
+    expect(budget.maxOutputTokens).toBe(128_000);
+    expect(budget.wasReduced).toBe(false);
+  });
+
+  it('retains a usable reply budget at the 80% boundary of a small window', () => {
+    const budget = calculateContextBudget(8192, 4096, 6553);
+    expect(budget.reserveTokens).toBe(819);
+    expect(budget.maxOutputTokens).toBe(820);
+  });
+
+  it('normalizes malformed numeric inputs instead of propagating NaN', () => {
+    expect(calculateContextBudget(100_000, Number.NaN, Number.NaN)).toMatchObject({
+      estimatedInputTokens: 0,
+      maxOutputTokens: 1,
+      wasReduced: false,
+    });
+  });
+});
+
+describe('context input estimation', () => {
+  it('counts prompt and tool declarations carried in the new Pi transcript', () => {
+    const transcript = normalizeContext({
+      systemPrompt: '中文系统提示。'.repeat(100),
+      tools: [{ name: 'read', description: 'Read a file', parameters: { type: 'object' } }],
+      messages: [{ role: 'user', content: '继续', timestamp: 1 }],
+    });
+    const breakdown = estimateContextInputBreakdown(transcript);
+    expect(breakdown.systemPrompt).toBeGreaterThan(100);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(estimateContextInputTokens(transcript)).toBeGreaterThan(breakdown.systemPrompt + breakdown.tools);
+  });
+
+  it('counts system prompts, tool schemas, attachments, CJK, and long history', () => {
+    const context = {
+      systemPrompt: 'System '.repeat(400),
+      tools: [{
+        name: 'search',
+        description: 'Search a large catalog',
+        parameters: { type: 'object', properties: { query: { type: 'string' } } },
+      }],
+      messages: [
+        { role: 'user', content: [
+          { type: 'text', text: '请分析附件。' },
+          { type: 'image', data: 'base64', mimeType: 'image/png' },
+        ], timestamp: 1 },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Earlier answer' }],
+          api: 'openai-responses',
+          provider: 'openai',
+          model: 'test',
+          usage: {
+            input: 45_000,
+            output: 2_000,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 47_000,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: 'stop',
+          timestamp: 2,
+        },
+        { role: 'user', content: '继续。'.repeat(1_000), timestamp: 3 },
+      ],
+    } as Context;
+
+    expect(estimateTextTokensConservatively('中文abcde')).toBe(4);
+    expect(estimateContextInputTokens(context)).toBeGreaterThan(50_000);
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
+    expect(breakdown.systemPrompt + breakdown.tools + breakdown.messages)
+      .toBeLessThanOrEqual(estimateContextInputTokens(context));
+  });
+
+  it('counts base64-heavy user input before the provider request', () => {
+    const encoded = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.repeat(1875);
+    const context: Context = { messages: [{ role: 'user', content: encoded, timestamp: 1 }] };
+    expect(estimateTextTokensConservatively(encoded)).toBe(80_000);
+    expect(estimateContextInputTokens(context)).toBeGreaterThan(80_000);
+  });
+
+  it('splits Selection-owned prompt tags and tool names into optional rows', () => {
+    const context = {
+      systemPrompt: [
+        'You are a concise assistant.',
+        '## User Preferences - User has explicitly set these preferences, so adhere to them',
+        '',
+        '- Name: Ada',
+        '<project_context project="acme">',
+        'Keep replies short.',
+        '</project_context>',
+        '<available_skills>',
+        '- officecli (officecli): Read this skill first',
+        '  path: /tmp/SKILL.md',
+        '</available_skills>',
+      ].join('\n'),
+      tools: [
+        { name: 'bash', description: 'Run a shell command', parameters: { type: 'object' } },
+        { name: 'mcp__source__search', description: 'Search a connected source', parameters: { type: 'object' } },
+        { name: 'spawn_session', description: 'Start a child session', parameters: { type: 'object' } },
+      ],
+      messages: [
+        {
+          role: 'user',
+          content: '<session_transfer_summary>\nPrior workspace work.\n</session_transfer_summary>\nHello',
+          timestamp: 1,
+        },
+        {
+          role: 'user',
+          content: '<sources>\n知识库 (slug: cortex)\n</sources>\nWhat next?',
+          timestamp: 2,
+        },
+      ],
+    } as Context;
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.rules).toBeGreaterThan(0);
+    expect(breakdown.skills).toBeGreaterThan(0);
+    expect(breakdown.mcpTools).toBeGreaterThan(0);
+    expect(breakdown.subagents).toBeGreaterThan(0);
+    expect(breakdown.summarized).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
+  });
+});
+
+describe('provider overflow parsing and retry cap', () => {
+  const issueMessage =
+    'This model maximum context length is 262144 tokens. However, you requested 214575 output tokens and your prompt contains at least 47570 input tokens.';
+
+  it('parses the issue #143 provider counts', () => {
+    expect(parseContextOverflow(issueMessage)).toEqual({
+      contextWindow: 262_144,
+      inputTokens: 47_570,
+      requestedOutputTokens: 214_575,
+    });
+  });
+
+  it('derives a strictly lower retry budget with provider-side headroom', () => {
+    expect(calculateOverflowRetryMaxTokens(issueMessage, 262_144, 214_575)).toBe(206_382);
+  });
+
+  it('uses a bounded conservative reduction when counts are unavailable', () => {
+    expect(calculateOverflowRetryMaxTokens('context_length_exceeded', 262_144, 100_000)).toBe(75_000);
+  });
+
+  it('defers to compaction when useful output cannot fit', () => {
+    const message =
+      'maximum context length is 10000 tokens; prompt contains at least 9900 input tokens';
+    expect(calculateOverflowRetryMaxTokens(message, 10_000, 2_000)).toBeUndefined();
+  });
+});
+
+describe('context envelope classification', () => {
+  it('ignores inline and fenced examples before the actual catalog', () => {
+    const catalog = '<available_skills>\n- officecli: /skills/officecli/SKILL.md\n</available_skills>';
+    for (const fence of ['```', '~~~~']) {
+      const examples = `Read \`<available_skills>\` when needed.\n${fence}xml\n<available_skills>\nexample\n</available_skills>\n${fence}\nSystem rules stay here.`;
+      const result = estimateContextInputBreakdown({ systemPrompt: examples + '\n' + catalog, messages: [] });
+      expect(result.skills).toBe(estimateTextTokensConservatively(catalog));
+      expect(result.systemPrompt).toBeGreaterThanOrEqual(estimateTextTokensConservatively(examples));
+      expect(estimateContextInputBreakdown({ systemPrompt: examples, messages: [] }).skills).toBeUndefined();
+    }
+  });
+
+  it('counts tags in tool output and assistant text as conversation content', () => {
+    const content = [{ type: 'text', text: '<available_skills>\nnot a catalog\n</available_skills>' }];
+    const result = estimateContextInputBreakdown({ messages: [
+      { role: 'toolResult', toolName: 'Read', toolCallId: 'read-1', content, isError: false, timestamp: 1 },
+      { role: 'assistant', content, timestamp: 2 },
+    ] } as Context);
+    expect(result.skills).toBeUndefined();
+    expect(result.messages).toBeGreaterThan(0);
+  });
+});
+
+it('leaves fenced preferences examples in the system bucket', () => {
+  const systemPrompt = '```md\n## User Preferences\nExample preference\n```\nNormal instructions';
+  const result = estimateContextInputBreakdown({ systemPrompt, messages: [] });
+  expect(result.rules).toBeUndefined();
+  expect(result.systemPrompt).toBe(estimateTextTokensConservatively(systemPrompt));
+});
+
+function anchoredAssistant(timestamp: number, input: number, output = 20, cacheRead = 0, cacheWrite = 0) {
+  return {
+    role: 'assistant' as const,
+    content: [{ type: 'text' as const, text: 'abcd' }],
+    api: 'openai-responses' as const,
+    provider: 'openai',
+    model: 'test',
+    usage: {
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      totalTokens: 9_000_000,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: 'stop' as const,
+    timestamp,
+  };
+}
+
+describe('anchored context estimate', () => {
+  const context = {
+    systemPrompt: 'abcdefgh',
+    tools: [],
+    messages: [
+      { role: 'user' as const, content: 'abcd', timestamp: 1 },
+      anchoredAssistant(2, 100, 20, 5, 3),
+      { role: 'user' as const, content: 'abcdefgh', timestamp: 3 },
+    ],
+  } as Context;
+
+  const anchor: ContextUsageAnchor = {
+    promptTokens: 108,
+    outputTokens: 20,
+    messageTimestamp: 2,
+    systemFingerprint: contextSystemFingerprint(context),
+    toolsFingerprint: contextToolsFingerprint(context),
+    modelKey: 'openai/m',
+    connectionKey: 'conn',
+    branchRevision: 'compaction:1',
+  };
+  const options = {
+    anchor,
+    modelKey: 'openai/m',
+    connectionKey: 'conn',
+    branchRevision: 'compaction:1',
+    emaRatio: 1,
+  };
+
+  it('adds replayed output and the calibrated tail, ignoring totalTokens', () => {
+    const delta = estimateLocalContextTokens({ messages: [context.messages[2]!] });
+    expect(estimateContextInputTokens(context, options)).toBe(108 + 20 + delta);
+    expect(estimateContextInputTokens(context, { ...options, emaRatio: 2 })).toBe(108 + 20 + Math.ceil(delta * 2));
+    expect(estimateContextInputTokens(context)).toBe(108 + 20 + delta);
+  });
+
+  it('falls back to the full calibrated estimate when the anchor is invalidated', () => {
+    const full = (value: Context, ema = 1) => Math.ceil(estimateLocalContextTokens(value) * ema);
+    expect(estimateContextInputTokens(context, { ...options, anchor: null, emaRatio: 2 })).toBe(full(context, 2));
+    const changedSystem = { ...context, systemPrompt: 'changed system' } as Context;
+    expect(estimateContextInputTokens(changedSystem, options)).toBe(full(changedSystem));
+    const changedTools = { ...context, tools: [{ name: 'read', description: 'Read', parameters: { type: 'object' } }] } as Context;
+    expect(estimateContextInputTokens(changedTools, options)).toBe(full(changedTools));
+    expect(estimateContextInputTokens(context, { ...options, modelKey: 'openai/other' })).toBe(full(context));
+    expect(estimateContextInputTokens(context, { ...options, connectionKey: 'other' })).toBe(full(context));
+    expect(estimateContextInputTokens(context, { ...options, branchRevision: 'context_edit:9' })).toBe(full(context));
+    const removed = { ...context, messages: [context.messages[0]!, context.messages[2]!] } as Context;
+    expect(estimateContextInputTokens(removed, options)).toBe(full(removed));
+  });
+
+  it('drops an anchor whose usage cannot describe the visible prefix', () => {
+    const huge = {
+      systemPrompt: 's',
+      messages: [
+        { role: 'user' as const, content: '文'.repeat(8_000), timestamp: 1 },
+        anchoredAssistant(2, 100),
+        { role: 'user' as const, content: 'next', timestamp: 3 },
+      ],
+    } as Context;
+    expect(estimateContextInputTokens(huge)).toBe(estimateLocalContextTokens(huge));
+    const plausible = {
+      ...huge,
+      messages: [
+        huge.messages[0],
+        anchoredAssistant(2, 4_000),
+        huge.messages[2],
+      ],
+    } as Context;
+    const trusted = estimateContextInputTokens(plausible);
+    expect(trusted).toBeGreaterThan(4_000);
+    expect(trusted).toBeLessThan(8_000);
+  });
+
+  it('does not reuse assistant usage that is older than a later message', () => {
+    const stale = {
+      messages: [
+        { role: 'user' as const, content: 'Compacted summary', timestamp: 100 },
+        anchoredAssistant(2, 900_000),
+        { role: 'user' as const, content: 'Continue', timestamp: 101 },
+      ],
+    } as Context;
+    expect(estimateContextInputTokens(stale)).toBe(estimateLocalContextTokens(stale));
+    expect(estimateContextInputTokens(stale)).toBeLessThan(1_000);
+  });
+});

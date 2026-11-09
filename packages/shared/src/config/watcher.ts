@@ -43,7 +43,6 @@ import {
 import { permissionsConfigCache, getAppPermissionsDir } from '../agent/permissions-config.ts';
 import { getWorkspacePath, getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts';
 import type { LoadedSkill } from '../skills/types.ts';
-import { loadWorkspacePages } from '../pages/storage.ts';
 import { loadSkill, loadAllSkills, invalidateSkillsCache, skillNeedsIconDownload, downloadSkillIcon } from '../skills/storage.ts';
 import {
   loadStatusConfig,
@@ -153,14 +152,6 @@ export interface ConfigWatcherCallbacks {
   // Automations callbacks
   /** Called when automations.json changes */
   onAutomationsConfigChange?: (workspaceId: string) => void;
-
-  // Page callbacks
-  /**
-   * Called when any pages/{slug}/page.json changes (create/delete/refresh
-   * completion). page.json is the completion marker of a refresh run, so
-   * data/ churn (sqlite, snapshot tmp files) is deliberately NOT watched.
-   */
-  onPagesListChange?: (pages: import('../pages/types.ts').LoadedPage[]) => void;
 
   // Session callbacks
   /** Called when a session's JSONL header is modified externally (labels, name, flags, etc.) */
@@ -477,18 +468,6 @@ export class ConfigWatcher {
       } else if (file && /^icon\.(svg|png|jpg|jpeg)$/i.test(file)) {
         // Icon file changes also trigger a skill change (to update iconPath)
         this.debounce(`skill-icon:${slug}`, () => this.handleSkillChange(slug));
-      }
-      return;
-    }
-
-    // Pages changes: pages/{slug}/page.json is the ONLY trigger — a refresh
-    // run's last write is page.json, so reacting to it (and nothing else)
-    // means observers never see a half-written data/ directory. Slug-dir
-    // add/remove also fires (page created/deleted externally).
-    if (parts[0] === 'pages' && parts.length >= 2) {
-      const file = parts[2];
-      if (parts.length === 2 || file === 'page.json') {
-        this.debounce('pages-dir', () => this.handlePagesChange());
       }
       return;
     }
@@ -814,6 +793,7 @@ export class ConfigWatcher {
    */
   private handleSkillChange(slug: string): void {
     debug('[ConfigWatcher] Skill changed:', slug);
+    invalidateSkillsCache();
 
     const skill = loadSkill(this.workspaceDir, slug);
     this.callbacks.onSkillChange?.(slug, skill);
@@ -965,26 +945,6 @@ export class ConfigWatcher {
   private handleAutomationsConfigChange(): void {
     debug('[ConfigWatcher] automations config changed:', this.workspaceId);
     this.callbacks.onAutomationsConfigChange?.(this.workspaceId);
-  }
-
-  // ============================================================
-  // Page Handlers
-  // ============================================================
-
-  /**
-   * Handle a pages change (any page.json touched, or a page folder
-   * added/removed). Coarse by design: reload the full list once per
-   * debounce window.
-   */
-  private handlePagesChange(): void {
-    if (!this.callbacks.onPagesListChange) return;
-    try {
-      const pages = loadWorkspacePages(this.workspaceDir);
-      debug('[ConfigWatcher] pages changed:', this.workspaceId, `(${pages.length} pages)`);
-      this.callbacks.onPagesListChange(pages);
-    } catch (error) {
-      debug('[ConfigWatcher] Failed to reload pages:', error);
-    }
   }
 
   // ============================================================

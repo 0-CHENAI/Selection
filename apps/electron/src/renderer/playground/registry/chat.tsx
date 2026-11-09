@@ -1,28 +1,23 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ComponentEntry } from './types'
 import { AttachmentPreview } from '@/components/app-shell/AttachmentPreview'
 import { SetupAuthBanner } from '@/components/app-shell/SetupAuthBanner'
-import { TurnCard, type ActivityItem } from '@craft-agent/ui'
+import { LatticeLoader, TurnCard, type ActivityItem } from '@craft-agent/ui'
 import type { BackgroundTask } from '@/components/app-shell/ActiveTasksBar'
 import { ActiveOptionBadges } from '@/components/app-shell/ActiveOptionBadges'
 import { ChatInputZone, InputContainer } from '@/components/app-shell/input'
 import { setRecentWorkingDirs } from '@/components/app-shell/input/working-directory-history'
 import type { StructuredResponse } from '@/components/app-shell/input/structured/types'
 import { EmptyStateHint, getHintCount, getHintTemplate } from '@/components/chat/EmptyStateHint'
-import { NewChatEmptyState } from '@/components/app-shell/chat-display/TranscriptStates'
-import { NewChatSuggestions } from '@/components/app-shell/chat-display/NewChatSuggestions'
-import { pickNewChatSuggestions } from '@/components/app-shell/chat-display/new-chat-suggestions'
-import { TaskBrief } from '@/components/app-shell/chat-display/TaskBrief'
-import { taskBriefFromSpec } from '@/components/app-shell/chat-display/task-brief'
-import { CHAT_LAYOUT } from '@/config/layout'
-import { TASK_SPEC_SAMPLES, TASK_SPEC_SAMPLE_OPTIONS, type TaskSpecSample } from './samples/task-specs'
-import type { LoadedSource } from '@craft-agent/shared/sources/types'
 import { Button } from '@/components/ui/button'
 import { motion } from 'motion/react'
 import { ArrowUp, Paperclip, ChevronDown, Circle, Sparkles } from 'lucide-react'
 import type { LabelConfig } from '@craft-agent/shared/labels'
 import type { SessionStatus } from '@/config/session-status-config'
-import type { FileAttachment, PermissionRequest, PermissionMode } from '../../../shared/types'
+import type { FileAttachment, PermissionRequest, PermissionMode, LlmConnectionWithStatus } from '../../../shared/types'
+import { type ThinkingLevel, THINKING_LEVELS } from '@craft-agent/shared/agent/thinking-levels'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { cn } from '@/lib/utils'
 import { AppShellProvider } from '@/context/AppShellContext'
 import { ModalProvider } from '@/context/ModalContext'
@@ -86,18 +81,16 @@ kubectl apply -f k8s/deployment.yaml
 kubectl rollout status deployment/myapp`,
 }
 
-// Sample background tasks: a running agent with its live summary, a running command, a finished
-// agent and a failed command (the playground's getBackgroundTaskOutput mock answers per id prefix).
+// Sample background tasks
 const sampleBackgroundTasks: BackgroundTask[] = [
   {
-    id: 'agent-abc123',
+    id: 'task-abc123',
     type: 'agent',
     toolUseId: 'tool-1',
-    startTime: Date.now() - 169000, // 2m 49s ago
-    elapsedSeconds: 169,
-    intent: 'Adversarial review of label fix',
+    startTime: Date.now() - 45000, // 45 seconds ago
+    elapsedSeconds: 45,
+    intent: 'Explore codebase structure',
     status: 'running',
-    activity: { summary: 'Checking callers of newAutoLabelEntries', lastToolName: 'Grep', toolUses: 23 },
   },
   {
     id: 'shell-xyz456',
@@ -105,28 +98,7 @@ const sampleBackgroundTasks: BackgroundTask[] = [
     toolUseId: 'tool-2',
     startTime: Date.now() - 154000, // 2m 34s ago
     elapsedSeconds: 154,
-    intent: 'bun test --watch',
     status: 'running',
-  },
-  {
-    id: 'agent-done789',
-    type: 'agent',
-    toolUseId: 'tool-3',
-    startTime: Date.now() - 192000,
-    elapsedSeconds: 190,
-    intent: 'Research Radix popover focus rules',
-    status: 'completed',
-    completedAt: Date.now() - 2000,
-  },
-  {
-    id: 'shell-fail01',
-    type: 'shell',
-    toolUseId: 'tool-4',
-    startTime: Date.now() - 20000,
-    elapsedSeconds: 18,
-    intent: 'bun run lint',
-    status: 'failed',
-    completedAt: Date.now() - 1000,
   },
 ]
 
@@ -235,8 +207,6 @@ const playgroundAppShellContext = {
   onMarkSessionRead: () => {},
   onMarkSessionUnread: () => {},
   onSetActiveViewingSession: () => {},
-  // The # menu's status picker reads these from the shell context
-  sessionStatuses: inputContainerSampleStatuses,
   onSessionStatusChange: () => {},
   onDeleteSession: async () => true,
   onOpenFile: () => {},
@@ -567,7 +537,40 @@ const deepNestedActivities: ActivityItem[] = [
 
 type InputContainerMode = 'freeform' | 'permission' | 'admin_approval'
 
+// UI acceptance fixtures, independent of the user's configured connections.
+const inputModelMenuConnections: LlmConnectionWithStatus[] = [
+  {
+    slug: 'eming', name: 'Eming', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
+    createdAt: 0, isAuthenticated: true, isDefault: true, defaultModel: 'gpt-6-luna',
+    models: [
+      { id: 'gpt-6-luna', name: 'gpt-6-luna', shortName: 'gpt-6-luna', description: 'UI fixture', provider: 'pi', contextWindow: 258_000, maxTokens: 128_000, thinkingSource: 'explicit', supportedThinkingLevels: THINKING_LEVELS.map(level => level.id) },
+      { id: 'gpt-6.1-sol', name: 'gpt-6.1-sol', shortName: 'gpt-6.1-sol', description: 'UI fixture', provider: 'pi', contextWindow: 272_000, maxTokens: 128_000, supportedThinkingLevels: ['low', 'high', 'max'] },
+    ],
+  },
+  {
+    slug: 'direct-fixture', name: 'Direct-only (fixture)', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
+    createdAt: 0, isAuthenticated: true, defaultModel: 'direct-fixture',
+    models: [{ id: 'direct-fixture', name: 'No reasoning (fixture)', shortName: 'Direct', description: 'UI fixture', provider: 'pi', contextWindow: 128_000, supportsThinking: false }],
+  },
+  {
+    slug: 'kimi-code', name: 'Kimi Code', providerType: 'pi', piAuthProvider: 'kimi-coding', authType: 'oauth',
+    createdAt: 0, isAuthenticated: true, defaultModel: 'k3-256k',
+    models: [
+      { id: 'k3', name: 'Kimi K3', shortName: 'Kimi K3', description: 'UI fixture', provider: 'pi', contextWindow: 1_000_000, supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'] },
+      { id: 'k3-256k', name: 'Kimi K3-256K', shortName: 'Kimi K3-256K', description: 'UI fixture', provider: 'pi', contextWindow: 256_000, supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'] },
+      { id: 'kimi-for-coding', name: 'kimi-for-coding', shortName: 'kimi-for-coding', description: 'UI fixture', provider: 'pi', contextWindow: 1_000_000, supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'] },
+      { id: 'kimi-for-coding-highspeed', name: 'Kimi For Coding HighSpeed', shortName: 'HighSpeed', description: 'UI fixture', provider: 'pi', contextWindow: 256_000, supportedThinkingLevels: ['off', 'low', 'medium', 'high'] },
+    ],
+  },
+]
+
 interface InputContainerPlaygroundProps {
+  appearance?: 'classic' | 'prompt'
+  workMode?: WorkMode
+  modelPickerHierarchy?: boolean
+  /** One connection so the picker uses `flat` list chrome, not the multi-provider switcher. */
+  modelPickerSingle?: boolean
+  thinkingLevel?: ThinkingLevel
   disabled?: boolean
   isProcessing?: boolean
   placeholder?: string
@@ -576,6 +579,7 @@ interface InputContainerPlaygroundProps {
   workingDirectory?: string
   inputMode?: InputContainerMode
   compactMode?: boolean
+  enableCompactModelPicker?: boolean
   showOptionBadges?: boolean
   showTasks?: boolean
   showLabels?: boolean
@@ -590,20 +594,23 @@ interface InputContainerPlaygroundProps {
   attachmentCount?: number
   showFollowUps?: boolean
   followUpCount?: number
-  showCodingMode?: boolean
-  codingMode?: boolean
-  conversationStarted?: boolean
 }
 
 function InputContainerPlayground({
+  appearance = 'prompt',
+  workMode = 'NORM',
+  modelPickerHierarchy = false,
+  modelPickerSingle = false,
+  thinkingLevel = 'medium',
   disabled = false,
   isProcessing = false,
-  placeholder = 'Message Craft Agent...',
+  placeholder = 'Message Selection...',
   currentModel = 'claude-sonnet-4-6',
   permissionMode = 'ask',
   workingDirectory = '/Users/demo/projects/craft-agent',
   inputMode = 'freeform',
   compactMode = false,
+  enableCompactModelPicker = false,
   showOptionBadges = true,
   showTasks = true,
   showLabels = true,
@@ -618,24 +625,26 @@ function InputContainerPlayground({
   attachmentCount = 2,
   showFollowUps = false,
   followUpCount = 2,
-  showCodingMode = true,
-  codingMode = false,
-  conversationStarted = true,
 }: InputContainerPlaygroundProps) {
+  const { i18n } = useTranslation()
   const playgroundSessionId = 'playground-session'
-  const [coding, setCoding] = React.useState(codingMode)
-  React.useEffect(() => {
-    setCoding(codingMode)
-  }, [codingMode])
   const [model, setModel] = React.useState(currentModel)
+  const [connection, setConnection] = React.useState('eming')
+  const [effort, setEffort] = React.useState(thinkingLevel)
+  const [processing, setProcessing] = React.useState(isProcessing)
   const [mode, setMode] = React.useState<PermissionMode>(permissionMode)
   const [inputValue, setInputValue] = React.useState('')
-  const [currentSessionStatus] = React.useState('in-progress')
+  const [currentSessionStatus, setCurrentSessionStatus] = React.useState('in-progress')
   const [cwd, setCwd] = React.useState(workingDirectory)
 
   React.useEffect(() => {
     ensureMockElectronAPI()
   }, [])
+
+  React.useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('lng')
+    if (requested && requested !== i18n.language) void i18n.changeLanguage(requested)
+  }, [i18n])
 
   React.useEffect(() => {
     if (!seedRecentDirs) return
@@ -645,6 +654,9 @@ function InputContainerPlayground({
   React.useEffect(() => {
     setModel(currentModel)
   }, [currentModel])
+
+  React.useEffect(() => { setEffort(thinkingLevel) }, [thinkingLevel])
+  React.useEffect(() => { setProcessing(isProcessing) }, [isProcessing])
 
   React.useEffect(() => {
     setMode(permissionMode)
@@ -780,7 +792,15 @@ function InputContainerPlayground({
 
   return (
     <ModalProvider>
-    <AppShellProvider value={playgroundAppShellContext as any}>
+    <AppShellProvider value={{
+      ...playgroundAppShellContext,
+      llmConnections: modelPickerHierarchy
+        ? inputModelMenuConnections
+        : modelPickerSingle
+          ? inputModelMenuConnections.slice(0, 1)
+          : [],
+      workspaceDefaultLlmConnection: modelPickerHierarchy || modelPickerSingle ? 'eming' : undefined,
+    } as any}>
       <div className="w-full h-full flex flex-col bg-background">
         <div className="flex-1" />
 
@@ -792,42 +812,49 @@ function InputContainerPlayground({
           onPermissionModeChange={setMode}
           tasks={showTasks ? sampleBackgroundTasks : []}
           sessionId={playgroundSessionId}
-          onStopTask={(task) => console.log('[Playground] Stop task:', task.id)}
-          onRunCommand={(command) => console.log('[Playground] Run in background:', command)}
+          onKillTask={(taskId) => console.log('[Playground] Kill task:', taskId)}
+          onInsertMessage={setInputValue}
           sessionLabels={showLabels ? sessionLabels : []}
           labels={showLabels ? labels : []}
           onLabelsChange={setSessionLabels}
+          sessionStatuses={showStatuses ? inputContainerSampleStatuses : []}
           currentSessionStatus={showStatuses ? currentSessionStatus : undefined}
+          onSessionStatusChange={setCurrentSessionStatus}
           inputProps={{
+            appearance,
+            workMode,
+            thinkingLevel: effort,
+            onThinkingLevelChange: setEffort,
             placeholder,
             disabled,
-            isProcessing,
+            isProcessing: processing,
             structuredInput,
             onStructuredResponse: (response) => {
               console.log('[Playground] Structured response:', response)
             },
             currentModel: model,
+            enableCompactModelPicker: compactMode && enableCompactModelPicker,
+            currentConnection: modelPickerHierarchy || modelPickerSingle ? connection : undefined,
+            onConnectionChange: modelPickerHierarchy || modelPickerSingle ? setConnection : undefined,
             sources: showSources ? sources : [],
             enabledSourceSlugs: showSources ? enabledSourceSlugs : [],
             onSourcesChange: showSources ? setEnabledSourceSlugs : undefined,
             workingDirectory: showWorkingDirectory ? cwd : undefined,
             onWorkingDirectoryChange: showWorkingDirectory ? setCwd : undefined,
             followUpItems,
-            isEmptySession: !conversationStarted,
-            workspaceId: 'playground-workspace',
-            sessionId: playgroundSessionId,
-            codingMode: coding,
-            onCodingModeChange: showCodingMode ? setCoding : undefined,
-            onContinueWithCodingMode: showCodingMode
-              ? (enabled: boolean) => console.log('[Playground] Continue in a new session, coding mode:', enabled)
-              : undefined,
-            onSubmit: mockInputCallbacks.onSubmit,
-            onModelChange: setModel,
+            onSubmit: (message, attachments) => {
+              mockInputCallbacks.onSubmit(message, attachments)
+              setProcessing(true)
+            },
+            onModelChange: (nextModel, nextConnection) => {
+              setModel(nextModel)
+              if (nextConnection) setConnection(nextConnection)
+            },
             onInputChange: setInputValue,
             inputValue,
             onHeightChange: mockInputCallbacks.onHeightChange,
             onFocusChange: mockInputCallbacks.onFocusChange,
-            onStop: mockInputCallbacks.onStop,
+            onStop: () => { mockInputCallbacks.onStop(); setProcessing(false) },
           }}
         />
       </div>
@@ -878,12 +905,12 @@ function ActiveTasksBarContext({ tasks = sampleBackgroundTasks }: ActiveTasksBar
           onPermissionModeChange={setPermissionMode}
           tasks={tasks}
           sessionId="playground-session"
-          onStopTask={(task) => console.log('[Playground] Stop task:', task.id)}
+          onKillTask={(taskId) => console.log('[Playground] Kill task:', taskId)}
         />
 
         {/* Real InputContainer */}
         <InputContainer
-          placeholder="Message Craft Agent..."
+          placeholder="Message Selection..."
           disabled={false}
           isProcessing={false}
           currentModel="claude-sonnet-4-6"
@@ -986,7 +1013,7 @@ function PermissionInputToggle({ autoToggle = false, autoToggleInterval = 3000, 
 
       {/* Real InputContainer - handles animation automatically */}
       <InputContainer
-        placeholder="Message Craft Agent..."
+        placeholder="Message Selection..."
         disabled={false}
         isProcessing={false}
         currentModel="claude-sonnet-4-6"
@@ -1011,52 +1038,6 @@ function PermissionInputToggle({ autoToggle = false, autoToggleInterval = 3000, 
   )
 }
 
-const previewSource = (slug: string, name: string, provider: string, api?: Record<string, unknown>): LoadedSource =>
-  ({ config: { slug, name, provider, type: 'api', enabled: true, connectionStatus: 'connected', api } }) as unknown as LoadedSource
-
-const NEW_CHAT_PREVIEW_SOURCES: Record<string, LoadedSource[]> = {
-  connected: [
-    previewSource('gmail', 'Gmail', 'google', { googleService: 'gmail' }),
-    previewSource('google-calendar', 'Google Calendar', 'google', { googleService: 'calendar' }),
-    previewSource('slack', 'Slack', 'slack'),
-    previewSource('todoist', 'Todoist', 'todoist'),
-  ],
-  none: [],
-  oneGeneric: [previewSource('cat-facts', 'Cat Facts', 'catfact')],
-}
-
-/** The new-chat empty state with its suggestion chips, for a given set of workspace sources */
-function NewChatEmptyStatePreview({ sources = 'connected', compact = false }: { sources?: string; compact?: boolean }) {
-  const suggestions = pickNewChatSuggestions(NEW_CHAT_PREVIEW_SOURCES[sources] ?? [])
-  return (
-    <div className="relative h-[420px] w-full">
-      <NewChatEmptyState compact={compact}>
-        <NewChatSuggestions suggestions={suggestions} onSelect={(s) => console.log('[playground] run suggestion', s)} />
-      </NewChatEmptyState>
-    </div>
-  )
-}
-
-/** The task brief an unrun task session shows in its transcript column, for a task.yaml sample */
-function TaskBriefPreview({ sample = 'gitignore-the-workspace', starting = false, compact = false }: { sample?: TaskSpecSample; starting?: boolean; compact?: boolean }) {
-  const brief = taskBriefFromSpec(TASK_SPEC_SAMPLES[sample])
-  return (
-    <div className={cn('mx-auto w-full', compact ? 'max-w-[390px]' : CHAT_LAYOUT.maxWidth, compact ? CHAT_LAYOUT.compactContainerPadding : CHAT_LAYOUT.containerPadding)}>
-      {brief && (
-        <TaskBrief
-          brief={brief}
-          compact={compact}
-          starting={starting}
-          onRun={() => console.log('[playground] run task', sample)}
-          onEdit={() => console.log('[playground] edit task', sample)}
-          onOpenUrl={(url) => console.log('[playground] open url', url)}
-          onOpenFile={(path) => console.log('[playground] open file', path)}
-        />
-      )}
-    </div>
-  )
-}
-
 // Generate variants for all hints dynamically
 const emptyStateHintVariants = Array.from({ length: getHintCount() }, (_, i) => ({
   name: `Hint ${i + 1}`,
@@ -1066,46 +1047,27 @@ const emptyStateHintVariants = Array.from({ length: getHintCount() }, (_, i) => 
 
 export const chatComponents: ComponentEntry[] = [
   {
-    id: 'new-chat-empty-state',
-    name: 'NewChatEmptyState',
+    id: 'lattice-loader',
+    name: 'LatticeLoader',
     category: 'Chat',
-    description: 'Empty new chat: serif question, capability line and up to three suggestion chips from the workspace sources (a click sends the prompt)',
-    component: NewChatEmptyStatePreview,
+    description: 'Theme-aware thinking wave, completion check and error cross',
+    component: LatticeLoader,
     props: [
-      {
-        name: 'sources',
-        description: 'Workspace sources the chips are drawn from',
-        control: { type: 'select', options: [{ label: 'Gmail, Calendar, Slack, Todoist', value: 'connected' }, { label: 'No sources', value: 'none' }, { label: 'One generic source', value: 'oneGeneric' }] },
-        defaultValue: 'connected',
-      },
-      { name: 'compact', description: 'Compact (mobile) layout', control: { type: 'boolean' }, defaultValue: false },
+      { name: 'status', control: { type: 'select', options: [
+        { label: '运行中', value: 'working' }, { label: '完成', value: 'done' }, { label: '失败', value: 'error' },
+      ] }, defaultValue: 'working' },
+      { name: 'label', control: { type: 'string' }, defaultValue: '思考中…' },
+      { name: 'doneLabel', control: { type: 'string' }, defaultValue: '已完成' },
+      { name: 'errorLabel', control: { type: 'string' }, defaultValue: '失败' },
+      { name: 'cellSize', control: { type: 'number', min: 3, max: 8 }, defaultValue: 5 },
+      { name: 'gap', control: { type: 'number', min: 1, max: 3 }, defaultValue: 2 },
+      { name: 'fontSize', control: { type: 'number', min: 10, max: 18 }, defaultValue: 13 },
+      { name: 'showTimer', control: { type: 'boolean' }, defaultValue: true },
     ],
     variants: [
-      { name: 'Connected sources', props: { sources: 'connected' } },
-      { name: 'No sources', props: { sources: 'none' } },
-      { name: 'One generic source', props: { sources: 'oneGeneric' } },
-      { name: 'Compact', props: { sources: 'connected', compact: true } },
-    ],
-    mockData: () => ({}),
-  },
-  {
-    id: 'task-brief',
-    name: 'TaskBrief',
-    category: 'Chat',
-    description: 'What a task session shows before its first run, instead of the new-chat empty state: goal, acceptance criteria and subtasks from task.yaml, with Run task and Edit task',
-    component: TaskBriefPreview,
-    props: [
-      { name: 'sample', description: 'task.yaml sample', control: { type: 'select', options: TASK_SPEC_SAMPLE_OPTIONS }, defaultValue: 'gitignore-the-workspace' },
-      { name: 'starting', description: 'The run call is in flight', control: { type: 'boolean' }, defaultValue: false },
-      { name: 'compact', description: 'Phone-width column', control: { type: 'boolean' }, defaultValue: false },
-    ],
-    variants: [
-      { name: 'Created by an agent', props: { sample: 'gitignore-the-workspace' } },
-      { name: 'Four subtasks', props: { sample: 'ship-the-release' } },
-      { name: 'Goal only', props: { sample: 'tidy-the-readme' } },
-      { name: 'Long markdown goal', props: { sample: 'audit-auth' } },
-      { name: 'Starting', props: { sample: 'ship-the-release', starting: true } },
-      { name: 'Compact', props: { sample: 'ship-the-release', compact: true } },
+      { name: '运行中', props: { status: 'working' } },
+      { name: '完成', props: { status: 'done', elapsed: 2.4 } },
+      { name: '失败', props: { status: 'error', elapsed: 2.4 } },
     ],
   },
   {
@@ -1245,7 +1207,7 @@ export const chatComponents: ComponentEntry[] = [
       tasks: sampleBackgroundTasks,
       sessionId: 'session-playground',
       onPermissionModeChange: (mode: string) => console.log('[Playground] Permission mode changed:', mode),
-      onStopTask: (task: { id: string }) => console.log('[Playground] Stop task:', task.id),
+      onKillTask: (taskId: string) => console.log('[Playground] Kill task:', taskId),
     }),
   },
   {
@@ -1290,6 +1252,14 @@ export const chatComponents: ComponentEntry[] = [
     props: [],
     variants: [
       { name: 'Default', props: {} },
+      {
+        name: '中间进度气泡对齐',
+        props: {
+          activities: [{ id: 'progress-fixture', type: 'tool', toolName: 'run_task', status: 'completed', timestamp: 1,
+            content: JSON.stringify({ runId: 'ui-fixture', status: 'running' }) }],
+          response: { text: '已启动调研，包含近期官方信息与社区反馈检索，并安排独立核验关键结论和引用。完成后我会整理成简体中文摘要，区分官方确认、社区体验与尚未证实的推断。', isStreaming: false },
+        },
+      },
     ],
     mockData: () => ({
       activities: flatActivities,
@@ -1346,38 +1316,7 @@ export const chatComponents: ComponentEntry[] = [
       response: { text: 'Analysis and fixes complete. I found 23 TODO/FIXME issues, removed deprecated code, and created a modern replacement component.', isStreaming: false },
       isStreaming: false,
       isComplete: true,
-      defaultExpanded: true,
     }),
-  },
-  {
-    id: 'turn-card-continued-subagent',
-    name: 'TurnCard (Subagent from an earlier turn)',
-    category: 'Turn Cards',
-    description: 'A background subagent launched in an earlier turn keeps working: its rows form one collapsed "continued" group instead of interleaving with this turn\'s rows',
-    component: TurnCard,
-    props: [],
-    variants: [
-      { name: 'Default', props: {} },
-    ],
-    mockData: () => {
-      const t0 = Date.now() - 60_000
-      const own = (i: number, toolName: string, input: Record<string, unknown>) => ({ id: `own-${i}`, type: 'tool' as const, status: 'completed' as const, toolName, toolUseId: `own-tool-${i}`, toolInput: input, timestamp: t0 + i * 1000, depth: 0 })
-      const sub = (i: number, toolName: string, input: Record<string, unknown>) => ({ id: `sub-${i}`, type: 'tool' as const, status: 'completed' as const, toolName, toolUseId: `sub-tool-${i}`, toolInput: input, parentId: 'agent-from-earlier-turn', timestamp: t0 + i * 1000 + 500, depth: 1 })
-      return {
-        activities: [
-          own(1, 'Bash', { command: 'rg -n "View Output"', description: 'Find the View Output implementation' }),
-          sub(1, 'Read', { file_path: '/repo/ChatHeaderLabels.tsx' }),
-          own(2, 'Read', { file_path: '/repo/TaskActionMenu.tsx' }),
-          sub(2, 'Grep', { pattern: 'entryIndex' }),
-          own(3, 'Read', { file_path: '/repo/ActiveTasksBar.tsx' }),
-          sub(3, 'Bash', { command: 'bun test src/labels', description: 'Run label tests' }),
-        ],
-        response: { text: 'The menu runs getTaskOutput and shows the result in an overlay that was never wired.', isStreaming: false },
-        isStreaming: false,
-        isComplete: true,
-        defaultExpanded: true,
-      }
-    },
   },
   {
     id: 'turn-card-deep-nested',
@@ -1418,11 +1357,41 @@ export const chatComponents: ComponentEntry[] = [
     id: 'input-container',
     name: 'InputContainer',
     category: 'Chat Inputs',
-    description: 'App-like input zone with max-width layout, background-task chips, the # label and status menu, and full InputContainer behavior. Session status and label chips live in the chat header.',
+    description: 'App-like input zone with max-width layout, active option badges, labels, statuses, tasks, and full InputContainer behavior',
     component: InputContainerPlayground,
     layout: 'full',
     previewOverflow: 'visible',
     props: [
+      {
+        name: 'appearance',
+        description: 'Compare the integrated PromptBar with the original composer',
+        control: { type: 'select', options: [{ label: 'PromptBar 融合', value: 'prompt' }, { label: '原输入框', value: 'classic' }] },
+        defaultValue: 'prompt',
+      },
+      {
+        name: 'thinkingLevel',
+        description: 'Reasoning effort — the highest supported level enables sparks',
+        control: { type: 'select', options: THINKING_LEVELS.map(level => ({ label: level.id, value: level.id })) },
+        defaultValue: 'medium',
+      },
+      {
+        name: 'workMode',
+        description: 'Conversation mode — PRO uses theme-aware gold effects',
+        control: { type: 'select', options: [{ label: 'NORM', value: 'NORM' }, { label: 'PRO', value: 'PRO' }] },
+        defaultValue: 'NORM',
+      },
+      {
+        name: 'modelPickerHierarchy',
+        description: 'UI fixtures for the connection → model menu and reasoning capabilities',
+        control: { type: 'boolean' },
+        defaultValue: false,
+      },
+      {
+        name: 'modelPickerSingle',
+        description: 'Inject one LLM connection so the picker uses the flat model-list chrome',
+        control: { type: 'boolean' },
+        defaultValue: false,
+      },
       {
         name: 'inputMode',
         description: 'Input mode rendered by InputContainer',
@@ -1458,7 +1427,7 @@ export const chatComponents: ComponentEntry[] = [
         name: 'placeholder',
         description: 'Textarea placeholder text',
         control: { type: 'string', placeholder: 'Message...' },
-        defaultValue: 'Message Craft Agent...',
+        defaultValue: 'Message Selection...',
       },
       {
         name: 'currentModel',
@@ -1513,7 +1482,7 @@ export const chatComponents: ComponentEntry[] = [
       },
       {
         name: 'showStatuses',
-        description: "Pass the session's status to the # menu (the status glyph lives in the chat header)",
+        description: 'Include session status badge and menu',
         control: { type: 'boolean' },
         defaultValue: true,
       },
@@ -1584,56 +1553,52 @@ export const chatComponents: ComponentEntry[] = [
         control: { type: 'number', min: 1, max: 4, step: 1 },
         defaultValue: 2,
       },
-      {
-        name: 'showCodingMode',
-        description: 'Show the Coding mode chip next to the folder chip',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-      {
-        name: 'codingMode',
-        description: 'Coding mode is on for this session',
-        control: { type: 'boolean' },
-        defaultValue: false,
-      },
-      {
-        name: 'conversationStarted',
-        description: 'The session has messages: coding mode is fixed and the chip offers a new session instead',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
     ],
     mockData: () => ({}),
     variants: [
       {
+        name: 'PromptBar 融合',
+        description: '真实输入框融合 PromptBar，可调整思考强度并体验发送/停止状态切换',
+        props: { appearance: 'prompt', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: 'PromptBar 最高强度',
+        description: '最高思考强度启用微光，输入时光点加速',
+        props: { appearance: 'prompt', workMode: 'NORM', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: 'PromptBar PRO 金色',
+        description: 'PRO 会话使用浅色铜金、深色香槟金的文字与微光',
+        props: { appearance: 'prompt', workMode: 'PRO', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '单连接模型列表',
+        description: '仅一个供应商时打开即模型列表与勾选，思考强度挂在当前连接页底部',
+        props: { appearance: 'prompt', workMode: 'NORM', modelPickerSingle: true, currentModel: 'gpt-6-luna', thinkingLevel: 'low', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '模型菜单内调节强度',
+        description: '同一浮窗先选供应商、再选模型并调节强度；模型能力仅作界面验收样例',
+        props: { appearance: 'prompt', workMode: 'PRO', modelPickerHierarchy: true, currentModel: 'gpt-6-luna', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '紧凑单连接模型列表',
+        description: '紧凑抽屉在单连接时同样先列出模型，思考强度挂在列表下方',
+        props: { appearance: 'prompt', workMode: 'NORM', modelPickerSingle: true, currentModel: 'gpt-6-luna', thinkingLevel: 'low', compactMode: true, enableCompactModelPicker: true, showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '紧凑模型菜单内调节强度',
+        description: '紧凑抽屉选中模型后保持打开，并在列表下方显示该模型的思考强度',
+        props: { appearance: 'prompt', workMode: 'PRO', modelPickerHierarchy: true, currentModel: 'gpt-6-luna', thinkingLevel: 'max', compactMode: true, enableCompactModelPicker: true, showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '原输入框对比',
+        props: { appearance: 'classic', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
         name: 'Default (Comprehensive)',
         description: 'App-like full setup with badges, labels, statuses, sources, and working directory',
         props: {},
-      },
-      {
-        name: 'Coding Mode: New Session (Off)',
-        description: 'Before the first message the Coding chip toggles the mode; turning it on asks for a new worktree (mock repos) or an existing folder',
-        props: { conversationStarted: false, codingMode: false },
-      },
-      {
-        name: 'Coding Mode: New Session (On)',
-        description: 'Coding mode turned on before the first message (accent tint)',
-        props: { conversationStarted: false, codingMode: true },
-      },
-      {
-        name: 'Coding Mode: Started Session (On)',
-        description: 'Mode is fixed once the conversation starts; the chip opens "Continue in a new standard session"',
-        props: { conversationStarted: true, codingMode: true },
-      },
-      {
-        name: 'Coding Mode: Started Session (Off)',
-        description: 'Icon-only chip in a started standard session; opens "Continue in a new Coding session"',
-        props: { conversationStarted: true, codingMode: false },
-      },
-      {
-        name: 'Coding Mode: Compact',
-        description: 'Compact/mobile composer: icon-only chip',
-        props: { compactMode: true, conversationStarted: false, codingMode: true },
       },
       {
         name: 'Working Dir History (Few)',

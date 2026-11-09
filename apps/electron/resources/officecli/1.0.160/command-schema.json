@@ -1,0 +1,303 @@
+{
+  "version": "1.0.160",
+  "schemaCrc": "f950ee40",
+  "generatedFrom": "reviewed-release-binary",
+  "rootHelpSha256": "cd4d98c9ff0f27d4a2e0d0028a73c88dc23bc53bcce231a2569f64fdc72d983d",
+  "helpAllSha256": "9a6c7bac7f6967a9f8ede86c94611165da1af28d0b3c3ce47ebe4f5aed7e0640",
+  "helpAllEntries": 2496,
+  "rootCommands": [
+    "add",
+    "add-part",
+    "batch",
+    "close",
+    "create",
+    "dump",
+    "get",
+    "help",
+    "import",
+    "install",
+    "mcp",
+    "merge",
+    "move",
+    "open",
+    "plugins",
+    "query",
+    "raw",
+    "raw-set",
+    "refresh",
+    "remove",
+    "save",
+    "set",
+    "skills",
+    "swap",
+    "unwatch",
+    "validate",
+    "view",
+    "watch"
+  ],
+  "commands": {
+    "add": {
+      "helpSha256": "f363fcbc2397b5036f6b5ed7e6f5c6c01019349d609c3c8c4c3eef3d55ee15a1",
+      "flags": [
+        "--after",
+        "--before",
+        "--force",
+        "--from",
+        "--help",
+        "--index",
+        "--json",
+        "--prop",
+        "--type"
+      ]
+    },
+    "add-part": {
+      "helpSha256": "c50ed9e84aba049b06d0ee77d51da747e890213e51e571529e4181067cc8f3a7",
+      "flags": [
+        "--help",
+        "--json",
+        "--type"
+      ]
+    },
+    "batch": {
+      "helpSha256": "0e780e83dff5be359208197be15491b003d79e4ec1daf3069d489372dcbc3a15",
+      "flags": [
+        "--best-effort",
+        "--commands",
+        "--compact",
+        "--force",
+        "--help",
+        "--input",
+        "--json",
+        "--prop",
+        "--stop-on-error"
+      ]
+    },
+    "close": {
+      "helpSha256": "21f48a9ac82df5fc9b5abe60880a96b7ad640a636d482bb448e3b1d41e434065",
+      "flags": [
+        "--help",
+        "--json"
+      ]
+    },
+    "create": {
+      "helpSha256": "ffe0c3a802bb452bc544ae979b6e138c689fe3ab93a545a7741fbc048f8f1c7c",
+      "flags": [
+        "--force",
+        "--help",
+        "--json",
+        "--locale",
+        "--minimal",
+        "--type"
+      ]
+    },
+    "dump": {
+      "helpSha256": "7cb4dd8447fb36fe7834ee9b2e28333e3b64d092de2b864453a910c7472d7b94",
+      "flags": [
+        "--format",
+        "--help",
+        "--json",
+        "--out"
+      ]
+    },
+    "get": {
+      "helpSha256": "15f76fb865941dd2c3d1f46c4dec74431030d812f1ca6344138da9cf354d467a",
+      "flags": [
+        "--depth",
+        "--help",
+        "--json",
+        "--save"
+      ]
+    },
+    "help": {
+      "helpSha256": "cd4d98c9ff0f27d4a2e0d0028a73c88dc23bc53bcce231a2569f64fdc72d983d",
+      "flags": [
+        "--commands",
+        "--compact",
+        "--force",
+        "--help",
+        "--input",
+        "--json",
+        "--jsonl",
+        "--prop",
+        "--version"
+      ]
+    },
+    "import": {
+      "helpSha256": "b6df22a1bb31c2c99f14a10624a7639d746c4d396cdc7fbf71030a6ad5ecaf3e",
+      "flags": [
+        "--decimal",
+        "--delimiter",
+        "--file",
+        "--format",
+        "--header",
+        "--help",
+        "--json",
+        "--start-cell",
+        "--stdin"
+      ]
+    },
+    "install": {
+      "helpSha256": "8ac988135604a06d008fda4ffdf33b11a11bd04a0759937de7fcafa904a78194",
+      "flags": []
+    },
+    "mcp": {
+      "helpSha256": "005374708e208ed5dc59d9bbf95226e6057ddead38e2f681b0d3f8927e98b88d",
+      "flags": []
+    },
+    "merge": {
+      "helpSha256": "b2dd660b1472437d1f426a413b1a05d984a296f1dd70ffb099a35b0139a1bd81",
+      "flags": [
+        "--data",
+        "--force",
+        "--help",
+        "--json"
+      ]
+    },
+    "move": {
+      "helpSha256": "0db03671a97b823e24812dfc98dc3d9f95ac9c7ff5de81b9ea78c36f11b33e86",
+      "flags": [
+        "--after",
+        "--before",
+        "--help",
+        "--index",
+        "--json",
+        "--prop",
+        "--to"
+      ]
+    },
+    "open": {
+      "helpSha256": "70dfb3c3242d94bada3a2bcff3715d22a48e6a675f8c2411c7ecd9f171420604",
+      "flags": [
+        "--help",
+        "--json"
+      ]
+    },
+    "plugins": {
+      "helpSha256": "87f2808f6bed2e73a89abb69720a683d51fa028cdad419c65d1188a81a821e45",
+      "flags": [
+        "--help",
+        "--prop"
+      ]
+    },
+    "query": {
+      "helpSha256": "54f8bfcc95e03d17900d4ea950c1cc544fecabc3e86a8fe45fdb8eee7275d893",
+      "flags": [
+        "--compact",
+        "--fields",
+        "--find",
+        "--help",
+        "--json",
+        "--range"
+      ]
+    },
+    "raw": {
+      "helpSha256": "a19175047531d7a405f2b9fb2e8ff8f0e515eaa03964f93f12655d0fa432b3ed",
+      "flags": [
+        "--cols",
+        "--end",
+        "--help",
+        "--json",
+        "--start"
+      ]
+    },
+    "raw-set": {
+      "helpSha256": "6a3cabcd6431bc6d8ba4d9fa7582b23516f8f7cadc21666fc08033500b17723e",
+      "flags": [
+        "--action",
+        "--help",
+        "--json",
+        "--xml",
+        "--xpath"
+      ]
+    },
+    "refresh": {
+      "helpSha256": "afb4c6935334f3f80956e95eac757e2190e136c156fb0ad5960eddeba3ad5ed0",
+      "flags": [
+        "--help",
+        "--json"
+      ]
+    },
+    "remove": {
+      "helpSha256": "fa402734c59870a1608b3af475eeaf06fa8882ad5404d10bf9e7d6637bc39f69",
+      "flags": [
+        "--help",
+        "--json",
+        "--prop",
+        "--shift"
+      ]
+    },
+    "save": {
+      "helpSha256": "153a225e42a89ebb26411033f27ea70b1712b492269278100ffc41ea4c504a1d",
+      "flags": [
+        "--help",
+        "--json"
+      ]
+    },
+    "set": {
+      "helpSha256": "e18bb599c544b1f50dfe9987e4071fd3166da1a3e7eea91b481e868f394d5509",
+      "flags": [
+        "--find",
+        "--force",
+        "--help",
+        "--json",
+        "--prop",
+        "--replace"
+      ]
+    },
+    "skills": {
+      "helpSha256": "a2499a3660dd46fd95886e9f3640cc54de3a11547d54fd67f991a80a828cbe1b",
+      "flags": []
+    },
+    "swap": {
+      "helpSha256": "aaee5b6fe7c7e8b81550694972687850fa03bb424fcf47235320436bf02f6334",
+      "flags": [
+        "--help",
+        "--json"
+      ]
+    },
+    "unwatch": {
+      "helpSha256": "8dcc7c455e7759ad13a09fe39c886054c5e9578b3ea1b1f137ced6cee9202767",
+      "flags": [
+        "--help"
+      ]
+    },
+    "validate": {
+      "helpSha256": "1e08b2fd019d5e41a51cdeec1e8bbe30edc4f734233f6a44e2976a801f753568",
+      "flags": [
+        "--help",
+        "--json"
+      ]
+    },
+    "view": {
+      "helpSha256": "b5b99c59843d651500581fefab9b1f938456c749bb0b1cc6cd42f69e794bf3f0",
+      "flags": [
+        "--browser",
+        "--cols",
+        "--end",
+        "--grid",
+        "--help",
+        "--json",
+        "--limit",
+        "--max-lines",
+        "--out",
+        "--page",
+        "--page-count",
+        "--range",
+        "--render",
+        "--screenshot-height",
+        "--screenshot-width",
+        "--start",
+        "--type"
+      ]
+    },
+    "watch": {
+      "helpSha256": "2e27544ff2a52945a4ab6fc322f8036356b3ff28b9bea9b1adcd1e973ce1f587",
+      "flags": [
+        "--all",
+        "--help",
+        "--path",
+        "--port"
+      ]
+    }
+  }
+}

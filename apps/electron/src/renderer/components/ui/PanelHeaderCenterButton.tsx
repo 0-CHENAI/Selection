@@ -6,16 +6,24 @@ import { cn } from '@/lib/utils'
 interface PanelHeaderCenterButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Icon as React element - caller controls size/styling */
   icon: React.ReactNode
-  /** Optional tooltip text (also used as the accessible name) */
+  /** Optional tooltip text */
   tooltip?: string
+  /** Additional purpose text below the tooltip title. */
+  tooltipDescription?: string
+  /** Hide a tooltip while another explanation surface is open, without remounting the button. */
+  tooltipDisabled?: boolean
 }
 
-/**
- * Icon button for panel-header actions (share, info, close, back): a 28×28 ghost button with a
- * secondary icon (spec §7.3). In the compact shell `.panel-header-btn` grows it to a 44px touch target.
- */
 export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeaderCenterButtonProps>(
-  ({ icon, tooltip, className, ...props }, ref) => {
+  ({ icon, tooltip, tooltipDescription, tooltipDisabled, className, ...props }, ref) => {
+    const [tooltipOpen, setTooltipOpen] = React.useState(false)
+    const suppressRestoredFocus = React.useRef(false)
+    React.useEffect(() => {
+      if (tooltipDisabled) {
+        setTooltipOpen(false)
+        suppressRestoredFocus.current = true
+      }
+    }, [tooltipDisabled])
     const button = (
       <button
         ref={ref}
@@ -23,14 +31,22 @@ export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeader
         aria-label={props['aria-label'] ?? tooltip}
         className={cn(
           "panel-header-btn inline-flex items-center justify-center",
-          "size-control shrink-0 rounded-md titlebar-no-drag",
-          "text-secondary hover:text-foreground hover:bg-fill-hover active:bg-fill-pressed",
-          "data-[state=open]:text-foreground data-[state=open]:bg-fill-hover",
-          "transition-[background-color,color] duration-micro ease-out-subtle hover:duration-instant",
-          "disabled:pointer-events-none disabled:text-disabled",
+          "p-1.5 shrink-0 rounded-[6px] titlebar-no-drag",
+          "bg-background shadow-minimal",
+          "opacity-70 hover:opacity-100",
+          "transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "disabled:pointer-events-none disabled:opacity-50",
           className
         )}
         {...props}
+        onFocus={event => {
+          props.onFocus?.(event)
+          // Restore keyboard focus after closing the dialog without reopening its tooltip.
+          if (suppressRestoredFocus.current) {
+            suppressRestoredFocus.current = false
+            event.preventDefault()
+          }
+        }}
       >
         {icon}
       </button>
@@ -38,9 +54,12 @@ export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeader
 
     if (tooltip) {
       return (
-        <Tooltip>
+        <Tooltip open={!tooltipDisabled && tooltipOpen} onOpenChange={value => setTooltipOpen(!tooltipDisabled && value)}>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{tooltip}</TooltipContent>
+          <TooltipContent side="bottom" className={tooltipDescription ? 'max-w-80' : undefined}>
+            <div className={tooltipDescription ? 'font-medium' : undefined}>{tooltip}</div>
+            {tooltipDescription && <p className="mt-1 text-xs leading-relaxed font-normal">{tooltipDescription}</p>}
+          </TooltipContent>
         </Tooltip>
       )
     }

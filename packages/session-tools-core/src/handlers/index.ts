@@ -6,6 +6,16 @@
  */
 
 // SubmitPlan
+export { handleArtifactVersions } from './artifact-versions.ts';
+export type { ArtifactVersionsArgs } from './artifact-versions.ts';
+export { handleOfficeTemplate, handleOfficeTemplateWrite, handleXlsxRecalculate } from './office-template.ts';
+export type { OfficeToolName } from './office-template.ts';
+export { handleOfficeRender, officeRenderResult, OfficeRenderSchema, OFFICE_RENDER_MAX_PAGES } from './office-render.ts';
+export { handleOfficeBusiness, OfficeBusinessSchema, OFFICE_BUSINESS_DESCRIPTION } from './office-business.ts';
+export type { OfficeBusinessArgs } from './office-business.ts';
+export { handlePptTemplateCreateProject, handleImageGenerate } from './ppt-tools.ts';
+export type { PptToolName } from './ppt-tools.ts';
+export type { OfficeRenderArgs, OfficeRenderOutcome, OfficeRenderImage } from './office-render.ts';
 export { handleSubmitPlan } from './submit-plan.ts';
 export type { SubmitPlanArgs } from './submit-plan.ts';
 
@@ -43,20 +53,6 @@ export type {
 export { handleCredentialPrompt } from './credential-prompt.ts';
 export type { CredentialPromptArgs } from './credential-prompt.ts';
 
-// MCP source resources & prompts
-export {
-  handleSourceListResources,
-  handleSourceReadResource,
-  handleSourceListPrompts,
-  handleSourceGetPrompt,
-} from './mcp-sources.ts';
-export type {
-  SourceListResourcesArgs,
-  SourceReadResourceArgs,
-  SourceListPromptsArgs,
-  SourceGetPromptArgs,
-} from './mcp-sources.ts';
-
 // Update Preferences
 export { handleUpdatePreferences } from './update-preferences.ts';
 export type { UpdatePreferencesArgs } from './update-preferences.ts';
@@ -90,29 +86,18 @@ export { handleListBackgroundTasks } from './list-background-tasks.ts';
 export type { ListBackgroundTasksArgs } from './list-background-tasks.ts';
 export { handleCreateTask } from './create-task.ts';
 export type { CreateTaskArgs } from './create-task.ts';
-export { handleProjectMemoryAppend } from './project-memory.ts';
-export type { ProjectMemoryAppendArgs } from './project-memory.ts';
+export { handleRunTask } from './run-task.ts';
+export type { RunTaskArgs } from './run-task.ts';
+export { handleGetTaskResults } from './get-task-results.ts';
+export type { GetTaskResultsArgs } from './get-task-results.ts';
+export { handleSubmitTaskOutput } from './submit-task-output.ts';
+export type { SubmitTaskOutputArgs } from './submit-task-output.ts';
+export { handleSubmitTaskVerdict } from './submit-task-verdict.ts';
+export { handleSubmitOrchestrationPatch } from './submit-orchestration-patch.ts';
+export { handleSubmitOrchestrationDecision } from './submit-orchestration-decision.ts';
+export { handleSubmitTaskNodeVerdict } from './submit-task-node-verdict.ts';
+export { handleSubmitTaskDefinition } from './submit-task-definition.ts';
+export { handleControlTaskRun } from './control-task-run.ts';
+export type { SubmitTaskVerdictArgs } from './submit-task-verdict.ts';
 export { handleArchiveSession } from './archive-session.ts';
 export type { ArchiveSessionArgs } from './archive-session.ts';
-
-// Pages
-export {
-  handleListPages,
-  handleGetPage,
-  handleCreatePage,
-  handleUpdatePage,
-  handleWritePageData,
-  handleDeletePage,
-} from './pages.ts';
-export type {
-  ListPagesArgs,
-  GetPageArgs,
-  CreatePageArgs,
-  UpdatePageArgs,
-  WritePageDataArgs,
-  DeletePageArgs,
-} from './pages.ts';
-
-// Decision model
-export { handleDecide } from './decide.ts';
-export type { DecideArgs } from './decide.ts';

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test'
-import { modelSupportsImages, type LlmConnection } from '../llm-connections.ts'
+import {
+  modelSupportsImages,
+  resolveConnectionModelContextWindow,
+  resolveConnectionModelMaxTokens,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
+  toCustomEndpointModelPayload,
+  type LlmConnection,
+} from '../llm-connections.ts'
 
 const BASE_COMPAT: LlmConnection = {
   slug: 'custom',
@@ -39,14 +47,14 @@ describe('modelSupportsImages — pi_compat precedence', () => {
     expect(modelSupportsImages(conn, 'plain')).toBe(true)
   })
 
-  it('returns false when neither per-model override nor connection default is set', () => {
+  it('tries images when neither per-model override nor connection default is set', () => {
     const conn: LlmConnection = { ...BASE_COMPAT, models: ['plain'] }
-    expect(modelSupportsImages(conn, 'plain')).toBe(false)
+    expect(modelSupportsImages(conn, 'plain')).toBe(true)
   })
 
-  it('returns false when the model is not in models[] (matches Pi default)', () => {
+  it('tries images when the model is not in models[]', () => {
     const conn: LlmConnection = { ...BASE_COMPAT, models: ['plain'] }
-    expect(modelSupportsImages(conn, 'unknown')).toBe(false)
+    expect(modelSupportsImages(conn, 'unknown')).toBe(true)
   })
 
   it('returns connection default when the model is missing but connection default is true', () => {
@@ -57,24 +65,159 @@ describe('modelSupportsImages — pi_compat precedence', () => {
     }
     expect(modelSupportsImages(conn, 'unknown')).toBe(true)
   })
+
+  it('matches stored Opus against runtime pi/ and custom-endpoint/ IDs', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'Opus', supportsImages: true } as never],
+    }
+    expect(modelSupportsImages(conn, 'pi/Opus')).toBe(true)
+    expect(modelSupportsImages(conn, 'custom-endpoint/Opus')).toBe(true)
+    expect(modelSupportsImages(conn, 'opus')).toBe(true)
+  })
+
+  it('honors an explicit false even when the runtime ID is prefixed', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'Opus', supportsImages: false } as never],
+    }
+    expect(modelSupportsImages(conn, 'pi/Opus')).toBe(false)
+  })
+
+  it('infers vision for well-known names when no explicit flag is stored', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
+    expect(modelSupportsImages(conn, 'pi/Opus')).toBe(true)
+  })
+
+  it('infers vision for ORDER Laufry when no explicit flag is stored', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Laufry'] }
+    expect(modelSupportsImages(conn, 'Laufry')).toBe(true)
+    expect(modelSupportsImages(conn, 'pi/Laufry')).toBe(true)
+  })
+
+  it('tries images for unknown names that are not in the known table', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Maylo', 'octopus', 'omnibox', 'foo-vllm'] }
+    expect(modelSupportsImages(conn, 'Maylo')).toBe(true)
+    expect(modelSupportsImages(conn, 'octopus')).toBe(true)
+    expect(modelSupportsImages(conn, 'omnibox')).toBe(true)
+    expect(modelSupportsImages(conn, 'foo-vllm')).toBe(true)
+  })
 })
 
-describe('modelSupportsImages — non-pi_compat fallthrough', () => {
-  it('returns true for anthropic regardless of override (renderer does not gate built-in catalogs)', () => {
+describe('toCustomEndpointModelPayload', () => {
+  it('leaves inferred vision names as a bare id so connection defaults stay authoritative', () => {
+    expect(toCustomEndpointModelPayload('Opus')).toBe('Opus')
+  })
+
+  it('leaves unknown names as a bare string', () => {
+    expect(toCustomEndpointModelPayload('Laufry')).toBe('Laufry')
+  })
+
+  it('forwards an explicit true', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Opus', supportsImages: true })).toEqual({
+      id: 'Opus',
+      supportsImages: true,
+    })
+  })
+
+  it('preserves an explicit false over the name heuristic', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Opus', supportsImages: false })).toEqual({
+      id: 'Opus',
+      supportsImages: false,
+    })
+  })
+
+  it('does not write inferred false when only a context window is present', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Laufry', contextWindow: 200_000 })).toEqual({
+      id: 'Laufry',
+      contextWindow: 200_000,
+    })
+  })
+
+  it('forwards an explicit maxTokens override', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Laufry', maxTokens: 32_768 })).toEqual({
+      id: 'Laufry',
+      maxTokens: 32_768,
+    })
+  })
+})
+
+describe('resolveConnectionModelContextWindow', () => {
+  it('reads a stored catalog window and matches prefixed runtime IDs', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'DeepSeek-V4-Flash', contextWindow: 262_144 } as never],
+    }
+    expect(resolveConnectionModelContextWindow(conn, 'custom-endpoint/DeepSeek-V4-Flash')).toBe(262_144)
+    expect(resolveConnectionModelContextWindow(conn, 'pi/DeepSeek-V4-Flash')).toBe(262_144)
+  })
+
+  it('returns undefined when the catalog has no window', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
+    expect(resolveConnectionModelContextWindow(conn, 'Opus')).toBeUndefined()
+    expect(resolveConnectionModelContextWindow(null, 'Opus')).toBeUndefined()
+  })
+})
+
+describe('sanitizeCustom token limits', () => {
+  it('rejects out-of-range context windows and max output', () => {
+    expect(sanitizeCustomContextWindow(16)).toBeUndefined()
+    expect(sanitizeCustomContextWindow(20_000_000)).toBeUndefined()
+    expect(sanitizeCustomMaxTokens(16)).toBeUndefined()
+    expect(sanitizeCustomMaxTokens(2_000_000)).toBeUndefined()
+    expect(sanitizeCustomContextWindow(131_072)).toBe(131_072)
+    expect(sanitizeCustomMaxTokens(32_768)).toBe(32_768)
+  })
+
+  it('clamps max output to the context window when both are known', () => {
+    expect(sanitizeCustomMaxTokens(65_536, 4_096)).toBe(4_096)
+    expect(sanitizeCustomMaxTokens(1_024, 4_096)).toBe(1_024)
+  })
+})
+
+describe('resolveConnectionModelMaxTokens', () => {
+  it('reads a stored max output and matches prefixed runtime IDs', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'DeepSeek-V4-Flash', maxTokens: 32_768 } as never],
+    }
+    expect(resolveConnectionModelMaxTokens(conn, 'custom-endpoint/DeepSeek-V4-Flash')).toBe(32_768)
+    expect(resolveConnectionModelMaxTokens(conn, 'pi/DeepSeek-V4-Flash')).toBe(32_768)
+  })
+
+  it('returns undefined when the catalog has no max output', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
+    expect(resolveConnectionModelMaxTokens(conn, 'Opus')).toBeUndefined()
+    expect(resolveConnectionModelMaxTokens(null, 'Opus')).toBeUndefined()
+  })
+})
+
+describe('modelSupportsImages — every API-key provider', () => {
+  it('honors an explicit off for a built-in provider', () => {
     const conn: LlmConnection = {
       slug: 'a', name: 'a', providerType: 'anthropic', authType: 'api_key',
       models: [{ id: 'claude-haiku', supportsImages: false } as never],
       createdAt: 1,
     }
-    expect(modelSupportsImages(conn, 'claude-haiku')).toBe(true)
+    expect(modelSupportsImages(conn, 'claude-haiku')).toBe(false)
   })
 
-  it('returns true for pi regardless of override', () => {
+  it('honors an explicit off for a Pi API-key connection', () => {
     const conn: LlmConnection = {
       slug: 'p', name: 'p', providerType: 'pi', authType: 'api_key',
       models: [{ id: 'gpt-x', supportsImages: false } as never],
       createdAt: 1,
     }
-    expect(modelSupportsImages(conn, 'gpt-x')).toBe(true)
+    expect(modelSupportsImages(conn, 'gpt-x')).toBe(false)
+  })
+
+  it('tries images for an undeclared Pi API-key model', () => {
+    const conn: LlmConnection = {
+      slug: 'p', name: 'p', providerType: 'pi', authType: 'api_key',
+      models: [{ id: 'pi/deepseek-flash' } as never],
+      createdAt: 1,
+    }
+    expect(modelSupportsImages(conn, 'pi/deepseek-flash')).toBe(true)
+    expect(modelSupportsImages(conn, 'pi/some-new-model')).toBe(true)
   })
 })

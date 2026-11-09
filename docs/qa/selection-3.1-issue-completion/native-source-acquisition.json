@@ -1,0 +1,158 @@
+{
+  "codeCommit": "60e4a512e9dc1684ec0e26603573f8e70f23486b",
+  "rootId": "261010-plain-dawn",
+  "taskSlug": "pro-45d54f38447e120ba62c9551",
+  "runId": "chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d",
+  "scope": "Acquisition and freezing only. Full research, correction, independent review and final report still in progress.",
+  "indexesBeforeRun": 9,
+  "sources": [
+    {
+      "id": "costs-text",
+      "version": "9c66638515f2c070e78e7612652f649e82dc8423dae8a6483f81a8c60b8cdb05",
+      "hash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+      "textHash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+      "originalPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/costs.txt",
+      "indexedPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/.selection-sources/9c66638515f2c070e78e7612652f649e82dc8423dae8a6483f81a8c60b8cdb05/snapshot.txt",
+      "snapshotPath": "/private/tmp/selection-joint-aligned-clean/workspaces/comparison/tasks/pro-45d54f38447e120ba62c9551/runs/chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d/research/source-0.txt",
+      "limitations": [
+        "Text sections use literal Markdown headings and line ranges, not physical pages."
+      ],
+      "unavailableReason": null,
+      "unitsCount": 1,
+      "sampleNativeLocations": []
+    },
+    {
+      "id": "draft-text",
+      "version": "d36bc8c2e4f7b9515b9054f7cd06183ca24e740c796c3436058d7ae8c270c58f",
+      "hash": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+      "textHash": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+      "originalPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/draft.txt",
+      "indexedPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/.selection-sources/d36bc8c2e4f7b9515b9054f7cd06183ca24e740c796c3436058d7ae8c270c58f/snapshot.txt",
+      "snapshotPath": "/private/tmp/selection-joint-aligned-clean/workspaces/comparison/tasks/pro-45d54f38447e120ba62c9551/runs/chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d/research/source-1.txt",
+      "limitations": [
+        "Text sections use literal Markdown headings and line ranges, not physical pages."
+      ],
+      "unavailableReason": null,
+      "unitsCount": 1,
+      "sampleNativeLocations": []
+    },
+    {
+      "id": "cost-pdf",
+      "version": "1c109c684660dc729488195b6b55609915f0fc630bc0373cbb231ededb53ea21",
+      "hash": "1cce72b607d065970cd9804bdfe1135f5ae27a26007c640abc9e1af1ab0bb9d0",
+      "textHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+      "originalPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/cost.pdf",
+      "indexedPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/.selection-sources/1c109c684660dc729488195b6b55609915f0fc630bc0373cbb231ededb53ea21/snapshot.txt",
+      "snapshotPath": "/private/tmp/selection-joint-aligned-clean/workspaces/comparison/tasks/pro-45d54f38447e120ba62c9551/runs/chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d/research/source-2.txt",
+      "limitations": [
+        "PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied."
+      ],
+      "unavailableReason": null,
+      "unitsCount": 20,
+      "sampleNativeLocations": [
+        {
+          "id": "page-17",
+          "label": "第 17 页",
+          "kind": "page",
+          "startLine": 17,
+          "endLine": 17
+        }
+      ]
+    },
+    {
+      "id": "cost-docx",
+      "version": "98e8c50f0330482c9a7b77c87cae5b6b2394b9770b7b6df461f755d903b3a335",
+      "hash": "e714eac6c1d98d2e5c08c0ebd0abe3cab3ca88c96fc8b9796ab61e48f052eaba",
+      "textHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+      "originalPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/cost.docx",
+      "indexedPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/.selection-sources/98e8c50f0330482c9a7b77c87cae5b6b2394b9770b7b6df461f755d903b3a335/snapshot.txt",
+      "snapshotPath": "/private/tmp/selection-joint-aligned-clean/workspaces/comparison/tasks/pro-45d54f38447e120ba62c9551/runs/chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d/research/source-3.txt",
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.",
+        "DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered."
+      ],
+      "unavailableReason": null,
+      "unitsCount": 204,
+      "sampleNativeLocations": [
+        {
+          "id": "paragraph-204",
+          "label": "Cost source · 段落 204",
+          "kind": "paragraph",
+          "startLine": 204,
+          "endLine": 204
+        }
+      ]
+    },
+    {
+      "id": "cost-xlsx",
+      "version": "0401d86945a080c4b727b5558b5a2a4db2876f9eeae0fb66f5473d6482bac93a",
+      "hash": "f1c11e092de077d468cc3fd8e8d0a3440ec4f7f7b6ac8d20d7c8ce0e540bdfe3",
+      "textHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+      "originalPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/cost.xlsx",
+      "indexedPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/.selection-sources/0401d86945a080c4b727b5558b5a2a4db2876f9eeae0fb66f5473d6482bac93a/snapshot.txt",
+      "snapshotPath": "/private/tmp/selection-joint-aligned-clean/workspaces/comparison/tasks/pro-45d54f38447e120ba62c9551/runs/chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d/research/source-4.txt",
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+      ],
+      "unavailableReason": null,
+      "unitsCount": 5,
+      "sampleNativeLocations": [
+        {
+          "id": "Costs!B2",
+          "label": "Costs!B2",
+          "kind": "cell",
+          "startLine": 3,
+          "endLine": 3
+        }
+      ]
+    },
+    {
+      "id": "cost-pptx",
+      "version": "b031c29d627d5e5efb2f1b64531b2446f6273a27b3c67644f0ba906cc869d967",
+      "hash": "7b36bd4bed7e5c529bd1c4e6df6853442a67077faf27f2af98cb8b720812d9cc",
+      "textHash": "c9a72214113ea64979302b24726990caf495f9bcb9951f6247f398ac221df57b",
+      "originalPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/cost.pptx",
+      "indexedPath": "/private/tmp/selection-g7-controlled-20261010/aligned-indexed/.selection-sources/b031c29d627d5e5efb2f1b64531b2446f6273a27b3c67644f0ba906cc869d967/snapshot.txt",
+      "snapshotPath": "/private/tmp/selection-joint-aligned-clean/workspaces/comparison/tasks/pro-45d54f38447e120ba62c9551/runs/chat-43a5d99a27920fc08c5efb45295cda8e6de343422d5ea3fc2b45c8fca34b097d/research/source-5.txt",
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+      ],
+      "unavailableReason": null,
+      "unitsCount": 2,
+      "sampleNativeLocations": [
+        {
+          "id": "slide-2",
+          "label": "幻灯片 2",
+          "kind": "slide",
+          "startLine": 3,
+          "endLine": 4
+        }
+      ]
+    }
+  ],
+  "toolOrderBeforeStart": [
+    "Read",
+    "Read",
+    "Bash",
+    "Read",
+    "Read",
+    "Read",
+    "document_index",
+    "document_index",
+    "document_index",
+    "document_index",
+    "document_index",
+    "document_index",
+    "document_index",
+    "document_index",
+    "document_index",
+    "mcp__session__create_task",
+    "mcp__session__create_task",
+    "mcp__session__create_task",
+    "mcp__session__create_task",
+    "mcp__session__run_task"
+  ],
+  "currentRunStatus": "stopped",
+  "completeResearchReport": false,
+  "currentScope": "该运行已停止；仅证明先索引后冻结的采集衔接，不代表完整报告或独立审查通过。"
+}

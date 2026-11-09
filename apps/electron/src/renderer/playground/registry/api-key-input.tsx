@@ -8,7 +8,7 @@ export const apiKeyInputComponents: ComponentEntry[] = [
     id: 'api-key-custom-endpoint',
     name: 'Custom Endpoint',
     category: 'Agent Setup',
-    description: 'ApiKeyInput with Custom preset — protocol toggle, base URL, and comma-separated models',
+    description: 'ApiKeyInput with Custom preset — OpenAI Compatible base URL and comma-separated models',
     component: ApiKeyInput,
     props: [
       {
@@ -35,7 +35,7 @@ export const apiKeyInputComponents: ComponentEntry[] = [
     variants: [
       {
         name: 'Empty (OpenAI compat)',
-        description: 'Custom preset, OpenAI protocol selected, no values filled',
+        description: 'Custom preset, no values filled',
         props: {
           providerType: 'pi_api_key',
           initialValues: {
@@ -46,14 +46,14 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
       {
-        name: 'Empty (Anthropic compat)',
-        description: 'Custom preset, Anthropic protocol selected',
+        name: 'Empty (OpenAI Compatible)',
+        description: 'Custom preset with an OpenAI Compatible endpoint',
         props: {
           providerType: 'pi_api_key',
           initialValues: {
             activePreset: 'custom',
             baseUrl: 'https://your-proxy.com',
-            customApi: 'anthropic-messages',
+            customApi: 'openai-completions',
           },
         },
       },
@@ -71,6 +71,22 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
       {
+        name: 'Custom limits (auto + edited)',
+        description: 'Shows per-model context/output cards with default and saved overrides',
+        props: {
+          providerType: 'pi_api_key',
+          initialValues: {
+            activePreset: 'custom',
+            baseUrl: 'https://order.ai.jxepdi.top/v1',
+            connectionDefaultModel: 'Laufry, Opus, MO',
+            customApi: 'openai-completions',
+            modelContextWindows: { Laufry: 1_000_448, Opus: 1_536 * 1_024 },
+            modelMaxTokens: { Laufry: 128 * 1_024, Opus: 128 * 1_024, MO: 128 * 1_024 },
+            modelImageCaps: { Laufry: true, Opus: true, MO: true },
+          },
+        },
+      },
+      {
         name: 'Ollama Local (OpenAI)',
         description: 'Local Ollama endpoint — OpenAI compatible',
         props: {
@@ -84,23 +100,23 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
       {
-        name: 'Anthropic Proxy',
-        description: 'Custom Anthropic-compatible proxy endpoint',
+        name: 'OpenAI Compatible Proxy',
+        description: 'Custom OpenAI Compatible proxy endpoint',
         props: {
           providerType: 'pi_api_key',
           initialValues: {
             activePreset: 'custom',
-            baseUrl: 'https://my-anthropic-proxy.internal/v1',
-            connectionDefaultModel: 'claude-sonnet-4-6',
-            customApi: 'anthropic-messages',
+            baseUrl: 'https://my-openai-proxy.internal/v1',
+            connectionDefaultModel: 'gpt-4o',
+            customApi: 'openai-completions',
           },
         },
       },
       {
-        name: 'Via Anthropic API Key flow',
-        description: 'Custom endpoint accessed through Anthropic provider type',
+        name: 'Via Selection Backend API Key flow',
+        description: 'Custom endpoint accessed through the Pi API key flow',
         props: {
-          providerType: 'anthropic',
+          providerType: 'pi_api_key',
           initialValues: {
             activePreset: 'custom',
             baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -110,8 +126,8 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
       {
-        name: 'No Base URL (toggle hidden)',
-        description: 'Custom preset but no base URL — protocol toggle should not appear',
+        name: 'No Base URL',
+        description: 'Custom preset but no base URL',
         props: {
           providerType: 'pi_api_key',
           initialValues: {
@@ -135,6 +151,9 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
     ],
+    wrapper: ({ children }) => (
+      <div className="h-full w-full overflow-auto bg-foreground-2 p-6">{children}</div>
+    ),
     mockData: () => ({
       onSubmit: logSubmit,
       providerType: 'pi_api_key',

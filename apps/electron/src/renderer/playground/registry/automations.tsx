@@ -5,7 +5,7 @@
  * and playground variants for testing every visual state.
  */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ComponentEntry } from './types'
 import { AutomationsListPanel } from '@/components/automations/AutomationsListPanel'
 import { AutomationInfoPage } from '@/components/automations/AutomationInfoPage'
@@ -34,9 +34,6 @@ function AutomationsListPanelPlayground({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const [automationList, setAutomationList] = useState(automations)
-  // A variant switch passes new props; reset the local copies (toggle/delete edit them in between)
-  useEffect(() => { setAutomationList(automations) }, [automations])
-  useEffect(() => { setSelectedId(initialSelectedId ?? null) }, [initialSelectedId])
 
   return (
     <AutomationsListPanel
@@ -68,11 +65,6 @@ function AutomationInfoPagePlayground({
 }) {
   const [currentAutomation, setCurrentAutomation] = useState(automation)
   const [testResult, setTestResult] = useState<TestResult>({ state: 'idle' })
-  // A variant switch passes a new automation; show it (and drop the previous test result)
-  useEffect(() => {
-    setCurrentAutomation(automation)
-    setTestResult({ state: 'idle' })
-  }, [automation])
 
   const handleTest = () => {
     setTestResult({ state: 'running' })
@@ -121,10 +113,6 @@ function AutomationAvatarGallery() {
   const events: AutomationTrigger[] = [
     'SchedulerTick', 'LabelAdd', 'LabelRemove', 'LabelConfigChange',
     'PermissionModeChange', 'FlagChange', 'TodoStateChange',
-    'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-    'Notification', 'UserPromptSubmit', 'SessionStart', 'SessionEnd',
-    'Stop', 'SubagentStart', 'SubagentStop', 'PreCompact',
-    'PermissionRequest', 'Setup',
   ]
 
   return (
@@ -212,17 +200,6 @@ const mockAutomations: AutomationListItem[] = [
     lastExecutedAt: now - 300_000, // 5 minutes ago
   },
   {
-    id: 'automation-3',
-    event: 'PreToolUse',
-    matcherIndex: 0,
-    name: 'Git Pre-commit Check',
-    summary: 'Before any Bash tool use',
-    enabled: false,
-    matcher: 'Bash',
-    actions: [{ type: 'prompt', prompt: 'Run git diff --cached --check and report any issues' }],
-    permissionMode: 'safe',
-  },
-  {
     id: 'automation-4',
     event: 'LabelAdd',
     matcherIndex: 1,
@@ -247,39 +224,6 @@ const mockAutomations: AutomationListItem[] = [
     ],
     labels: ['Monitoring'],
     lastExecutedAt: now - 900_000, // 15 minutes ago
-  },
-  {
-    id: 'automation-6',
-    event: 'PostToolUse',
-    matcherIndex: 0,
-    name: 'Build Artifact Logger',
-    summary: 'After Bash tool completes',
-    enabled: true,
-    matcher: 'Bash',
-    actions: [{ type: 'prompt', prompt: 'Log that tool $TOOL_NAME completed to ~/build-log.txt' }],
-    lastExecutedAt: now - 172800_000, // 2 days ago
-  },
-  {
-    id: 'automation-7',
-    event: 'SessionStart',
-    matcherIndex: 0,
-    name: 'Welcome Prompt',
-    summary: 'Greet on new session',
-    enabled: true,
-    actions: [{ type: 'prompt', prompt: 'Welcome! Check if there are any pending @linear issues assigned to me.' }],
-    labels: ['Onboarding'],
-    lastExecutedAt: now - 7200_000, // 2 hours ago
-  },
-  {
-    id: 'automation-8',
-    event: 'PostToolUseFailure',
-    matcherIndex: 0,
-    name: 'Error Alert',
-    summary: 'Notify on tool failures',
-    enabled: true,
-    actions: [{ type: 'prompt', prompt: 'Send an error notification: tool $TOOL_NAME failed' }],
-    permissionMode: 'allow-all',
-    lastExecutedAt: now - 86400_000, // 1 day ago
   },
   {
     id: 'automation-9',
@@ -320,50 +264,11 @@ const mockAutomations: AutomationListItem[] = [
   },
 ]
 
-/** Rows the server reports as not running, and a script automation (all three were missing from the list before) */
-const mockProblemAutomations: AutomationListItem[] = [
-  {
-    id: 'automation-legacy',
-    event: 'LabelAdd',
-    matcherIndex: 3,
-    name: 'Label Added',
-    summary: 'Matches: ^urgent$',
-    enabled: true,
-    matcher: '^urgent$',
-    actions: [],
-    issues: ['Action 1 uses the removed "command" type; use a "script" action instead'],
-  },
-  {
-    id: 'automation-script',
-    event: 'SchedulerTick',
-    matcherIndex: 3,
-    name: 'Refresh build dashboard',
-    summary: 'Every 15 minutes',
-    enabled: true,
-    cron: '*/15 * * * *',
-    actions: [{ type: 'script', script: 'scripts/refresh-build-health.ts', runtime: 'bun', args: ['--quiet'] }],
-    lastExecutedAt: now - 300_000,
-  },
-  {
-    id: 'automation-hook',
-    event: 'PreToolUse',
-    matcherIndex: 0,
-    name: 'Log Bash calls',
-    summary: 'Matches: ^Bash$',
-    enabled: true,
-    matcher: '^Bash$',
-    actions: [{ type: 'script', script: 'scripts/log-bash.ts' }],
-    issues: ['Automations on the agent event "PreToolUse" never run: agent hook events don\'t trigger actions. Use an app event such as LabelAdd, SessionStatusChange or SchedulerTick.'],
-  },
-]
-
 const mockExecutions: ExecutionEntry[] = [
   { id: 'ex-1', automationId: 'automation-1', event: 'SchedulerTick', status: 'success', duration: 42, timestamp: now - 120_000, actionSummary: 'prompt → @weather forecast' },
   { id: 'ex-2', automationId: 'automation-4', event: 'LabelAdd', status: 'success', duration: 8, timestamp: now - 300_000, actionSummary: 'echo "[...] Added: urgent"' },
   { id: 'ex-3', automationId: 'automation-5', event: 'SchedulerTick', status: 'error', duration: 1200, timestamp: now - 900_000, error: 'Connection refused' },
-  { id: 'ex-4', automationId: 'automation-3', event: 'PreToolUse', status: 'blocked', duration: 0, timestamp: now - 3600_000, actionSummary: 'git diff --cached --check' },
   { id: 'ex-5', automationId: 'automation-1', event: 'SchedulerTick', status: 'success', duration: 38, timestamp: now - 86400_000, actionSummary: 'prompt → @weather forecast' },
-  { id: 'ex-6', automationId: 'automation-6', event: 'PostToolUse', status: 'success', duration: 5, timestamp: now - 172800_000, actionSummary: 'echo "[...] Tool completed: Bash"' },
   // Webhook entries with expandable details
   {
     id: 'ex-7', automationId: 'automation-1', event: 'SessionStatusChange', status: 'success', duration: 45, timestamp: now - 60_000,
@@ -451,14 +356,6 @@ export const automationComponents: ComponentEntry[] = [
           selectedAutomationId: null,
         },
       },
-      {
-        name: 'Not Running + Script',
-        description: 'Banner, Not running chips (removed command action, agent event), and a script automation',
-        props: {
-          automations: [...mockProblemAutomations, ...mockAutomations.slice(0, 3)],
-          selectedAutomationId: 'automation-legacy',
-        },
-      },
     ],
     mockData: () => ({
       automations: mockAutomations,
@@ -481,16 +378,6 @@ export const automationComponents: ComponentEntry[] = [
         name: 'Scheduled',
         description: 'Recurring schedule with timezone and upcoming runs',
         props: { automation: mockAutomations[0], executions: mockExecutions.filter(e => e.automationId === 'automation-1') },
-      },
-      {
-        name: 'Not Running (removed command)',
-        description: 'Skipped at load: the alert says why',
-        props: { automation: mockProblemAutomations[0], executions: [] },
-      },
-      {
-        name: 'Script Action',
-        description: 'Runs a workspace script (runtime, path, args)',
-        props: { automation: mockProblemAutomations[1], executions: [] },
       },
       {
         name: 'Label Event',

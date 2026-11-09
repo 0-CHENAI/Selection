@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="glass-archive" x1="18%" y1="0%" x2="86%" y2="100%">
+      <stop offset="0%" stop-color="#ddb290"/>
+      <stop offset="46%" stop-color="#c5793f"/>
+      <stop offset="100%" stop-color="#864212"/>
+    </linearGradient>
+    <linearGradient id="sheen-archive" x1="20%" y1="0%" x2="70%" y2="80%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.72"/>
+      <stop offset="38%" stop-color="#fff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fold-archive" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#ddb290" stop-opacity="0.55"/>
+    </linearGradient>
+    <filter id="shadow-archive" x="-20%" y="-10%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#B45309" flood-opacity="0.22"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.16"/>
+    </filter>
+    <clipPath id="page-archive">
+      <path d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"/>
+    </clipPath>
+  </defs>
+  <path filter="url(#shadow-archive)" fill="url(#glass-archive)"
+    d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"/>
+  <g clip-path="url(#page-archive)">
+    <rect width="1024" height="1024" fill="url(#sheen-archive)"/>
+    <path d="M220 150h520l-180 240H180z" fill="#fff" opacity="0.22"/>
+    <ellipse cx="390" cy="250" rx="210" ry="70" fill="#fff" opacity="0.28"/>
+  </g>
+  <path d="M640 168v148h148z" fill="url(#fold-archive)" stroke="#ddb290" stroke-width="2"/>
+  <path d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"
+    fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="3"/>
+  <g transform="translate(512 560)" color="#1e293b" opacity="0.86"><g fill="#1e293b"><rect x="-130" y="-80" width="260" height="48" rx="8"/><rect x="-110" y="-32" width="220" height="150" rx="16"/><rect x="-28" y="8" width="56" height="22" rx="6" fill="#fff"/></g></g>
+</svg>

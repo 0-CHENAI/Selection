@@ -12,12 +12,23 @@ import { atom } from 'jotai'
 import type { Getter, Setter } from 'jotai/vanilla'
 import { atomFamily } from 'jotai-family'
 import type { Session, Message } from '../../shared/types'
+import type { OfficeDocumentState, PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 
 /**
  * Session metadata for list display (lightweight, no messages)
  * Used by SessionList to avoid re-rendering on message changes
  */
 export interface SessionMeta {
+  /** PPT requests classify history independently of the PRO execution mode. */
+  ppt?: PptRequest
+  /** Word / Excel document mode. Null means the Office selection was cleared. */
+  office?: OfficeDocumentState | null
+  pptProgress?: PptProgress
+  handover?: import('@craft-agent/shared/protocol').HandoverLink
+
+  workMode?: 'NORM' | 'PRO'
+  workModeNeedsReview?: boolean
+  executionRootSessionId?: string
   id: string
   name?: string
   /** Preview of first user message (for title fallback) */
@@ -29,8 +40,6 @@ export interface SessionMeta {
   lastReadMessageId?: string
   workingDirectory?: string
   enabledSourceSlugs?: string[]
-  /** Coding mode: lean coding prompt and session tools (shown as a glyph in the session list) */
-  codingMode?: boolean
   /** Shared viewer URL (if shared via viewer) */
   sharedUrl?: string
   /** Shared session ID in viewer (for revoke) */
@@ -45,7 +54,7 @@ export interface SessionMeta {
   hasUnread?: boolean
   /** Labels for filtering (additive tags, many-per-session) */
   labels?: string[]
-  /** Permission mode ('safe', 'ask', 'guarded', 'allow-all') — used by view expressions */
+  /** Permission mode ('safe', 'ask', 'allow-all') — used by view expressions */
   permissionMode?: string
   /** Session status for filtering */
   sessionStatus?: string
@@ -60,13 +69,7 @@ export interface SessionMeta {
   /** LLM connection slug for this session */
   llmConnection?: string
   /** Token usage stats (from JSONL header, available without loading messages) */
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    costUsd: number
-    contextTokens: number
-  }
+  tokenUsage?: Session['tokenUsage']
   /** When the session was created (ms timestamp) */
   createdAt?: number
   /** Total number of messages in this session */
@@ -79,10 +82,10 @@ export interface SessionMeta {
   archivedAt?: number
   /** Workspace-scoped project id this session is bound to (undefined = unbound) */
   projectId?: string
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
+  sharedProjectMemoryEnabled?: boolean
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task) */
   parentSessionId?: string
-  /** Id of the session this one was branched from (undefined = not a branch) */
-  branchFromSessionId?: string
   /** Kanban board column id ('todo' | 'in-progress' | 'done'); independent of sessionStatus */
   kanbanColumn?: string
   /** Tasks Conductor: slug of the task spec this session belongs to (orchestrator + child nodes) */
@@ -95,6 +98,22 @@ export interface SessionMeta {
   taskNodeCount?: number
   /** Tasks Conductor: a generate-time draft orchestrator, hidden from the board until adopted by createTask. */
   taskDraft?: boolean
+  /** Per-session opt-in for autonomous Swarm delegation. Missing means disabled. */
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  /** Swarm lineage role. Worker and reviewer sessions stay out of ordinary session lists. */
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  /** User-facing summary of the internal orchestration state. */
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  /** Human-readable reason for a blocked orchestration. */
+  orchestrationBlocker?: string
+  /** Temporary Swarm usage, independent of DAG run accounting. */
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
+  orchestrationAggregation?: Session['orchestrationAggregation']
 }
 
 /**
@@ -121,6 +140,7 @@ export function extractSessionMeta(session: Session): SessionMeta {
   const {
     messages: _msgs, sessionFolderPath: _sf, supportsBranching: _sb,
     workspaceName: _wn, thinkingLevel: _tl, currentStatus: _cs,
+    processingStartedAt: _ps,
     isAsyncOperationOngoing, isRegeneratingTitle,
     messageCount, lastFinalMessageId: sessionLastFinal,
     ...sessionFields
@@ -164,6 +184,21 @@ export const sessionIdsAtom = atom<string[]>([])
  * Sessions are loaded with empty messages initially, messages are fetched on-demand
  */
 export const loadedSessionsAtom = atom<Set<string>>(new Set<string>())
+
+/** Apply only local changes made after an asynchronous snapshot was requested. */
+function mergeChanges<T extends object>(snapshot: T, before: T, current: T): T {
+  const result = { ...snapshot }
+  const target = result as Record<string, unknown>
+  const previous = before as Record<string, unknown>
+  const latest = current as Record<string, unknown>
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(latest)])) {
+    if (previous[key] !== latest[key]) {
+      if (key in latest) target[key] = latest[key]
+      else delete target[key]
+    }
+  }
+  return result
+}
 
 /**
  * Promise cache for deduplicating concurrent session load requests.
@@ -360,9 +395,10 @@ export const refreshSessionsMetadataAtom = atom(
   (
     get,
     set,
-    payload: { sessions: Session[]; loadedSessionIds: Set<string>; removeMissing?: boolean }
+    payload: { sessions: Session[]; loadedSessionIds: Set<string>; removeMissing?: boolean; baselineSessions?: Map<string, Session | null>; baselineMetas?: Map<string, SessionMeta> }
   ): Map<string, SessionMeta> => {
-    const { sessions, loadedSessionIds, removeMissing = true } = payload
+    const { sessions, loadedSessionIds, removeMissing = true, baselineSessions, baselineMetas } = payload
+    const currentMetas = get(sessionMetaMapAtom)
 
     // Remove stale sessions only for authoritative refreshes. Stale reconnect
     // recovery can receive a transient partial list immediately after sleep/wake;
@@ -373,7 +409,9 @@ export const refreshSessionsMetadataAtom = atom(
     const latestIds = new Set(sessions.map(s => s.id))
     if (removeMissing) {
       for (const staleId of currentIds) {
-        if (!latestIds.has(staleId)) {
+        if (!latestIds.has(staleId) && (!baselineSessions || (baselineSessions.has(staleId)
+          && baselineSessions.get(staleId) === get(sessionAtomFamily(staleId))))
+          && (!baselineMetas || baselineMetas.get(staleId) === currentMetas.get(staleId))) {
           set(removeSessionAtom, staleId)
         }
       }
@@ -381,14 +419,26 @@ export const refreshSessionsMetadataAtom = atom(
 
     // Update each session atom, preserving messages for loaded sessions
     const unloadedIds: string[] = []
+    const refreshedSessions = new Map<string, Session>()
     for (const session of sessions) {
       const currentSession = get(sessionAtomFamily(session.id))
-      const shouldPreserveMessages = !!currentSession && loadedSessionIds.has(session.id)
-      const nextSession = shouldPreserveMessages && currentSession
+      if (baselineMetas?.has(session.id) && !currentMetas.has(session.id)) continue
+      const before = baselineSessions?.get(session.id)
+      if (baselineSessions?.has(session.id) && before && !currentSession) continue
+      const shouldPreserveMessages = !!currentSession && (loadedSessionIds.has(session.id) || currentSession.isProcessing)
+      let nextSession = shouldPreserveMessages && currentSession
         ? { ...session, messages: currentSession.messages }
         : session
 
+      if (baselineSessions && currentSession && before !== currentSession) {
+        // Merge only fields changed since the fetch began. Other fields can
+        // still be repaired by the authoritative server snapshot.
+        if (!before) nextSession = currentSession
+        else nextSession = mergeChanges(nextSession, before, currentSession)
+      }
+
       set(sessionAtomFamily(session.id), nextSession)
+      refreshedSessions.set(session.id, nextSession)
 
       // Track sessions that lost their messages so lazy-loading re-fetches them
       if (!shouldPreserveMessages && loadedSessionIds.has(session.id)) {
@@ -406,11 +456,19 @@ export const refreshSessionsMetadataAtom = atom(
     // Build and set metadata map. Non-destructive refresh starts from the
     // existing map so sessions omitted by a transient partial response remain
     // visible. Returned sessions are still authoritative for their own fields.
-    const nextMetaMap = removeMissing
-      ? new Map<string, SessionMeta>()
-      : new Map(get(sessionMetaMapAtom))
+    const nextMetaMap = new Map(get(sessionMetaMapAtom))
     for (const session of sessions) {
-      nextMetaMap.set(session.id, extractSessionMeta(session))
+      const refreshed = refreshedSessions.get(session.id)
+      if (refreshed) {
+        let nextMeta = extractSessionMeta(refreshed)
+        const before = baselineMetas?.get(session.id)
+        const current = currentMetas.get(session.id)
+        if (before && current && before !== current) {
+          // Keep fields updated only in metadata while the request was pending.
+          nextMeta = mergeChanges(nextMeta, before, current)
+        }
+        nextMetaMap.set(session.id, nextMeta)
+      }
     }
     set(sessionMetaMapAtom, nextMetaMap)
 
@@ -615,6 +673,14 @@ async function loadSessionMessages(
     // tokenUsage and sessionFolderPath are only returned by getSession() (not getSessions()),
     // so they must be explicitly merged here to be available after app restart.
     const existingSession = get(sessionAtomFamily(sessionId))
+    // Streaming can create a placeholder before session_created is hydrated.
+    // Fill its missing execution identity from the host without overwriting a
+    // newer mode event or optimistic UI state received during the fetch.
+    const executionIdentity = {
+      workMode: existingSession?.workMode ?? loadedSession.workMode,
+      workModeNeedsReview: existingSession?.workModeNeedsReview ?? loadedSession.workModeNeedsReview,
+      executionRootSessionId: existingSession?.executionRootSessionId ?? loadedSession.executionRootSessionId,
+    }
     const preservedStaleMessages = !!existingSession
       && existingSession.messages.length > 0
       && (!loadedSession.messages || loadedSession.messages.length === 0)
@@ -622,6 +688,7 @@ async function loadSessionMessages(
     const mergedSession = existingSession
       ? {
           ...existingSession,
+          ...executionIdentity,
           // CRITICAL: Don't clobber messages if session is actively streaming
           // AND already has messages in the atom. Streaming events update the atom
           // directly and may contain messages the IPC response doesn't know about
@@ -642,18 +709,16 @@ async function loadSessionMessages(
       : loadedSession
     set(sessionAtomFamily(sessionId), mergedSession)
 
-    // Update only lastFinalMessageId in metadata (now computable from loaded messages).
-    // Don't replace the full meta entry — other fields are maintained through
-    // optimistic updates and IPC events, and may be ahead of disk state.
+    // Keep execution identity consistent with the full atom so the mode selector
+    // and session list cannot label a PRO placeholder as NORM.
+    // Other UI metadata may be ahead of the fetched snapshot.
     const lastFinalMessageId = findLastFinalMessageId(loadedSession.messages)
-    if (lastFinalMessageId) {
-      const metaMap = get(sessionMetaMapAtom)
-      const existingMeta = metaMap.get(sessionId)
-      if (existingMeta && existingMeta.lastFinalMessageId !== lastFinalMessageId) {
-        const newMetaMap = new Map(metaMap)
-        newMetaMap.set(sessionId, { ...existingMeta, lastFinalMessageId })
-        set(sessionMetaMapAtom, newMetaMap)
-      }
+    const metaMap = get(sessionMetaMapAtom)
+    const existingMeta = metaMap.get(sessionId)
+    if (existingMeta) {
+      const newMetaMap = new Map(metaMap)
+      newMetaMap.set(sessionId, { ...existingMeta, ...executionIdentity, ...(lastFinalMessageId ? { lastFinalMessageId } : {}) })
+      set(sessionMetaMapAtom, newMetaMap)
     }
 
     // Mark as loaded only when we received a fresh payload.
@@ -739,10 +804,8 @@ export interface BackgroundTask {
   outputFile?: string
   /** Short summary, set when task_completed arrives */
   summary?: string
-  /** What a running task is doing (task_activity): the agent's one-line summary, its last tool, its step count */
-  activity?: { summary?: string; lastToolName?: string; toolUses?: number }
-  /** A stop was requested; the stopped status arrives as task_completed */
-  stopping?: boolean
+  /** Managed Swarm run id. These child chips remain until explicitly dismissed. */
+  orchestrationId?: string
 }
 
 /**

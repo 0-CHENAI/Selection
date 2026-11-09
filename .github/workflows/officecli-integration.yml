@@ -1,0 +1,79 @@
+# Packaged OfficeCLI runtime integration.
+#
+# PR: Windows x64 only, and only when OfficeCLI-related paths change.
+# Chat/UI-only diffs (see #787–#790) must not queue macos-arm64.
+# macOS arm64 runs on schedule and workflow_dispatch — it is optional, not
+# part of the merge gate. See docs/ci.md.
+name: OfficeCLI Packaged Runtime Integration
+
+on:
+  pull_request:
+    paths:
+      - "apps/electron/resources/officecli/**"
+      - "apps/electron/resources/bin/**"
+      - "apps/electron/resources/skills/officecli/**"
+      - "apps/electron/resources/skills/ppt-design/**"
+      - "apps/electron/resources/scripts/officecli*"
+      - "apps/electron/electron-builder.yml"
+      - "packages/session-tools-core/**"
+      - "packages/shared/src/utils/officecli.ts"
+      - "packages/shared/src/utils/__tests__/officecli*"
+      - "packages/shared/src/utils/isolated-shell.ts"
+      - "packages/shared/src/utils/windows-isolated-shell.ts"
+      - "packages/shared/src/agent/**"
+      - "packages/shared/src/skills/**"
+      - "packages/server-core/src/sessions/office*"
+      - "packages/pi-agent-server/src/isolated-shell.test.ts"
+      - "scripts/sync-officecli.ts"
+      - "scripts/run-officecli-integration-tests.ts"
+      - "scripts/selection-3.2-office-cases.test.ts"
+      - "scripts/build/common.ts"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/officecli-integration.yml"
+      - ".github/actions/setup-selection-ci/**"
+      - ".github/actions/run-officecli-integration/**"
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: officecli-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HUSKY: "0"
+  OFFICECLI_INTEGRATION: "1"
+
+jobs:
+  officecli-windows:
+    name: officecli (windows-x64)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
+        with:
+          cache-officecli-runtime: "true"
+      - name: Run packaged OfficeCLI integration
+        uses: ./.github/actions/run-officecli-integration
+
+  officecli-macos:
+    name: officecli (macos-arm64)
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
+        with:
+          cache-officecli-runtime: "true"
+      - name: Run packaged OfficeCLI integration
+        uses: ./.github/actions/run-officecli-integration

@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { OAuthFlowStore, createPendingFlow } from '@craft-agent/shared/auth';
 import { createWebuiHandler } from '../http-server';
 
 const TEMP_DIRS: string[] = [];
@@ -23,25 +22,6 @@ function createTestWebuiDir(): string {
   return dir;
 }
 
-function createFlow(state: string) {
-  return createPendingFlow({
-    flowId: `flow-${state}`,
-    state,
-    codeVerifier: 'verifier',
-    redirectUri: 'https://thecraftagents.com/auth/callback',
-    source: {} as any,
-    clientId: 'test-client-id',
-    clientSecret: 'test-client-secret',
-    tokenEndpoint: 'https://oauth2.googleapis.com/token',
-    provider: 'google',
-    ownerClientId: 'client-1',
-    workspaceId: 'workspace-1',
-    sourceSlug: 'gmail',
-    sessionId: 'session-1',
-    authRequestId: 'auth-1',
-  });
-}
-
 afterEach(() => {
   while (TEMP_DIRS.length > 0) {
     const dir = TEMP_DIRS.pop();
@@ -51,10 +31,23 @@ afterEach(() => {
 
 describe('WebUI /api/oauth/callback', () => {
   it('completes OAuth when the relay forwards the inner flow state', async () => {
-    const flowStore = new OAuthFlowStore();
-    const flow = createFlow('inner-state-123');
-    flowStore.store(flow);
-    const fanOuts: unknown[][] = [];
+    const flow = {
+      flowId: 'flow-1',
+      state: 'inner-state-123',
+      codeVerifier: 'verifier',
+      redirectUri: 'https://agents.craft.do/auth/callback',
+      source: {} as any,
+      clientId: 'test-client-id',
+      clientSecret: 'test-client-secret',
+      tokenEndpoint: 'https://oauth2.googleapis.com/token',
+      provider: 'google',
+      ownerClientId: 'client-1',
+      workspaceId: 'workspace-1',
+      sourceSlug: 'gmail',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    };
+    const flows = new Map([[flow.state, flow]]);
 
     const handler = createWebuiHandler({
       webuiDir: createTestWebuiDir(),
@@ -67,13 +60,17 @@ describe('WebUI /api/oauth/callback', () => {
     });
 
     handler.setOAuthCallbackDeps({
-      flowStore,
+      flowStore: {
+        getByState: (state: string) => flows.get(state) ?? null,
+        remove: (state: string) => {
+          flows.delete(state);
+        },
+      },
       credManager: {
         exchangeAndStore: async () => ({ success: true, email: 'gyula@craft.do' }),
       },
       sessionManager: {
         completeAuthRequest: async () => {},
-        completeAuthRequestsForSource: (...args) => { fanOuts.push(args); return ['session-1']; },
       },
       pushSourcesChanged: () => {},
     });
@@ -85,25 +82,17 @@ describe('WebUI /api/oauth/callback', () => {
 
       expect(response.status).toBe(200);
       expect(await response.text()).toContain('Authorization Successful');
-      expect(flowStore.getByState('inner-state-123')).toBeNull();
-      // Every session waiting on the source in the workspace is answered, not only the card's
-      expect(fanOuts).toEqual([[
-        'workspace-1', 'gmail', { email: 'gyula@craft.do' }, [{ sessionId: 'session-1', authRequestId: 'auth-1' }],
-      ]]);
-      expect(flowStore.getStatus(flow.flowId, 'workspace-1')).toEqual({
-        live: false,
-        outcome: { success: true, error: undefined, email: 'gyula@craft.do' },
-      });
+      expect(flows.has('inner-state-123')).toBe(false);
     } finally {
       handler.dispose();
-      flowStore.dispose();
     }
   });
 
   it('renders an OAuth failure page when the relay forwards provider errors', async () => {
-    const flowStore = new OAuthFlowStore();
-    const flow = createFlow('inner-state-456');
-    flowStore.store(flow);
+    const flow = {
+      state: 'inner-state-456',
+    };
+    const flows = new Map([[flow.state, flow]]);
 
     const handler = createWebuiHandler({
       webuiDir: createTestWebuiDir(),
@@ -116,13 +105,17 @@ describe('WebUI /api/oauth/callback', () => {
     });
 
     handler.setOAuthCallbackDeps({
-      flowStore,
+      flowStore: {
+        getByState: (state: string) => flows.get(state) ?? null,
+        remove: (state: string) => {
+          flows.delete(state);
+        },
+      },
       credManager: {
         exchangeAndStore: async () => ({ success: true }),
       },
       sessionManager: {
         completeAuthRequest: async () => {},
-        completeAuthRequestsForSource: () => [],
       },
       pushSourcesChanged: () => {},
     });
@@ -134,15 +127,9 @@ describe('WebUI /api/oauth/callback', () => {
 
       expect(response.status).toBe(200);
       expect(await response.text()).toContain('Authorization Failed');
-      expect(flowStore.getByState('inner-state-456')).toBeNull();
-      // Clients that joined the flow learn why it ended
-      expect(flowStore.getStatus(flow.flowId, 'workspace-1')).toEqual({
-        live: false,
-        outcome: { success: false, error: 'User denied', email: undefined },
-      });
+      expect(flows.has('inner-state-456')).toBe(false);
     } finally {
       handler.dispose();
-      flowStore.dispose();
     }
   });
 });

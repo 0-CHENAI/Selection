@@ -21,20 +21,30 @@ import {
   isApiEndpointAllowed,
   getBashRejectionReason,
   formatBashRejectionMessage,
-  resolveEffectivePermissionMode,
   type ToolCheckResult,
 } from '../mode-manager.ts';
 import { createLogger } from '../../utils/debug.ts';
-import { parseSimpleCommand } from '../bash-validator.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
-import { isAutonomousPermissionMode, type PermissionMode } from '../mode-types.ts';
-import { isDangerousArgv, type PermissionRemember } from './permission-remember.ts';
+import type { PermissionMode } from '../mode-types.ts';
 import type { PermissionManagerConfig, ToolPermissionResult } from './types.ts';
 
 const log = createLogger('permissions');
 
 // Re-export types for convenience
-export type { ToolCheckResult, PermissionMode, PermissionRemember };
+export type { ToolCheckResult, PermissionMode };
+
+/**
+ * Dangerous commands that should always require permission in 'ask' mode.
+ * These are never auto-allowed regardless of user configuration.
+ */
+const DANGEROUS_COMMANDS = new Set([
+  'rm', 'rmdir', 'sudo', 'su', 'chmod', 'chown', 'chgrp',
+  'mv', 'cp', 'dd', 'mkfs', 'fdisk', 'parted',
+  'kill', 'killall', 'pkill',
+  'reboot', 'shutdown', 'halt', 'poweroff',
+  'curl', 'wget', 'ssh', 'scp', 'rsync',
+  'git push', 'git reset', 'git rebase', 'git checkout',
+]);
 
 /**
  * PermissionManager provides centralized permission checking for agent backends.
@@ -62,6 +72,8 @@ export class PermissionManager {
   // Session-scoped whitelists for "always allow" feature
   private alwaysAllowedCommands: Set<string> = new Set();
   private alwaysAllowedDomains: Set<string> = new Set();
+  /** Case-sensitive approval keys from "Always allow" (paths, exact commands). */
+  private rememberedApprovals: Set<string> = new Set();
 
   constructor(config: PermissionManagerConfig) {
     this.config = config;
@@ -173,10 +185,10 @@ export class PermissionManager {
    * @returns null if allowed, or rejection reason string if blocked
    */
   checkBashCommand(command: string): string | null {
-    const mode = resolveEffectivePermissionMode(this.getPermissionMode());
+    const mode = this.getPermissionMode();
 
-    // In execute (and guarded) mode, all commands are allowed
-    if (isAutonomousPermissionMode(mode)) {
+    // In execute mode, all commands are allowed
+    if (mode === 'allow-all') {
       return null;
     }
 
@@ -204,10 +216,10 @@ export class PermissionManager {
    * @returns true if permission should be requested
    */
   requiresBashPermission(command: string): boolean {
-    const mode = resolveEffectivePermissionMode(this.getPermissionMode());
+    const mode = this.getPermissionMode();
 
-    // Execute mode never requires permission (Guarded's prompts come from its risk check)
-    if (isAutonomousPermissionMode(mode)) {
+    // Execute mode never requires permission
+    if (mode === 'allow-all') {
       return false;
     }
 
@@ -216,10 +228,9 @@ export class PermissionManager {
       return false;
     }
 
-    // In ask mode: dangerous commands, and anything that is not one plain command
-    // (a chain can hide a dangerous command after a harmless one).
-    const argv = parseSimpleCommand(command);
-    return argv === null || isDangerousArgv(argv);
+    // In ask mode, check if command is dangerous
+    const baseCommand = this.getBaseCommand(command);
+    return this.isDangerousCommand(baseCommand);
   }
 
   // ============================================================
@@ -243,9 +254,8 @@ export class PermissionManager {
   // ============================================================
 
   /**
-   * The first word of a bash command, after an optional `sudo`. For labels and
-   * curl/wget detection only: it ignores chains and subcommands, so it must not
-   * decide what "Always Allow" remembers (see permission-remember.ts).
+   * Extract the base command (first word) from a bash command string.
+   * Handles pipes, redirects, and other shell constructs.
    *
    * @param command - Full bash command
    * @returns Base command name
@@ -255,6 +265,39 @@ export class PermissionManager {
     // Extract first word, handling common prefixes
     const match = trimmed.match(/^(?:sudo\s+)?(\S+)/);
     return match?.[1] ?? trimmed.split(/\s+/)[0] ?? '';
+  }
+
+  /**
+   * Check if a command is in the dangerous commands list.
+   *
+   * @param baseCommand - Base command name (from getBaseCommand)
+   * @returns true if command is dangerous
+   */
+  isDangerousCommand(baseCommand: string): boolean {
+    return DANGEROUS_COMMANDS.has(baseCommand.toLowerCase());
+  }
+
+  /**
+   * Extract domain from network commands (curl, wget, ssh, etc.)
+   * Used for domain whitelisting checks.
+   *
+   * @param command - Full bash command
+   * @returns Domain if found, null otherwise
+   */
+  extractDomainFromNetworkCommand(command: string): string | null {
+    // Match common patterns for URLs and hostnames
+    const urlMatch = command.match(/https?:\/\/([^\/\s:]+)/);
+    if (urlMatch?.[1]) {
+      return urlMatch[1];
+    }
+
+    // Match ssh-style user@host patterns
+    const sshMatch = command.match(/@([^\s:]+)/);
+    if (sshMatch?.[1]) {
+      return sshMatch[1];
+    }
+
+    return null;
   }
 
   // ============================================================
@@ -302,22 +345,11 @@ export class PermissionManager {
   }
 
   /**
-   * Whitelist a command key for the remainder of the session.
+   * Whitelist a command for the remainder of the session.
+   * Called when user clicks "Always Allow" for a command.
    */
   whitelistCommand(baseCommand: string): void {
     this.alwaysAllowedCommands.add(baseCommand.toLowerCase());
-  }
-
-  /**
-   * Apply an "Always Allow" answer: remember exactly what the prompt's permission
-   * check computed (`PromptInfo.remember`), never a key derived from the prompt text.
-   */
-  remember(entry: PermissionRemember): void {
-    if (entry.kind === 'domains') {
-      for (const domain of entry.domains) this.whitelistDomain(domain);
-    } else {
-      this.whitelistCommand(entry.key);
-    }
   }
 
   /**
@@ -336,12 +368,26 @@ export class PermissionManager {
   }
 
   /**
+   * Remember an approval for the rest of the session ("Always allow").
+   * Keys come from smart-confirm `rememberKeys` and are matched exactly
+   * (case-sensitive), so approving `rm -rf build` never approves `rm -rf Build`.
+   */
+  rememberApproval(key: string): void {
+    this.rememberedApprovals.add(key);
+  }
+
+  isApprovalRemembered(key: string): boolean {
+    return this.rememberedApprovals.has(key);
+  }
+
+  /**
    * Clear all session-scoped whitelists.
    * Called on session clear or dispose.
    */
   clearWhitelists(): void {
     this.alwaysAllowedCommands.clear();
     this.alwaysAllowedDomains.clear();
+    this.rememberedApprovals.clear();
   }
 
   /**

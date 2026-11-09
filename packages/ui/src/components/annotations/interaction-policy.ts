@@ -1,5 +1,5 @@
 import type { AnnotationV1 } from '@craft-agent/core'
-import { getAnnotationFollowUpState, type AnnotationFollowUpState } from './follow-up-state'
+import { asRecord, getAnnotationFollowUpState, type AnnotationFollowUpState } from './follow-up-state'
 
 export type AnnotationChipInteraction = {
   state: AnnotationFollowUpState
@@ -10,12 +10,15 @@ export type AnnotationChipInteraction = {
 
 /**
  * Unified annotation chip behavior:
- * - sent follow-up chips are tooltip-only (no island open on click)
+ * - legacy sent follow-up chips are tooltip-only
+ * - tracked feedback stays accessible for its revision result
  * - pending/unsent chips open annotation detail in view mode
  */
 export function getAnnotationChipInteraction(annotation?: AnnotationV1 | null): AnnotationChipInteraction {
   const state = annotation ? getAnnotationFollowUpState(annotation) : 'none'
-  const isSent = state === 'sent'
+  const followUp = asRecord(annotation?.meta?.followUp)
+  const tracked = typeof followUp?.requestMessageId === 'string' && followUp.requestMessageId.length > 0
+  const isSent = state === 'sent' && !tracked
 
   return {
     state,

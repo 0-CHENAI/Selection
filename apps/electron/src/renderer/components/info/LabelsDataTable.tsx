@@ -11,10 +11,9 @@ import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import type { ColumnDef, Row } from '@tanstack/react-table'
-import { ChevronRight } from 'lucide-react'
-import { Info_DataTable, SortableHeader, INFO_TABLE_HEADER_CLASS, INFO_TABLE_SORTABLE_HEADER_CLASS } from './Info_DataTable'
+import { ChevronRight, Maximize2 } from 'lucide-react'
+import { Info_DataTable, SortableHeader } from './Info_DataTable'
 import { Info_Badge } from './Info_Badge'
-import { Info_FullscreenButton } from './Info_FullscreenButton'
 import { DataTableOverlay } from '@craft-agent/ui'
 import { LabelIcon } from '@/components/ui/label-icon'
 import { cn } from '@/lib/utils'
@@ -53,18 +52,15 @@ function ExpandableNameCell({ row }: { row: Row<LabelConfig> }) {
       {canExpand ? (
         <button
           type="button"
-          aria-expanded={isExpanded}
-          aria-label={row.original.name}
           onClick={(e) => {
             e.stopPropagation()
             row.toggleExpanded()
           }}
-          className="-m-1 inline-grid size-6 place-items-center rounded-sm transition-colors duration-micro ease-out-subtle hover:bg-fill-hover hover:duration-instant"
+          className="p-0.5 rounded hover:bg-foreground/5 transition-colors"
         >
           <ChevronRight
             className={cn(
-              // Rotation on the snap spring; instant under reduced motion (--motion-scale 0)
-              'size-3 text-tertiary transition-transform duration-[calc(var(--spring-snap-dur)*var(--motion-scale))] ease-[var(--spring-snap)]',
+              'w-3 h-3 text-muted-foreground transition-transform duration-150',
               isExpanded && 'rotate-90'
             )}
           />
@@ -73,7 +69,7 @@ function ExpandableNameCell({ row }: { row: Row<LabelConfig> }) {
         // Spacer to keep alignment consistent with expandable rows
         <span className="w-4" />
       )}
-      <span className="truncate text-label text-foreground">{row.original.name}</span>
+      <span className="text-sm truncate">{row.original.name}</span>
     </div>
   )
 }
@@ -83,7 +79,7 @@ function getColumns(t: TFunction): ColumnDef<LabelConfig>[] {
   return [
     {
       id: 'color',
-      header: () => <span className={cn("p-1.5 pl-2.5", INFO_TABLE_HEADER_CLASS)}>{t("common.color")}</span>,
+      header: () => <span className="p-1.5 pl-2.5">{t("common.color")}</span>,
       cell: ({ row }) => (
         <div className="p-1.5 pl-2.5">
           <LabelIcon
@@ -98,22 +94,22 @@ function getColumns(t: TFunction): ColumnDef<LabelConfig>[] {
     },
     {
       accessorKey: 'name',
-      header: ({ column }) => <SortableHeader column={column} title={t("common.name")} className={INFO_TABLE_SORTABLE_HEADER_CLASS} />,
+      header: ({ column }) => <SortableHeader column={column} title={t("common.name")} />,
       cell: ({ row }) => <ExpandableNameCell row={row} />,
       meta: { fillWidth: true },
     },
     {
       id: 'valueType',
       accessorKey: 'valueType',
-      header: ({ column }) => <SortableHeader column={column} title={t("common.type")} className={INFO_TABLE_SORTABLE_HEADER_CLASS} />,
+      header: ({ column }) => <SortableHeader column={column} title={t("common.type")} />,
       cell: ({ row }) => (
         <div className="p-1.5 pl-2.5">
           {row.original.valueType ? (
-            <Info_Badge color="default" className="capitalize whitespace-nowrap">
+            <Info_Badge color="muted" className="capitalize whitespace-nowrap">
               {t(`sidebar.labelValueType.${row.original.valueType}`)}
             </Info_Badge>
           ) : (
-            <span className="text-label text-tertiary">—</span>
+            <span className="text-muted-foreground/50 text-sm">—</span>
           )}
         </div>
       ),
@@ -145,7 +141,19 @@ export function LabelsDataTable({
 
   // Fullscreen button (shown on hover via group class)
   const fullscreenButton = fullscreen ? (
-    <Info_FullscreenButton onClick={() => setIsFullscreen(true)} />
+    <button
+      onClick={() => setIsFullscreen(true)}
+      className={cn(
+        'p-1 rounded-[6px] transition-all',
+        'opacity-0 group-hover:opacity-100',
+        'bg-background/80 backdrop-blur-sm shadow-minimal',
+        'text-muted-foreground/50 hover:text-foreground',
+        'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100'
+      )}
+      title={t("table.viewFullscreen")}
+    >
+      <Maximize2 className="w-3.5 h-3.5" />
+    </button>
   ) : undefined
 
   // Count all labels recursively for the subtitle

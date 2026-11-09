@@ -3,18 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { Check, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LabelIcon } from './label-icon'
-import { extractLabelId, flattenLabels, type LabelConfig } from '@craft-agent/shared/labels'
+import type { LabelConfig } from '@craft-agent/shared/labels'
 import { createLabelMenuItems, filterItems, segmentScore, type LabelMenuItem } from './label-menu-utils'
 import { getStatusIconStyle, type SessionStatus } from '@/config/session-status-config'
-import {
-  INLINE_MENU_ITEM,
-  INLINE_MENU_ITEM_SELECTED,
-  INLINE_MENU_LIST,
-  INLINE_MENU_ORIGIN,
-  INLINE_MENU_SECTION_LABEL,
-  INLINE_MENU_SEPARATOR,
-  INLINE_MENU_SURFACE,
-} from './inline-menu-styles'
 
 export { createLabelMenuItems, filterItems, type LabelMenuItem } from './label-menu-utils'
 
@@ -45,10 +36,10 @@ export interface InlineLabelMenuProps {
 // Shared Styles (matching slash-command-menu and mention-menu)
 // ============================================================================
 
-const MENU_CONTAINER_STYLE = cn(INLINE_MENU_SURFACE, INLINE_MENU_ORIGIN)
-const MENU_LIST_STYLE = cn(INLINE_MENU_LIST, 'max-h-[240px]')
-const MENU_ITEM_STYLE = cn(INLINE_MENU_ITEM, 'gap-2.5')
-const MENU_ITEM_SELECTED = INLINE_MENU_ITEM_SELECTED
+const MENU_CONTAINER_STYLE = 'overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small'
+const MENU_LIST_STYLE = 'max-h-[240px] overflow-y-auto py-1'
+const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2.5 rounded-[6px] mx-1 px-2 py-1.5 text-[13px]'
+const MENU_ITEM_SELECTED = 'bg-foreground/5'
 
 // ============================================================================
 // Filter utilities
@@ -221,10 +212,10 @@ export function InlineLabelMenu({
             }}
             className={cn(MENU_ITEM_STYLE, MENU_ITEM_SELECTED)}
           >
-            <div className="shrink-0 text-secondary">
-              <Plus className="size-4" />
+            <div className="shrink-0 text-muted-foreground">
+              <Plus className="h-3.5 w-3.5" />
             </div>
-            <span>{t('sidebarMenu.addNewLabel')}</span>
+            <span className="text-[13px]">{t('sidebarMenu.addNewLabel')}</span>
           </div>
         ) : (
           <>
@@ -232,7 +223,7 @@ export function InlineLabelMenu({
             {filteredStates_.length > 0 && (
               <>
                 {showSectionHeaders && (
-                  <div className={INLINE_MENU_SECTION_LABEL}>
+                  <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
                     States
                   </div>
                 )}
@@ -251,7 +242,7 @@ export function InlineLabelMenu({
                       className={cn(
                         MENU_ITEM_STYLE,
                         isSelected && MENU_ITEM_SELECTED,
-                        isActive && 'bg-fill-selected',
+                        isActive && 'bg-foreground/7',
                       )}
                     >
                       {/* State icon with resolved color */}
@@ -264,7 +255,7 @@ export function InlineLabelMenu({
                       <div className="flex-1 min-w-0 truncate">{state.label}</div>
                       {/* Checkmark on active state */}
                       {isActive && (
-                        <Check className="size-4 shrink-0 text-secondary" />
+                        <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
                     </div>
                   )
@@ -274,14 +265,14 @@ export function InlineLabelMenu({
 
             {/* ── Separator between sections ── */}
             {showSectionHeaders && (
-              <div className={INLINE_MENU_SEPARATOR} />
+              <div className="my-1 mx-2 border-t border-border/40" />
             )}
 
             {/* ── Labels section ── */}
             {filteredItems.length > 0 && (
               <>
                 {showSectionHeaders && (
-                  <div className={INLINE_MENU_SECTION_LABEL}>
+                  <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
                     Labels
                   </div>
                 )}
@@ -308,7 +299,7 @@ export function InlineLabelMenu({
                       {/* Label name with optional parent path */}
                       <div className="flex-1 min-w-0 truncate">
                         {item.parentPath && (
-                          <span className="text-tertiary">{item.parentPath}</span>
+                          <span className="text-muted-foreground">{item.parentPath}</span>
                         )}
                         <span>{item.label}</span>
                       </div>
@@ -337,6 +328,8 @@ export interface LabelMenuInputElement {
 }
 
 export interface UseInlineLabelMenuOptions {
+  /** Disable the legacy session classification picker while keeping hook order stable. */
+  enabled?: boolean
   /** Ref to the input element */
   inputRef: React.RefObject<LabelMenuInputElement | null>
   /** Available labels (tree structure) */
@@ -373,6 +366,7 @@ export interface UseInlineLabelMenuReturn {
  * Already-applied labels are excluded from the menu to prevent duplicates.
  */
 export function useInlineLabelMenu({
+  enabled = true,
   inputRef,
   labels,
   sessionLabels = [],
@@ -387,16 +381,22 @@ export function useInlineLabelMenu({
   // Store current input state for handleSelect
   const currentInputRef = React.useRef({ value: '', cursorPosition: 0 })
 
-  // Build flat menu items from label tree, excluding plain labels already applied — by id, since older
-  // sessions may store `bug::bug`. Valued labels stay listed: picking one opens its value editor.
-  const items = React.useMemo(() => {
-    const plainIds = new Set(flattenLabels(labels).filter(label => !label.valueType).map(label => label.id))
-    return createLabelMenuItems(labels, sessionLabels.map(extractLabelId).filter(id => plainIds.has(id)))
-  }, [labels, sessionLabels])
+  // Build flat menu items from label tree, excluding already-applied labels
+  const items = React.useMemo(
+    () => createLabelMenuItems(labels, sessionLabels),
+    [labels, sessionLabels],
+  )
 
   const handleInputChange = React.useCallback((value: string, cursorPosition: number) => {
     // Store current state for handleSelect
     currentInputRef.current = { value, cursorPosition }
+
+    if (!enabled) {
+      setIsOpen(false)
+      setFilter('')
+      setHashStart(-1)
+      return
+    }
 
     const textBeforeCursor = value.slice(0, cursorPosition)
     // Match # at start of input or after whitespace, followed by optional filter text
@@ -432,7 +432,7 @@ export function useInlineLabelMenu({
       setFilter('')
       setHashStart(-1)
     }
-  }, [inputRef, items])
+  }, [enabled, inputRef, items])
 
   // Handle label selection: remove #trigger text from input, call onSelect
   const handleSelect = React.useCallback((labelId: string): string => {

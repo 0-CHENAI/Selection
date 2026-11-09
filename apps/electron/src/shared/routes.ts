@@ -97,6 +97,19 @@ export const routes = {
     allSessions: (sessionId?: string) =>
       sessionId ? `allSessions/session/${sessionId}` as const : 'allSessions' as const,
 
+    /** PPT history and composer share the session runtime, with a dedicated filter. */
+    ppt: (sessionId?: string) =>
+      sessionId ? `ppt/session/${sessionId}` as const : 'ppt' as const,
+
+    /**
+     * Office area. `ppt` stays the canonical PPT URL.
+     * `office` and `office/ppt` parse back to that same filter.
+     */
+    office: (section: 'ppt' | 'word' | 'excel' = 'ppt', sessionId?: string) => {
+      if (section === 'ppt') return sessionId ? `ppt/session/${sessionId}` as const : 'ppt' as const
+      return sessionId ? `office/${section}/session/${sessionId}` as const : `office/${section}` as const
+    },
+
     /** Flagged view (sessions navigator, flagged filter) */
     flagged: (sessionId?: string) =>
       sessionId ? `flagged/session/${sessionId}` as const : 'flagged' as const,
@@ -159,11 +172,11 @@ export const routes = {
     },
 
     /** Automations view (automations navigator) - supports type filtering */
-    automations: (params?: { automationId?: string; type?: 'scheduled' | 'event' | 'agentic' }) => {
+    automations: (params?: { automationId?: string; type?: 'scheduled' | 'event' }) => {
       const { automationId, type } = params ?? {}
       const base = type ? `automations/${type}` : 'automations'
       if (automationId) return `${base}/automation/${automationId}` as const
-      return base as 'automations' | `automations/${'scheduled' | 'event' | 'agentic'}`
+      return base as 'automations' | `automations/${'scheduled' | 'event'}`
     },
 
     /** Scheduled automations view (automations navigator, scheduled filter) */
@@ -173,10 +186,6 @@ export const routes = {
     /** Event-based automations view (automations navigator, event filter) */
     automationsEvent: (automationId?: string) =>
       automationId ? `automations/event/automation/${automationId}` as const : 'automations/event' as const,
-
-    /** Agentic automations view (automations navigator, agentic filter) */
-    automationsAgentic: (automationId?: string) =>
-      automationId ? `automations/agentic/automation/${automationId}` as const : 'automations/agentic' as const,
 
     /** Settings view (settings navigator) - uses SettingsSubpage from registry */
     settings: (subpage?: SettingsSubpage) =>
@@ -189,12 +198,6 @@ export const routes = {
       projectSlug
         ? `projects/project/${projectSlug}` as const
         : 'projects' as const,
-
-    /** Pages view (full-width library grid, or one page's embedded render) */
-    pages: (pageSlug?: string) =>
-      pageSlug
-        ? `pages/page/${pageSlug}` as const
-        : 'pages' as const,
 
     /** Kanban board view (sessions navigator, board view mode, all sessions) */
     board: () => 'board' as const,

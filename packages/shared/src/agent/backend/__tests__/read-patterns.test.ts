@@ -7,9 +7,20 @@
  * - PowerShell gating: looksLikePowerShell triggers PS path
  * - Non-read commands return null
  */
-import { describe, it, expect } from 'bun:test';
+import { beforeAll, describe, it, expect } from 'bun:test';
+import { join } from 'node:path';
 import { parseReadCommand } from '../read-patterns.ts';
-import { looksLikePowerShell, isPowerShellAvailable } from '../../powershell-validator.ts';
+import {
+  isPowerShellAvailable,
+  looksLikePowerShell,
+  setPowerShellValidatorRoot,
+} from '../../powershell-validator.ts';
+
+beforeAll(() => {
+  // Production startup injects this resource root. Keep this suite independent
+  // from test execution order and other suites that initialize the validator.
+  setPowerShellValidatorRoot(join(import.meta.dir, '..', '..'));
+});
 
 // ============================================================
 // Bash Read Commands

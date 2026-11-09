@@ -1,71 +1,43 @@
 import * as React from 'react'
-import { useSetAtom } from 'jotai'
-import { useTranslation } from 'react-i18next'
-import { Play, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { CHAT_LAYOUT } from '@/config/layout'
-import { extractLabelId, flattenLabels, type LabelConfig } from '@craft-agent/shared/labels'
+import { CHAT_CLASSES } from '@/config/layout'
+import { flattenLabels, type LabelConfig } from '@craft-agent/shared/labels'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
-import type { BackgroundTaskOutput } from '@craft-agent/shared/protocol'
-import { pendingLabelValueEditAtom } from '@/atoms/label-value-edit'
-import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import type { SessionStatus } from '@/config/session-status-config'
 import type { BackgroundTask } from '../ActiveTasksBar'
+import type { Message } from '../../../../shared/types'
 import { ActiveOptionBadges } from '../ActiveOptionBadges'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
-import { ComposerHintLine } from './ComposerHintLine'
-import { COMPOSER_META_CHIP } from './composer-styles'
-
-/**
- * Offer to run a pasted console snippet as a background command. Running sends the run request
- * (the agent starts it, under the permission mode) and takes the snippet out of the composer.
- */
-function PastedCommandChip({ command, onRun, onDismiss }: { command: string; onRun: () => void; onDismiss: () => void }) {
-  const { t } = useTranslation()
-  const [firstLine] = command.split('\n')
-  return (
-    <div className="mb-2 flex min-w-0 items-center gap-0.5 px-px transition-[opacity,translate] duration-base ease-out starting:translate-y-1 starting:opacity-0">
-      <button type="button" onClick={onRun} title={command} className={cn(COMPOSER_META_CHIP, 'min-w-0 cursor-pointer pl-2')}>
-        <Play aria-hidden className="size-3.5 shrink-0 text-accent" />
-        <span className="shrink-0">{t('chat.runCommandInBackground')}</span>
-        <span className="min-w-0 max-w-[320px] truncate font-mono font-normal text-tertiary">
-          {firstLine}{command.includes('\n') ? ' …' : ''}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label={t('common.dismiss')}
-        className="inline-grid size-6 shrink-0 place-items-center rounded-full text-tertiary hover:bg-fill-hover hover:text-foreground"
-      >
-        <X aria-hidden className="size-3.5" />
-      </button>
-    </div>
-  )
-}
+import { QueuedMessagePanel } from './QueuedMessagePanel'
 
 interface ChatInputZoneProps {
   compactMode?: boolean
-  /** Show the row above the composer (background tasks, the mode chip during decision prompts) */
   showOptionBadges?: boolean
   permissionMode?: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
   tasks?: BackgroundTask[]
-  sessionId: string
+  sessionId?: string
   sessionFolderPath?: string
-  onStopTask?: (task: BackgroundTask) => void
-  onDismissTask?: (task: BackgroundTask) => void
-  /** Show a background task's full output (ChatDisplay opens it in an overlay) */
-  onOpenTaskOutput?: (task: BackgroundTask, output: BackgroundTaskOutput) => void
-  /** Run a shell command as a background task (a pasted console snippet's "Run in background") */
-  onRunCommand?: (command: string) => void
-  /** For the # label menu; the label chips live in the chat header (spec §7.3) */
+  onKillTask?: (taskId: string) => void
+  onOpenSession?: (sessionId: string) => void
+  onInsertMessage?: (text: string) => void
   sessionLabels?: string[]
   labels?: LabelConfig[]
   onLabelsChange?: (labels: string[]) => void
-  /** For the # menu's status picker */
+  sessionStatuses?: SessionStatus[]
   currentSessionStatus?: string
+  onSessionStatusChange?: (stateId: string) => void
+  swarmEnabled?: boolean
+  onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
+  swarmToggleDisabled?: boolean
+  swarmRunning?: boolean
   className?: string
+  queuedMessages?: Message[]
+  /** Sits in the composer column, directly above the input card. */
+  beforeInput?: React.ReactNode
+  /** Task capsule centered in the permission / session-files row. */
+  toolbarCenter?: (slot: { shellMaxWidth: number }) => React.ReactNode
   inputProps: React.ComponentProps<typeof InputContainer>
 }
 
@@ -77,43 +49,28 @@ export function ChatInputZone({
   tasks = [],
   sessionId,
   sessionFolderPath,
-  onStopTask,
-  onDismissTask,
-  onOpenTaskOutput,
-  onRunCommand,
+  onKillTask,
+  onOpenSession,
+  onInsertMessage,
   sessionLabels = [],
   labels = [],
   onLabelsChange,
+  sessionStatuses = [],
   currentSessionStatus = 'todo',
+  onSessionStatusChange,
+  swarmEnabled = false,
+  onSwarmEnabledChange,
+  swarmToggleDisabled = false,
+  swarmRunning = false,
   className,
+  queuedMessages = [],
+  beforeInput,
+  toolbarCenter,
   inputProps,
 }: ChatInputZoneProps) {
-  const setPendingLabelValueEdit = useSetAtom(pendingLabelValueEditAtom)
-  const panelId = useOptionalAppShellContext()?.panelId
+  const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
   const shouldShowOptionBadges = showOptionBadges ?? !compactMode
-  const inputResetKey = `${sessionId}::${inputProps.structuredInput?.type ?? 'freeform'}`
-
-  // A pasted console snippet offers "Run in background" until it is run, dismissed, or deleted from
-  // the composer (the paste lands after the event, so the offer waits until it has seen the text).
-  const [pastedSnippet, setPastedSnippet] = React.useState<{ command: string; text: string } | null>(null)
-  const snippetSeenRef = React.useRef(false)
-  React.useEffect(() => { setPastedSnippet(null) }, [sessionId])
-  React.useEffect(() => {
-    if (!pastedSnippet) return
-    const marker = pastedSnippet.text.trim().split('\n')[0] ?? ''
-    if ((inputProps.inputValue ?? '').includes(marker)) snippetSeenRef.current = true
-    else if (snippetSeenRef.current) setPastedSnippet(null)
-  }, [inputProps.inputValue, pastedSnippet])
-  const handleSnippetPaste = React.useCallback((snippet: { command: string; text: string }) => {
-    snippetSeenRef.current = false
-    setPastedSnippet(snippet)
-  }, [])
-  const handleRunPasted = () => {
-    if (!pastedSnippet || !onRunCommand) return
-    onRunCommand(pastedSnippet.command)
-    if ((inputProps.inputValue ?? '').trim() === pastedSnippet.text.trim()) inputProps.onInputChange?.('')
-    setPastedSnippet(null)
-  }
+  const inputResetKey = `${sessionId ?? 'draft'}::${inputProps.structuredInput?.type ?? 'freeform'}`
 
   const handleClearDraft = React.useCallback(() => {
     inputProps.onInputChange?.('')
@@ -122,46 +79,62 @@ export function ChatInputZone({
 
   const handleLabelAdd = React.useCallback((labelId: string) => {
     const current = sessionLabels || []
-    // Valued entries are stored as "id::value", so compare ids: picking an applied label again must not
-    // append a bare duplicate (for a valued label it opens the existing chip's editor instead, below).
-    const alreadyApplied = current.some(entry => extractLabelId(entry) === labelId)
-    if (!alreadyApplied) onLabelsChange?.([...current, labelId])
+    if (current.includes(labelId)) return
 
-    // A valued label needs its value: the chip in the chat header opens its editor once the label
-    // arrives. Compact headers show no chips, so there is nothing to open there.
+    onLabelsChange?.([...current, labelId])
+
     const config = flattenLabels(labels || []).find(label => label.id === labelId)
-    if (config?.valueType && !compactMode) {
-      setPendingLabelValueEdit({ sessionId, panelId, labelId, requestedAt: Date.now() })
+    if (config?.valueType) {
+      setAutoOpenLabelId(labelId)
     }
-  }, [labels, onLabelsChange, sessionLabels, compactMode, sessionId, panelId, setPendingLabelValueEdit])
+  }, [labels, onLabelsChange, sessionLabels])
 
   return (
     <div className={cn(
-      CHAT_LAYOUT.maxWidth,
-      'mx-auto w-full mt-1',
-      // The card lines up with the transcript's text edge: the 16px gutter in compact, the column's
-      // 24px gutters on desktop (the hint line below the card reserves its own 24px)
-      compactMode ? 'px-gutter pb-gutter' : 'px-3 @xs/panel:px-6 pb-3.5',
+      CHAT_CLASSES.composerColumn,
+      'mt-1',
+      compactMode ? 'px-2 pb-3' : 'px-3 @xs/panel:px-4 pb-4',
       className,
     )}>
       {shouldShowOptionBadges && (
         <ActiveOptionBadges
-          // The permission-mode chip lives in the composer toolbar next to the model (spec §7.5).
-          // A decision prompt replaces that toolbar, so the chip moves up here while one is shown.
-          showPermissionMode={!!inputProps.structuredInput}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           tasks={tasks}
           sessionId={sessionId}
-          onStopTask={onStopTask}
-          onDismissTask={onDismissTask}
-          onOpenTaskOutput={onOpenTaskOutput}
+          sessionFolderPath={sessionFolderPath}
+          onKillTask={onKillTask}
+          onOpenSession={onOpenSession}
+          onInsertMessage={onInsertMessage ?? inputProps.onInputChange}
+          sessionLabels={sessionLabels}
+          labels={labels}
+          onLabelsChange={onLabelsChange}
+          onRemoveLabel={(labelId) => {
+            const next = (sessionLabels || []).filter(entry => entry !== labelId && !entry.startsWith(`${labelId}::`))
+            onLabelsChange?.(next)
+          }}
+          autoOpenLabelId={autoOpenLabelId}
+          onAutoOpenConsumed={() => setAutoOpenLabelId(null)}
+          sessionStatuses={sessionStatuses}
+          currentSessionStatus={currentSessionStatus}
+          onSessionStatusChange={onSessionStatusChange}
+          swarmEnabled={swarmEnabled}
+          onSwarmEnabledChange={onSwarmEnabledChange}
+          swarmToggleDisabled={swarmToggleDisabled}
+          swarmRunning={swarmRunning}
+          center={toolbarCenter}
         />
       )}
 
-      {pastedSnippet && onRunCommand && (
-        <PastedCommandChip command={pastedSnippet.command} onRun={handleRunPasted} onDismiss={() => setPastedSnippet(null)} />
+      {sessionId && (
+        <QueuedMessagePanel
+          sessionId={sessionId}
+          messages={queuedMessages}
+          compactMode={compactMode}
+        />
       )}
+
+      {beforeInput}
 
       <InputErrorBoundary
         sessionId={sessionId}
@@ -170,9 +143,7 @@ export function ChatInputZone({
       >
         <InputContainer
           {...inputProps}
-          onConsoleSnippetPaste={onRunCommand ? handleSnippetPaste : undefined}
           compactMode={compactMode}
-          showPermissionModeChip={shouldShowOptionBadges}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           labels={labels}
@@ -183,9 +154,6 @@ export function ChatInputZone({
           currentSessionStatus={currentSessionStatus}
         />
       </InputErrorBoundary>
-
-      {/* Desktop shortcut hints: reserved height, shown while the composer has focus */}
-      {!compactMode && <ComposerHintLine empty={!!inputProps.structuredInput} />}
     </div>
   )
 }

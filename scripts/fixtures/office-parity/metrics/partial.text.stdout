@@ -1,0 +1,19 @@
+
+======================================================
+  SAAS METRICS CALCULATOR
+======================================================
+
+  Monthly Recurring Revenue                $50,000.00
+  Annual Recurring Revenue                 $600,000.00
+  Avg Revenue Per Account/mo               $500.00
+  Monthly Churn Rate                       5.0%
+  Customer Lifetime Value                  $7,000.00
+  NRR Estimate (churn-only)                95.0%
+
+  Missing / estimated:
+    - MoM Growth — need last month MRR
+    - CAC — need S&M spend + new customers
+    - LTV:CAC — need both LTV and CAC
+    - Payback Period — need CAC and ARPA
+    - NRR (accurate) — using churn-only estimate; provide expansion MRR for full NRR
+======================================================

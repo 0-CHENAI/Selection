@@ -1,249 +1,52 @@
-/**
- * MarkdownHtmlBlock - Renders ```html-preview code blocks as sandboxed HTML previews.
- *
- * Loads HTML from file(s) (via `src` or `items` field) and renders in a sandboxed iframe.
- * Supports multiple items with a tab bar for switching between them.
- *
- * Expected JSON shapes:
- * Single item:
- * {
- *   "src": "/absolute/path/to/file.html",
- *   "title": "Optional title"
- * }
- *
- * Multiple items:
- * {
- *   "title": "Email Thread",
- *   "items": [
- *     { "src": "/path/to/email1.html", "label": "Original" },
- *     { "src": "/path/to/reply.html", "label": "Reply" }
- *   ]
- * }
- *
- * Flash prevention: All cached items are rendered as hidden iframes (display:none/block).
- * Switching tabs toggles CSS visibility — no re-parse, no flash.
- *
- * Security: iframe uses `sandbox` attribute without `allow-scripts`,
- * blocking all JavaScript execution. `allow-same-origin` is included
- * so CSS and images resolve correctly.
- */
-
+/** File-backed HTML opens in the platform browser; never execute it inside chat. */
 import * as React from 'react'
-import { Globe, Maximize2 } from 'lucide-react'
-import { cn } from '../../lib/utils'
-import { CodeBlock } from './CodeBlock'
-import { HTMLPreviewOverlay } from '../overlay/HTMLPreviewOverlay'
-import {
-  PreviewBlockAction,
-  PreviewBlockError,
-  PreviewBlockFrame,
-  PreviewBlockHeader,
-  PreviewBlockLoading,
-  PreviewItemNavigator,
-} from './PreviewBlockChrome'
-import { usePlatform } from '../../context/PlatformContext'
+import { ArrowUpRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { cn } from '../../lib/utils'
+import { usePlatform } from '../../context/PlatformContext'
+import { CodeBlock } from './CodeBlock'
+import { ItemNavigator } from '../overlay/ItemNavigator'
+import { FileTypeIcon } from '../chat/attachment-helpers'
+import { parseMarkdownPreviewSpec, normalizePreviewItems } from './markdown-preview-helpers'
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface PreviewItem {
-  src: string
-  label?: string
-}
-
-interface HtmlPreviewSpec {
-  src?: string
-  title?: string
-  items?: PreviewItem[]
-}
-
-// ── Error boundary ───────────────────────────────────────────────────────────
-
-class HtmlBlockErrorBoundary extends React.Component<
-  { children: React.ReactNode; fallback: React.ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false }
-  static getDerivedStateFromError() { return { hasError: true } }
-  componentDidCatch(error: Error) {
-    console.warn('[MarkdownHtmlBlock] Render failed, falling back to CodeBlock:', error)
-  }
-  render() {
-    if (this.state.hasError) return this.props.fallback
-    return this.props.children
-  }
-}
-
-// ── HTML preprocessing ───────────────────────────────────────────────────────
-
-/**
- * Inject `<base target="_top">` into HTML so link clicks navigate the top frame
- * instead of the iframe. Combined with `allow-top-navigation-by-user-activation`
- * in the sandbox, this lets Electron's `will-navigate` handler intercept the
- * navigation and open the URL in the system browser.
- */
-function injectBaseTarget(html: string): string {
-  if (/<base\s/i.test(html)) return html
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/(<head[^>]*>)/i, '$1<base target="_top">')
-  }
-  if (/<html[^>]*>/i.test(html)) {
-    return html.replace(/(<html[^>]*>)/i, '$1<head><base target="_top"></head>')
-  }
-  return `<head><base target="_top"></head>${html}`
-}
-
-// ── Main component ───────────────────────────────────────────────────────────
-
-export interface MarkdownHtmlBlockProps {
-  code: string
-  className?: string
-}
+export interface MarkdownHtmlBlockProps { code: string; className?: string }
 
 export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
   const { t } = useTranslation()
-  const { onReadFile } = usePlatform()
-
-  // Parse the JSON spec — supports single src or items array
-  const spec = React.useMemo<HtmlPreviewSpec | null>(() => {
-    try {
-      const raw = JSON.parse(code)
-      if (raw.items && Array.isArray(raw.items) && raw.items.length > 0) {
-        return raw as HtmlPreviewSpec
-      }
-      if (raw.src && typeof raw.src === 'string') {
-        return raw as HtmlPreviewSpec
-      }
-      return null
-    } catch {
-      return null
-    }
-  }, [code])
-
-  // Normalize to items array (backward compat)
-  const items = React.useMemo<PreviewItem[]>(() => {
-    if (!spec) return []
-    if (spec.items && spec.items.length > 0) return spec.items
-    if (spec.src) return [{ src: spec.src }]
-    return []
-  }, [spec])
-
+  const { onOpenFile } = usePlatform()
+  const spec = React.useMemo(() => parseMarkdownPreviewSpec(code), [code])
+  const items = React.useMemo(() => normalizePreviewItems(spec), [spec])
   const [activeIndex, setActiveIndex] = React.useState(0)
-  const [isFullscreen, setIsFullscreen] = React.useState(false)
+  const selectedIndex = activeIndex < items.length ? activeIndex : 0
+  const item = items[selectedIndex]
 
-  // Content cache: src path → loaded HTML string
-  const [contentCache, setContentCache] = React.useState<Record<string, string>>({})
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
+  if (!spec || !item) return <CodeBlock code={code} language="json" mode="full" className={className} />
 
-  const activeItem = items[activeIndex]
-  const activeHtml = activeItem ? contentCache[activeItem.src] : undefined
-
-  // Load active item's content when it changes
-  React.useEffect(() => {
-    if (!activeItem?.src || !onReadFile) return
-    if (contentCache[activeItem.src]) {
-      setError(null)
-      return
-    }
-    setLoading(true)
-    setError(null)
-    onReadFile(activeItem.src)
-      .then((content) => {
-        setContentCache((prev) => ({ ...prev, [activeItem.src]: content }))
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to read HTML file')
-      })
-      .finally(() => setLoading(false))
-  }, [activeItem?.src, onReadFile, contentCache])
-
-  // Preprocess all cached HTML (inject base target for links)
-  const processedCache = React.useMemo(() => {
-    const result: Record<string, string> = {}
-    for (const [src, html] of Object.entries(contentCache)) {
-      result[src] = injectBaseTarget(html)
-    }
-    return result
-  }, [contentCache])
-
-  // Stable onLoadContent callback for the overlay
-  const handleLoadContent = React.useCallback(async (src: string) => {
-    if (contentCache[src]) return contentCache[src]
-    if (!onReadFile) throw new Error('Cannot load content')
-    const content = await onReadFile(src)
-    setContentCache((prev) => ({ ...prev, [src]: content }))
-    return content
-  }, [contentCache, onReadFile])
-
-  // Invalid spec → fall back to code block
-  if (!spec || items.length === 0) {
-    return <CodeBlock code={code} language="json" mode="full" className={className} />
-  }
-
-  const fallback = <CodeBlock code={code} language="json" mode="full" className={className} />
+  const title = item.label || spec.title || item.src.split(/[\\/]/).pop() || item.src
+  const fileName = item.src.split(/[\\/]/).pop() || item.src
 
   return (
-    <HtmlBlockErrorBoundary fallback={fallback}>
-      <PreviewBlockFrame className={className}>
-        {/* Header: title · item navigator · fullscreen */}
-        <PreviewBlockHeader icon={<Globe />} title={spec.title || t('preview.htmlPreview')}>
-          <PreviewItemNavigator items={items} activeIndex={activeIndex} onSelect={setActiveIndex} />
-          <PreviewBlockAction
-            aria-label={t('common.viewFullscreen')}
-            icon={<Maximize2 />}
-            onClick={() => setIsFullscreen(true)}
-          />
-        </PreviewBlockHeader>
-
-        {/* Content area: hidden iframes for cached items + loading/error for uncached active.
-            Until the active page arrives the area keeps the iframe's 400px, so the transcript
-            doesn't shift when it loads. No bottom fade: the page scrolls inside its frame, and a
-            fade into the dark well smears across a light page in dark mode. */}
-        <div className={cn('relative max-h-[400px] overflow-hidden', !activeHtml && !error && onReadFile && 'h-[400px]')}>
-          {/* Render all cached items as hidden iframes — prevents flash on tab switch.
-              The page canvas: paper (a light-scheme document gets the browser's opaque white). */}
-          {items.map((item, i) => {
-            const processed = processedCache[item.src]
-            if (!processed) return null
-            return (
-              <iframe
-                key={item.src}
-                sandbox="allow-same-origin allow-top-navigation-by-user-activation"
-                srcDoc={processed}
-                title={item.label || spec.title || t('preview.htmlPreview')}
-                className="w-full border-0 bg-paper"
-                style={{
-                  height: '400px',
-                  display: i === activeIndex ? 'block' : 'none',
-                }}
-              />
-            )
-          })}
-
-          {/* Loading state for uncached active item */}
-          {!activeHtml && loading && (
-            <PreviewBlockLoading className="h-full">{t('common.loading')}</PreviewBlockLoading>
-          )}
-
-          {/* Error state for uncached active item */}
-          {!activeHtml && !loading && error && (
-            <PreviewBlockError>{error}</PreviewBlockError>
-          )}
-        </div>
-      </PreviewBlockFrame>
-
-      {/* Fullscreen overlay — passes items for multi-item navigation */}
-      <HTMLPreviewOverlay
-        isOpen={isFullscreen}
-        onClose={() => setIsFullscreen(false)}
-        items={items}
-        contentCache={contentCache}
-        onLoadContent={handleLoadContent}
-        initialIndex={activeIndex}
-        title={spec.title}
-      />
-    </HtmlBlockErrorBoundary>
+    <div className={cn('my-3 flex w-full min-w-0 flex-wrap items-center gap-2 rounded-xl border border-success/20 bg-success/[0.045] p-1.5 transition-colors hover:bg-success/[0.075] focus-within:border-success/40', className)}>
+      <button
+        type="button"
+        disabled={!onOpenFile}
+        onClick={() => onOpenFile?.(item.src)}
+        title={title}
+        className="group/html flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-success/10">
+          <FileTypeIcon fileName={item.src} className="size-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">{title}</span>
+          <span className="block truncate text-xs text-muted-foreground">HTML · {fileName}</span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-success">
+          {t('preview.openInBrowser')}
+          <ArrowUpRight aria-hidden="true" className="size-4 transition-transform group-hover/html:translate-x-0.5 group-hover/html:-translate-y-0.5" />
+        </span>
+      </button>
+      <ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />
+    </div>
   )
 }
-

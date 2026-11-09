@@ -1,3 +1,5 @@
+import { artifactInputSnapshotError, invalidArtifactInput, captureArtifactInputs, invalidFrozenArtifactInput } from './artifact-input-validation';
+import { dependencyImpact, dependencyAncestors } from './dependency-impact';
 /**
  * The Conductor — an in-process DAG runner for Tasks.
  *
@@ -8,63 +10,170 @@
  *      `${nodes.<id>.output}` / `${params.<name>}` / `${inputs.<name>}` into the prompt,
  *   3. subscribes to SessionManager's in-process `onSessionComplete` seam,
  *   4. on completion reads the child's final assistant text as the node output,
- *      feeds it to dependents (every `depends_on` edge carries it), and reschedules.
- *      A step the user stopped, or one whose background agents are still running,
- *      is not finished: it stays running until a later turn completes it,
+ *      feeds it to dependents, and reschedules,
  *   5. drives child `sessionStatus` + `kanbanColumn` so the board renders the live DAG,
  *   6. persists an append-only run-log under `tasks/<slug>/runs/<runId>/`.
  *
- * v1 executes `kind: 'session'` nodes wired by `depends_on` + `inputs`. Control-flow
- * kinds (route/loop/approval/…) parse but are not yet executed (P4).
+ * v1 executes `kind: 'session'` nodes wired by `depends_on` + `inputs`.
+ * v2 dispatches implemented kinds (session/control/map/loop/transforms).
  *
  * The runner depends on a minimal `ConductorSessionHost` interface (which
  * SessionManager structurally satisfies) so it is unit-testable with a mock.
  */
-import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
-import type { SessionCompletionEvent } from '../sessions/SessionManager';
+import { statSync, truncateSync } from 'node:fs';
+import { join } from 'node:path';
+import type { SourceReadProof } from '@craft-agent/core/types';
+import type { SubmitTaskVerdictInput, TaskHelpInput } from '@craft-agent/session-tools-core';
+import { TASK_NODE_COMPLETION_AUDIT_PROMPT } from '@craft-agent/shared/prompts';
+import type { CreateSessionOptions, SendMessageOptions } from '@craft-agent/shared/protocol';
+import type { SessionCompletionEvent, SessionRuntimeActivity } from '../sessions/SessionManager';
+import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
 import {
   type TaskSpec,
   type TaskNode,
   type NodeOutput,
   type RunLogEntry,
   type NodeRunState,
+  type RunStatus,
   nodeTitle,
-  nodeDeps,
-  extractRefs,
+  nodeDisplayTitle,
   interpolateRefs,
+  interpolateLocals,
+  instanceId,
+  instanceIndex,
+  definitionId,
+  parseForEach,
+  resolveArtifact,
+  verifyArtifact,
+  sensitiveParamNames,
+  missingSensitive,
   materializeDeps,
   appendRunLog,
+  writeRunState,
+  readRunState,
+  committedRunLog,
   writeNodeOutput,
+  writeNodeAttempt,
+  writeNodeSubmission,
+  readNodeSubmission,
   readNodeOutput,
-  nodeOutputPath,
   readRunLog,
-  loadTaskSpec,
-  writeRunSpecSnapshot,
+  loadTaskDocument,
+  writeSpecRevision,
+  readSpecRevision,
+  listTaskSlugs,
+  listRunIds,
+  deriveRunStatusFromLog,
+  isTerminalRunStatus,
+  resolveKanbanColumnId,
+  evaluateCondition,
+  conditionFromLegacyWhen,
+  type ConditionAst,
   DEFAULT_REPAIR_ATTEMPTS,
+  DEFAULT_V3_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
+  DEFAULT_DAG_MAX_PARALLEL,
+  MAX_DAG_MAX_PARALLEL,
+  COORDINATOR_GATE_TIMEOUT_SECONDS,
+  CONDUCTOR_CACHE_RUNTIME_VERSION,
+  computeVerifyReserve,
+  resolveVerificationMode,
+  extractRefs,
+  taskSourceVersion,
+  planValueKey,
+  validateOrchestrationPatch,
+  validateOrchestrationDecision,
+  validateTaskNodeVerdict,
+  emptyRunMetrics,
+  criticalPathRemaining,
+  sortReadyByCriticalPath,
+  fingerprintWorkspaceCache,
+  readWorkspaceCache,
+  writeWorkspaceCache,
+  workspaceCacheBypassReason,
+  isWorkspaceCacheKindAllowed,
+  COORDINATOR_TIMEOUT_BLOCKER,
+  ResearchPayloadSchema, researchTaskContext, validateResearchRecord, summarizeResearch, researchReadRangeTexts, renderResearchReport, freezeResearchSources, loadResearchResults, researchInheritanceCompatible,
+  type ResearchRecord, type ResearchSummary,
+  type OrchestrationPatch,
+  type PatchOk,
+  runDir,
+  type OrchestrationDecision,
+  type CoordinatorGateState,
+  type CoordinatorGateReason,
+  type TaskRunMetrics,
+  type TaskVerificationCheck,
+  type VerificationMode,
+  type VerificationResolution,
+  type TaskNodeTiming,
+  type TaskNodeVerdict,
+  type TaskHelpRecord,
+  type CacheStatus,
 } from '@craft-agent/shared/tasks';
-import type { DecisionRequest, DecisionResult } from '@craft-agent/shared/decisions';
-import { classifyVerdictWithDecision } from './verdict-decision';
+import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags';
+import { loadSkillBySlug } from '@craft-agent/shared/skills';
+import { createLogger } from '@craft-agent/shared/utils';
+import { createHash } from 'crypto';
+import { MAX_RUN_INSTANCES, isSessionLikeKind, isControlKind, unimplementedV2Nodes } from './executors';
+import { LlmConnectionPool } from './connection-pool';
+
+const conductorLog = createLogger('tasks-conductor');
+
+export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
 
 // ---------------------------------------------------------------------------
 // Host interface (SessionManager satisfies this structurally)
 // ---------------------------------------------------------------------------
 
 export interface ConductorSessionHost {
-  /** Creates the child session AND announces it to the renderer (createSession emits
-   *  session_created by default), so the subtask appears on the board with its real title. */
+  /** Inspection is separate from a stop request; unknown side effects must be reviewed. */
+  assertTaskSafePoint?(sessionIds: string[]): void;
+  settleTaskSessionStop?(sessionId: string): Promise<void>;
+  canReuseTaskSession?(sessionId: string): boolean;
+  inspectTaskWorker?(worker: TaskWorkerRecord): { state: 'done' | 'failed' | 'stopped'; output?: NodeOutput; reason?: string; tokensUsed?: number } | undefined;
+  /** Bind each turn before sending; the generation fences late completions from the preceding task. */
+  bindTaskSession?(sessionId: string, binding: import('@craft-agent/shared/tasks').TaskSessionBinding): Promise<{ generation: number }>;
+  nextTaskSessionGeneration?(sessionId: string): number;
+  assertTaskRunAllowed?(workspaceId: string, orchestratorSessionId?: string, task?: { slug: string }): void;
+  /** Creates the child session. DAG workers are persisted but hidden from the
+   * ordinary session list; run details address them by task/run/node metadata. */
   createSession(workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }>;
-  sendMessage(sessionId: string, message: string): Promise<void>;
+  prepareTaskWorkspace?(sessionId: string, sourceRoot: string, inputs: string[]): Promise<{ directory: string }>;
+  hasPreparedTaskDelivery?(sessionId: string): boolean;
+  canAutoResumeTaskDelivery?(sessionId: string): boolean;
+  finalizeTaskWorkspace?(sessionId: string, outputs: Record<string, string>, ensureCurrent: () => void, verifyInputs?: () => void): Promise<Record<string, unknown>>;
+  sendMessage(sessionId: string, message: string, attachments?: undefined, storedAttachments?: undefined, options?: Pick<SendMessageOptions, 'hidden' | 'taskContext'>): Promise<void>;
+  continueProgress?(sessionId: string): Promise<void>;
+  getProgressLiveTokens?(sessionId: string): number;
   setSessionStatus(sessionId: string, status: string): Promise<void>;
   setKanbanColumn(sessionId: string, column: string | null): Promise<void>;
+  /** Map a session status to a board column. Return null to keep the current column. */
+  resolveKanbanColumn?(sessionId: string, statusId: string): Promise<string | null>;
   /** Records the total DAG node count on the orchestrator session for a stable board progress denominator. */
   setTaskNodeCount(sessionId: string, count: number): Promise<void>;
+  /** Persist the parent-facing orchestration badge independently of board/session status. */
+  setOrchestrationStatus?(
+    sessionId: string,
+    status: 'running' | 'completed' | 'need-to-check' | 'stopped',
+    blocker?: string,
+  ): Promise<void> | void;
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>;
+  /** Explicitly stop managed spawn_session descendants owned by a DAG worker. */
+  stopSwarm?(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>;
   onSessionComplete(listener: (evt: SessionCompletionEvent) => void): () => void;
+  onRuntimeActivity?(listener: (activity: SessionRuntimeActivity) => void): () => void;
+  getSessionFinalText(sessionId: string): string | undefined;
   /** Resolved working directory of a session, so children inherit the orchestrator's cwd. */
   getSessionWorkingDirectory(sessionId: string): string | undefined;
-  /** Parent of a sub-session (undefined = top-level or unknown), so a run never starts on one. */
-  getSessionParentId(sessionId: string): string | undefined;
+  /** Current model of a session, so DAG workers inherit the orchestrator when the spec omits one. */
+  getSessionModel?(sessionId: string): string | undefined;
+  /** Current LLM connection of a session, so DAG workers inherit the orchestrator when the spec omits one. */
+  getSessionLlmConnection?(sessionId: string): string | undefined;
+  getSessionPermissionModeState?(sessionId: string): { permissionMode: 'safe' | 'ask' | 'allow-all' } | null | undefined;
+  /** True when the session invoked tools. Undefined means unknown — workspace-pure will not store. */
+  sessionUsedTools?(sessionId: string): boolean | undefined;
+  /** Skill file contents for cache fingerprints. Missing slugs bypass workspace-pure. */
+  readSkillContents?(slugs: string[]): Record<string, string> | undefined;
 }
 
 export interface TaskRunnerDeps {
@@ -78,42 +187,20 @@ export interface TaskRunnerDeps {
   /** Injectable clock (run-log timestamps) + run-id generator, for determinism in tests. */
   now?: () => string;
   genRunId?: () => string;
-  /**
-   * Optional decision-model call (Jev). Used ONLY to read a verdict out of an orchestrator reply that
-   * has no parseable VERDICT line: a parseable line always wins, the model never changes what PASS or
-   * FAIL do, and `null` (layer off, unsure, failed) leaves the runner exactly as before — it re-asks.
-   */
-  decide?: TaskDecisionFn;
-  /**
-   * Optional decision-model read of how a child's turn ended (Jev). A child that asked for input or
-   * gave up is failed (retry with the reason, or needs-review) instead of marked done: children run
-   * unattended, so nobody would answer. `null` (layer off, unsure, failed) marks the node done as before.
-   */
-  classifyNodeOutcome?: NodeOutcomeFn;
-  /**
-   * Optional decision-model scoping of a FAIL repair (Jev). When the verifier's FAIL names no
-   * subtasks, the model picks the ones its reason implicates; `null` repairs the whole DAG as before.
-   */
-  pickRepairNodes?: RepairScopeFn;
+  /** Push a typed snapshot after every durable run/node/budget/approval change. */
+  onRunChanged?: (snapshot: RunSnapshot) => void;
+  /** Model ids currently configured in this workspace; dynamic patches may not escape this set. */
+  allowedModels?: ReadonlySet<string>;
+  /** Workspace-level LLM connection concurrency pool. Shared across runs. */
+  connectionPool?: LlmConnectionPool;
+  /** Fired after a pool slot is released so sibling runs can retry acquire. */
+  onConnectionReleased?: (sourceRunKey?: string) => void;
 }
 
-/** Runs one decision request for a task run; `null` = unavailable. Must not throw (the runner also guards). */
-export type TaskDecisionFn = (request: DecisionRequest, context: { slug: string; runId: string }) => Promise<DecisionResult | null>;
-
-/** Picks the nodes a FAIL reason implicates; `null` = unavailable or none. Must not throw (the runner also guards). */
-export type RepairScopeFn = (
-  reason: string,
-  nodes: Array<{ id: string; description: string }>,
-  context: { slug: string; runId: string },
-) => Promise<string[] | null>;
-
-/** Reads how a child node's final turn ended; `null` = unavailable or unsure. Must not throw (the runner also guards). */
-export type NodeOutcomeFn = ((finalText: string, context: { slug: string; runId: string; nodeId: string }) => Promise<'finished' | 'needs_input' | 'blocked' | null>) & {
-  /** Synchronous gate: when false the node completes without the async check, as before. */
-  isActive?: () => boolean;
-};
-
 export interface RunOptions {
+  resumedFrom?: string;
+  /** Internal durable policy restored from the run checkpoint. */
+  plannerRequired?: boolean;
   /** The task's persistent parent/orchestrator session (author + final verifier). */
   orchestratorSessionId?: string;
   /** Resolved task param values (merged over the spec's declared defaults). */
@@ -122,50 +209,98 @@ export interface RunOptions {
   runId?: string;
   /** When the run completes, message the orchestrator to verify the result. Default true. */
   verifyOnComplete?: boolean;
+  /** Disk source version. Unsaved v1 files keep skip semantics; v2/v3 refuse unimplemented kinds. */
+  sourceVersion?: 1 | 2 | 3;
+  /** Explicit authorization derived from the parent session's Swarm toggle. */
+  orchestrateAllowed?: boolean;
 }
 
-export type RunStatus = 'running' | 'paused' | 'verifying' | 'stopped' | 'completed' | 'failed';
+export type { RunStatus };
+
+export class TaskControlError extends Error {
+  readonly code = 'conflict' as const;
+  constructor(
+    readonly status: RunStatus,
+    message: string,
+    readonly currentRun?: {runId:string;revision:number;status:RunStatus;coordinatorGate?:CoordinatorGateState},
+  ) {
+    super(message);
+    this.name = 'TaskControlError';
+  }
+}
 
 export interface NodeRunStatus {
+  actor?: TaskNode['actor'];
+  title?: string;
+  instruction?: string;
+  /** First dispatch time in Unix milliseconds, restored from the durable log. */
+  startedAt?: number;
+  attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[];
+  approvalFeedback?: string;
+  approvalDefinition?: { title: string; prompt: string; dependsOn: string[] };
   id: string;
+  definitionId?: string;
   state: NodeRunState;
   sessionId?: string;
   attempt: number;
+  retryCount?: number;
+  role?: 'worker' | 'reviewer';
+  model?: string;
+  tokensUsed?: number;
+  blocker?: string;
+  elapsedMs?: number;
+  queueMs?: number;
+  cacheStatus?: CacheStatus;
+  cacheCreatedAt?: string;
+  cacheSourceRunId?: string;
+  verdict?: { result: 'pass' | 'fail'; reason?: string; evidence?: string; nodes?: string[] };
 }
 
 export interface RunSnapshot {
+  /** Response-only receipt: the identical continue was committed previously; no work was repeated. */
+  alreadyApplied?: boolean;
+  help?: TaskHelpRecord[];
+  coordinatorGate?: CoordinatorGateState;
+  research?: ResearchSummary;
+  artifactAvailability?: { nodeIds: string[]; reason: string };
+  resumedFrom?: string;
+  supersededBy?: string;
+  workers?: TaskWorkerRecord[];
+  planChanges?: import('@craft-agent/shared/tasks').PlanChange[];
+  planner?: { phase: PlannerPhase; pendingResults: PlannerResultEvent[]; consumedResults: number };
+  workspaceId: string;
   slug: string;
   runId: string;
   taskId: string;
   status: RunStatus;
   orchestratorSessionId?: string;
   nodes: NodeRunStatus[];
+  canRetryFailedNodes?: boolean;
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number;
+  /** Current user-controlled run ceiling. Missing means unlimited. */
+  tokenBudget?: number;
+  /** Node ids that currently block the run (approval, budget, interrupt). */
+  blockers?: string[];
+  revision?: number;
+  metrics?: TaskRunMetrics;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MAX_PARALLEL = 4;
-// Explicit, unattended-safe default for a subtask's permission mode when neither the node nor the task
-// defaults set one. Conductor children run with no human to answer an `ask` prompt, so we must NOT fall
-// through to the workspace default (which may be `ask` → the child hangs, or read-only `safe` → it
-// silently produces nothing). The task editor now persists an explicit `defaults.permissionMode`, so
-// this constant only governs hand-authored specs that omit it — and it is never `ask`.
-const AUTONOMOUS_DEFAULT_MODE = 'allow-all' as const;
+// Missing authority is never interpreted as write authority. Nodes which need
+// broader access must be explicitly granted it by the task definition.
+const DEFAULT_TASK_PERMISSION_MODE = 'safe' as const;
 const RUNNING_STATUS = 'in-progress';
 const DONE_STATUS = 'done';
+const TODO_STATUS = 'todo';
 // There is no 'failed' session status (the fixed set is todo|in-progress|needs-review|done|cancelled).
-// We flag a failed child as 'needs-review' (amber, attention needed); the board's 'failed' run-state
-// is derived from the run-log, not from a session status.
+// Failed children and the settled top-level card use 'needs-review'. Runs never auto-close
+// the orchestrator tile to done/cancelled — see ARCHITECTURE.md §5.
 const FAILED_STATUS = 'needs-review';
-// A step the user stopped waits for them (a message continues it); the same amber status flags it.
-const WAITING_FOR_USER_STATUS = 'needs-review';
-// Upstream replies handed to a dependent through `depends_on` are capped per step; the full text is
-// in the run's nodes/<id>.json.
-const MAX_UPSTREAM_REPLY_CHARS = 40_000;
+const REVIEW_STATUS = 'needs-review';
 
 // A malformed verdict (no parseable VERDICT line) is re-asked this many times before we give up and
 // fail the run. These re-asks are format-only — they do NOT consume the repair (max_iterations) budget.
@@ -173,20 +308,69 @@ const MAX_UNPARSED_REASKS = 2;
 
 const INPUTS_REF_RE = /\$\{\s*inputs\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g;
 
+function isExecutableTaskNode(node: TaskNode): boolean {
+  return node.kind === 'session' || node.kind === 'orchestrator';
+}
+
+function isTerminalNodeState(state: NodeRunState | undefined): boolean {
+  return (
+    state === 'done' ||
+    state === 'skipped' ||
+    state === 'failed' ||
+    state === 'invalid' ||
+    state === 'cancelled'
+  );
+}
+
+function orchestrationDisplayStatus(snapshot: RunSnapshot): {
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped';
+  blocker?: string;
+} {
+  if (snapshot.status === 'completed') return { status: 'completed' };
+  if (snapshot.status === 'stopped') return { status: 'stopped', blocker: 'Run stopped' };
+  if (
+    snapshot.status === 'running' ||
+    snapshot.status === 'pausing' ||
+    snapshot.status === 'verifying' ||
+    snapshot.status === 'repairing' ||
+    snapshot.status === 'waiting-coordinator'
+  ) {
+    return { status: 'running' };
+  }
+  const details = snapshot.blockers?.length ? `: ${snapshot.blockers.join(', ')}` : '';
+  return { status: 'need-to-check', blocker: `${snapshot.status}${details}` };
+}
+
+function nodeCacheMode(node: TaskNode, sourceVersion: 1 | 2 | 3): 'none' | 'run-pure' | 'workspace-pure' {
+  if (node.researchRole) return 'none';
+  if (sourceVersion < 3) return node.cache === 'pure' ? 'run-pure' : 'none';
+  if (node.cache === 'workspace-pure') return 'workspace-pure';
+  if (node.cache === 'run-pure') return 'run-pure';
+  return 'none';
+}
+
+const TASK_PERMISSION_RANK = { safe: 0, ask: 1, 'allow-all': 2 } as const;
+
+function permissionAllowedByTask(
+  requested: keyof typeof TASK_PERMISSION_RANK,
+  ceiling: keyof typeof TASK_PERMISSION_RANK,
+): boolean {
+  return TASK_PERMISSION_RANK[requested] <= TASK_PERMISSION_RANK[ceiling];
+}
+
 /** Distributive Omit so the run-log discriminated union keeps its per-variant fields. */
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 type RunLogEntryInput = DistributiveOmit<RunLogEntry, 't'>;
 
 interface NodeStateEntry {
+  generation?: number;
+  approvalFeedback?: string;
   state: NodeRunState;
   sessionId?: string;
   attempt: number;
   /** Reason the previous attempt failed, fed back into the retry prompt (failure-aware retry). */
   lastFailure?: string;
-  /** Replies of this attempt's completed turns while it waited for background work; joined into the output. */
-  replies: string[];
-  /** The user stopped this attempt: only a turn answering their message completes it. */
-  waitingForUser?: boolean;
+  approvalDeadline?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,10 +378,31 @@ interface NodeStateEntry {
 // ---------------------------------------------------------------------------
 
 class ActiveRun {
+  private resumedFrom?: string;
+  private supersededBy?: string;
+  private readonly plannerRequired: boolean;
+  private readonly workers = new Map<string, TaskWorkerRecord>();
+  private readonly deferredCompletions = new Map<string, SessionCompletionEvent>();
+  private readonly unconfirmedShutdown = new Set<string>();
+  private artifactAvailability?: RunSnapshot['artifactAvailability'];
+  private plannerPhase: 'active' | 'draining' = 'active';
+  private readonly resultEvents = new Map<string, PlannerResultEvent>();
+  private readonly consumedResultIds = new Set<string>();
+  private readonly decisionEventSeqs = new Set<number>();
+  private readonly planChanges: NonNullable<RunSnapshot['planChanges']> = [];
+  private readonly actors = new Map<string, { sessionId: string; signature: string; prefix: string[] }>();
+  private progressParentResume?: 'coordinator' | 'verifying';
+  private historicalMetrics?: TaskRunMetrics;
+  private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string; revision?: number }[]>();
+  private readonly nodeStartedAt = new Map<string, number>();
+  private readonly attemptNumbers = new Map<string, number>();
+  private readonly attemptRevisions = new Map<string, number>();
   private readonly state = new Map<string, NodeStateEntry>();
+  private readonly controlArtifactInputs = new Map<string, Record<string, NodeOutput>>();
+  private readonly artifactInputs = new Map<string, Record<string, NodeOutput>>();
   private readonly sessionToNode = new Map<string, string>();
   private readonly outputs: Record<string, NodeOutput> = {};
-  private readonly edges: Map<string, Set<string>>;
+  private edges: Map<string, Set<string>>;
   private readonly maxParallel: number;
   private inFlight = 0;
   private tokensUsed = 0;
@@ -209,137 +414,743 @@ class ActiveRun {
   private verdictOff?: () => void;
   /** FAIL verdicts that have triggered a repair pass (bounded by `maxRepairs`). */
   private repairsUsed = 0;
-  /** The last repair was narrowed by the decision model: the next FAIL repairs the whole DAG. */
-  private lastRepairScoped = false;
   /** Malformed-verdict re-asks issued (bounded by MAX_UNPARSED_REASKS); not a repair. */
   private unparsedReAsks = 0;
+  /** Structured-verdict format turns are separate from business repair. */
+  private verificationFormatReasks = 0;
+  private verificationModelRequested = false;
+  private verificationModelRequests = 0;
+  private verificationResolution?: VerificationResolution;
+  private verificationContextBytes = 0;
+  private verificationTokensUsed = 0;
+  private verdictChecks = 0;
+  private verificationDecisionLogged = false;
+  private readonly verificationUsageGenerations = new Set<number>();
   /** Resolved repair cap = min(spec.max_iterations ?? DEFAULT, CAP). */
   private readonly maxRepairs: number;
   /** Inverted edges: node id → set of nodes that (directly) depend on it. Built lazily for the frontier. */
   private dependents?: Map<string, Set<string>>;
   private settled = false;
   private settleResolvers: ((s: RunSnapshot) => void)[] = [];
+  private readonly sourceVersion: 1 | 2 | 3;
+  private tokenBudget: number | undefined;
+  private instanceCount = 0;
+  private stopRequested = false;
+  private originalFailed = false;
+  private readonly submittedOutputs = new Map<string, NodeOutput>();
+  private readonly integratingSessions = new Set<string>();
+  private readonly integratedSessions = new Set<string>();
+  private verdictLocked = false;
+  private readonly instances = new Map<string, NodeStateEntry>();
+  private readonly retiredInstanceAttempts = new Map<string, number>();
+  private readonly instanceOutputs = new Map<string, NodeOutput>();
+  private readonly mapItems = new Map<string, unknown[]>();
+  private readonly replicaCounts = new Map<string, number>();
+  private readonly loopIndex = new Map<string, number>();
+  private readonly promptCache = new Map<string, NodeOutput>();
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  private revision = 0;
+  private readonly seenDecisionIds = new Set<string>();
+  private readonly completedCheckpointIds = new Set<string>();
+  private coordinatorGate: CoordinatorGateState | null = null;
+  private readonly researchStageNotifications = new Map<string, { key: string; blockers: string[] }>();
+  private readonly help = new Map<string, TaskHelpRecord>();
+  private readonly helpWaiters = new Map<string, { promise: Promise<unknown>; resolve(value: unknown): void; reject(error: Error): void }>();
+  private readonly helpTimeouts = new Map<string, number>();
+  private readonly coordinatorTimers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly nodeTimings = new Map<string, TaskNodeTiming>();
+  private readonly nodeVerdicts = new Map<string, TaskNodeVerdict>();
+  private readonly acquiredConnections = new Map<string, string>();
+  private readonly runStartedAtMs: number;
+  private coordinatorWaitMs = 0;
+  private coordinatorWaitStartedAt?: number;
+  private coordinatorWaits = 0;
+  private cacheHits = 0;
+  private cacheMisses = 0;
+  private cacheBypasses = 0;
+  private lastCoordinatorTimeout = false;
+  private lastCoordinatorTimeoutReason: CoordinatorGateReason | null = null;
+  private invalidPatchCount = 0;
+  /** Sticky once observed; even the final batch must stop for an explicit user budget increase. */
+  private budgetBreached = false;
+  private nextSeq = 1;
+  private readonly approvalTimers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly sessionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly sessionTimeoutDeadlines = new Map<string, number>();
+  private suppressSchedule = false;
 
   constructor(
-    private readonly spec: TaskSpec,
+    private spec: TaskSpec,
     private readonly slug: string,
     private readonly runId: string,
     private readonly opts: Required<Pick<RunOptions, 'verifyOnComplete'>> & RunOptions,
     private readonly deps: TaskRunnerDeps,
   ) {
+    this.sourceVersion = opts.sourceVersion ?? taskSourceVersion(spec);
+    this.resumedFrom = opts.resumedFrom;
+    this.plannerRequired = opts.plannerRequired ?? isTasksOrchestrateEnabled();
+    this.runStartedAtMs = this.nowMs();
+    this.tokenBudget = spec.token_budget;
     this.edges = materializeDeps(spec);
-    this.maxParallel = spec.max_parallel ?? deps.defaultMaxParallel ?? DEFAULT_MAX_PARALLEL;
+    this.maxParallel = Math.min(
+      spec.max_parallel ?? deps.defaultMaxParallel ?? DEFAULT_DAG_MAX_PARALLEL,
+      MAX_DAG_MAX_PARALLEL,
+    );
     // Runner-side clamp (belt-and-suspenders: the schema already caps `max_iterations` at the same
     // bound, so a parsed spec can't exceed it — but a programmatically built spec might).
-    this.maxRepairs = Math.min(spec.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP);
-    for (const node of spec.nodes) this.state.set(node.id, { state: 'pending', attempt: 0, replies: [] });
+    this.maxRepairs = Math.min(spec.max_iterations ?? (this.sourceVersion === 3 ? DEFAULT_V3_REPAIR_ATTEMPTS : DEFAULT_REPAIR_ATTEMPTS), MAX_REPAIR_ATTEMPTS_CAP);
+    for (const node of spec.nodes) this.state.set(node.id, { state: 'pending', attempt: 0 });
   }
 
   // --- lifecycle ---
 
-  start(): void {
-    this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    // Snapshot the spec for this run so the Results view labels nodes by run-time titles even after
-    // the live task.yaml is edited. Best-effort: a snapshot failure must not abort the run.
-    try {
-      writeRunSpecSnapshot(this.deps.workspaceRoot, this.slug, this.runId, this.spec);
-    } catch {
-      // ignore — Results falls back to run-log node ids when no snapshot exists
-    }
-    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId });
+  start(beforeDispatch?: () => void): void {
+    this.assertSensitiveReady();
+    // Freeze the policy only for new runs; rehydrated revisions retain their original policy.
+    this.spec = { ...this.spec, execution: { ...this.spec.execution, artifact_delivery: 1 } };
+    // The frozen run graph is a correctness prerequisite, not a presentation
+    // convenience. Refuse to dispatch anything if revision 0 cannot be durably
+    // written; otherwise a restart could only consult the mutable task.yaml.
+    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, 0, this.spec);
+    const sources = this.spec.research ? freezeResearchSources(this.deps.workspaceRoot, this.slug, this.runId, this.spec.research,
+      this.opts.orchestratorSessionId ? this.deps.host.getSessionWorkingDirectory(this.opts.orchestratorSessionId) ?? this.spec.cwd ?? this.deps.workspaceRoot : this.spec.cwd ?? this.deps.workspaceRoot) : undefined;
+    const predecessorState = this.spec.research && this.resumedFrom ? readRunState(this.deps.workspaceRoot,this.slug,this.resumedFrom) : undefined;
+    const predecessorSpec = this.spec.research && this.resumedFrom ? readSpecRevision(this.deps.workspaceRoot,this.slug,this.resumedFrom,predecessorState?.revision ?? 0) : undefined;
+    const predecessor = this.spec.research && this.resumedFrom && researchInheritanceCompatible(predecessorSpec?.research,this.spec.research)
+      ? loadResearchResults(this.deps.workspaceRoot,this.slug,this.resumedFrom) : undefined;
+    for (const question of this.spec.research?.questions ?? []) if (!this.spec.nodes.some(node => node.id === question.sharedTaskRef && node.researchRole === 'researcher') && !predecessor?.records.some(record => record.role === 'researcher' && record.producedBy.nodeId === question.sharedTaskRef)) throw new Error(`Unknown canonical shared research task ${question.sharedTaskRef}`);
+    const researchPredecessor = predecessor ? {runId:this.resumedFrom!,recordsHash:createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex'),readsHash:createHash('sha256').update(JSON.stringify(predecessor.reads)).digest('hex')} : undefined;
+    this.unsubscribe = this.subscribe();
+    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom, ...(researchPredecessor ? {researchPredecessor} : {}), ...(sources ? { researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') } : {}) });
+    beforeDispatch?.();
     this.runStatus = 'running';
-    // Move the task tile to the in-progress column for the duration of the run.
-    if (this.opts.orchestratorSessionId) {
-      void this.deps.host.setKanbanColumn(this.opts.orchestratorSessionId, 'in-progress');
-      void this.deps.host.setSessionStatus(this.opts.orchestratorSessionId, RUNNING_STATUS);
-      // Publish the full node count up front so the board's subtask progress denominator is stable,
-      // rather than growing as children are spawned lazily at dispatch.
-      void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, this.spec.nodes.length);
+    // v1 unsaved files keep skip semantics. v2 never silent-skips unimplemented kinds
+    // (those runs are refused before start()).
+    for (const node of this.spec.nodes) {
+      if (this.sourceVersion === 1 && !isExecutableTaskNode(node)) {
+        const st = this.state.get(node.id)!;
+        st.state = 'skipped';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+      }
     }
-    this.scheduleReady();
+    if (this.opts.orchestratorSessionId) {
+      this.applyCard(this.opts.orchestratorSessionId, RUNNING_STATUS);
+      // Publish the executable node count so deferred kinds don't inflate the board.
+      const executableCount = this.spec.nodes.filter(isExecutableTaskNode).length;
+      void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, executableCount);
+    }
+    if (!this.enterCoordinatorGate('first-schedule')) {
+      this.coordinatorCheckpoint('first-schedule');
+      this.scheduleReady();
+    }
+    this.emitChanged();
   }
 
-  pause(): void {
-    if (this.runStatus !== 'running') return;
-    this.runStatus = 'paused';
-    this.log({ kind: 'run-paused' });
-    // In-flight children keep running; their completions still record output but won't schedule.
+  pause(): RunSnapshot {
+    if (this.runStatus === 'pausing' || this.runStatus === 'paused') return this.snapshot();
+    if (this.isTerminal() || this.runStatus === 'interrupted') {
+      throw new TaskControlError(this.runStatus, `Cannot pause a ${this.runStatus} run`);
+    }
+    this.clearCoordinatorGate();
+    if (this.inFlight === 0) {
+      this.runStatus = 'paused';
+      this.log({ kind: 'run-paused' });
+    } else {
+      this.runStatus = 'pausing';
+      this.log({ kind: 'run-pausing' });
+    }
+    this.emitChanged();
+    return this.snapshot();
   }
 
-  resume(): void {
-    if (this.runStatus !== 'paused') return;
+  resume(): RunSnapshot {
+    if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop before resuming');
+    if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+      throw new TaskControlError(this.runStatus, `Cannot resume a ${this.runStatus} run; use continue after interrupt`);
+    }
+    this.assertSensitiveReady();
+    const restoredExecutions = [...this.state.values(), ...this.instances.values()].some(state => state.sessionId && ['pending', 'interrupted'].includes(state.state));
+    if (restoredExecutions) {
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+      this.reconcileWorkers();
+    }
+    if (this.progressParentResume && this.opts.orchestratorSessionId) {
+      const phase = this.progressParentResume;
+      if (phase === 'verifying' && !this.deps.host.continueProgress) throw new TaskControlError(this.runStatus, 'Host cannot resume verification checkpoint');
+      this.progressParentResume = undefined;
+      this.runStatus = phase === 'verifying' ? 'verifying' : 'running';
+      this.log({ kind: 'run-resumed' });
+      if (phase === 'coordinator') this.enterCoordinatorGate('progress-review');
+      else {
+        this.log({ kind: 'run-verifying' });
+        if (this.sourceVersion === 1) this.attachVerdictListener(this.opts.orchestratorSessionId);
+        void this.deps.host.continueProgress!(this.opts.orchestratorSessionId).catch(() => { this.pause(); });
+      }
+      this.emitChanged(); return this.snapshot();
+    }
+    const reopenGate = this.lastCoordinatorTimeout && this.coordinatorGateEnabled();
+    const reopenReason = this.lastCoordinatorTimeoutReason ?? 'first-schedule';
+    this.lastCoordinatorTimeout = false;
+    this.lastCoordinatorTimeoutReason = null;
     // Cancelled nodes return to pending so they re-dispatch. Nodes that exhausted their `retry`
     // budget stay 'failed' — automatic retry happens in failNode within the run, not on resume.
     for (const [, st] of this.state) if (st.state === 'cancelled') st.state = 'pending';
+    for (const [, st] of this.instances) if (st.state === 'cancelled') st.state = 'pending';
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
+    this.restorePrimaryCompletions();
+    this.restorePreparedDeliveries();
+    if (reopenGate) {
+      if (!this.enterCoordinatorGate(reopenReason)) this.scheduleReady();
+    } else {
+      this.scheduleReady();
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  canResumePreparedDelivery(): boolean {
+    if (this.spec.execution?.artifact_delivery !== 1 || this.runStatus !== 'interrupted') return false;
+    const unfinished = [...this.state.values(), ...this.instances.values()].filter(st => !isTerminalNodeState(st.state));
+    const interrupted = unfinished.filter(st => st.state === 'interrupted');
+    return interrupted.length > 0 && interrupted.every(st => !!st.sessionId && this.deps.host.canAutoResumeTaskDelivery?.(st.sessionId))
+      && unfinished.every(st => ['pending', 'ready', 'interrupted'].includes(st.state));
+  }
+
+  continueAfterInterrupt(): RunSnapshot {
+    if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus === 'failed') return this.retryFailedNodes();
+    if (this.runStatus !== 'interrupted') {
+      throw new TaskControlError(this.runStatus, `Cannot continue a ${this.runStatus} run`);
+    }
+    this.assertSensitiveReady();
+    if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+    if (this.progressParentResume === 'verifying' && this.opts.orchestratorSessionId) {
+      if (!this.deps.host.continueProgress) throw new TaskControlError(this.runStatus, 'Host cannot resume verification checkpoint');
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+      this.progressParentResume = undefined;
+      this.runStatus = 'verifying';
+      this.log({ kind: 'run-resumed' });
+      void this.deps.host.continueProgress(this.opts.orchestratorSessionId).catch(() => { this.pause(); });
+      this.emitChanged();
+      return this.snapshot();
+    }
+    this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+    this.reconcileWorkers();
+    for (const [, st] of this.state) {
+      if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
+    }
+    for (const [, st] of this.instances) {
+      if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
+    }
+    this.runStatus = 'running';
+    this.log({ kind: 'run-resumed' });
+    this.restorePrimaryCompletions();
+    this.restorePreparedDeliveries();
     this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  private restorePreparedDeliveries(): void {
+    if (this.spec.execution?.artifact_delivery !== 1) return;
+    for (const [nodeId, st] of [...this.state, ...this.instances]) {
+      if (st.state !== 'pending' || !st.sessionId || this.integratedSessions.has(st.sessionId)
+        || !this.deps.host.hasPreparedTaskDelivery?.(st.sessionId)) continue;
+      let output: NodeOutput | null;
+      try {
+        output = readNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.sessionId, st.attempt);
+        if (!output) throw new Error('Missing persisted submission');
+      } catch {
+        // Never route an uncertain prepared write through the automatic retry policy.
+        st.state = 'invalid';
+        st.lastFailure = 'Prepared delivery submission is missing or damaged; recover its record before continuing';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId, state: 'invalid', reason: st.lastFailure });
+        this.applyCard(st.sessionId, TODO_STATUS);
+        continue;
+      }
+      this.submittedOutputs.set(nodeId, output);
+      st.state = 'running';
+      this.inFlight += 1;
+      this.onSessionComplete({ sessionId: st.sessionId, workspaceId: this.deps.workspaceId, generation: st.generation ?? 0, reason: 'complete' });
+    }
+  }
+
+  /** Explicit recovery follows dependency edges; unrelated successful work remains intact. */
+  private retryFailedNodes(coordinatorActive = false): RunSnapshot {
+    const roots = new Set([...this.state].filter(([, st]) => st.state === 'failed' || st.state === 'invalid').map(([id]) => id));
+    const affected = dependencyImpact(roots, this.spec.nodes, this.edges);
+    const retryIds = [...affected];
+    const discardIds: string[] = [];
+    for (const [id, st] of this.instances) {
+      const defId = definitionId(id);
+      if (!affected.has(defId)) continue;
+      if (!roots.has(defId) || this.state.get(defId)?.lastFailure === 'loop-exhausted') discardIds.push(id);
+      else if (st.state !== 'done') retryIds.push(id);
+    }
+    if (!retryIds.length && ![...this.state.values()].every(st => st.state === 'done' || st.state === 'skipped')) {
+      throw new TaskControlError('failed', 'No failed execution nodes to retry');
+    }
+    this.assertSensitiveReady();
+    if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+    this.deps.host.assertTaskSafePoint?.(this.executionSessions(!coordinatorActive));
+    // One durable event also invalidates stale reviewer decisions and expanded descendants.
+    this.log({ kind: 'run-resumed', retryNodeIds: retryIds, discardInstanceIds: discardIds });
+    this.applyRetryReset(retryIds, discardIds);
+    this.originalFailed = false;
+    this.settled = false;
+    this.verdictLocked = false;
+    this.unsubscribe?.();
+    this.unsubscribe = this.subscribe();
+    this.runStatus = 'running';
+    this.restorePreparedDeliveries();
+    // Recovery does not bypass a V3 coordinator checkpoint.
+    if (!this.enterCoordinatorGate('node-failed')) this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  private applyRetryReset(retryIds: readonly string[], discardIds: readonly string[] = []): void {
+    for (const id of [...retryIds, ...discardIds]) {
+      const st = this.state.get(id) ?? this.instances.get(id);
+      if (st) {
+        st.state = 'pending';
+        delete st.approvalFeedback;
+        delete st.approvalDeadline;
+      }
+      this.instanceOutputs.delete(id);
+      this.submittedOutputs.delete(id);
+      this.nodeVerdicts.delete(id);
+      if (this.nodeTimings.has(id)) delete this.nodeTimings.get(id)!.verdict;
+      delete this.outputs[id];
+      if (discardIds.includes(id)) {
+        this.retiredInstanceAttempts.set(id, st?.attempt ?? this.retiredInstanceAttempts.get(id) ?? 0);
+        this.instances.delete(id);
+      }
+    }
+    for (const id of retryIds) {
+      if (id.includes('#')) continue;
+      this.mapItems.delete(id);
+      this.replicaCounts.delete(id);
+      this.loopIndex.delete(id);
+    }
+    this.coordinatorGate = null;
+    this.lastCoordinatorTimeout = false;
+    // Restore the first unfinished loop iteration, preserving its successful prefix.
+    for (const node of this.spec.nodes) {
+      if (node.kind !== 'loop' || !retryIds.includes(node.id)) continue;
+      let index = 0;
+      while (this.instances.get(instanceId(node.id, index))?.state === 'done') index++;
+      this.loopIndex.set(node.id, index);
+    }
+  }
+
+  restoreCheckpoint(
+    checkpoint: {
+      seq: number;
+      revision: number;
+      tokensUsed: number;
+      tokenBudget?: number;
+      params?: Record<string, unknown>;
+      seenDecisionIds: string[];
+      invalidPatchCount: number;
+      completedCheckpointIds?: string[];
+      coordinatorGate?: CoordinatorGateState;
+      plannerPhase?: PlannerPhase;
+      consumedResultIds?: string[];
+      decisionEventSeqs?: number[];
+    } | null,
+    revisionFallback: number,
+    nextSequenceFloor = 0,
+  ): void {
+    this.revision = checkpoint?.revision ?? revisionFallback;
+    if (!checkpoint) return;
+    this.nextSeq = Math.max(checkpoint.seq + 1, nextSequenceFloor);
+    this.tokensUsed = checkpoint.tokensUsed;
+    if (checkpoint.tokenBudget !== undefined) this.tokenBudget = checkpoint.tokenBudget;
+    if (checkpoint.params) this.opts.params = { ...this.opts.params, ...checkpoint.params };
+    this.invalidPatchCount = checkpoint.invalidPatchCount;
+    for (const id of checkpoint.seenDecisionIds) this.seenDecisionIds.add(id);
+    for (const id of checkpoint.completedCheckpointIds ?? []) this.completedCheckpointIds.add(id);
+    for (const id of checkpoint.consumedResultIds ?? []) this.consumedResultIds.add(id);
+    for (const seq of checkpoint.decisionEventSeqs ?? []) this.decisionEventSeqs.add(seq);
+    this.plannerPhase = checkpoint.plannerPhase === 'draining' || checkpoint.plannerPhase === 'exhausted' ? 'draining' : 'active';
+    if (checkpoint.coordinatorGate) this.coordinatorGate = checkpoint.coordinatorGate;
   }
 
   /**
-   * Rebuild run state from a persisted run-log (cross-restart resume). Done nodes reuse their
-   * recorded output and are NOT re-run; in-flight/cancelled nodes fall back to pending so they
-   * re-dispatch. A done node whose output file is missing also falls back to pending.
+   * Rebuild run state from a persisted run-log. Done nodes reuse recorded output.
+   * `mode: 'scan'` marks leftover running nodes interrupted and does not schedule.
+   * `mode: 'hydrate'` restores the durable run status (paused / waiting-*) as-is.
    */
-  hydrate(log: RunLogEntry[], loadOutput: (nodeId: string) => NodeOutput | null): void {
+  hydrate(
+    log: RunLogEntry[],
+    loadOutput: (nodeId: string) => NodeOutput | null,
+    mode: 'scan' | 'hydrate' | 'view' = 'hydrate',
+    persistedMetrics?: TaskRunMetrics,
+  ): void {
+    this.suppressSchedule = true;
     for (const e of log) {
-      if (e.kind === 'node-spawned') {
-        const st = this.state.get(e.nodeId);
+      this.recordAttempt(e);
+      const entrySeq = (e as RunLogEntry & { seq?: number }).seq;
+      if (typeof entrySeq === 'number') this.nextSeq = Math.max(this.nextSeq, entrySeq + 1);
+      if ('tokensUsed' in e && typeof e.tokensUsed === 'number') this.tokensUsed = e.tokensUsed;
+      if (e.kind === 'run-started') {
+        this.resumedFrom = e.resumedFrom;
+      } else if (e.kind === 'run-superseded') {
+        this.supersededBy = e.supersededBy;
+      } else if (e.kind === 'execution-shutdown') {
+        if (e.confirmed) this.unconfirmedShutdown.delete(e.sessionId); else this.unconfirmedShutdown.add(e.sessionId);
+      } else if (e.kind === 'task-worker') {
+        this.workers.set(e.worker.workerId, structuredClone(e.worker));
+      } else if (e.kind === 'task-help') {
+        this.help.set(e.help.id, structuredClone(e.help));
+      } else if (e.kind === 'node-help-resumed') {
+        const state = this.instances.get(e.nodeId) ?? this.state.get(e.nodeId);
+        if (state) { state.state = 'running'; delete state.lastFailure; }
+      } else if (e.kind === 'node-awaiting-workers') {
+        this.deferredCompletions.set(e.nodeId, { workspaceId: this.deps.workspaceId, sessionId: e.sessionId, generation: e.generation,
+          reason: e.reason, finalText: e.finalText, errorCode: e.errorCode, artifacts: e.artifacts,
+          tokenUsage: { inputTokens: e.inputTokens ?? 0, outputTokens: e.outputTokens ?? 0, totalTokens: (e.inputTokens ?? 0) + (e.outputTokens ?? 0), contextTokens: 0, costUsd: 0 } });
+        if (e.output) this.submittedOutputs.set(e.nodeId, structuredClone(e.output));
+      } else if (e.kind === 'artifact-availability') {
+        this.artifactAvailability = e.nodeIds.length ? { nodeIds: [...e.nodeIds], reason: e.reason } : undefined;
+      } else if (e.kind === 'artifact-results-invalidated') {
+        for (const id of e.nodeIds) {
+          const st = this.instances.get(id) ?? this.state.get(id);
+          if (st) { st.state = 'invalid'; st.lastFailure = e.reason; }
+          delete this.outputs[id]; this.instanceOutputs.delete(id);
+        }
+      } else if (e.kind === 'node-artifact-inputs') {
+        if (e.sessionId) this.artifactInputs.set(e.sessionId, e.inputs);
+        else this.controlArtifactInputs.set(e.nodeId, e.inputs);
+      } else if (e.kind === 'node-spawned') {
+        this.integratedSessions.delete(e.sessionId);
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.sessionId = e.sessionId;
+          st.generation = e.generation;
           this.sessionToNode.set(e.sessionId, e.nodeId);
         }
+      } else if (e.kind === 'run-resumed' && e.retryNodeIds) {
+        this.applyRetryReset(e.retryNodeIds, e.discardInstanceIds);
+      } else if (e.kind === 'node-retry') {
+        this.applyRetryReset([e.nodeId]);
+        const st = this.state.get(e.nodeId) ?? this.instances.get(e.nodeId);
+        if (st) st.lastFailure = e.reason;
       } else if (e.kind === 'node-scheduled') {
-        const st = this.state.get(e.nodeId);
-        if (st) st.attempt += 1;
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
+        if (st) {
+          if (st.lastFailure !== 'progress-paused') st.attempt += 1;
+          if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
+        }
       } else if (e.kind === 'node-finished') {
+        if (e.state === 'done' && e.sessionId && loadOutput(e.nodeId)?.integratedArtifacts) this.integratedSessions.add(e.sessionId);
+        if (e.state !== 'interrupted') this.deferredCompletions.delete(e.nodeId);
+        if (e.resultEvent) { this.resultEvents.set(e.resultEvent.id, e.resultEvent); this.plannerPhase = 'active'; }
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
+        if (st) {
+          st.state = e.state;
+          if (e.reason) st.lastFailure = e.reason;
+        }
+      } else if (e.kind === 'node-waiting-approval') {
         const st = this.state.get(e.nodeId);
-        if (st) st.state = e.state;
+        if (st) {
+          st.state = 'waiting-approval';
+          st.approvalDeadline = e.deadline;
+        }
+      } else if (e.kind === 'approval-response') {
+        const st = this.state.get(e.nodeId);
+        if (st) {
+          st.approvalFeedback = e.feedback;
+          if (e.approved === undefined) st.lastFailure = 'feedback-delivery-unknown';
+          else if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+        }
+      } else if (e.kind === 'approval-feedback-delivery') {
+        const st = this.state.get(e.nodeId);
+        if (st?.approvalFeedback === e.feedback) {
+          if (e.status === 'failed') st.lastFailure = 'feedback-delivery-failed';
+          else if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+        }
+      } else if (e.kind === 'verification-decision') {
+        this.verificationResolution = e.resolution;
+        if (e.resolution === 'model') {
+          this.verificationModelRequested = true;
+          this.verificationModelRequests += 1;
+          this.verificationContextBytes += e.contextBytes ?? 0;
+        } else {
+          this.verificationDecisionLogged = true;
+        }
+      } else if (e.kind === 'verification-usage') {
+        this.verificationTokensUsed += e.tokens;
+      } else if (e.kind === 'verdict-format-reask') {
+        this.verificationFormatReasks = Math.max(this.verificationFormatReasks, e.attempt);
       } else if (e.kind === 'verdict') {
-        // Reconstruct the durable repair counters so a cross-restart resume honors the cap rather
-        // than restarting the budget from zero (the in-memory counters reset on a fresh process).
+        this.verdictChecks = e.checks?.length ?? 0;
         if (e.result === 'fail') this.repairsUsed += 1;
         else if (e.result === 'unparsed') this.unparsedReAsks += 1;
         else if (e.result === 'pass') this.unparsedReAsks = 0;
+      } else if (e.kind === 'coordinator-request') {
+        this.lastCoordinatorTimeout = false;
+        this.lastCoordinatorTimeoutReason = e.reason;
+        this.coordinatorGate = {
+          checkpointId: e.checkpointId,
+          reason: e.reason,
+          revision: e.revision,
+          deadline: e.deadline,
+          resultEventIds: e.resultEventIds,
+        };
+      } else if (e.kind === 'coordinator-decision') {
+        if (e.seq !== undefined) this.decisionEventSeqs.add(e.seq);
+        for (const id of e.consumedResults ?? []) this.consumedResultIds.add(id);
+        if (e.plannerPhase) this.plannerPhase = e.plannerPhase === 'active' ? 'active' : 'draining';
+        this.lastCoordinatorTimeout = false;
+        this.seenDecisionIds.add(e.decisionId);
+        this.completedCheckpointIds.add(e.checkpointId);
+        if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate = null;
+      } else if (e.kind === 'coordinator-progress') {
+        if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate.deadline = e.deadline;
+      } else if (e.kind === 'progress-parent-paused') {
+        this.progressParentResume = e.phase; this.coordinatorGate = null;
+      } else if (e.kind === 'run-resumed') {
+        this.progressParentResume = undefined;
+      } else if (e.kind === 'coordinator-timeout') {
+        this.lastCoordinatorTimeout = true;
+        if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate = null;
+      } else if (e.kind === 'node-verdict') {
+        this.nodeVerdicts.set(e.nodeId, {
+          result: e.result,
+          reason: e.reason,
+          nodes: e.nodes,
+          evidence: e.evidence,
+          nodeId: e.nodeId,
+        });
+      } else if (e.kind === 'cache-hit') {
+        this.cacheHits += 1;
+        const timing = this.timing(e.nodeId);
+        timing.cacheStatus = 'hit';
+        timing.cacheCreatedAt = e.createdAt;
+        timing.cacheSourceRunId = e.sourceRunId;
+      } else if (e.kind === 'cache-bypass') {
+        this.cacheBypasses += 1;
+        this.timing(e.nodeId).cacheStatus = 'bypass';
+      } else if (e.kind === 'orchestration-patch') {
+        this.planChanges.push({ revision: e.revision ?? e.baseRevision + 1, decisionId: e.decisionId, kind: e.changeKind ?? 'structure', reason: e.rationale,
+          added: e.added ?? [], updated: e.updated ?? [], cancelled: e.cancelled ?? [] });
+        if (e.seq !== undefined) this.decisionEventSeqs.add(e.seq);
+        for (const id of e.consumedResults ?? []) this.consumedResultIds.add(id);
+        this.plannerPhase = e.plannerPhase === 'draining' ? 'draining' : 'active';
+      } else if (e.kind === 'run-paused' || e.kind === 'run-pausing') {
+        this.coordinatorGate = null;
       }
+    }
+    // `instanceCount` is an execution-attempt guard, not just the number of
+    // instance ids that happened to be reconstructed above. Session-backed
+    // attempts log node-scheduled; synchronous controls and pure-cache hits
+    // only log a terminal done event, so account for both without double count.
+    const outstandingSchedules = new Map<string, number>();
+    this.instanceCount = 0;
+    for (const entry of log) {
+      if (entry.kind === 'node-scheduled') {
+        this.instanceCount += 1;
+        outstandingSchedules.set(entry.nodeId, (outstandingSchedules.get(entry.nodeId) ?? 0) + 1);
+      } else if (entry.kind === 'node-finished' && entry.state === 'done') {
+        const credit = outstandingSchedules.get(entry.nodeId) ?? 0;
+        if (credit > 0) outstandingSchedules.set(entry.nodeId, credit - 1);
+        else this.instanceCount += 1;
+      }
+    }
+    this.runStatus = deriveRunStatusFromLog(log);
+    if (mode === 'scan' && this.runStatus === 'verifying') this.progressParentResume = 'verifying';
+    this.supersededBy ??= listRunIds(this.deps.workspaceRoot, this.slug).find(id => id !== this.runId
+      && readRunLog(this.deps.workspaceRoot, this.slug, id).some(event => event.kind === 'run-started' && event.resumedFrom === this.runId));
+    // History reads must never subscribe, start timers, change states or write logs.
+    if (mode === 'view') {
+      for (const [nodeId, state] of this.state) {
+        if (state.state !== 'done') continue;
+        const output = loadOutput(nodeId);
+        if (output) this.outputs[nodeId] = output;
+      }
+      for (const [id, state] of this.instances) {
+        if (state.state !== 'done') continue;
+        const output = loadOutput(id);
+        if (output) this.instanceOutputs.set(id, output);
+      }
+      const start = Date.parse(log[0]?.t ?? '');
+      const end = Date.parse(log.at(-1)?.t ?? '');
+      this.historicalMetrics = persistedMetrics ?? {
+        ...this.buildMetrics(),
+        elapsedMs: Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0,
+      };
+      return;
     }
     for (const [nodeId, st] of this.state) {
       if (st.state === 'done') {
         const out = loadOutput(nodeId);
         if (out) this.outputs[nodeId] = out;
-        else st.state = 'pending'; // recorded output missing → must re-run
-      } else if (st.state === 'running' || st.state === 'cancelled') {
-        st.state = 'pending'; // in-flight at shutdown / cancelled → re-dispatch on resume
-      }
-    }
-    this.inFlight = 0;
-  }
-
-  /** Resume a hydrated run: subscribe, log, and schedule the ready set (finished nodes are skipped). */
-  resumeFromHydrated(): void {
-    if (this.unsubscribe) return;
-    this.runStatus = 'running';
-    this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    this.log({ kind: 'run-resumed' });
-    this.scheduleReady();
-  }
-
-  async stop(): Promise<void> {
-    if (this.isTerminal()) return;
-    this.runStatus = 'stopped';
-    this.log({ kind: 'run-stopped' });
-    for (const [nodeId, st] of this.state) {
-      if (st.state === 'running') {
-        st.state = 'cancelled';
-        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'cancelled', reason: 'stopped' });
-        if (st.sessionId) {
-          void this.deps.host.cancelProcessing(st.sessionId, true);
-          void this.deps.host.setKanbanColumn(st.sessionId, 'todo');
+        else st.state = 'pending';
+      } else if (st.state === 'waiting-help') {
+        this.cancelNodeHelp(nodeId, 'Runtime restarted; recover retained tool results before requesting again');
+        // A lost tool waiter has no progress continuation. Retire its attempt
+        // and use normal retry safety checks before creating a fresh context.
+        st.state = 'interrupted'; st.lastFailure = 'startup-scan';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+      } else if (st.state === 'running' || st.state === 'retry-wait') {
+        if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+          st.state = 'interrupted';
+          this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+        } else {
+          // Paused hydrate: leftover in-flight nodes re-dispatch on resume.
+          st.state = 'pending';
         }
       }
     }
+    for (const [nodeId, st] of this.instances) {
+      if (st.state === 'waiting-help') {
+        this.cancelNodeHelp(nodeId, 'Runtime restarted; recover retained tool results before requesting again');
+        st.state = 'interrupted'; st.lastFailure = 'startup-scan';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+        continue;
+      }
+      if (st.state !== 'running' && st.state !== 'retry-wait') continue;
+      if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+        st.state = 'interrupted';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+      } else {
+        st.state = 'pending';
+      }
+    }
     this.inFlight = 0;
-    this.finalize();
+    this.restoreExpansionState(loadOutput);
+    if (this.runStatus === 'pausing') this.runStatus = 'paused';
+    this.expireApprovals(this.deps.now?.());
+    this.restoreApprovalTimers();
+    this.restoreCoordinatorTimer();
+    if (mode === 'scan' && !this.isTerminal() && this.runStatus !== 'paused' && this.runStatus !== 'waiting-approval' && this.runStatus !== 'waiting-budget' && this.runStatus !== 'waiting-coordinator') {
+      this.runStatus = 'interrupted';
+      this.log({ kind: 'run-interrupted' });
+    }
+    this.suppressSchedule = false;
+    this.unsubscribe = this.subscribe();
+    this.emitChanged();
+  }
+
+  private ensureInstanceState(nodeId: string): NodeStateEntry | undefined {
+    if (!nodeId.includes('#')) return undefined;
+    let st = this.instances.get(nodeId);
+    if (!st) {
+      st = { state: 'pending', attempt: this.retiredInstanceAttempts.get(nodeId) ?? 0 };
+      this.instances.set(nodeId, st);
+      this.instanceCount += 1;
+    }
+    return st;
+  }
+
+  private restoreExpansionState(loadOutput: (nodeId: string) => NodeOutput | null): void {
+    for (const [iid, st] of this.instances) {
+      if (st.state !== 'done') continue;
+      const out = loadOutput(iid);
+      if (out) this.instanceOutputs.set(iid, out);
+    }
+    for (const node of this.spec.nodes) {
+      if (node.kind === 'map' && this.state.get(node.id)?.state === 'running') {
+        try {
+          this.mapItems.set(node.id, parseForEach(this.resolveForEach(node)));
+        } catch {
+          this.mapItems.set(node.id, []);
+        }
+      }
+      if (node.kind === 'loop') {
+        let index = 0;
+        while (this.instances.get(instanceId(node.id, index))?.state === 'done') index++;
+        this.loopIndex.set(node.id, index);
+      }
+      if ((node.replicas ?? 1) > 1) {
+        this.replicaCounts.set(node.id, node.replicas!);
+      }
+    }
+  }
+
+  async stop(): Promise<RunSnapshot> {
+    if (this.isTerminal()) return this.snapshot();
+    this.stopRequested = true;
+    this.suppressSchedule = true;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
+    for (const timer of this.approvalTimers) clearTimeout(timer);
+    this.approvalTimers.clear();
+    for (const timer of this.sessionTimers.values()) clearTimeout(timer);
+    this.sessionTimers.clear();
+    this.sessionTimeoutDeadlines.clear();
+    for (const timer of this.coordinatorTimers) clearTimeout(timer);
+    this.coordinatorTimers.clear();
+    for (const nodeId of [...this.acquiredConnections.keys()]) this.releaseConnection(nodeId);
+
+    const sessionsToCancel = new Set<string>(this.unconfirmedShutdown);
+    if (this.opts.orchestratorSessionId && ['waiting-coordinator', 'verifying', 'repairing'].includes(this.runStatus)) sessionsToCancel.add(this.opts.orchestratorSessionId);
+    for (const worker of this.workers.values()) if (worker.sessionId && ['reserved', 'running'].includes(worker.state)) sessionsToCancel.add(worker.sessionId);
+    for (const [nodeId, st] of [...this.state, ...this.instances]) {
+      const node = this.spec.nodes.find((candidate) => candidate.id === definitionId(nodeId));
+      // Cleanup nodes are allowed to finish (or start below) after stop. Every
+      // other non-terminal node becomes terminal before any async cancellation,
+      // closing the completion-event race and making implicit finally ready.
+      if (node?.kind === 'finally' || isTerminalNodeState(st.state)) continue;
+      this.cancelNodeHelp(nodeId, 'Task run stopped');
+      if (st.state === 'running') this.inFlight = Math.max(0, this.inFlight - 1);
+      st.state = 'cancelled';
+      this.submittedOutputs.delete(nodeId);
+      this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'cancelled', reason: 'stopped' });
+      if (st.sessionId) sessionsToCancel.add(st.sessionId);
+    }
+
+    if (this.deps.host.settleTaskSessionStop) {
+      for (const sessionId of sessionsToCancel) {
+        this.unconfirmedShutdown.add(sessionId); this.log({ kind: 'execution-shutdown', sessionId, confirmed: false });
+      }
+    }
+    for (const sessionId of sessionsToCancel) {
+      let stoppedBySwarm = false;
+      if (this.deps.host.stopSwarm) {
+        try {
+          const stopped = await this.deps.host.stopSwarm(sessionId);
+          stoppedBySwarm = stopped.stoppedSessionIds.includes(sessionId);
+        } catch (error) {
+          conductorLog.warn('stop-swarm-failed', { slug: this.slug, runId: this.runId, sessionId, error });
+        }
+      }
+      if (!stoppedBySwarm) {
+        try {
+          await this.deps.host.cancelProcessing(sessionId, true);
+        } catch (error) {
+          // The in-memory node is already terminal. A cancellation transport
+          // failure must not freeze scheduling or suppress contracted finally
+          // cleanup forever; startup recovery will mark any surviving worker.
+          conductorLog.warn('cancel-session-failed', { slug: this.slug, runId: this.runId, sessionId, error });
+        }
+      }
+      this.applyCard(sessionId, TODO_STATUS);
+      if (this.deps.host.settleTaskSessionStop) {
+        try { await this.deps.host.settleTaskSessionStop(sessionId); }
+        catch (error) {
+          this.runStatus = 'paused'; this.log({ kind: 'run-paused' }); this.suppressSchedule = false; this.emitChanged();
+          throw new TaskControlError('paused', `Execution shutdown is unconfirmed for ${sessionId}: ${error instanceof Error ? error.message : error}`);
+        }
+        this.unconfirmedShutdown.delete(sessionId); this.log({ kind: 'execution-shutdown', sessionId, confirmed: true });
+      }
+      const worker = [...this.workers.values()].find(candidate => candidate.sessionId === sessionId && ['reserved', 'running'].includes(candidate.state));
+      if (worker) this.completeWorker(worker.workerId, sessionId, 'stopped', undefined, 'Task run stopped');
+    }
+    this.suppressSchedule = false;
+    const hasFinally =
+      this.sourceVersion >= 2 && this.spec.nodes.some((n) => n.kind === 'finally' && this.isFinallyReady(n));
+    if (hasFinally) {
+      this.runStatus = 'running';
+      this.scheduleReady();
+      return this.snapshot();
+    }
+    this.finish('stopped');
+    return this.snapshot();
   }
 
   waitUntilSettled(): Promise<RunSnapshot> {
@@ -347,61 +1158,1234 @@ class ActiveRun {
     return new Promise((resolve) => this.settleResolvers.push(resolve));
   }
 
+  nudgeSchedule(): void {
+    if (this.runStatus === 'running') this.scheduleReady();
+  }
+
+  private revalidateRunningArtifactInputs(): void {
+    for (const [id, state] of [...this.state, ...this.instances]) {
+      if (state.state !== 'running' || !state.sessionId) continue;
+      const sessionId = state.sessionId;
+      const inputs = this.artifactInputs.get(sessionId);
+      if (!this.artifactInputs.has(sessionId) || this.integratedSessions.has(sessionId)) continue;
+      const reason = invalidFrozenArtifactInput(this.deps.workspaceRoot, inputs!);
+      if (!reason) continue;
+      // Fence completion and integration before awaiting cancellation.
+      this.failNode(id, reason, sessionId, 'invalid', false);
+      void (async () => {
+        try {
+          const stopped = this.deps.host.stopSwarm ? await this.deps.host.stopSwarm(sessionId) : undefined;
+          if (!stopped?.stoppedSessionIds.includes(sessionId)) await this.deps.host.cancelProcessing(sessionId, true);
+        } catch { conductorLog.warn('artifact-invalidated-cancel-failed', { runId: this.runId, sessionId }); }
+      })();
+    }
+  }
+
+  revalidateCompletedArtifacts(): RunSnapshot {
+    this.revalidateRunningArtifactInputs();
+    const roots = new Set<string>();
+    const completed = new Set([...this.state].filter(([, state]) => state.state === 'done').map(([id]) => id));
+    const outputNodes = this.spec.nodes.filter(node => node.kind !== 'map' && node.kind !== 'loop' && !this.replicaCounts.has(node.id) && !node.replicas);
+    const effectiveOutputs = captureArtifactInputs(completed, outputNodes, this.outputs, this.deps.workspaceRoot, this.edges);
+    for (const [id, state] of this.state) {
+      if (state.state !== 'done') continue;
+      const inputs = state.sessionId ? this.artifactInputs.get(state.sessionId) : this.controlArtifactInputs.get(id);
+      const hasInputs = state.sessionId ? this.artifactInputs.has(state.sessionId) : this.controlArtifactInputs.has(id);
+      if (!hasInputs) continue; // Historical runs retain their original contract.
+      if (artifactInputSnapshotError(inputs!)) { roots.add(id); continue; }
+      const own = effectiveOutputs[id];
+      const inputNodes = Object.entries(inputs!).map(([nodeId, output]) => ({ id: nodeId, kind: 'session' as const,
+        outputs: Object.keys(output.params ?? {}).map(name => ({ name, kind: 'artifact' as const })) }));
+      const node = this.spec.nodes.find(node => node.id === id);
+      if (node) inputNodes.push({ id, kind: 'session', outputs: Object.keys(own?.params ?? {}).map(name => ({ name, kind: 'artifact' as const })) });
+      const outputs = { ...inputs, [id]: own ?? { text: '' } };
+      const edges = new Map([[id, new Set(Object.keys(inputs!))]]);
+      if (invalidArtifactInput(this.deps.workspaceRoot, new Set(Object.keys(outputs)), inputNodes, outputs, edges)) roots.add(id);
+    }
+    const completedInstances = [...this.instances].filter(([, state]) => state.state === 'done').map(([id]) => id);
+    const instanceNodes = completedInstances.flatMap(id => {
+      const definition = this.spec.nodes.find(node => node.id === definitionId(id));
+      return definition ? [{ ...definition, id, kind: 'session' as const, replicas: undefined }] : [];
+    });
+    const iterationEdges = new Map<string, Set<string>>();
+    for (const id of completedInstances) {
+      if (this.spec.nodes.find(node => node.id === definitionId(id))?.kind !== 'loop') continue;
+      iterationEdges.set(id, new Set(completedInstances.filter(previous => definitionId(previous) === definitionId(id)
+        && (instanceIndex(previous) ?? -1) < (instanceIndex(id) ?? -1))));
+    }
+    const effectiveInstances = captureArtifactInputs(new Set(completedInstances), instanceNodes,
+      Object.fromEntries(this.instanceOutputs), this.deps.workspaceRoot, iterationEdges);
+    const invalidInstances = new Set<string>();
+    const instanceRootDefinitions = new Set<string>();
+    for (const [id, state] of this.instances) {
+      if (state.state !== 'done' || !state.sessionId) continue;
+      const inputs = this.artifactInputs.get(state.sessionId);
+      if (!this.artifactInputs.has(state.sessionId)) continue;
+      const own = effectiveInstances[id] ? { [id]: effectiveInstances[id]! } : {};
+      if (invalidFrozenArtifactInput(this.deps.workspaceRoot, inputs!) || invalidFrozenArtifactInput(this.deps.workspaceRoot, own)) {
+        invalidInstances.add(id); instanceRootDefinitions.add(definitionId(id)); roots.add(definitionId(id));
+      }
+    }
+    const affected = dependencyImpact(roots, this.spec.nodes, this.edges);
+    const nodeIds = [...affected].filter(id => this.state.get(id)?.state === 'done');
+    for (const [id, state] of this.instances) {
+      if (state.state === 'done' && (invalidInstances.has(id) || affected.has(definitionId(id)) && !instanceRootDefinitions.has(definitionId(id)))) nodeIds.push(id);
+    }
+    const reason = 'Artifact input or output changed; revalidation required';
+    if (this.isTerminal()) {
+      // Completion is a historical fact. Changed bytes affect availability and
+      // future reuse, never the old output, verdict or execution history.
+      if (JSON.stringify(this.artifactAvailability?.nodeIds ?? []) !== JSON.stringify(nodeIds)) {
+        this.artifactAvailability = nodeIds.length ? { nodeIds, reason } : undefined;
+        this.log({ kind: 'artifact-availability', nodeIds, reason });
+        this.emitChanged();
+      }
+      return this.snapshot();
+    }
+    if (!nodeIds.length) return this.snapshot();
+    // One durable event preserves the entire impact set before changing memory.
+    this.log({ kind: 'artifact-results-invalidated', nodeIds, reason, completedRun: this.runStatus === 'completed' });
+    for (const id of nodeIds) {
+      const state = this.instances.get(id) ?? this.state.get(id)!;
+      state.state = 'invalid'; state.lastFailure = reason;
+      delete this.outputs[id]; this.instanceOutputs.delete(id);
+    }
+    if (this.runStatus === 'completed') {
+      this.runStatus = 'failed'; this.originalFailed = true;
+      this.log({ kind: 'run-failed' });
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
   snapshot(): RunSnapshot {
+    const blockers = [...this.state.entries()]
+      .filter(([, st]) => st.state === 'waiting-help' || st.state === 'waiting-approval' || st.state === 'interrupted' || st.state === 'failed' || st.state === 'invalid')
+      .map(([id]) => id);
+    if (this.isOverBudget() && this.hasPendingNodes()) blockers.push('budget');
+    for (const sessionId of this.unconfirmedShutdown) blockers.push(`shutdown-unconfirmed:${sessionId}`);
+    if (this.runStatus === 'waiting-coordinator') blockers.push(this.coordinatorGate?.reason ?? 'coordinator');
+    if (this.runStatus === 'paused' && this.lastCoordinatorTimeout) blockers.push(COORDINATOR_TIMEOUT_BLOCKER);
+    const metrics = this.historicalMetrics ?? this.buildMetrics();
+    const toNodeStatus = (id: string, st: NodeStateEntry, node?: TaskNode): NodeRunStatus => {
+      const timing = this.nodeTimings.get(id);
+      const recorded = this.nodeVerdicts.get(id) ?? this.nodeVerdicts.get(definitionId(id));
+      const verdict = st.state === 'invalid' ? undefined : recorded ?? timing?.verdict;
+      return {
+        id,
+        title: node ? nodeDisplayTitle(node) : id,
+        instruction: node?.prompt,
+        startedAt: this.nodeStartedAt.get(id),
+        attempts: this.attemptHistory.get(id)?.map(attempt => ({ ...attempt })),
+        definitionId: node?.id ?? definitionId(id),
+        state: st.state,
+        sessionId: st.sessionId,
+        attempt: st.attempt,
+        approvalFeedback: st.approvalFeedback,
+        approvalDefinition: node?.kind === 'approval' ? { title: node.title || node.id, prompt: node.prompt ?? '', dependsOn: [...(this.edges.get(node.id) ?? [])] } : undefined,
+        retryCount: Math.max(0, st.attempt - 1),
+        role: node?.kind === 'verify' || node?.kind === 'judge' || node?.researchRole === 'reviewer' ? 'reviewer' as const : 'worker' as const,
+        model: this.resolveNodeModel(node),
+        actor: node?.actor,
+        tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
+        // Keep failure history for retry prompts, but expose only a current blocker.
+        blocker: st.state === 'pending' && this.researchStageNotifications.has(id) ? this.researchStageNotifications.get(id)!.blockers.join('; ')
+          : ['pending', 'ready', 'running', 'done', 'skipped'].includes(st.state) ? undefined : st.lastFailure,
+        elapsedMs: timing?.elapsedMs,
+        queueMs: timing?.queueMs,
+        cacheStatus: timing?.cacheStatus,
+        cacheCreatedAt: timing?.cacheCreatedAt,
+        cacheSourceRunId: timing?.cacheSourceRunId,
+        verdict: verdict
+          ? { result: verdict.result, reason: verdict.reason, evidence: verdict.evidence, nodes: verdict.nodes }
+          : undefined,
+      };
+    };
     return {
+      workspaceId: this.deps.workspaceId,
+      ...(this.help.size ? { help: [...this.help.values()].map(value => structuredClone(value)) } : {}),
       slug: this.slug,
       runId: this.runId,
       taskId: this.spec.id,
       status: this.runStatus,
+      canRetryFailedNodes: this.runStatus === 'failed' && ([...this.state.values()].some(st => st.state === 'failed' || st.state === 'invalid')
+        || [...this.state.values()].every(st => st.state === 'done' || st.state === 'skipped')),
       orchestratorSessionId: this.opts.orchestratorSessionId,
       tokensUsed: this.tokensUsed,
-      nodes: this.spec.nodes.map((n) => {
-        const st = this.state.get(n.id)!;
-        return { id: n.id, state: st.state, sessionId: st.sessionId, attempt: st.attempt };
-      }),
+      tokenBudget: this.tokenBudget,
+      blockers: blockers.length ? blockers : undefined,
+      revision: this.revision,
+      coordinatorGate: this.runStatus === 'waiting-coordinator' && this.coordinatorGate ? structuredClone(this.coordinatorGate) : undefined,
+      ...(this.spec.research ? { research: loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) } : {}),
+      artifactAvailability: this.artifactAvailability ? structuredClone(this.artifactAvailability) : undefined,
+      resumedFrom: this.resumedFrom,
+      supersededBy: this.supersededBy,
+      ...(this.workers.size ? { workers: [...this.workers.values()].map(worker => structuredClone(worker)) } : {}),
+      ...(this.planChanges.length ? { planChanges: this.planChanges.map(change => structuredClone(change)) } : {}),
+      ...(this.coordinatorGateEnabled() ? { planner: { phase: this.planningPhase(), pendingResults: this.pendingPlannerResults(), consumedResults: this.consumedResultIds.size } } : {}),
+      metrics,
+      nodes: [
+        ...this.spec.nodes.map((n) => toNodeStatus(n.id, this.state.get(n.id)!, n)),
+        ...Array.from(this.instances, ([id, st]) => {
+          const defId = definitionId(id);
+          const node = this.spec.nodes.find((candidate) => candidate.id === defId);
+          return toNodeStatus(id, st, node);
+        }),
+      ],
     };
   }
 
   // --- scheduling ---
 
   private scheduleReady(): void {
+    if (this.suppressSchedule) return;
+    if (this.runStatus === 'pausing') {
+      if (this.inFlight === 0) {
+        this.runStatus = 'paused';
+        this.log({ kind: 'run-paused' });
+        this.emitChanged();
+      }
+      return;
+    }
     if (this.runStatus !== 'running') return;
-    for (const node of this.spec.nodes) {
-      if (this.inFlight >= this.maxParallel) break;
+    this.resumeAnsweredHelp();
+    if (this.pendingPlannerResults().length && this.coordinatorGateEnabled()
+      && (!this.adaptiveScheduling() || this.allNodesSettled()
+        || this.inFlight === 0 && !this.spec.nodes.some(node => this.isReady(node) && this.researchStageReady(node)))) {
+      this.enterCoordinatorGate(this.allNodesSettled() ? 'before-verify' : 'new-result');
+      this.emitChanged();
+      return;
+    }
+    this.settleBlockedNodes();
+    this.pumpExpandedInstances();
+    // Resume/hydrate of a v1 run can leave deferred kinds pending; never dispatch them as sessions.
+    if (this.sourceVersion === 1) {
+      for (const node of this.spec.nodes) {
+        if (isExecutableTaskNode(node)) continue;
+        const st = this.state.get(node.id)!;
+        if (st.state !== 'pending') continue;
+        st.state = 'skipped';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+      }
+    }
+    let settledSynchronously = false;
+    const ranked = this.sourceVersion === 3
+      ? sortReadyByCriticalPath(
+          this.spec.nodes,
+          this.spec,
+          criticalPathRemaining(this.spec, this.state),
+        )
+      : this.spec.nodes;
+    for (const node of ranked) {
+      if (this.stopRequested && node.kind !== 'finally') continue;
+      if (this.inFlight >= this.maxParallel && isSessionLikeKind(node.kind)) {
+        if (this.sourceVersion === 3) continue;
+        break;
+      }
       if (!this.isReady(node)) continue;
-      if (this.isOverBudget()) {
+      if (!this.researchStageReady(node)) continue;
+      if (node.kind !== 'filter' && !this.whenAllows(node)) {
+        this.skipNode(node.id, 'when');
+        continue;
+      }
+      if (!this.stopRequested && this.budgetBlocksDispatch(node) && isSessionLikeKind(node.kind)) {
         this.pauseForBudget();
         return;
       }
-      this.markRunning(node);
-      void this.dispatch(node);
+      if (this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      this.dispatchByKind(node);
+      const stateAfterDispatch = this.state.get(node.id)?.state;
+      if (stateAfterDispatch !== 'running' && stateAfterDispatch !== 'pending') settledSynchronously = true;
     }
+    // Control nodes settle synchronously. Iterate to a fixed point so a valid
+    // DAG does not depend on whether a dependent appears before its control
+    // predecessor in YAML order.
+    if (
+      settledSynchronously
+      && this.spec.nodes.some((node) => this.isReady(node) && (!this.stopRequested || node.kind === 'finally'))
+    ) {
+      this.scheduleReady();
+      return;
+    }
+    this.maybePromoteWaiting();
     this.maybeFinish();
+  }
+
+  /** Mark nodes that can no longer run after an upstream failure as cancelled. */
+  private settleBlockedNodes(): void {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of this.spec.nodes) {
+        if (node.kind === 'finally' || this.state.get(node.id)?.state !== 'pending') continue;
+        if (node.trigger === 'all_done') continue;
+        const dependencyStates = [...(this.edges.get(node.id) ?? [])]
+          .map((dep) => this.state.get(dep)?.state);
+        const blocked = node.trigger === 'one_success'
+          // A failed branch must not cancel a race while another branch can
+          // still succeed. It becomes impossible only after every dependency
+          // settles without a successful result.
+          ? dependencyStates.length > 0
+            && dependencyStates.every(isTerminalNodeState)
+            && !dependencyStates.some((state) => state === 'done')
+          : dependencyStates.some((state) =>
+              state === 'failed' || state === 'invalid' || state === 'cancelled');
+        if (!blocked) continue;
+        const st = this.state.get(node.id)!;
+        st.state = 'cancelled';
+        st.lastFailure = 'Blocked by a failed or cancelled dependency';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'cancelled', reason: 'blocked-dependency' });
+        changed = true;
+      }
+    }
   }
 
   private isReady(node: TaskNode): boolean {
     if (this.state.get(node.id)!.state !== 'pending') return false;
-    for (const dep of this.edges.get(node.id) ?? []) {
-      if (this.state.get(dep)?.state !== 'done') return false;
+    if (node.actor && this.actorBusy(node.actor.id)) return false;
+    if (node.actor) {
+      const previous = this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).findLast(candidate => candidate.actor?.id === node.actor!.id);
+      if (previous && !isTerminalNodeState(this.state.get(previous.id)?.state)) return false;
     }
-    return true;
+    if (this.sourceVersion >= 2 && node.kind === 'finally') return this.isFinallyReady(node);
+    const deps = [...(this.edges.get(node.id) ?? [])];
+    const states = deps.map((dep) => this.state.get(dep)?.state);
+    if (node.trigger === 'all_done') return states.every(isTerminalNodeState);
+    if (node.trigger === 'one_success') return deps.some((dep) => this.dependencyPassed(dep));
+    if (node.trigger === 'none_failed_min_one_success') {
+      return states.every(isTerminalNodeState)
+        && deps.some((dep) => this.dependencyPassed(dep))
+        && !states.some((state) => state === 'failed' || state === 'invalid' || state === 'cancelled');
+    }
+    return deps.every((dep) => this.dependencySatisfied(dep));
+  }
+
+  private dependencySatisfied(depId: string): boolean {
+    const state = this.state.get(depId)?.state;
+    if (state === 'skipped') return true;
+    if (state !== 'done') return false;
+    return this.verifyDependencyPassed(depId);
+  }
+
+  private dependencyPassed(depId: string): boolean {
+    return this.state.get(depId)?.state === 'done' && this.verifyDependencyPassed(depId);
+  }
+
+  private verifyDependencyPassed(depId: string): boolean {
+    if (this.sourceVersion !== 3) return true;
+    const node = this.spec.nodes.find((candidate) => candidate.id === depId);
+    if (!node || (node.kind !== 'verify' && node.kind !== 'judge')) return true;
+    const verdict = this.nodeVerdicts.get(depId) ?? this.timing(depId).verdict;
+    return verdict?.result === 'pass';
+  }
+
+  /** Fill capacity for already-expanded nodes before opening more definitions. */
+  private pumpExpandedInstances(): void {
+    for (const node of this.spec.nodes) {
+      if (this.inFlight >= this.maxParallel) return;
+      if (this.state.get(node.id)?.state !== 'running') continue;
+      if (this.replicaCounts.has(node.id)) this.scheduleReplicaInstances(node);
+      else if (this.mapItems.has(node.id)) this.scheduleMapInstances(node);
+      else if (this.loopIndex.has(node.id)) this.startLoopIteration(node);
+    }
+  }
+
+  private isFinallyReady(node: TaskNode): boolean {
+    const explicit = [...(this.edges.get(node.id) ?? [])];
+    const watched =
+      explicit.length > 0
+        ? explicit
+        : this.spec.nodes.filter((n) => n.kind !== 'finally' && n.id !== node.id).map((n) => n.id);
+    return watched.every((id) => isTerminalNodeState(this.state.get(id)?.state));
   }
 
   private markRunning(node: TaskNode): void {
     const st = this.state.get(node.id)!;
+    this.submittedOutputs.delete(node.id);
     st.state = 'running';
-    st.attempt += 1;
-    st.replies = [];
-    st.waitingForUser = false;
+    if (st.lastFailure !== 'progress-paused') st.attempt += 1;
     this.inFlight += 1;
+    this.instanceCount += 1;
     this.log({ kind: 'node-scheduled', nodeId: node.id });
+    this.timing(node.id).scheduledAtMs = this.nowMs();
   }
 
-  private async dispatch(node: TaskNode): Promise<void> {
+  private dispatchByKind(node: TaskNode): void {
+    if (this.sourceVersion >= 2 && isControlKind(node.kind)) {
+      this.instanceCount += 1;
+      if (node.kind === 'route') this.executeRoute(node);
+      else this.completeControlNode(node.id, 'parallel');
+      return;
+    }
+    if (this.sourceVersion >= 2 && node.kind === 'approval') {
+      this.instanceCount += 1;
+      this.enterApproval(node);
+      return;
+    }
+    if (this.sourceVersion >= 2 && node.kind === 'map') {
+      this.executeMap(node);
+      return;
+    }
+    if (this.sourceVersion >= 2 && node.kind === 'loop') {
+      this.executeLoop(node);
+      return;
+    }
+    if (this.sourceVersion >= 2 && node.kind === 'filter') {
+      this.instanceCount += 1;
+      this.executeFilter(node);
+      return;
+    }
+    if (this.sourceVersion >= 2 && node.kind === 'aggregate') {
+      this.instanceCount += 1;
+      this.executeAggregate(node);
+      return;
+    }
+    if (this.sourceVersion >= 2 && (node.replicas ?? 1) > 1 && isSessionLikeKind(node.kind)) {
+      this.executeReplicas(node);
+      return;
+    }
+    const cached = this.cachedOutput(node);
+    if (cached) {
+      this.instanceCount += 1;
+      this.completeControlNode(node.id, cached.text, cached.params);
+      return;
+    }
+    if (!this.tryAcquireConnection(node)) {
+      this.timing(node.id).scheduledAtMs ??= this.nowMs();
+      return;
+    }
+    this.markRunning(node);
+    void this.dispatch(node);
+  }
+
+  private skipNode(nodeId: string, reason: string): void {
+    const st = this.state.get(nodeId);
+    if (!st || st.state === 'skipped') return;
+    st.state = 'skipped';
+    this.log({ kind: 'node-finished', nodeId, sessionId: '', state: 'skipped', reason });
+  }
+
+  private completeControlNode(nodeId: string, text: string, values?: Record<string, unknown>, integratedArtifacts?: Record<string, unknown>): void {
+    const st = this.state.get(nodeId)!;
+    const inputs = captureArtifactInputs(dependencyAncestors(nodeId, this.edges), this.spec.nodes, this.outputs, this.deps.workspaceRoot, this.edges);
+    const invalidInput = invalidFrozenArtifactInput(this.deps.workspaceRoot, inputs!);
+    if (invalidInput) {
+      this.failNode(nodeId, invalidInput, undefined, 'invalid', false);
+      return;
+    }
+    this.log({ kind: 'node-artifact-inputs', nodeId, sessionId: '', inputs });
+    this.controlArtifactInputs.set(nodeId, inputs);
+    const output: NodeOutput = { text, ...(values ? { params: values } : {}), ...(integratedArtifacts ? { integratedArtifacts } : {}) };
+    this.outputs[nodeId] = output;
+    writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
+    st.state = 'done';
+    this.log({ kind: 'node-finished', nodeId, sessionId: '', state: 'done' });
+    this.emitChanged();
+  }
+
+  private executeRoute(node: TaskNode): void {
+    const selected = this.selectRouteTarget(node);
+    this.completeControlNode(node.id, selected, { selected });
+    if (!node.route) return;
+    const targets = new Set([...node.route.cases.map((c) => c.goto), node.route.default]);
+    const selectedReachable = this.reachableDependents(selected);
+    for (const target of targets) {
+      if (target === selected) continue;
+      for (const id of this.reachableDependents(target)) {
+        // A merge reachable from the selected target belongs to the surviving
+        // branch. Everything exclusive to the unselected target is pruned.
+        if (!selectedReachable.has(id)) this.skipNode(id, 'route');
+      }
+    }
+  }
+
+  private reachableDependents(start: string): Set<string> {
+    const out = new Set<string>();
+    const queue = [start];
+    const dependents = this.dependentsMap();
+    while (queue.length) {
+      const id = queue.shift()!;
+      if (out.has(id)) continue;
+      out.add(id);
+      for (const next of dependents.get(id) ?? []) queue.push(next);
+    }
+    return out;
+  }
+
+  private selectRouteTarget(node: TaskNode): string {
+    if (!node.route) return node.id;
+    for (const c of node.route.cases) {
+      if (this.evalWhen(c.when)) return c.goto;
+    }
+    return node.route.default;
+  }
+
+  private executeMap(node: TaskNode): void {
+    const items = parseForEach(this.resolveForEach(node));
+    if (this.instanceCount + items.filter((_, i) => !this.instances.has(instanceId(node.id, i))).length > MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    st.state = 'running';
+    st.attempt += 1;
+    this.log({ kind: 'node-scheduled', nodeId: node.id });
+    this.mapItems.set(node.id, items);
+    if (items.length === 0) {
+      this.completeControlNode(node.id, '[]', { items: [] });
+      return;
+    }
+    this.scheduleMapInstances(node);
+  }
+
+  private scheduleMapInstances(node: TaskNode): void {
+    const items = this.mapItems.get(node.id) ?? [];
+    const parallel = Math.min(node.max_parallel ?? this.maxParallel, this.maxParallel, MAX_DAG_MAX_PARALLEL);
+    let running = 0;
+    for (let i = 0; i < items.length; i++) {
+      const iid = instanceId(node.id, i);
+      if (this.instances.get(iid)?.state === 'running') running += 1;
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (running >= parallel || this.inFlight >= this.maxParallel) break;
+      const iid = instanceId(node.id, i);
+      const existing = this.instances.get(iid);
+      if (existing && existing.state !== 'pending') continue;
+      if (!existing && this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      if (!this.startInstance(node, iid, { item: items[i], index: i })) break;
+      running += 1;
+    }
+  }
+
+  private executeReplicas(node: TaskNode): void {
+    const count = node.replicas ?? 1;
+    if (count <= 1 || !node.aggregate) {
+      this.failNode(node.id, 'replicas require an aggregate mode');
+      return;
+    }
+    const newInstances = Array.from({ length: count }, (_, i) => instanceId(node.id, i))
+      .filter((id) => !this.instances.has(id)).length;
+    if (this.instanceCount + newInstances > MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    st.state = 'running';
+    st.attempt += 1;
+    this.log({ kind: 'node-scheduled', nodeId: node.id });
+    this.replicaCounts.set(node.id, count);
+    this.scheduleReplicaInstances(node);
+  }
+
+  private scheduleReplicaInstances(node: TaskNode): void {
+    const count = this.replicaCounts.get(node.id) ?? node.replicas ?? 0;
+    const parallel = Math.min(node.max_parallel ?? this.maxParallel, this.maxParallel, MAX_DAG_MAX_PARALLEL);
+    let running = 0;
+    for (let i = 0; i < count; i++) {
+      if (this.instances.get(instanceId(node.id, i))?.state === 'running') running += 1;
+    }
+    for (let i = 0; i < count; i++) {
+      if (running >= parallel || this.inFlight >= this.maxParallel) break;
+      const iid = instanceId(node.id, i);
+      const existing = this.instances.get(iid);
+      if (existing && existing.state !== 'pending') continue;
+      if (!existing && this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      if (!this.startInstance(node, iid, { item: i, index: i })) break;
+      running += 1;
+    }
+  }
+
+  private finishReplicas(node: TaskNode): void {
+    const count = this.replicaCounts.get(node.id) ?? node.replicas ?? 0;
+    const outputs: NodeOutput[] = [];
+    for (let i = 0; i < count; i++) {
+      const iid = instanceId(node.id, i);
+      const state = this.instances.get(iid)?.state;
+      if (state === 'failed' || state === 'invalid' || state === 'cancelled') {
+        this.failNode(node.id, `replica ${iid} ${state}`);
+        return;
+      }
+      const output = this.instanceOutputs.get(iid);
+      if (output) outputs.push(output);
+    }
+    const texts = outputs.map((output) => output.text);
+    let text: string;
+    let params: Record<string, unknown> = { items: outputs.map((output) => output.params ?? output.text) };
+    if (node.aggregate === 'vote' || node.aggregate === 'majority') {
+      const votes = new Map<string, number>();
+      for (const value of texts) votes.set(value, (votes.get(value) ?? 0) + 1);
+      let winner = texts[0] ?? '';
+      let best = -1;
+      for (const [value, total] of votes) {
+        if (total > best) {
+          winner = value;
+          best = total;
+        }
+      }
+      text = winner;
+      params = { ...params, votes: Object.fromEntries(votes) };
+    } else if (node.aggregate === 'filter') {
+      const kept = texts.filter((value) => value.trim() !== '');
+      text = kept.join('\n');
+      params = { ...params, items: kept };
+    } else {
+      // concat and synthesize preserve stable replica order. A separate
+      // synthesize node can perform model-based synthesis when required.
+      text = texts.join('\n');
+    }
+    this.completeControlNode(node.id, text, params, Object.fromEntries(outputs.flatMap((output, index) => Object.entries(output.integratedArtifacts ?? {}).map(([name, value]) => [`${name}[${index}]`, value]))));
+  }
+
+  private finishMap(node: TaskNode): void {
+    const items = this.mapItems.get(node.id) ?? [];
+    const ordered: unknown[] = [];
+    const texts: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const iid = instanceId(node.id, i);
+      const out = this.instanceOutputs.get(iid);
+      const st = this.instances.get(iid);
+      if (st && (st.state === 'failed' || st.state === 'invalid')) {
+        this.failNode(node.id, `map instance ${iid} ${st.state}`);
+        return;
+      }
+      texts.push(out?.text ?? '');
+      ordered.push(node.outputs?.some(output => output.kind === 'artifact') ? out?.params ?? out?.text ?? '' : out?.params?.item ?? out?.text ?? '');
+    }
+    this.completeControlNode(node.id, texts.join('\n'), { items: ordered }, Object.fromEntries(items.flatMap((_, index) => Object.entries(this.instanceOutputs.get(instanceId(node.id, index))?.integratedArtifacts ?? {}).map(([name, value]) => [`${name}[${index}]`, value]))));
+  }
+
+  private executeLoop(node: TaskNode): void {
+    if (!node.loop) {
+      this.failNode(node.id, 'loop.max is required');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    if (st.state === 'pending') {
+      st.state = 'running';
+      st.attempt += 1;
+      this.log({ kind: 'node-scheduled', nodeId: node.id });
+      if (!this.loopIndex.has(node.id)) this.loopIndex.set(node.id, 0);
+    }
+    this.startLoopIteration(node);
+  }
+
+  private startLoopIteration(node: TaskNode): void {
+    if (this.inFlight >= this.maxParallel) return;
+    const index = this.loopIndex.get(node.id) ?? 0;
+    const max = node.loop?.max ?? 0;
+    if (index >= max) {
+      this.exhaustLoop(node);
+      return;
+    }
+    const iid = instanceId(node.id, index);
+    const existing = this.instances.get(iid);
+    if (existing && existing.state !== 'pending') return;
+    if (!existing && this.instanceCount >= MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const prev = index > 0 ? this.instanceOutputs.get(instanceId(node.id, index - 1))?.text : undefined;
+    const item = index === 0
+      ? (node.loop?.carry
+          ? interpolateRefs(node.loop.carry, { nodeOutputs: this.outputs, params: this.opts.params })
+          : undefined)
+      : prev;
+    this.startInstance(node, iid, { item, index, prev });
+  }
+
+  private startInstance(
+    node: TaskNode,
+    iid: string,
+    locals: { item?: unknown; index?: number; prev?: string },
+  ): boolean {
+    if (node.actor && this.actorBusy(node.actor.id, node.id)) return false;
+    if (!this.tryAcquireConnection(node, iid)) {
+      this.timing(iid).scheduledAtMs ??= this.nowMs();
+      return false;
+    }
+    const existing = this.instances.get(iid);
+    const instance = existing ?? { state: 'pending' as const, attempt: this.retiredInstanceAttempts.get(iid) ?? 0 };
+    this.submittedOutputs.delete(iid);
+    instance.state = 'running';
+    if (instance.lastFailure !== 'progress-paused') instance.attempt += 1;
+    this.instances.set(iid, instance);
+    if (!existing) this.instanceCount += 1;
+    this.inFlight += 1;
+    this.log({ kind: 'node-scheduled', nodeId: iid });
+    this.timing(iid).scheduledAtMs ??= this.nowMs();
+    void this.dispatch(node, { id: iid, ...locals });
+    return true;
+  }
+
+  private afterLoopInstance(node: TaskNode, instanceKey: string, output: NodeOutput): void {
+    const until = node.loop?.until;
+    if (
+      until &&
+      this.evalWhen(until, {
+        item: output.text,
+        index: this.loopIndex.get(node.id) ?? 0,
+        prev: output.text,
+        nodes: {
+          ...((this.conditionCtx().nodes as Record<string, unknown> | undefined) ?? {}),
+          [node.id]: { output: output.text },
+        },
+      })
+    ) {
+      this.completeControlNode(node.id, output.text, { ...output.params, iterations: (this.loopIndex.get(node.id) ?? 0) + 1 }, output.integratedArtifacts);
+      return;
+    }
+    this.loopIndex.set(node.id, (this.loopIndex.get(node.id) ?? 0) + 1);
+    this.startLoopIteration(node);
+  }
+
+  private exhaustLoop(node: TaskNode): void {
+    const elseId = node.loop?.else;
+    if (elseId) {
+      this.completeControlNode(node.id, 'exhausted', { exhausted: true, else: elseId });
+      for (const [id, deps] of this.edges) {
+        if (id !== elseId && deps.has(node.id)) this.skipNode(id, 'loop-else');
+      }
+      return;
+    }
+    this.failNode(node.id, 'loop-exhausted');
+  }
+
+  private executeFilter(node: TaskNode): void {
+    const items = parseForEach(this.resolveForEach(node));
+    const kept = items.filter((item, index) => {
+      if (!node.when) return true;
+      return this.evalWhen(node.when, { item, index });
+    });
+    this.completeControlNode(node.id, JSON.stringify(kept), { items: kept });
+  }
+
+  private executeAggregate(node: TaskNode): void {
+    const deps = [...(this.edges.get(node.id) ?? [])];
+    const texts = deps.map((id) => this.outputs[id]?.text ?? '');
+    if (node.aggregate === 'majority' || node.aggregate === 'vote') {
+      const counts = new Map<string, number>();
+      for (const t of texts) counts.set(t, (counts.get(t) ?? 0) + 1);
+      let winner = texts[0] ?? '';
+      let best = 0;
+      for (const [t, n] of counts) if (n > best) {
+        winner = t;
+        best = n;
+      }
+      this.completeControlNode(node.id, winner, { votes: Object.fromEntries(counts) });
+      return;
+    }
+    if (node.aggregate === 'filter') {
+      const kept = texts.filter((text) => text.trim() !== '');
+      this.completeControlNode(node.id, kept.join('\n'), { items: kept });
+      return;
+    }
+    this.completeControlNode(node.id, texts.join('\n'), { items: texts });
+  }
+
+  private resolveForEach(node: TaskNode): string {
+    const expr = node.for_each;
+    if (expr) {
+      return interpolateRefs(expr, { nodeOutputs: this.outputs, params: this.opts.params });
+    }
+    const firstDep = [...(this.edges.get(node.id) ?? [])][0];
+    return firstDep ? (this.outputs[firstDep]?.text ?? '') : '';
+  }
+
+  private cachedOutput(node: TaskNode): NodeOutput | undefined {
+    const mode = nodeCacheMode(node, this.sourceVersion);
+    if (mode === 'none') return undefined;
+    if (invalidArtifactInput(this.deps.workspaceRoot, dependencyAncestors(node.id, this.edges), this.spec.nodes, this.outputs, this.edges)) {
+      this.markCache(node.id, 'bypass');
+      this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'artifact-input-changed' });
+      return undefined;
+    }
+    if (!isWorkspaceCacheKindAllowed(node.kind)) {
+      this.markCache(node.id, 'bypass');
+      this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'uncacheable-kind' });
+      return undefined;
+    }
+    if (mode === 'run-pure') {
+      const candidate = this.promptCache.get(this.cacheKey(node));
+      const hit = candidate && !invalidArtifactInput(this.deps.workspaceRoot, new Set([node.id]), [node], { [node.id]: candidate }) ? candidate : undefined;
+      if (hit) {
+        this.markCache(node.id, 'hit');
+        this.cacheHits += 1;
+      } else {
+        this.markCache(node.id, 'miss');
+        this.cacheMisses += 1;
+      }
+      return hit;
+    }
+    return this.lookupWorkspaceCache(node);
+  }
+
+  private cacheKey(node: TaskNode, locals?: { item?: unknown; index?: number; prev?: string }): string {
+    const inputs = captureArtifactInputs(dependencyAncestors(node.id, this.edges), this.spec.nodes, this.outputs, this.deps.workspaceRoot, this.edges);
+    return createHash('sha256').update(`${node.id}\n${this.workspaceFingerprint(node, locals)}\n${JSON.stringify(inputs)}`).digest('hex');
+  }
+
+  private rememberCache(node: TaskNode, output: NodeOutput, locals?: { item?: unknown; index?: number; prev?: string }): void {
+    if (!isWorkspaceCacheKindAllowed(node.kind)) return;
+    const mode = nodeCacheMode(node, this.sourceVersion);
+    if (mode === 'run-pure') this.promptCache.set(this.cacheKey(node, locals), output);
+    if (mode === 'workspace-pure') this.storeWorkspaceCache(node, output, locals);
+  }
+
+  private assertSensitiveReady(): void {
+    const missing = missingSensitive(this.opts.params, sensitiveParamNames(this.spec.params));
+    if (missing.length) {
+      throw new TaskControlError(this.runStatus, `Sensitive params must be re-entered: ${missing.join(', ')}`);
+    }
     try {
+      this.opts.params = resolveParams(this.spec, this.opts.params);
+    } catch (error) {
+      throw new TaskControlError(this.runStatus, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private enterApproval(node: TaskNode): void {
+    const st = this.state.get(node.id)!;
+    st.state = 'waiting-approval';
+    if (node.timeout && node.timeout > 0) {
+      const nowMs = this.deps.now ? Date.parse(this.deps.now()) : Date.now();
+      const deadline = new Date(nowMs + node.timeout * 1000).toISOString();
+      st.approvalDeadline = deadline;
+      this.log({ kind: 'node-waiting-approval', nodeId: node.id, deadline });
+      if (!this.deps.now) {
+        const timer = setTimeout(() => {
+          this.approvalTimers.delete(timer);
+          this.expireApprovals();
+        }, node.timeout * 1000);
+        this.approvalTimers.add(timer);
+      }
+    } else {
+      this.log({ kind: 'node-waiting-approval', nodeId: node.id });
+    }
+    this.emitChanged();
+  }
+
+  respondApproval(nodeId: string, approved: boolean, feedback?: string, feedbackOnly = false): RunSnapshot {
+    if (typeof approved !== 'boolean' || typeof feedbackOnly !== 'boolean' || (feedback !== undefined && (typeof feedback !== 'string' || feedback.length > 4000))) {
+      throw new TaskControlError(this.runStatus, 'Invalid approval response');
+    }
+    if (this.isTerminal()) throw new TaskControlError(this.runStatus, 'Run is already terminal');
+    if (!['running', 'waiting-approval'].includes(this.runStatus)) {
+      throw new TaskControlError(this.runStatus, 'Resume the run before responding to approval');
+    }
+    this.expireApprovals();
+    const st = this.state.get(nodeId);
+    if (!st || st.state !== 'waiting-approval') {
+      throw new TaskControlError(this.runStatus, `Node ${nodeId} is not waiting for approval`);
+    }
+    const message = feedback?.trim() ?? st.approvalFeedback ?? '';
+    if (feedbackOnly && !message) throw new TaskControlError(this.runStatus, 'Feedback is required');
+    if (message !== st.approvalFeedback || !feedbackOnly || st.lastFailure === 'feedback-delivery-failed' || st.lastFailure === 'feedback-delivery-unknown') {
+      st.approvalFeedback = message;
+      if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+      this.log({ kind: 'approval-response', nodeId, feedback: message, ...(feedbackOnly ? {} : { approved }) });
+      if (feedbackOnly && this.opts.orchestratorSessionId) {
+        const coordinatorId = this.opts.orchestratorSessionId;
+        void Promise.resolve().then(() => this.deps.host.sendMessage(coordinatorId,
+          `Human feedback for approval node ${nodeId} in run ${this.runId}:\n${message}\nThe human approval gate remains CLOSED. Discuss the requested changes with the user. Do not approve or resume on their behalf. Definition changes require explicit user confirmation and do not alter this run snapshot.`,
+          undefined, undefined, { taskContext: { kind: 'feedback', description: message } },
+        )).then(() => {
+          if (st.state === 'waiting-approval' && st.approvalFeedback === message) {
+            this.log({ kind: 'approval-feedback-delivery', nodeId, feedback: message, status: 'delivered' });
+            if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+            this.emitChanged();
+          }
+        }).catch(error => {
+          if (st.state === 'waiting-approval' && st.approvalFeedback === message) {
+            st.lastFailure = 'feedback-delivery-failed';
+            this.log({ kind: 'approval-feedback-delivery', nodeId, feedback: message, status: 'failed' });
+          }
+          conductorLog.warn('approval-feedback-delivery-failed', { nodeId, error });
+          this.emitChanged();
+        });
+      }
+    }
+    if (feedbackOnly) {
+      this.emitChanged();
+      return this.snapshot();
+    }
+    if (approved) {
+      this.completeControlNode(nodeId, message ? `Approved by the user. Feedback:\n${message}` : 'approved', { approved: true, feedback: message });
+    } else {
+      this.failNode(nodeId, 'approval-rejected', st.sessionId, 'error');
+    }
+    if (this.runStatus === 'waiting-approval') this.runStatus = 'running';
+    if (!this.enterCoordinatorGate('approval')) {
+      this.coordinatorCheckpoint('approval');
+      this.scheduleReady();
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  private researchRecord(nodeId: string, state: NodeStateEntry, sessionId: string, output: NodeOutput): ResearchRecord {
+    const config = this.spec.research, node = this.spec.nodes.find(node => node.id === definitionId(nodeId));
+    if (!config || !node?.researchRole) throw new Error('Research requires an explicitly configured task and role');
+    const payload = ResearchPayloadSchema.parse(output.params?.research);
+    const previous = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+    if (!previous) throw new Error('Frozen research state is unavailable; inspect before submitting or delivering');
+    const record: ResearchRecord = { role: node.researchRole, payload, producedBy: { runId: this.runId, nodeId,
+      attempt: state.attempt, revision: this.attemptRevisions.get(nodeId) ?? this.revision, sessionId,
+      artifactVersion: createHash('sha256').update(JSON.stringify(output)).digest('hex') } };
+    const errors = validateResearchRecord(config, previous?.sources ?? [], previous?.records ?? [], record, new Set(this.spec.nodes.map(node => node.id)));
+    if (config.judgmentVersion && node.researchLineIds && payload.report && !payload.report.lineIds
+      && [config.line, ...(config.lines ?? [])].some(line => !node.researchLineIds!.includes(line.id))) errors.push('A local reporter must explicitly identify report.lineIds within its task binding');
+    if (node.researchLineIds && (payload.claims.some(claim => (claim.lineIds ?? [config.line.id]).some(id => !node.researchLineIds!.includes(id)))
+      || payload.premiseReviews?.some(value => !node.researchLineIds!.includes(value.lineId))
+      || payload.branchCandidates?.some(value => !node.researchLineIds!.includes(value.parentLineId))
+      || payload.report?.lineIds?.some(id => !node.researchLineIds!.includes(id)))) errors.push('Research record exceeds the task research line binding');
+    if (errors.length) throw new Error(errors.join('; '));
+    if (record.payload.report) {
+      const candidate = summarizeResearch(config, previous.sources, [...previous.records, record], previous.reads, record.payload.report.lineIds);
+      if (candidate.blockers.length) throw new Error(candidate.blockers.join('; '));
+      output.text = renderResearchReport(candidate);
+      record.producedBy.artifactVersion = createHash('sha256').update(JSON.stringify(output)).digest('hex');
+    }
+    return record;
+  }
+
+  recordSourceRead(sessionId: string, proof: SourceReadProof, toolUseId: string, result: string): boolean {
+    const nodeId = this.sessionToNode.get(sessionId), state = nodeId ? this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId)) : undefined;
+    if (!this.spec.research || !nodeId || !state || state.state !== 'running' || state.sessionId !== sessionId) return false;
+    const previous = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+    const sources = previous?.sources.filter(source => (source.textHash ?? source.hash) === proof.contentHash && [source.snapshotPath, source.originalPath, source.indexedPath].includes(proof.path)) ?? [];
+    let recorded = false;
+    for (const source of sources) {
+      if (!source.text || source.unavailableReason || !Number.isInteger(proof.startLine) || !Number.isInteger(proof.endLine)
+        || proof.startLine < 1 || proof.endLine < proof.startLine || proof.endLine > source.text.split('\n').length) continue;
+      const original = researchReadRangeTexts(source, proof).find(text => createHash('sha256').update(text).digest('hex') === proof.returnedTextHash);
+      if (!toolUseId || !original || !result.startsWith(original)) continue;
+      const producedBy = { runId: this.runId, nodeId, sessionId, attempt: state.attempt,
+        revision: this.attemptRevisions.get(nodeId) ?? this.revision, generation: state.generation ?? 0 };
+      const id = createHash('sha256').update(JSON.stringify({ producedBy, toolUseId, sourceId: source.id })).digest('hex');
+      if (!previous?.reads.some(read => read.id === id)) this.log({ kind: 'source-read', receipt: { ...proof, id, sourceId: source.id, sourceVersion: source.version,
+        toolUseId, producedBy, receivedAt: new Date().toISOString() } });
+      recorded = true;
+    }
+    if (recorded) this.emitChanged();
+    return recorded;
+  }
+
+  acceptOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }): { ok: true } | { ok: false; error: string } {
+    const nodeId = this.sessionToNode.get(sessionId);
+    if (!nodeId) return { ok: false, error: 'Session is not a node in this run' };
+    const node = this.spec.nodes.find((n) => n.id === nodeId || n.id === definitionId(nodeId));
+    if (!node) return { ok: false, error: 'Unknown node' };
+    const active = this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId));
+    if (!active || active.state !== 'running' || active.sessionId !== sessionId) {
+      return { ok: false, error: 'Session is not the active attempt for this node' };
+    }
+    if (this.integratingSessions.has(sessionId) || this.integratedSessions.has(sessionId)) {
+      return { ok: false, error: 'Task output is already being integrated' };
+    }
+    const declared = node.outputs ?? [];
+    const values = { ...(payload.values ?? {}) };
+    if (declared.length) {
+      if (this.sourceVersion >= 2) {
+        const allowed = new Set(declared.map((decl) => decl.name));
+        const extra = Object.keys(values).find((name) => !allowed.has(name));
+        if (extra) return { ok: false, error: `Undeclared output "${extra}"` };
+      }
+      for (const decl of declared) {
+        if (decl.required !== false && !(decl.name in values) && (this.sourceVersion >= 2 || payload.text == null)) {
+          return { ok: false, error: `Missing required output "${decl.name}"` };
+        }
+        if (decl.name in values && decl.kind !== 'artifact') {
+          const typeError = outputTypeError(decl.type, decl.enum, values[decl.name]);
+          if (typeError) return { ok: false, error: `Output "${decl.name}" ${typeError}` };
+        }
+        if (decl.kind === 'artifact' && values[decl.name] != null) {
+          const isolated = this.spec.execution?.artifact_delivery === 1
+            && (node.permissionMode ?? this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE) !== 'safe';
+          const root = isolated ? this.deps.host.getSessionWorkingDirectory(sessionId) : this.deps.workspaceRoot;
+          if (!root) return { ok: false, error: 'Missing artifact workspace' };
+          const resolved = resolveArtifact(root, isolated ? undefined : this.spec.cwd, String(values[decl.name]));
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          values[decl.name] = resolved.artifact;
+        } else if (decl.kind === 'artifact' && decl.required !== false) {
+          return { ok: false, error: `Missing required output "${decl.name}"` };
+        }
+      }
+    }
+    const output = { text: payload.text ?? '', params: values };
+    if (node.researchRole) {
+      try { this.researchRecord(nodeId, active, sessionId, output); }
+      catch (error) { return { ok: false, error: `Research output: ${error instanceof Error ? error.message : error}` }; }
+    }
+    if (this.spec.execution?.artifact_delivery === 1) {
+      try { writeNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, sessionId, active.attempt, output); }
+      catch { return { ok: false, error: 'Could not persist task output; retry submission' }; }
+    }
+    this.submittedOutputs.set(nodeId, output);
+    return { ok: true };
+  }
+
+  hasAcceptedOutput(sessionId: string, generation: number): boolean {
+    const nodeId = this.sessionToNode.get(sessionId);
+    const state = nodeId ? this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId)) : undefined;
+    if (!nodeId || !state || state.state !== 'running' || state.sessionId !== sessionId
+      || state.generation !== undefined && state.generation !== generation) return false;
+    const output = this.submittedOutputs.get(nodeId);
+    return !!output && (!!output.text?.trim() || Object.keys(output.params ?? {}).length > 0);
+  }
+
+  submitStructuredVerdict(payload: SubmitTaskVerdictInput): RunSnapshot {
+    if (this.runStatus !== 'verifying') {
+      throw new TaskControlError(this.runStatus, 'Run is not waiting for a verdict');
+    }
+    this.handleVerdictObject({ result: payload.result, reason: payload.reason, nodes: payload.nodes, checks: payload.checks });
+    return this.snapshot();
+  }
+
+  updateLimits(tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {
+    if (tokenBudget !== undefined) {
+      if (!Number.isFinite(tokenBudget) || tokenBudget <= 0) {
+        throw new TaskControlError(this.runStatus, 'Token budget must be a positive finite number');
+      }
+      if (this.tokenBudget !== undefined && tokenBudget < this.tokenBudget) {
+        throw new TaskControlError(this.runStatus, 'Token budget can only be increased');
+      }
+      if (tokenBudget < this.tokensUsed) {
+        throw new TaskControlError(this.runStatus, 'Token budget cannot be lower than tokens already used');
+      }
+      this.tokenBudget = tokenBudget;
+      if (!this.isOverBudget()) this.budgetBreached = false;
+    }
+    if (params) this.opts.params = resolveParams(this.spec, { ...this.opts.params, ...params });
+    if (this.runStatus === 'waiting-budget') {
+      this.runStatus = 'running';
+      this.log({ kind: 'run-resumed' });
+      if (!this.enterCoordinatorGate('budget')) this.scheduleReady();
+    }
+    this.writeCheckpoint(Math.max(0, this.nextSeq - 1));
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  hasSession(sessionId: string): boolean {
+    return this.sessionToNode.has(sessionId) || [...this.workers.values()].some(worker => worker.sessionId === sessionId) || this.opts.orchestratorSessionId === sessionId;
+  }
+
+  executionSessions(includeCoordinator = true): string[] {
+    return [...new Set([...this.sessionToNode.keys(), ...[...this.workers.values()].flatMap(worker => worker.sessionId ? [worker.sessionId] : []),
+      ...(includeCoordinator && this.opts.orchestratorSessionId ? [this.opts.orchestratorSessionId] : [])])];
+  }
+
+  markSuperseded(runId: string): void {
+    if (this.supersededBy && this.supersededBy !== runId) throw new TaskControlError(this.runStatus, `Run is already superseded by ${this.supersededBy}`);
+    if (this.supersededBy === runId) return;
+    this.supersededBy = runId; this.log({ kind: 'run-superseded', supersededBy: runId });
+  }
+
+  private actorBusy(actorId: string, expandingNodeId?: string): boolean {
+    return [...this.state, ...this.instances].some(([id, state]) => state.state === 'running'
+      && id !== expandingNodeId && this.spec.nodes.find(node => node.id === definitionId(id))?.actor?.id === actorId);
+  }
+
+  reserveWorker(rootSessionId: string, nodeId: string, workerId: string, role: 'worker' | 'reviewer', permissionMode?: TaskSessionBinding['permissionMode']): TaskSessionBinding {
+    const state = this.instances.get(nodeId) ?? this.state.get(nodeId);
+    const node = this.spec.nodes.find(candidate => candidate.id === definitionId(nodeId));
+    if (rootSessionId !== this.opts.orchestratorSessionId || this.isTerminal() || this.stopRequested
+      || !['running', 'waiting-coordinator'].includes(this.runStatus) || state?.state !== 'running' || !node) throw new Error('Delegated work requires an active running node owned by this root');
+    if (this.workers.has(workerId)) throw new Error('Worker identity already exists');
+    const ceiling = node.permissionMode ?? this.spec.defaults?.permissionMode ?? 'safe';
+    if (permissionMode && !permissionAllowedByTask(permissionMode, ceiling)) throw new Error('Delegated permission exceeds the owning task node');
+    const worker: TaskWorkerRecord = { workerId, rootSessionId, parentSessionId: rootSessionId, nodeId, attempt: state.attempt,
+      revision: this.attemptRevisions.get(nodeId) ?? this.revision, role, state: 'reserved' };
+    this.workers.set(workerId, worker); this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+    return { rootSessionId, taskSlug: this.slug, taskRunId: this.runId, taskNodeId: nodeId, taskAttempt: worker.attempt,
+      taskRevision: worker.revision, taskActor: node.actor, permissionMode: ceiling,
+      contract: structuredClone({ goal: this.spec.goal, node, constraints: this.spec.constraints, decisions: this.spec.decisions }) };
+  }
+
+  bindWorker(workerId: string, sessionId: string): void {
+    const worker = this.workers.get(workerId);
+    if (!worker) throw new Error('Worker reservation is unavailable');
+    if (this.stopRequested || this.isTerminal() || worker.state !== 'reserved') {
+      Object.assign(worker, { sessionId, state: 'stopped', reason: 'Owning run stopped before worker dispatch' });
+      this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+      throw new Error('Worker reservation is no longer active');
+    }
+    Object.assign(worker, { sessionId, state: 'running' }); this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+  }
+
+  completeWorker(workerId: string, sessionId: string | undefined, state: 'done' | 'failed' | 'stopped', output?: NodeOutput, reason?: string, tokensUsed?: number): void {
+    const worker = this.workers.get(workerId);
+    if (!worker || worker.sessionId !== sessionId || !['reserved', 'running'].includes(worker.state)) return;
+    Object.assign(worker, { state, output: output ? structuredClone(output) : undefined, reason, tokensUsed });
+    if (sessionId && tokensUsed !== undefined) {
+      const previous = this.sessionTokens.get(sessionId) ?? 0; this.tokensUsed += Math.max(0, tokensUsed - previous); this.sessionTokens.set(sessionId, tokensUsed);
+    }
+    this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+    const pending = [...this.workers.values()].some(candidate => candidate.nodeId === worker.nodeId && candidate.attempt === worker.attempt && ['reserved', 'running'].includes(candidate.state));
+    const completion = this.deferredCompletions.get(worker.nodeId);
+    const node = this.instances.get(worker.nodeId) ?? this.state.get(worker.nodeId);
+    if (!pending && completion && node?.state === 'running') { this.deferredCompletions.delete(worker.nodeId); this.onSessionComplete(completion); }
+  }
+
+  private reconcileWorkers(): void {
+    for (const worker of this.workers.values()) {
+      if (!['reserved', 'running'].includes(worker.state)) continue;
+      if (!worker.sessionId) { this.completeWorker(worker.workerId, undefined, 'stopped', undefined, 'Interrupted before worker dispatch'); continue; }
+      const result = this.deps.host.inspectTaskWorker?.(worker);
+      if (!result) throw new TaskControlError(this.runStatus, `Worker ${worker.workerId} outcome requires inspection before replay`);
+      this.completeWorker(worker.workerId, worker.sessionId, result.state, result.output, result.reason, result.tokensUsed);
+    }
+  }
+
+  private restorePrimaryCompletions(): void {
+    for (const [nodeId, completion] of this.deferredCompletions) {
+      const state = this.instances.get(nodeId) ?? this.state.get(nodeId);
+      if (!state || state.state === 'running' || isTerminalNodeState(state.state)) continue;
+      if ([...this.workers.values()].some(worker => worker.nodeId === nodeId && worker.attempt === state.attempt && ['reserved', 'running'].includes(worker.state))) continue;
+      state.state = 'running'; this.inFlight += 1; this.deferredCompletions.delete(nodeId); this.onSessionComplete(completion);
+    }
+  }
+
+  expireApprovals(nowIso?: string): void {
+    const now = nowIso ? Date.parse(nowIso) : Date.now();
+    for (const [id, st] of this.state) {
+      if (st.state !== 'waiting-approval' || !st.approvalDeadline) continue;
+      if (Date.parse(st.approvalDeadline) > now) continue;
+      if (this.runStatus === 'waiting-approval') this.runStatus = 'running';
+      this.failNode(id, 'approval-timeout', st.sessionId, 'error');
+    }
+  }
+
+  private restoreApprovalTimers(): void {
+    if (this.deps.now) return;
+    const now = Date.now();
+    for (const [id, st] of this.state) {
+      if (st.state !== 'waiting-approval' || !st.approvalDeadline) continue;
+      const remaining = Math.max(0, Date.parse(st.approvalDeadline) - now);
+      const timer = setTimeout(() => {
+        this.approvalTimers.delete(timer);
+        this.expireApprovals();
+      }, remaining);
+      this.approvalTimers.add(timer);
+    }
+  }
+
+  private whenAllows(node: TaskNode): boolean {
+    if (!node.when) return true;
+    return this.evalWhen(node.when);
+  }
+
+  private evalWhen(when: string | ConditionAst, extra?: Record<string, unknown>): boolean {
+    const cond = typeof when === 'string' ? conditionFromLegacyWhen(when) : when;
+    return evaluateCondition(cond, { ...this.conditionCtx(), ...extra });
+  }
+
+  private conditionCtx(): Record<string, unknown> {
+    const nodes: Record<string, unknown> = {};
+    for (const [id, out] of Object.entries(this.outputs)) {
+      nodes[id] = { output: out.text, ...(out.params ?? {}) };
+    }
+    return { params: this.opts.params ?? {}, nodes };
+  }
+
+  private maybePromoteWaiting(): void {
+    if (this.runStatus !== 'running' || this.inFlight > 0) return;
+    if (this.hasUnsettledRunningNode() || this.hasExpandingWork()) return;
+    if (this.spec.nodes.some((n) => this.isReady(n) && this.whenAllows(n))) return;
+    if ([...this.state.values(), ...this.instances.values()].some(st => st.state === 'waiting-help')) return;
+    const approval = [...this.state.entries()].filter(([, st]) => st.state === 'waiting-approval').map(([id]) => id);
+    if (approval.length) {
+      this.runStatus = 'waiting-approval';
+      this.log({ kind: 'run-waiting-approval' });
+      // v3 waits for the human response itself; the coordinator gate fires on respondApproval.
+      if (this.sourceVersion !== 3) this.coordinatorCheckpoint('approval');
+      this.emitChanged();
+      return;
+    }
+    if ((this.isOverBudget() || this.workerBudgetExhausted()) && this.hasPendingNodes()) {
+      this.runStatus = 'waiting-budget';
+      this.log({ kind: 'run-waiting-budget' });
+      // v3 waits for the user to raise the budget; the coordinator gate fires on updateLimits.
+      if (this.sourceVersion !== 3) this.coordinatorCheckpoint('budget');
+      this.emitChanged();
+      return;
+    }
+    if (this.hasPendingNodes() && this.enterCoordinatorGate('no-ready')) {
+      this.emitChanged();
+    }
+  }
+
+  /** Readiness is local business state, not a second graph or global pause. */
+  private researchStageReady(node: TaskNode): boolean {
+    const config = this.spec.research;
+    if (node.researchRole !== 'reporter' || !config?.judgmentVersion) return true;
+    const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+    const summary = research && summarizeResearch(config, research.sources, research.records, research.reads,
+      node.researchLineIds ?? research.lines.map(line => line.id));
+    const blockers = summary ? [...(summary.judgment?.blockers.filter(message => !message.startsWith('Report must disclose')) ?? []),
+      ...summary.blockers.filter(message => message.startsWith('Claim ') && !summary.judgment?.blockers.includes(message))]
+      : ['Frozen research state is unavailable; inspect the current source and execution records'];
+    if (!blockers.length) { this.researchStageNotifications.delete(node.id); return true; }
+    const key = planValueKey({ revision: this.revision, blockers });
+    if (this.researchStageNotifications.get(node.id)?.key !== key) {
+      this.researchStageNotifications.set(node.id, { key, blockers });
+      const root = this.opts.orchestratorSessionId;
+      if (root) void Promise.resolve().then(() => this.deps.host.sendMessage(root,
+        `Research stage is not ready for reporter ${JSON.stringify(node.id)}; unrelated research continues. Run ${JSON.stringify(this.runId)}, revision ${this.revision}.\n${blockers.join('\n')}\nRead get_task_results, then use submit_orchestration_patch with the current revision to record each branch disposition or schedule same-line repair and fresh review. Preserve locked goals, completed records and permissions. Do not start a reporter to repair this missing coordination record.`, undefined, undefined, { hidden: true }))
+        .catch(error => conductorLog.warn('research-stage-notification-failed', { nodeId: node.id, error }));
+    }
+    return false;
+  }
+
+  private async dispatch(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<void> {
+    const key = instance?.id ?? node.id;
+    const state = this.instances.get(key) ?? this.state.get(node.id)!;
+    const attempt = state.attempt;
+    const canDispatch = () => state.state === 'running' && state.attempt === attempt
+      && !this.settled && (!this.stopRequested || node.kind === 'finally');
+    try {
+      const ceiling = this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE;
+      const requested = node.permissionMode ?? ceiling;
+      if (!permissionAllowedByTask(requested, ceiling)) {
+        this.failNode(instance?.id ?? node.id, `permission ${requested} exceeds task ceiling ${ceiling}`);
+        return;
+      }
+      const promptOutputs = structuredClone(this.outputs);
+      const frozenInputs = state.lastFailure === 'progress-paused' && state.sessionId && this.artifactInputs.has(state.sessionId)
+        ? this.artifactInputs.get(state.sessionId)! : captureArtifactInputs(dependencyAncestors(node.id, this.edges), this.spec.nodes, promptOutputs, this.deps.workspaceRoot, this.edges);
+      const invalidInput = invalidFrozenArtifactInput(this.deps.workspaceRoot, frozenInputs);
+      if (invalidInput) {
+        this.failNode(key, invalidInput, undefined, 'invalid', false);
+        return;
+      }
       // Task-level skills ride as [skill:slug] mentions on every child prompt — the agent
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
-      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node));
+      const research = this.spec.research && node.researchRole ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      const prompt = skillsPreamble(research ? [...new Set([...(this.spec.skills ?? []), 'deep-research'])] : this.spec.skills)
+        + (research ? `Research role: ${node.researchRole}. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify(researchTaskContext(research,node.researchRole === 'reporter' ? undefined : node.id,node.researchLineIds))}\nSubmit values.research using the native Skill contract. Submit only this node's new records or explicit issue updates; reference existing evidence ids without resubmitting old evidence, claims or reviews. Each correction requires a new claim version; old reviews cannot approve it.\n` : '')
+        + (await this.buildPrompt(node, instance, promptOutputs));
+      if (!canDispatch()) return;
+      if (state.sessionId && state.lastFailure && state.lastFailure !== 'progress-paused') {
+        await this.deps.host.settleTaskSessionStop?.(state.sessionId);
+        this.deps.host.assertTaskSafePoint?.([state.sessionId]);
+      }
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
       // rather than the parent session's (project) directory.
@@ -415,15 +2399,20 @@ class ActiveRun {
         // tell Conductor-owned children apart from hand-authored subtasks (it skips the former).
         taskSlug: this.slug,
         taskRunId: this.runId,
-        taskNodeId: node.id,
-        name: nodeTitle(node),
-        model: node.model ?? this.spec.defaults?.model,
+        taskNodeId: definitionId(instance?.id ?? node.id),
+        taskAttempt: attempt,
+        taskRevision: this.attemptRevisions.get(key) ?? this.revision,
+        taskActor: node.actor,
+        ...(node.researchRole === 'reviewer' || node.kind === 'verify' || node.kind === 'judge' ? {orchestrationRole:'reviewer' as const} : {}),
+        hidden: true,
+        name: instance?.id ?? nodeTitle(node),
+        model: this.resolveNodeModel(node),
         // Required for non-default (e.g. pi/*) models to resolve a backend — without it the
         // child session completes instantly with no output.
-        llmConnection: node.llmConnection ?? this.spec.defaults?.llmConnection,
-        // Node override → task default (persisted by the editor, visible to the user) → explicit
-        // unattended-safe fallback. Never the workspace default (which could be `ask` → hang).
-        permissionMode: node.permissionMode ?? this.spec.defaults?.permissionMode ?? AUTONOMOUS_DEFAULT_MODE,
+        llmConnection: node.llmConnection ?? this.spec.defaults?.llmConnection ?? this.orchestratorLlmConnection(),
+        // Node override → explicit task ceiling → safe. Never inherit a
+        // permissive workspace default when the task omitted authorization.
+        permissionMode: requested,
         labels: node.labels,
         // Inherit the orchestrator's task number (task::N) so the whole run filters as one task.
         applyTaskLabel: true,
@@ -433,84 +2422,208 @@ class ActiveRun {
         ...(cwd ? { workingDirectory: cwd } : {}),
         sessionStatus: RUNNING_STATUS,
       };
-      // createSession announces the child to the renderer by default, so it nests under the task
-      // tile with its real title instead of a fabricated "New Chat" (or never appearing).
-      const child = await this.deps.host.createSession(this.deps.workspaceId, options);
-      const st = this.state.get(node.id)!;
+      // Hidden workers remain persisted/queryable by their task/run/node linkage,
+      // but do not appear as ordinary project sessions.
+      const resuming = state.lastFailure === 'progress-paused' && !!state.sessionId
+      const prefix = node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => candidate.id) : [];
+      const signature = planValueKey({ actor: node.actor, researchRole: node.researchRole, model: options.model, connection: options.llmConnection, permission: requested, cwd, sources: this.spec.sources, skills: this.spec.skills, constraints: this.spec.constraints, decisions: this.spec.decisions, workspaceInputs: node.workspace_inputs });
+      const actor = node.actor && options.orchestrationRole !== 'reviewer' ? this.actors.get(node.actor.id) : undefined;
+      const reuse = !!node.actor && !instance && !!this.deps.host.bindTaskSession && actor?.signature === signature
+        && this.deps.host.canReuseTaskSession?.(actor.sessionId) === true
+        && (!this.deps.host.getSessionPermissionModeState || this.deps.host.getSessionPermissionModeState(actor.sessionId)?.permissionMode === requested)
+        && (!options.model || this.deps.host.getSessionModel?.(actor.sessionId) === options.model)
+        && (!options.llmConnection || this.deps.host.getSessionLlmConnection?.(actor.sessionId) === options.llmConnection)
+        && planValueKey(actor.prefix) === planValueKey(prefix) && prefix.every(id => this.state.get(id)?.state === 'done');
+      const child = resuming ? { id: state.sessionId! } : reuse ? { id: actor!.sessionId } : await this.deps.host.createSession(this.deps.workspaceId, options);
+      const st = this.instances.get(key) ?? this.state.get(node.id)!;
+      if (resuming) st.generation = this.deps.host.nextTaskSessionGeneration?.(child.id);
+      if (this.deps.host.bindTaskSession && this.opts.orchestratorSessionId && !resuming) {
+        const bound = await this.deps.host.bindTaskSession(child.id, { rootSessionId: this.opts.orchestratorSessionId, taskSlug: this.slug, taskRunId: this.runId,
+          taskNodeId: key, taskAttempt: attempt, taskRevision: options.taskRevision!, taskActor: node.actor, model: options.model, llmConnection: options.llmConnection, permissionMode: requested,
+          contract: { goal: this.spec.goal, node, constraints: this.spec.constraints ?? [], decisions: this.spec.decisions ?? [] } });
+        st.generation = bound.generation;
+      }
       st.sessionId = child.id;
-      this.sessionToNode.set(child.id, node.id);
-      this.log({ kind: 'node-spawned', nodeId: node.id, sessionId: child.id });
-      await this.deps.host.setKanbanColumn(child.id, 'in-progress');
-      await this.deps.host.sendMessage(child.id, prompt);
+      this.sessionToNode.set(child.id, key);
+      this.integratedSessions.delete(child.id);
+      if (node.actor && !instance) this.actors.set(node.actor.id, { sessionId: child.id, signature, prefix: [...prefix, node.id] });
+      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id, generation: st.generation, attempt, attemptRevision: this.attemptRevisions.get(key) ?? this.revision, actor: node.actor, reused: reuse });
+      if (!canDispatch()) {
+        // Creation may finish after Stop. Preserve its history, but never send the prompt.
+        this.log({ kind: 'node-finished', nodeId: key, sessionId: child.id, state: 'cancelled', reason: 'stopped-before-dispatch' });
+        this.applyCard(child.id, TODO_STATUS);
+        this.emitChanged();
+        return;
+      }
+      let deliveryPrompt = prompt;
+      if (this.sourceVersion === 3) {
+        deliveryPrompt = `Canonical execution identity: slug=${JSON.stringify(this.slug)}, runId=${JSON.stringify(this.runId)}, nodeId=${JSON.stringify(key)}, attempt=${attempt}, revision=${options.taskRevision}. Use these exact identities in result tools; a task label is not a slug.\nOriginal user goal: ${this.spec.goal}\nThe original goal is background for this assigned node. Complete only node ${JSON.stringify(key)}; the scheduler owns all other steps. Return your findings as this node output, then end the turn. Never wait for or search for this node\'s own result.\nAcceptance criteria: ${this.spec.acceptance_criteria ?? 'Not specified'}\n\n${TASK_NODE_COMPLETION_AUDIT_PROMPT}\n\n${deliveryPrompt}`;
+      }
+      if (node.actor) {
+        deliveryPrompt = `Logical actor ${node.actor.id}${node.actor.persona ? `: ${node.actor.persona}` : ''}. Work binding: run=${this.runId}, node=${key}, attempt=${attempt}, revision=${options.taskRevision}. Submit this task's output separately; prior task outputs remain immutable.\n\n${deliveryPrompt}`;
+        if (!reuse && prefix.length) deliveryPrompt += `\n\nConfirmed prior actor task results (new execution context): ${JSON.stringify(prefix.map(id => ({ nodeId: id, output: this.outputs[id] ?? null })))}`;
+      }
+      if (!resuming && this.spec.execution?.artifact_delivery === 1 && requested !== 'safe') {
+        if (!this.deps.host.prepareTaskWorkspace) throw new Error('Host does not support isolated artifact delivery');
+        const prepared = await this.deps.host.prepareTaskWorkspace(child.id, cwd ?? this.deps.workspaceRoot, node.workspace_inputs ?? []);
+        if (!canDispatch()) return;
+        deliveryPrompt += `\n\nWrite candidate outputs only inside ${JSON.stringify(prepared.directory)}. The runtime will validate and integrate declared outputs. Do not write the source project.`;
+      }
+      if (!resuming || !this.artifactInputs.has(child.id)) {
+        const inputs = frozenInputs;
+        this.log({ kind: 'node-artifact-inputs', nodeId: key, sessionId: child.id, inputs });
+        this.artifactInputs.set(child.id, inputs);
+      }
+      const changedInput = invalidFrozenArtifactInput(this.deps.workspaceRoot, this.artifactInputs.get(child.id)!);
+      if (changedInput) {
+        this.failNode(key, changedInput, child.id, 'invalid', false);
+        return;
+      }
+      const timing = this.timing(key);
+      timing.startedAtMs = this.nowMs();
+      if (timing.scheduledAtMs !== undefined) timing.queueMs = Math.max(0, timing.startedAtMs - timing.scheduledAtMs);
+      this.applyCard(child.id, RUNNING_STATUS);
+      this.emitChanged(); // Publish the new child link while the node is still running.
+      if (!canDispatch()) return;
+      if (node.timeout && node.timeout > 0) {
+        this.startSessionTimeout(key, child.id, node.timeout * 1000);
+      }
+      if (resuming) {
+        if (!this.deps.host.continueProgress) throw new Error('Host cannot resume the existing progress checkpoint');
+        await this.deps.host.continueProgress(child.id);
+      } else await this.deps.host.sendMessage(child.id, deliveryPrompt, undefined, undefined, {
+        taskContext: { kind: 'assignment', title: nodeDisplayTitle(node), description: this.spec.goal, instruction: node.prompt },
+      });
     } catch (err) {
-      this.failNode(node.id, `dispatch failed: ${(err as Error).message}`);
+      if (canDispatch()) this.failNode(key, `dispatch failed: ${(err as Error).message}`);
     }
   }
 
   /** Resolve a node's prompt: declared inputs (+ optional summarize) then ${…} interpolation. */
-  private async buildPrompt(node: TaskNode): Promise<string> {
+  private async buildPrompt(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }, outputs: Record<string, NodeOutput> = this.outputs): Promise<string> {
     const inputValues: Record<string, unknown> = {};
     for (const [name, ref] of Object.entries(node.inputs ?? {})) {
       const fromExpr = typeof ref === 'string' ? ref : ref.from;
       const summarize = typeof ref === 'string' ? false : !!ref.summarize;
-      let resolved = interpolateRefs(fromExpr, { nodeOutputs: this.outputs, params: this.opts.params });
+      let resolved = interpolateRefs(fromExpr, { nodeOutputs: outputs, params: this.opts.params });
       if (summarize && this.deps.summarize) resolved = await this.deps.summarize(resolved);
       inputValues[name] = resolved;
     }
-    let text = interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params });
+    let text = interpolateRefs(node.prompt ?? '', { nodeOutputs: outputs, params: this.opts.params });
+    text = interpolateLocals(text, instance ?? {});
     text = text.replace(INPUTS_REF_RE, (raw, name: string) => (name in inputValues ? String(inputValues[name]) : raw));
-    const upstream = this.upstreamReplies(node);
-    if (upstream) text = `${upstream}\n\n${text}`;
 
     // Failure-aware retry: prepend the prior failure so a retried session knows what went wrong
     // instead of blindly repeating a deterministic failure.
-    const st = this.state.get(node.id)!;
+    const st = instance ? (this.instances.get(instance.id) ?? this.state.get(node.id)!) : this.state.get(node.id)!;
     if (st.attempt > 1 && st.lastFailure) {
       text = `${st.lastFailure}\n\n${text}`;
     }
-    return text;
+    if (this.sourceVersion === 3 && node.kind === 'synthesize') {
+      text = `${text}\n\n${this.synthesizeDependencyInputs(node, outputs)}`;
+    }
+    if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
+      text = `${text}\n\nJudge the assigned inspection contract. An audit of supplied historical material may complete successfully with defect findings; report those defects so the coordinator can schedule correction. It does not certify that material as correct. A deliverable approval fails only when a completed producing dependency needs rework. Call submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. For a fail verdict, nodes must name completed producing dependencies; never submit an empty nodes list or a pending node. If a tool rejects the verdict, correct it before ending. Chat text is not a verdict.`;
+    }
+    if (this.sourceVersion >= 2 && node.outputs?.length) {
+      text += `\n\nDeclared node outputs: ${JSON.stringify(node.outputs)}. Before ending, call submit_task_output with values keyed by these exact output names and include every required output. Chat text and submit_task_node_verdict do not submit these outputs. Correct rejected submissions before ending.`;
+    }
+    // Research workers already receive their role/line-specific frozen context
+    // in dispatch. Repeating the global context wastes input and leaks unrelated
+    // line records back into an otherwise scoped assignment.
+    const planContext = this.planContext(!node.researchRole);
+    return planContext ? `${planContext}\n\n${text}` : text;
   }
 
-  /**
-   * The replies of the `depends_on` steps that the prompt does not already pull in with
-   * ${nodes.<id>.output} (directly or through `inputs`). Authors add the edge and write "based on
-   * the exploration output"; the dependent used to start without it (found 2026-10-11).
-   */
-  private upstreamReplies(node: TaskNode): string | null {
-    const pulledIn = new Set<string>();
-    const refTexts = [node.prompt ?? '', ...Object.values(node.inputs ?? {}).map((ref) => (typeof ref === 'string' ? ref : ref.from))];
-    for (const text of refTexts) {
-      for (const ref of extractRefs(text)) if (ref.kind === 'node' && !ref.field) pulledIn.add(ref.nodeId);
-    }
-    const sections: string[] = [];
-    for (const depId of nodeDeps(node)) {
-      const reply = this.outputs[depId]?.text;
-      if (pulledIn.has(depId) || !reply?.trim()) continue;
-      const dep = this.spec.nodes.find((n) => n.id === depId);
-      const body = reply.length > MAX_UPSTREAM_REPLY_CHARS
-        ? `${reply.slice(0, MAX_UPSTREAM_REPLY_CHARS)}\n…[cut at ${MAX_UPSTREAM_REPLY_CHARS} characters; the full reply is in ${nodeOutputPath(this.deps.workspaceRoot, this.slug, this.runId, depId)}]`
-        : reply;
-      sections.push(`### ${dep ? nodeTitle(dep) : depId}\n${body}`);
-    }
-    if (sections.length === 0) return null;
-    return [`Replies of the step${sections.length === 1 ? '' : 's'} this one depends on:`, '', ...sections, '', '---'].join('\n');
+  private planContext(includeResearch = true): string {
+    return [
+      ...(includeResearch && this.spec.research ? [`Research business state and delivery requirements: ${JSON.stringify((() => { const research = loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId); return research ? researchTaskContext(research) : undefined; })())}`] : []),
+      ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
+      ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
+      ...(this.workers.size ? [`Delegated task facts and separate outputs: ${JSON.stringify([...this.workers.values()])}`] : []),
+      ...(this.help.size ? [`Structured help history (responses do not grant permissions): ${JSON.stringify([...this.help.values()])}`] : []),
+    ].join('\n');
+  }
+
+  private coordinatorContext(): string {
+    const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    return [this.planContext(false), ...(research ? [
+      `Research status (summary, not source evidence): ${JSON.stringify({
+        coverage: research.coverage, blockers: research.blockers,
+        claims: research.claims.map(claim => ({ id: claim.id, version: claim.version, text: claim.text, support: claim.review?.support })),
+        issues: research.issues.map(issue => ({ id: issue.id, claimRef: issue.claimRef, state: issue.state, finding: issue.finding })),
+        errata: research.errata.map(erratum => ({ id: erratum.id, target: erratum.target, state: erratum.state })),
+        report: research.report,
+      })}`,
+      'Use get_task_results for the exact canonical research payloads, source versions, locators and read receipts before making an evidence judgment. This summary cannot replace original-source reading or independent review.',
+    ] : [])].join('\n');
   }
 
   // --- completion ---
 
   private onSessionComplete(evt: SessionCompletionEvent): void {
     const nodeId = this.sessionToNode.get(evt.sessionId);
-    if (!nodeId) return; // not one of our child nodes
-    const st = this.state.get(nodeId);
-    if (!st || st.state !== 'running') return; // already settled/cancelled
-    // A retried node runs in a new session; a turn of the replaced one (woken by its own background
-    // work, or messaged by the user) is not this attempt's result.
-    if (st.sessionId !== evt.sessionId) return;
+    if (!nodeId) {
+      const orchestratorCompletion = evt.sessionId === this.opts.orchestratorSessionId;
+      if (orchestratorCompletion && this.runStatus === 'verifying' && this.sourceVersion >= 2) {
+        if (!this.verificationUsageGenerations.has(evt.generation)) {
+          this.verificationUsageGenerations.add(evt.generation);
+          this.recordVerificationUsage(evt.turnTokens ?? 0);
+        }
+        const resumable = ['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '');
+        if (!resumable && evt.reason === 'complete' && !this.verdictLocked) {
+          if (this.verificationFormatReasks < 1) {
+            this.verificationFormatReasks += 1;
+            this.log({ kind: 'verdict-format-reask', attempt: this.verificationFormatReasks });
+            void this.reAskStructuredVerdict();
+          } else {
+            this.finish('failed');
+          }
+          return;
+        }
+        if (!resumable && evt.reason !== 'complete') {
+          this.finish('failed');
+          return;
+        }
+      }
+      if (orchestratorCompletion
+        && ['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '')
+        && (this.runStatus === 'waiting-coordinator' || this.runStatus === 'verifying')) {
+        this.progressParentResume = this.runStatus === 'verifying' ? 'verifying' : 'coordinator';
+        this.verdictOff?.(); this.verdictOff = undefined;
+        this.clearCoordinatorGate();
+        this.log({ kind: 'progress-parent-paused', phase: this.progressParentResume });
+        this.pause();
+      }
+      return;
+    }
+    const defId = definitionId(nodeId);
+    const st = this.instances.get(nodeId) ?? this.state.get(defId);
+    if (st?.state === 'waiting-help' && st.sessionId === evt.sessionId && (st.generation === undefined || evt.generation === st.generation)) {
+      this.cancelNodeHelp(nodeId, 'Worker interrupted while awaiting help');
+      // The waiting node already yielded its slot; restore the slot exactly once
+      // before the normal terminal/recovery path settles it.
+      st.state = 'running'; this.inFlight++;
+      if (evt.reason === 'complete') evt = { ...evt, reason: 'error', finalText: 'Worker completed without resolving its structured help request' };
+    }
+    if (!st || st.state !== 'running' || st.sessionId !== evt.sessionId || st.generation !== undefined && evt.generation < st.generation) return; // stale/already settled
+    const ownedWorkers = [...this.workers.values()].filter(worker => worker.nodeId === nodeId && worker.attempt === st.attempt);
+    if (ownedWorkers.some(worker => ['reserved', 'running'].includes(worker.state))) {
+      if (!this.deferredCompletions.has(nodeId)) this.log({ kind: 'node-awaiting-workers', nodeId, sessionId: evt.sessionId, generation: evt.generation,
+        reason: evt.reason, finalText: evt.finalText, errorCode: evt.errorCode, artifacts: evt.artifacts, output: this.submittedOutputs.get(nodeId), inputTokens: evt.tokenUsage?.inputTokens, outputTokens: evt.tokenUsage?.outputTokens });
+      this.deferredCompletions.set(nodeId, evt); return;
+    }
+    if (evt.reason === 'complete' && ownedWorkers.some(worker => worker.state !== 'done')) {
+      evt = { ...evt, reason: 'error', finalText: ownedWorkers.filter(worker => worker.state !== 'done').map(worker => worker.reason ?? `Worker ${worker.workerId}: ${worker.state}`).join('; ') };
+    }
+    const timeout = this.sessionTimers.get(evt.sessionId);
+    if (timeout) clearTimeout(timeout);
+    this.sessionTimers.delete(evt.sessionId);
+    this.sessionTimeoutDeadlines.delete(evt.sessionId);
 
     if (evt.tokenUsage) {
       // `tokenUsage` is cumulative-per-session; add only the delta since this session's last
-      // observed total, since a node can run more than one turn (stopped and continued, woken by
-      // background work).
+      // observed total so a node that ever runs >1 turn (future retry/loop) can't double-count.
       const cumulative = (evt.tokenUsage.inputTokens ?? 0) + (evt.tokenUsage.outputTokens ?? 0);
       const prev = this.sessionTokens.get(evt.sessionId) ?? 0;
       this.tokensUsed += Math.max(0, cumulative - prev);
@@ -519,132 +2632,310 @@ class ActiveRun {
 
     // Completion-time budget check: pause immediately on breach (not only at schedule-time), but
     // only while pending work remains — never block a run that is about to finish.
-    if (this.isOverBudget() && this.runStatus === 'running' && this.hasPendingNodes()) {
-      this.pauseForBudget();
-    }
+    if (this.isOverBudget()) this.budgetBreached = true;
 
-    if (evt.reason === 'interrupted' || evt.reason === 'timeout') {
-      // The user stopped the step, usually to steer it. It is not finished and must not fail:
-      // it waits for them, and the turn that completes it later carries its output.
-      st.waitingForUser = true;
-      this.log({ kind: 'node-waiting', nodeId, sessionId: evt.sessionId, reason: 'stopped' });
-      void this.deps.host.setSessionStatus(evt.sessionId, WAITING_FOR_USER_STATUS);
-      return;
+    if (['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '')) {
+      this.pause();
+      st.state = 'cancelled'; st.lastFailure = 'progress-paused';
+      this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'cancelled', reason: 'progress-paused' });
+      this.settleSessionSlot(nodeId, evt.sessionId);
+      if (this.inFlight === 0) { this.runStatus = 'paused'; this.log({ kind: 'run-paused' }); }
+      this.applyCard(evt.sessionId, TODO_STATUS); this.emitChanged(); return;
     }
-    if (evt.reason === 'error') {
-      this.failNode(nodeId, 'error', evt.sessionId);
-      return;
-    }
-
-    if (evt.finalText?.trim()) st.replies.push(evt.finalText);
-    // Background agents survive a Stop and wake the session when they finish. That turn's reply
-    // is kept, but the step still waits for the user it was stopped for.
-    if (st.waitingForUser && evt.fromUser === false) return;
-    st.waitingForUser = false;
-    if ((evt.backgroundWorkRunning ?? 0) > 0) {
-      // Its background agents report back by waking the session for another turn.
-      this.log({ kind: 'node-waiting', nodeId, sessionId: evt.sessionId, reason: 'background-work' });
-      return;
-    }
-
-    const text = st.replies.join('\n\n');
-    if (text.trim() === '') {
-      // A finished turn without a reply delivered nothing for the dependents.
-      this.failNode(nodeId, 'finished without a reply', evt.sessionId);
-      return;
-    }
-    if (this.deps.classifyNodeOutcome && (this.deps.classifyNodeOutcome.isActive?.() ?? true)) {
-      void this.finishNodeAfterOutcomeCheck(nodeId, evt.sessionId, text);
-      return;
-    }
-    this.markNodeDone(nodeId, evt.sessionId, text);
-  }
-
-  private markNodeDone(nodeId: string, sessionId: string, text: string): void {
-    const st = this.state.get(nodeId)!;
-    const output: NodeOutput = { text };
-    this.outputs[nodeId] = output;
-    st.state = 'done';
-    this.inFlight = Math.max(0, this.inFlight - 1);
-    writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
-    this.log({ kind: 'node-finished', nodeId, sessionId, state: 'done' });
-    void this.deps.host.setSessionStatus(sessionId, DONE_STATUS);
-    void this.deps.host.setKanbanColumn(sessionId, 'done');
-    this.scheduleReady();
-  }
-
-  /**
-   * Ask the decision model how the child's turn ended before marking it done. The node stays
-   * `running` meanwhile; if the run was stopped or the node re-dispatched during the await, the
-   * answer is dropped.
-   */
-  private async finishNodeAfterOutcomeCheck(nodeId: string, sessionId: string, text: string): Promise<void> {
-    let outcome: 'finished' | 'needs_input' | 'blocked' | null = null;
-    try {
-      outcome = await this.deps.classifyNodeOutcome!(text, { slug: this.slug, runId: this.runId, nodeId });
-    } catch {
-      outcome = null;
-    }
-    const st = this.state.get(nodeId);
-    if (!st || st.state !== 'running' || st.sessionId !== sessionId) return;
-    if (this.runStatus === 'stopped' || this.runStatus === 'completed' || this.runStatus === 'failed') return;
-
-    try {
-      if (outcome === 'needs_input') {
-        this.failNode(nodeId, 'asked for input instead of finishing (nobody answers inside a task run: decide and continue)', sessionId);
-      } else if (outcome === 'blocked') {
-        this.failNode(nodeId, 'reported that it could not finish', sessionId);
-      } else {
-        this.markNodeDone(nodeId, sessionId, text);
+    if (evt.reason === 'complete') {
+      // Before integrating this consumer's own outputs, verify that the inputs
+      // it consumed have not changed while its model/tools were running.
+      // Re-entry after integration must not reject an intentional output update.
+      if (!this.integratedSessions.has(evt.sessionId)) {
+        const invalidInput = (this.artifactInputs.has(evt.sessionId) ? invalidFrozenArtifactInput(this.deps.workspaceRoot, this.artifactInputs.get(evt.sessionId)!) : invalidArtifactInput(this.deps.workspaceRoot, dependencyAncestors(defId, this.edges), this.spec.nodes, this.outputs, this.edges));
+        if (invalidInput) {
+          this.failNode(nodeId, invalidInput, evt.sessionId, 'invalid', false);
+          return;
+        }
       }
-    } catch (err) {
-      // Same reporting channel as the synchronous completion listener; the async hop would
-      // otherwise route this to unhandledRejection.
-      console.error(`[conductor] node completion failed for ${this.slug}/${this.runId}/${nodeId}:`, err);
+      const text = evt.finalText ?? this.deps.host.getSessionFinalText(evt.sessionId) ?? '';
+      const node = this.spec.nodes.find((n) => n.id === defId);
+      const submitted = this.submittedOutputs.get(nodeId) ?? this.submittedOutputs.get(defId);
+      const declared = node?.outputs?.length ?? 0;
+      if (this.sourceVersion >= 2 && declared > 0 && !submitted && node && isSessionLikeKind(node.kind)) {
+        this.failNode(nodeId, 'completed without submit_task_output', evt.sessionId, 'invalid');
+        return;
+      }
+      if (this.spec.execution?.artifact_delivery === 1
+        && (node?.permissionMode ?? this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE) !== 'safe'
+        && !this.integratedSessions.has(evt.sessionId)) {
+        if (this.integratingSessions.has(evt.sessionId)) return;
+        const submission = submitted ?? { text };
+        const files: Record<string, string> = {};
+        for (const declaration of node?.outputs ?? []) {
+          if (declaration.kind !== 'artifact') continue;
+          const artifact = submission?.params?.[declaration.name] as { path?: string } | undefined;
+          if (typeof artifact?.path === 'string' && artifact.path.length > 0) {
+            files[declaration.name] = artifact.path;
+          } else if (declaration.required !== false) {
+            this.failNode(nodeId, `Missing required candidate output "${declaration.name}"`, evt.sessionId, 'invalid'); return;
+          }
+        }
+        if (!this.deps.host.finalizeTaskWorkspace) {
+          this.failNode(nodeId, 'Missing runtime integration support', evt.sessionId, 'invalid'); return;
+        }
+        const attempt = st.attempt;
+        try { writeNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, evt.sessionId, attempt, submission); }
+        catch { this.failNode(nodeId, 'Could not persist candidate submission before integration', evt.sessionId, 'invalid', false); return; }
+        const ensureCurrent = () => {
+          if (this.stopRequested || this.settled || st.state !== 'running' || st.sessionId !== evt.sessionId || st.attempt !== attempt) throw new Error('Task integration is no longer current');
+        };
+        this.integratingSessions.add(evt.sessionId);
+        void this.deps.host.finalizeTaskWorkspace(evt.sessionId, files, ensureCurrent, () => {
+          const invalidInput = (this.artifactInputs.has(evt.sessionId) ? invalidFrozenArtifactInput(this.deps.workspaceRoot, this.artifactInputs.get(evt.sessionId)!) : invalidArtifactInput(this.deps.workspaceRoot, dependencyAncestors(defId, this.edges), this.spec.nodes, this.outputs, this.edges));
+          if (invalidInput) throw new Error(invalidInput);
+        }).then(delivered => {
+          ensureCurrent();
+          this.submittedOutputs.set(nodeId, { ...submission, text: submission?.text ?? text, params: { ...submission?.params, ...delivered }, integratedArtifacts: delivered });
+          this.integratedSessions.add(evt.sessionId);
+          this.onSessionComplete(evt);
+        }).catch(error => {
+          if (st.state === 'running' && st.sessionId === evt.sessionId && st.attempt === attempt) this.failNode(nodeId, `integration failed: ${String(error)}`, evt.sessionId, 'invalid', false);
+        }).finally(() => { this.integratingSessions.delete(evt.sessionId); });
+        return;
+      }
+      if (
+        this.sourceVersion === 3
+        && node
+        && (node.kind === 'verify' || node.kind === 'judge')
+        && !this.nodeVerdicts.has(nodeId)
+        && !this.nodeVerdicts.has(defId)
+      ) {
+        this.failNode(nodeId, 'completed without submit_task_node_verdict', evt.sessionId, 'invalid');
+        return;
+      }
+      if (declared > 0 && !submitted && text.trim() === '') {
+        this.failNode(nodeId, 'completed without producing declared output', evt.sessionId, 'empty');
+        return;
+      }
+      if (this.requeueFailedNodeVerdict(nodeId, evt.sessionId, defId, st)) return;
+      const output: NodeOutput = submitted ?? { text };
+      let researchRecord: ResearchRecord | undefined;
+      if (node?.researchRole) {
+        try { researchRecord = this.researchRecord(nodeId, st, evt.sessionId, output); }
+        catch (error) { this.failNode(nodeId, `Research output: ${String(error)}`, evt.sessionId, 'invalid'); return; }
+      }
+      for (const declaration of node?.outputs ?? []) {
+        if (this.integratedSessions.has(evt.sessionId)) break;
+        if (declaration.kind !== 'artifact') continue;
+        const artifact = output.params?.[declaration.name];
+        if (artifact === undefined && declaration.required === false) continue;
+        const verified = verifyArtifact(this.deps.workspaceRoot, artifact);
+        if (!verified.ok) {
+          this.failNode(nodeId, `Output "${declaration.name}": ${verified.error}`, evt.sessionId, 'invalid');
+          return;
+        }
+      }
+      // Publish the completed output before marking the node done or releasing
+      // its pool slot. Releasing can synchronously wake dependent schedulers.
+      writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.attempt || 1, output);
+      const expandingInstance = node && (
+        this.replicaCounts.has(defId)
+        || node.kind === 'map'
+        || node.kind === 'loop'
+      );
+      if (expandingInstance) {
+        this.instanceOutputs.set(nodeId, output);
+      } else {
+        this.outputs[defId] = output;
+        writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, defId, output);
+        if (node) {
+          if (this.shouldBypassWorkspaceCache(node, evt.sessionId)) {
+            this.markCache(node.id, 'bypass');
+            this.cacheBypasses += 1;
+            this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'tool-or-dynamic' });
+          } else {
+            this.rememberCache(node, output);
+          }
+        }
+      }
+      st.state = 'done';
+      this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done', ...(researchRecord ? { researchRecord } : {}) });
+      this.applyCard(evt.sessionId, DONE_STATUS);
+      this.settleSessionSlot(nodeId, evt.sessionId);
+      if (node && this.replicaCounts.has(defId)) {
+        const count = this.replicaCounts.get(defId)!;
+        const allDone = Array.from({ length: count }, (_, i) => this.instances.get(instanceId(defId, i)))
+          .every((instance) => isTerminalNodeState(instance?.state));
+        if (allDone) this.finishReplicas(node);
+        else this.scheduleReplicaInstances(node);
+        this.emitChanged();
+        this.scheduleReady();
+        return;
+      }
+      if (node && (node.kind === 'map' || node.kind === 'loop')) {
+        if (node.kind === 'map') {
+          const items = this.mapItems.get(defId) ?? [];
+          const allDone = items.every((_, i) => isTerminalNodeState(this.instances.get(instanceId(defId, i))?.state));
+          if (allDone) this.finishMap(node);
+          else this.scheduleMapInstances(node);
+        } else {
+          this.afterLoopInstance(node, nodeId, output);
+        }
+        this.emitChanged();
+        this.scheduleReady();
+        return;
+      }
+      this.emitChanged();
+      this.scheduleReady();
+    } else if (evt.reason === 'interrupted') {
+      // Externally aborted while running → cancelled (re-dispatched on resume). We do not
+      // auto-retry here to avoid a stop/retry loop.
+      st.state = 'cancelled';
+      this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'cancelled', reason: 'interrupted' });
+      this.applyCard(evt.sessionId, TODO_STATUS);
+      this.settleSessionSlot(nodeId, evt.sessionId);
+      this.emitChanged();
+      this.scheduleReady();
+    } else {
+      // 'error' | 'timeout'
+      this.failNode(nodeId, evt.errorCode ? `${evt.reason}:${evt.errorCode}` : evt.reason, evt.sessionId);
     }
   }
 
-  private failNode(nodeId: string, reason: string, sessionId?: string): void {
-    const st = this.state.get(nodeId)!;
-    const wasRunning = st.state === 'running';
-    if (wasRunning) this.inFlight = Math.max(0, this.inFlight - 1);
+  private failNode(nodeId: string, reason: string, sessionId?: string, failure: 'error' | 'empty' | 'invalid' = 'error', allowRetry = true): void {
+    const defId = definitionId(nodeId);
+    const st = this.state.get(defId);
+    if (!st) return;
+    const inst = this.instances.get(nodeId);
+    this.submittedOutputs.delete(nodeId);
+    const expanding = this.mapItems.has(defId) || this.loopIndex.has(defId) || this.replicaCounts.has(defId);
+    const wasRunning = inst?.state === 'running' || (st.state === 'running' && !expanding);
+    if (inst) inst.state = failure === 'invalid' ? 'invalid' : 'failed';
+    if (wasRunning) this.settleSessionSlot(nodeId, sessionId, false);
 
-    // Bounded, failure-aware retry: re-dispatch the node when its `retry` policy still
-    // has budget and matches this failure class. error/timeout/dispatch failures all map
-    // to the `error` retry trigger (empty/invalid detection is deferred).
-    const node = this.spec.nodes.find((n) => n.id === nodeId);
-    const retry = node?.retry;
-    if (retry && st.attempt <= retry.limit && retryMatches(retry.when, 'error')) {
+    const node = this.spec.nodes.find((n) => n.id === defId);
+    // Only read-only v3 requests receive the transient fallback. Dispatch still
+    // settles the previous runtime and checks its durable operation safe point.
+    const readOnlyTransient = this.sourceVersion === 3 && failure === 'error'
+      && (node?.permissionMode ?? this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE) === 'safe'
+      && /^error:(provider_timeout|network_error|service_error|stream_interrupted|rate_limited)$/.test(reason);
+    const retry = allowRetry ? node?.retry ?? (readOnlyTransient ? { limit: 2, when: 'error' as const } : undefined) : undefined;
+    if (inst && expanding && retry && inst.attempt <= retry.limit && retryMatches(retry.when, failure)) {
+      inst.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
+      const delay = retryBackoffMs(retry, inst.attempt, reason);
+      const sid = sessionId ?? inst.sessionId;
+      if (sid) this.applyCard(sid, TODO_STATUS);
+      this.log({ kind: 'node-retry', nodeId, attempt: inst.attempt, reason });
+      if (delay > 0) {
+        inst.state = 'retry-wait';
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          if (inst.state === 'retry-wait') {
+            inst.state = 'pending';
+            this.scheduleReady();
+          }
+        }, delay);
+        this.retryTimers.add(timer);
+      } else {
+        inst.state = 'pending';
+        this.scheduleReady();
+      }
+      this.notifyConnectionReleased();
+      this.emitChanged();
+      return;
+    }
+    if (!inst && retry && st.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       st.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
-      st.state = 'pending';
+      const delay = retryBackoffMs(retry, st.attempt, reason);
       const sid = sessionId ?? st.sessionId;
-      if (sid) void this.deps.host.setKanbanColumn(sid, 'todo');
-      this.log({ kind: 'node-retry', nodeId, attempt: st.attempt, reason });
-      this.scheduleReady();
+      if (sid) this.applyCard(sid, TODO_STATUS);
+      this.log({ kind: 'node-retry', nodeId: defId, attempt: st.attempt, reason });
+      if (delay > 0) {
+        st.state = 'retry-wait';
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          if (st.state === 'retry-wait') {
+            st.state = 'pending';
+            this.scheduleReady();
+          }
+        }, delay);
+        this.retryTimers.add(timer);
+      } else {
+        st.state = 'pending';
+        this.scheduleReady();
+      }
+      this.notifyConnectionReleased();
+      this.emitChanged();
       return;
     }
 
-    st.state = 'failed';
+    if (inst) {
+      inst.lastFailure = reason;
+      this.log({ kind: 'node-finished', nodeId, sessionId: sessionId ?? inst.sessionId ?? '', state: inst.state, reason });
+    }
+    st.state = failure === 'invalid' ? 'invalid' : 'failed';
+    st.lastFailure = reason;
+    if (node?.kind !== 'finally') this.originalFailed = true;
     const sid = sessionId ?? st.sessionId;
-    this.log({ kind: 'node-finished', nodeId, sessionId: sid ?? '', state: 'failed', reason });
-    if (sid) void this.deps.host.setSessionStatus(sid, FAILED_STATUS);
-    this.scheduleReady();
+    this.log({ kind: 'node-finished', nodeId: defId, sessionId: sid ?? '', state: st.state, reason });
+    if (sid) this.applyCard(sid, FAILED_STATUS);
+    this.notifyConnectionReleased();
+    this.emitChanged();
+    if (!this.enterCoordinatorGate('node-failed')) {
+      this.coordinatorCheckpoint('node-failed');
+      this.scheduleReady();
+    }
   }
 
   private maybeFinish(): void {
-    if (this.runStatus !== 'running') return;
+    if (this.runStatus !== 'running' && !this.stopRequested) return;
     if (this.inFlight > 0) return;
-    if (this.spec.nodes.some((n) => this.isReady(n))) return; // more to dispatch
+    if (this.hasUnsettledRunningNode() || this.hasExpandingWork()) return;
+    if (this.spec.nodes.some((n) => this.isReady(n))) return;
+    if ([...this.state.values(), ...this.instances.values()].some((st) => st.state === 'waiting-approval' || st.state === 'waiting-help')) return;
+
+    if (this.stopRequested) {
+      this.finish('stopped');
+      return;
+    }
+
+    if (this.budgetBreached || this.isOverBudget()) {
+      this.budgetBreached = true;
+      this.pauseForBudget();
+      return;
+    }
+
     const allGood = this.spec.nodes.every((n) => {
       const s = this.state.get(n.id)!.state;
       return s === 'done' || s === 'skipped';
     });
-    if (!allGood) {
+    if (!allGood || this.originalFailed) {
       this.finish('failed');
       return;
     }
-    // All nodes succeeded. Gate the terminal status on the orchestrator's verdict when there is one
-    // to ask; with no orchestrator there is nothing to verify against, so complete directly.
+    // Deterministic artifact and frozen-input checks run before any semantic
+    // verifier decision, including mode=off and verifier-reuse paths.
+    this.revalidateCompletedArtifacts();
+    if ([...this.state.values(), ...this.instances.values()].some(state => !['done', 'skipped'].includes(state.state))) {
+      this.finish('failed');
+      return;
+    }
+    if (this.spec.research) {
+      const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+      if (!research || research.blockers.length) { this.finish('failed'); return; }
+    }
+    if (this.sourceVersion === 3) {
+      const decision = this.finalVerificationDecision();
+      this.verificationResolution = decision.resolution;
+      if (decision.resolution === 'model') {
+        if (!this.opts.orchestratorSessionId) {
+          this.recordVerificationDecision(decision);
+          this.finish('failed');
+          return;
+        }
+        this.enterVerifying();
+      } else {
+        this.recordVerificationDecision(decision);
+        this.finish('completed');
+      }
+      return;
+    }
     if (this.opts.verifyOnComplete && this.opts.orchestratorSessionId) {
       this.enterVerifying();
     } else {
@@ -653,27 +2944,77 @@ class ActiveRun {
   }
 
   /** Enter the non-terminal `verifying` state and ask the orchestrator for a verdict. Does NOT finalize. */
-  private enterVerifying(): void {
+  private enterVerifying(options: { skipGate?: boolean } = {}): void {
+    // A drained coordinator gate can bypass maybeFinish; terminal failures still
+    // prevent verification, even if a replacement node produced a valid result.
+    if (this.originalFailed || [...this.state.values(), ...this.instances.values()].some(state => ['failed', 'invalid', 'cancelled'].includes(state.state))) {
+      this.finish('failed');
+      return;
+    }
+    if (!options.skipGate && this.enterCoordinatorGate('before-verify')) return;
+    this.verdictLocked = false;
+    if (!options.skipGate) this.coordinatorCheckpoint('before-verify');
     this.runStatus = 'verifying';
     this.log({ kind: 'run-verifying' });
     void this.sendVerification();
   }
 
   private finish(status: RunStatus): void {
+    const notifyFailure = status === 'failed' && !this.settled && this.opts.orchestratorSessionId;
     this.runStatus = status;
-    this.log({ kind: status === 'completed' ? 'run-completed' : 'run-failed' });
-    // Settle the task tile: completed → done, failed → needs-review (the fixed status set has no
-    // 'failed'). The in-progress column was set at start().
-    const orchestrator = this.opts.orchestratorSessionId;
-    if (orchestrator) {
-      if (status === 'completed') {
-        void this.deps.host.setKanbanColumn(orchestrator, 'done');
-        void this.deps.host.setSessionStatus(orchestrator, DONE_STATUS);
-      } else {
-        void this.deps.host.setSessionStatus(orchestrator, FAILED_STATUS);
-      }
-    }
+    const kind =
+      status === 'completed' ? 'run-completed' : status === 'stopped' ? 'run-stopped' : 'run-failed';
+    this.log({ kind, tokensUsed: this.tokensUsed });
+    this.log({ kind: 'metrics', metrics: this.buildMetrics() });
+    // Top-level card stays open: success and failure both go to needs-review. Only the
+    // user can close the tile. Column moves only when dropStatusId matches.
+    if (this.opts.orchestratorSessionId) this.applyCard(this.opts.orchestratorSessionId, REVIEW_STATUS);
+    this.emitChanged();
     this.finalize();
+    if (notifyFailure) {
+      const failures = this.spec.nodes.flatMap(node => {
+        const state = this.state.get(node.id)!;
+        return ['failed', 'invalid', 'cancelled'].includes(state.state) ? [{
+          task: nodeTitle(node), state: state.state, reason: state.lastFailure,
+          summary: state.sessionId ? this.deps.host.getSessionFinalText(state.sessionId) : undefined,
+        }] : [];
+      });
+      void this.sendToOrchestrator(notifyFailure, [
+        `The task "${this.spec.title}" ended unsuccessfully before delivery.`,
+        `Task slug: ${this.slug}; runId: ${this.runId}; revision: ${this.revision}.`,
+        `Failure details (data): ${JSON.stringify({ nodes: failures, blockers: this.snapshot().blockers })}`,
+        'Tell the user what blocked execution, what verified results exist and what remains unfinished. Do not claim the task is still running or successfully completed. Do not invent findings or replay completed operations. This status notification grants no new permissions.',
+        'This run is terminal: do not call node output, node verdict, run verdict or scheduling tools. Write the failure explanation as your final plain-text answer, then stop.',
+      ].join('\n'), 'feedback');
+    }
+  }
+
+  private coordinatorActivity = { generation: -1, reasoningBytes: 0, textBytes: 0 };
+
+  private subscribe(): () => void {
+    const completion = this.deps.host.onSessionComplete(evt => this.onSessionComplete(evt));
+    const activity = this.deps.host.onRuntimeActivity?.(evt => {
+      if (!this.coordinatorGate || this.runStatus !== 'waiting-coordinator'
+        || evt.sessionId !== this.opts.orchestratorSessionId || evt.runId && evt.runId !== this.runId) return;
+      if (evt.generation !== this.coordinatorActivity.generation || evt.type === 'model_call_start') {
+        this.coordinatorActivity = { generation: evt.generation, reasoningBytes: 0, textBytes: 0 };
+      }
+      if (evt.type === 'model_activity') {
+        const reasoningBytes = evt.reasoningBytes ?? 0, textBytes = evt.textBytes ?? 0;
+        if (reasoningBytes <= this.coordinatorActivity.reasoningBytes && textBytes <= this.coordinatorActivity.textBytes) return;
+        this.coordinatorActivity = { generation: evt.generation, reasoningBytes, textBytes };
+      } else if (!['text_delta', 'tool_start', 'tool_result'].includes(evt.type)) return;
+      // This is an inactivity lease: real model output or tool progress extends it,
+      // while unchanged heartbeats and a merely pending model call do not.
+      const deadline = this.nowMs() + COORDINATOR_GATE_TIMEOUT_SECONDS * 1000;
+      if (deadline - Date.parse(this.coordinatorGate.deadline) < 10_000) return;
+      this.coordinatorGate.deadline = new Date(deadline).toISOString();
+      this.log({ kind: 'coordinator-progress', checkpointId: this.coordinatorGate.checkpointId, deadline: this.coordinatorGate.deadline });
+      for (const timer of this.coordinatorTimers) clearTimeout(timer);
+      this.coordinatorTimers.clear();
+      this.restoreCoordinatorTimer();
+    });
+    return () => { completion(); activity?.(); };
   }
 
   private finalize(): void {
@@ -681,6 +3022,15 @@ class ActiveRun {
     this.unsubscribe = undefined;
     this.verdictOff?.();
     this.verdictOff = undefined;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
+    for (const timer of this.approvalTimers) clearTimeout(timer);
+    this.approvalTimers.clear();
+    for (const timer of this.sessionTimers.values()) clearTimeout(timer);
+    this.sessionTimers.clear();
+    this.sessionTimeoutDeadlines.clear();
+    for (const timer of this.coordinatorTimers) clearTimeout(timer);
+    this.coordinatorTimers.clear();
     if (this.settled) return;
     this.settled = true;
     const snap = this.snapshot();
@@ -688,36 +3038,133 @@ class ActiveRun {
     this.settleResolvers = [];
   }
 
+  private currentEvidenceRefs(): string[] {
+    const refs: string[] = [];
+    for (const node of this.spec.nodes) {
+      if (this.state.get(node.id)?.state !== 'done') continue;
+      const suffix = `@${this.runId}#${this.attemptRevisions.get(node.id) ?? this.revision}`;
+      refs.push(`node:${node.id}${suffix}`);
+      const output = this.outputs[node.id];
+      for (const declaration of node.outputs ?? []) {
+        if (declaration.kind !== 'artifact' || !(declaration.name in (output?.params ?? {}))) continue;
+        refs.push(`artifact:${node.id}:${declaration.name}${suffix}`);
+      }
+    }
+    return refs;
+  }
+
+  private deterministicEvidenceGaps(): string[] {
+    const gaps: string[] = [];
+    for (const node of this.spec.nodes) {
+      const state = this.state.get(node.id)?.state ?? 'unknown';
+      if (!['done', 'skipped'].includes(state)) gaps.push(`node:${node.id}:${state}`);
+      if (state === 'skipped') continue;
+      const output = this.outputs[node.id];
+      for (const declaration of node.outputs ?? []) {
+        if (declaration.required !== false && !(declaration.name in (output?.params ?? {}))) {
+          gaps.push(`output:${node.id}:${declaration.name}:missing`);
+        }
+      }
+    }
+    if (this.artifactAvailability?.nodeIds.length) gaps.push(`artifact:${this.artifactAvailability.nodeIds.join(',')}:${this.artifactAvailability.reason}`);
+    for (const worker of this.workers.values()) if (['reserved', 'running'].includes(worker.state)) gaps.push(`worker:${worker.workerId}:${worker.state}`);
+    for (const sessionId of this.unconfirmedShutdown) gaps.push(`shutdown:${sessionId}:unknown`);
+    if (this.coordinatorGateEnabled() && this.pendingPlannerResults().length) gaps.push(`planner-results:${this.pendingPlannerResults().length}:unconsumed`);
+    const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    for (const blocker of research?.blockers ?? []) gaps.push(`research:${blocker}`);
+    return gaps;
+  }
+
   private async sendVerification(): Promise<void> {
     const orchestrator = this.opts.orchestratorSessionId;
     if (!orchestrator) {
-      this.finish('completed');
+      this.finish(this.qualityGateEnabled() ? 'failed' : 'completed');
       return;
     }
-    this.attachVerdictListener(orchestrator);
-    const sections = this.spec.nodes.map((n) => {
-      const out = this.outputs[n.id];
-      return `### ${nodeTitle(n)} (${n.id})\n${out ? out.text : '(no output)'}`;
-    });
+    if (this.sourceVersion === 1) this.attachVerdictListener(orchestrator);
     const rubric = this.spec.acceptance_criteria
       ? `Acceptance criteria:\n${this.spec.acceptance_criteria}`
       : `Goal: ${this.spec.goal}`;
+    const summaries = this.spec.nodes.map(node => {
+      const state = this.state.get(node.id);
+      const output = this.outputs[node.id];
+      const verdict = this.nodeVerdicts.get(node.id) ?? this.nodeTimings.get(node.id)?.verdict;
+      return {
+        id: node.id,
+        title: nodeTitle(node),
+        kind: node.kind ?? 'session',
+        state: state?.state ?? 'unknown',
+        attempt: state?.attempt ?? 0,
+        revision: this.attemptRevisions.get(node.id) ?? this.revision,
+        declaredOutputs: (node.outputs ?? []).map(declaration => ({
+          name: declaration.name,
+          kind: declaration.kind ?? 'param',
+          type: declaration.type,
+          required: declaration.required !== false,
+          runtime: declaration.name in (output?.params ?? {})
+            ? declaration.kind === 'artifact'
+              ? { status: 'validated-artifact', hash: (output?.params?.[declaration.name] as { hash?: unknown } | undefined)?.hash }
+              : { status: 'validated-value', type: typeof output?.params?.[declaration.name] }
+            : { status: 'missing' },
+        })),
+        ...(verdict ? { verifierVerdict: { result: verdict.result, reason: verdict.reason } } : {}),
+      };
+    });
+    const evidenceRefs = this.currentEvidenceRefs();
+    const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    const clip = (value: string, limit = 400) => value.length <= limit ? value : `${value.slice(0, limit)}…`;
+    const researchSummary = research ? {
+      coverage: research.coverage,
+      blockers: research.blockers.slice(0, 16).map(value => clip(value)),
+      blockerCount: research.blockers.length,
+      ...(research.report ? {
+        report: {
+          claimRefs: research.report.claimRefs.slice(0, 32),
+          claimRefCount: research.report.claimRefs.length,
+          limitations: research.report.limitations.slice(0, 16).map(value => clip(value)),
+          limitationCount: research.report.limitations.length,
+          unresolved: research.report.unresolved.slice(0, 16).map(value => clip(value)),
+          unresolvedCount: research.report.unresolved.length,
+        },
+      } : {}),
+    } : undefined;
     const message = [
       `The task "${this.spec.title}" has finished running.`,
+      `Task slug: ${this.slug}; runId: ${this.runId}; revision: ${this.revision}.`,
+      `Original goal: ${this.spec.goal}`,
       '',
       rubric,
       '',
-      'Node outputs:',
-      ...sections,
+      `Bounded node/status/output summary: ${JSON.stringify(summaries)}`,
+      ...(researchSummary ? [`Research state summary: ${JSON.stringify(researchSummary)}`] : []),
+      `Current-run evidence reference catalog: ${JSON.stringify(evidenceRefs)}`,
+      `Unsettled deterministic evidence: ${JSON.stringify(this.deterministicEvidenceGaps())}`,
       '',
-      'Verify the final result against the criteria above and summarize the outcome.',
-      'End your reply with a verdict line, on its own line, in exactly one of these forms:',
-      'VERDICT: PASS',
-      'VERDICT: FAIL — <one-line reason>',
-      'If only some subtasks need redoing, name them so only those (and their dependents) re-run:',
-      'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
+      `Use get_task_results with slug=${JSON.stringify(this.slug)} and runId=${JSON.stringify(this.runId)} to read only the exact node results needed for each criterion. Do not infer evidence from this summary and do not request or reproduce the full frozen plan or every node output.`,
+      'Audit the original goal and every acceptance item against current evidence. A narrow check proves only its own scope; historical narration is not current evidence. Missing or conflicting evidence is unknown, never pass.',
+      this.sourceVersion === 3
+        ? `Call submit_task_verdict with runId=${JSON.stringify(this.runId)}, result pass or fail, and bounded checks. Each check must contain criterion, status pass/fail/unknown, and evidenceRefs copied from the current-run catalog (format kind:node[:detail]@runId#revision). PASS requires every check to be pass with evidence. Checks explain gaps but do not choose repair scope; FAIL nodes may name only completed producing nodes. Parent chat messages are not verdicts.`
+        : this.sourceVersion === 2
+          ? 'Call submit_task_verdict with result pass or fail. Parent chat messages are not verdicts.'
+        : [
+            'End your reply with a verdict line, on its own line, in exactly one of these forms:',
+            'VERDICT: PASS',
+            'VERDICT: FAIL — <one-line reason>',
+            'If only some subtasks need redoing, name them so only those (and their dependents) re-run:',
+            'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
+          ].join('\n'),
     ].join('\n');
-    await this.sendToOrchestrator(orchestrator, message);
+    if (this.sourceVersion === 3) {
+      const contextBytes = Buffer.byteLength(message, 'utf8');
+      this.verificationModelRequested = true;
+      this.verificationModelRequests += 1;
+      this.verificationContextBytes += contextBytes;
+      this.recordVerificationDecision(
+        { mode: this.verificationMode(), resolution: 'model', reason: this.finalVerificationDecision().reason },
+        { contextBytes, reserveTokens: this.verifyReserveTokens() },
+      );
+    }
+    await this.sendToOrchestrator(orchestrator, message, 'verification');
   }
 
   /**
@@ -727,81 +3174,116 @@ class ActiveRun {
   private attachVerdictListener(orchestrator: string): void {
     this.verdictOff?.();
     this.verdictOff = this.deps.host.onSessionComplete((evt) => {
-      if (evt.sessionId !== orchestrator) return;
-      // A stopped verification turn is not an answer: the user continues it, and that turn answers.
-      if (evt.reason === 'interrupted' || evt.reason === 'timeout') return;
-      const text = evt.finalText ?? '';
-      // Still verifying with background agents: they wake the orchestrator for the verdict turn.
-      if ((evt.backgroundWorkRunning ?? 0) > 0 && parseVerdict(text).result === 'unparsed') return;
+      if (evt.sessionId !== orchestrator || this.progressParentResume) return;
       this.verdictOff?.();
       this.verdictOff = undefined;
+      const text = evt.finalText ?? this.deps.host.getSessionFinalText(orchestrator) ?? '';
       this.handleVerdict(text);
     });
   }
 
   /** Send to the orchestrator, failing the run (rather than hanging in `verifying`) if the send rejects. */
-  private async sendToOrchestrator(orchestrator: string, message: string): Promise<void> {
+  private async sendToOrchestrator(orchestrator: string, message: string, kind: 'coordination' | 'verification' | 'feedback' = 'coordination'): Promise<void> {
     try {
-      await this.deps.host.sendMessage(orchestrator, message);
-    } catch {
+      await this.deps.host.sendMessage(orchestrator, message, undefined, undefined, {
+        hidden: true, taskContext: { kind, runId: this.runId },
+      });
+    } catch (error) {
       // The verdict will never arrive — detach the listener and settle as failed instead of hanging.
       this.verdictOff?.();
       this.verdictOff = undefined;
-      this.finish('failed');
+      if (!this.isTerminal()) this.finish('failed');
+      else conductorLog.warn('parent-feedback-delivery-failed', { slug: this.slug, runId: this.runId, kind, error });
     }
   }
 
   /**
-   * Route the orchestrator's reply: a parseable VERDICT line is applied directly; an unparsed reply is
-   * first classified by the decision model when one is wired (`deps.decide`), otherwise re-asked.
-   */
-  private handleVerdict(text: string): void {
-    if (this.runStatus !== 'verifying') return; // stopped/finalized while awaiting the verdict
-    writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, '__verdict__', { text });
-    const verdict = parseVerdict(text);
-    if (verdict.result === 'unparsed' && this.deps.decide) {
-      void this.classifyUnparsedVerdict(text);
-      return;
-    }
-    this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes });
-    this.applyVerdict(verdict);
-  }
-
-  /**
-   * Ask the decision model what an unparsed reply concludes. A confident PASS/FAIL is applied like a
-   * parsed one (logged with `via: 'decision'`); anything else is treated as `unparsed` exactly as
-   * before. The run may have been stopped while we waited — re-check before acting.
-   */
-  private async classifyUnparsedVerdict(text: string): Promise<void> {
-    const nodeIds = this.spec.nodes.map((n) => n.id);
-    const outcome = await classifyVerdictWithDecision(text, nodeIds, (request) =>
-      this.deps.decide!(request, { slug: this.slug, runId: this.runId }),
-    );
-    if (this.runStatus !== 'verifying') return;
-    try {
-      if (outcome.kind === 'decided') {
-        const { verdict } = outcome;
-        this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes, via: 'decision', confidence: verdict.confidence });
-        this.applyVerdict({ result: verdict.result, reason: verdict.reason, nodes: verdict.nodes, via: 'decision' });
-        return;
-      }
-      // `via: 'decision'` only when a decision actually ran; an unavailable layer logs like before.
-      this.log(outcome.kind === 'unsure' ? { kind: 'verdict', result: 'unparsed', via: 'decision' } : { kind: 'verdict', result: 'unparsed' });
-      this.applyVerdict({ result: 'unparsed' });
-    } catch (err) {
-      // Same reporting channel as synchronous listener failures (SessionManager logs those); the
-      // async hop would otherwise route this to unhandledRejection.
-      console.error(`[conductor] verdict handling failed for ${this.slug}/${this.runId}:`, err);
-    }
-  }
-
-  /**
-   * Apply a verdict:
+   * Apply the orchestrator's parsed verdict:
    *   PASS      → completed.
    *   unparsed  → re-ask for a well-formed verdict (bounded; not a repair); exhausted → failed.
    *   FAIL      → repair the frontier if budget remains, else failed (iterations/token budget breach).
    */
-  private applyVerdict(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; via?: 'decision' }): void {
+  private handleVerdict(text: string): void {
+    if (this.sourceVersion >= 2) return;
+    if (this.runStatus !== 'verifying') return;
+    writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, '__verdict__', { text });
+    this.handleVerdictObject(parseVerdict(text));
+  }
+
+  private validateFinalChecks(result: 'pass' | 'fail', checks: TaskVerificationCheck[] | undefined): void {
+    if (!checks?.length || checks.length > 64) {
+      throw new TaskControlError(this.runStatus, 'New v3 final verification requires 1-64 structured checks');
+    }
+    const allowedRefs = new Set(this.currentEvidenceRefs());
+    const seen = new Set<string>();
+    for (const [index, check] of checks.entries()) {
+      const keys = Object.keys(check as unknown as Record<string, unknown>);
+      const unknown = keys.filter(key => !['criterion', 'status', 'evidenceRefs', 'note'].includes(key));
+      if (unknown.length) throw new TaskControlError(this.runStatus, `Check ${index + 1} has unknown fields: ${unknown.join(', ')}`);
+      const criterion = check.criterion?.trim();
+      if (!criterion || criterion.length > 1_000) throw new TaskControlError(this.runStatus, `Check ${index + 1} criterion must be 1-1000 characters`);
+      const key = criterion.toLocaleLowerCase();
+      if (seen.has(key)) throw new TaskControlError(this.runStatus, `Duplicate verification criterion: ${criterion}`);
+      seen.add(key);
+      if (!['pass', 'fail', 'unknown'].includes(check.status)) throw new TaskControlError(this.runStatus, `Check ${index + 1} has an invalid status`);
+      if (!Array.isArray(check.evidenceRefs) || check.evidenceRefs.length > 16) throw new TaskControlError(this.runStatus, `Check ${index + 1} evidenceRefs must contain at most 16 items`);
+      if (check.status === 'pass' && check.evidenceRefs.length === 0) throw new TaskControlError(this.runStatus, `PASS check ${index + 1} requires current-run evidence`);
+      const invalidRefs = check.evidenceRefs.filter(ref => typeof ref !== 'string' || ref.length === 0 || ref.length > 512 || !allowedRefs.has(ref));
+      if (invalidRefs.length) throw new TaskControlError(this.runStatus, `Check ${index + 1} references stale, foreign, or unknown evidence: ${invalidRefs.join(', ')}`);
+      if (check.note !== undefined && (!check.note.trim() || check.note.length > 2_000)) throw new TaskControlError(this.runStatus, `Check ${index + 1} note must be 1-2000 characters`);
+    }
+    const nonPass = checks.filter(check => check.status !== 'pass');
+    if (result === 'pass' && nonPass.length) {
+      throw new TaskControlError(this.runStatus, `Cannot accept PASS: ${nonPass.length} verification check(s) are fail or unknown`);
+    }
+    if (result === 'fail' && nonPass.length === 0) {
+      throw new TaskControlError(this.runStatus, 'A FAIL verdict requires at least one fail or unknown check');
+    }
+  }
+
+  private recordVerificationUsage(tokens: number): void {
+    const value = Math.max(0, Math.floor(tokens));
+    if (!value) return;
+    this.verificationTokensUsed += value;
+    this.tokensUsed += value;
+    this.log({ kind: 'verification-usage', tokens: value });
+  }
+
+  private recordLiveVerificationUsage(): void {
+    const orchestrator = this.opts.orchestratorSessionId;
+    if (!orchestrator) return;
+    this.recordVerificationUsage(this.deps.host.getProgressLiveTokens?.(orchestrator) ?? 0);
+  }
+
+  private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; checks?: TaskVerificationCheck[] }): void {
+    if (this.runStatus !== 'verifying') return;
+    if (this.verdictLocked) return;
+    if (this.sourceVersion >= 2 && verdict.result === 'fail' && verdict.nodes?.length) {
+      const invalid = verdict.nodes.filter(id => {
+        const node = this.spec.nodes.find(candidate => candidate.id === id);
+        return this.state.get(id)?.state !== 'done' || !node || node.kind === 'verify' || node.kind === 'judge' || node.kind === 'approval' || node.kind === 'finally';
+      });
+      if (invalid.length) throw new TaskControlError(this.runStatus, `FAIL may rework only completed producing nodes: ${invalid.join(', ')}`);
+    }
+    if (this.sourceVersion === 3 && verdict.result !== 'unparsed') {
+      this.validateFinalChecks(verdict.result, verdict.checks);
+    }
+    if (verdict.result === 'pass') {
+      const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      if (this.spec.research && (!research || research.blockers.length)) throw new TaskControlError(this.runStatus, `Research delivery is unsettled: ${research?.blockers.join('; ') ?? 'frozen state unavailable'}`);
+      this.revalidateCompletedArtifacts();
+      if ([...this.state.values(), ...this.instances.values()].some(state => !['done', 'skipped'].includes(state.state))
+        || [...this.workers.values()].some(worker => ['reserved', 'running'].includes(worker.state))
+        || this.unconfirmedShutdown.size || this.coordinatorGateEnabled() && this.pendingPlannerResults().length) {
+        throw new TaskControlError(this.runStatus, 'Cannot accept PASS: execution, result consumption or artifact validation is unsettled');
+      }
+    }
+    if (this.sourceVersion === 3 && verdict.result !== 'unparsed') this.recordLiveVerificationUsage();
+    this.verdictLocked = true;
+    this.verdictChecks = verdict.checks?.length ?? 0;
+    this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes,
+      ...(verdict.checks?.length ? { checks: structuredClone(verdict.checks) } : {}) });
+
     if (verdict.result === 'pass') {
       this.unparsedReAsks = 0;
       this.finish('completed');
@@ -814,60 +3296,29 @@ class ActiveRun {
         void this.reAskVerdict();
         return;
       }
-      // Repeatedly malformed → don't hang the run forever.
       this.finish('failed');
       return;
     }
 
-    // FAIL — repair the frontier if there is budget for it.
     if (this.repairsUsed >= this.maxRepairs) {
       this.log({ kind: 'budget-breach', metric: 'iterations', value: this.repairsUsed, limit: this.maxRepairs });
       this.finish('failed');
       return;
     }
     if (this.isOverBudget()) {
-      this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.spec.token_budget! });
+      this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.tokenBudget ?? this.spec.token_budget! });
       this.finish('failed');
       return;
     }
     this.repairsUsed += 1;
-    // Scoping needs the verifier's own reason: a FAIL the decision model read out of an unparsed
-    // reply carries a fixed one. A narrowed repair gets one chance; the next FAIL repairs everything.
-    const scopable = this.deps.pickRepairNodes && verdict.via !== 'decision' && !this.lastRepairScoped
-      && (verdict.nodes?.length ?? 0) === 0 && verdict.reason;
-    this.lastRepairScoped = false;
-    if (scopable) {
-      void this.repairAfterScoping(verdict.reason!);
-      return;
-    }
+    this.runStatus = 'repairing';
+    this.log({ kind: 'run-repairing' });
     this.repairForVerdict(verdict.reason, verdict.nodes);
-  }
-
-  /**
-   * Ask the decision model which subtasks a FAIL reason implicates, then repair those (and their
-   * dependents); no answer repairs the whole DAG. Dropped if the run was stopped meanwhile.
-   */
-  private async repairAfterScoping(reason: string): Promise<void> {
-    let nodes: string[] | null = null;
-    try {
-      const candidates = this.spec.nodes.map((n) => ({ id: n.id, description: `${n.title ?? n.id}: ${n.prompt ?? ''}`.trim() }));
-      nodes = await this.deps.pickRepairNodes!(reason, candidates, { slug: this.slug, runId: this.runId });
-    } catch {
-      nodes = null;
-    }
-    if (this.runStatus !== 'verifying') return;
-    try {
-      this.lastRepairScoped = nodes !== null;
-      this.repairForVerdict(reason, nodes ?? undefined);
-    } catch (err) {
-      // Same reporting channel as classifyUnparsedVerdict; the async hop would otherwise route this
-      // to unhandledRejection.
-      console.error(`[conductor] repair failed for ${this.slug}/${this.runId}:`, err);
-    }
   }
 
   /** Re-ask the orchestrator for a parseable verdict line (format-only; does not consume repair budget). */
   private async reAskVerdict(): Promise<void> {
+    this.verdictLocked = false;
     const orchestrator = this.opts.orchestratorSessionId;
     if (!orchestrator) {
       this.finish('completed');
@@ -881,7 +3332,32 @@ class ActiveRun {
       'VERDICT: FAIL — <one-line reason>',
       'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
     ].join('\n');
-    await this.sendToOrchestrator(orchestrator, message);
+    await this.sendToOrchestrator(orchestrator, message, 'verification');
+  }
+
+  /** One bounded structured-format correction; it never consumes business repair budget. */
+  private async reAskStructuredVerdict(): Promise<void> {
+    const orchestrator = this.opts.orchestratorSessionId;
+    if (!orchestrator) {
+      this.finish('failed');
+      return;
+    }
+    const message = [
+      'The previous verification turn ended without an accepted structured verdict. This is the only format-correction turn; do not redo the task or broaden its scope.',
+      `Canonical identity: slug=${JSON.stringify(this.slug)}, runId=${JSON.stringify(this.runId)}, revision=${this.revision}.`,
+      `Allowed current-run evidence refs: ${JSON.stringify(this.currentEvidenceRefs())}`,
+      'Call submit_task_verdict now. Include 1-64 checks; every check needs a non-empty criterion, status pass/fail/unknown, and at most 16 evidenceRefs. PASS requires every check to be pass with evidence. FAIL nodes may name only completed producing nodes.',
+      'Do not write a prose-only verdict. End the turn after the tool accepts the verdict.',
+    ].join('\n');
+    const contextBytes = Buffer.byteLength(message, 'utf8');
+    this.verificationModelRequested = true;
+    this.verificationModelRequests += 1;
+    this.verificationContextBytes += contextBytes;
+    this.recordVerificationDecision(
+      { mode: this.verificationMode(), resolution: 'model', reason: 'structured-format-reask' },
+      { contextBytes, reserveTokens: 0 },
+    );
+    await this.sendToOrchestrator(orchestrator, message, 'verification');
   }
 
   /**
@@ -893,11 +3369,23 @@ class ActiveRun {
   private repairForVerdict(reason: string | undefined, named?: string[]): void {
     const detail = reason ?? 'the result did not meet the acceptance criteria';
     let reset = 0;
+    this.promptCache.clear();
     for (const id of this.computeFrontier(named)) {
       const st = this.state.get(id);
       if (!st || st.state !== 'done') continue;
       st.state = 'pending';
+      delete this.outputs[id];
+      this.submittedOutputs.delete(id);
       st.lastFailure = `The previous result was rejected on verification: ${detail}. Revise your output to meet the acceptance criteria.`;
+      for (const iid of [...this.instances.keys()]) {
+        if (definitionId(iid) === id && this.instances.get(iid)?.state !== 'cancelled') {
+          this.instances.delete(iid);
+          this.instanceOutputs.delete(iid);
+          this.submittedOutputs.delete(iid);
+        }
+      }
+      this.mapItems.delete(id);
+      this.loopIndex.delete(id);
       this.log({ kind: 'node-retry', nodeId: id, attempt: st.attempt, reason: `verdict-fail: ${detail}` });
       reset += 1;
     }
@@ -944,12 +3432,18 @@ class ActiveRun {
   // --- budget ---
 
   private isOverBudget(): boolean {
-    return this.spec.token_budget !== undefined && this.tokensUsed >= this.spec.token_budget;
+    return this.tokenBudget !== undefined && this.tokensUsed >= this.tokenBudget;
   }
 
   private pauseForBudget(): void {
-    this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.spec.token_budget! });
-    this.pause();
+    this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.tokenBudget! });
+    this.budgetBreached = true;
+    if (this.inFlight === 0) {
+      this.runStatus = 'waiting-budget';
+      this.log({ kind: 'run-waiting-budget' });
+      this.coordinatorCheckpoint('budget');
+      this.emitChanged();
+    }
   }
 
   /** True if any node is still waiting to be dispatched (used to avoid pausing a finishable run). */
@@ -964,9 +3458,1093 @@ class ActiveRun {
     return this.runStatus === 'completed' || this.runStatus === 'failed' || this.runStatus === 'stopped';
   }
 
+  private applyCard(sessionId: string, statusId: string): void {
+    void this.deps.host.setSessionStatus(sessionId, statusId);
+    void this.resolveAndMoveColumn(sessionId, statusId);
+  }
+
+  private async resolveAndMoveColumn(sessionId: string, statusId: string): Promise<void> {
+    const column = this.deps.host.resolveKanbanColumn
+      ? await this.deps.host.resolveKanbanColumn(sessionId, statusId)
+      : resolveKanbanColumnId(statusId);
+    if (column) void this.deps.host.setKanbanColumn(sessionId, column);
+  }
+
+  private emitChanged(): void {
+    const snapshot = this.snapshot();
+    this.deps.onRunChanged?.(snapshot);
+    if (snapshot.orchestratorSessionId && this.deps.host.setOrchestrationStatus) {
+      const display = orchestrationDisplayStatus(snapshot);
+      void this.deps.host.setOrchestrationStatus(
+        snapshot.orchestratorSessionId,
+        display.status,
+        display.blocker,
+      );
+    }
+  }
+
+  applyPatch(patch: OrchestrationPatch): RunSnapshot {
+    if (this.isTerminal()) {
+      throw new TaskControlError(this.runStatus, `Cannot patch a ${this.runStatus} run`);
+    }
+    if (this.runStatus === 'waiting-coordinator') {
+      throw new TaskControlError(this.runStatus, 'Use submit_orchestration_decision while waiting for a coordinator checkpoint');
+    }
+    if (this.planningPhase() === 'exhausted' && this.coordinatorGateEnabled()) throw new TaskControlError(this.runStatus, 'Planning is exhausted; create a successor run for new work');
+    const wasVerifying = this.runStatus === 'verifying';
+    const result = validateOrchestrationPatch(patch, {
+      spec: this.spec,
+      revision: this.revision,
+      runId: this.runId,
+      seenDecisionIds: this.seenDecisionIds,
+      nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
+      allowedModels: this.deps.allowedModels,
+      researchRecords: loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId)?.records,
+      invalidPatchCount: this.invalidPatchCount,
+      pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
+    });
+    if (!result.ok) {
+      this.invalidPatchCount += 1;
+      this.writeCheckpoint(Math.max(0, this.nextSeq - 1));
+      if (result.pauseForReview) {
+        this.runStatus = 'paused';
+        this.log({ kind: 'run-paused' });
+        this.emitChanged();
+      }
+      throw new TaskControlError(this.runStatus, result.error);
+    }
+    this.commitPlanPatch(result, patch);
+    if (result.action === 'pause') {
+      this.pause();
+    } else if (wasVerifying) {
+      // A verification-time patch represents more work, so invalidate the
+      // outstanding verdict request and execute the new revision before asking
+      // the coordinator for another structured verdict.
+      this.runStatus = 'running';
+      this.verdictLocked = false;
+      this.log({ kind: 'run-resumed' });
+      this.scheduleReady();
+    } else {
+      this.scheduleReady();
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  private commitPlanPatch(result: PatchOk | undefined, patch: Pick<OrchestrationPatch, 'decisionId' | 'baseRevision' | 'rationale' | 'consumedResults' | 'plannerPhase' | 'changeKind'>, decision?: OrchestrationDecision): void {
+    // Stage immutable revision first. No in-memory plan changes on write failure.
+    if (result) writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, result.revision, result.spec);
+    const logPath = join(runDir(this.deps.workspaceRoot, this.slug, this.runId), 'run-log.jsonl');
+    const logLength = statSync(logPath).size;
+    const previous = { spec: this.spec, revision: this.revision, state: new Map([...this.state].map(([id, state]) => [id, { ...state }])),
+      edges: this.edges, dependents: this.dependents, seen: new Set(this.seenDecisionIds), completed: new Set(this.completedCheckpointIds), consumed: new Set(this.consumedResultIds), decisionSeqs: new Set(this.decisionEventSeqs), phase: this.plannerPhase, invalid: this.invalidPatchCount, seq: this.nextSeq };
+    try {
+      if (result) { this.spec = result.spec; this.revision = result.revision; }
+      this.invalidPatchCount = 0;
+      this.seenDecisionIds.add(patch.decisionId);
+      if (decision) this.completedCheckpointIds.add(decision.checkpointId);
+      const consumedResults = patch.consumedResults ?? (decision ? decision.consumedResults ?? this.coordinatorGate?.resultEventIds ?? [] : []);
+      if (decision?.action !== 'pause') for (const id of consumedResults) this.consumedResultIds.add(id);
+      this.plannerPhase = patch.plannerPhase ?? (result ? 'active' : this.allNodesSettled() ? 'draining' : this.plannerPhase);
+      this.edges = materializeDeps(this.spec); this.dependents = undefined;
+      for (const node of this.spec.nodes) if (!this.state.has(node.id)) this.state.set(node.id, { state: 'pending', attempt: 0 });
+      // Validated cancellation removes only pending/ready nodes from the
+      // canonical plan. Keep their audit event, not an orphan execution state.
+      for (const id of result?.cancelled ?? []) this.state.delete(id);
+      // Append both facts, then atomically checkpoint revision + decision identity once.
+      const t = this.deps.now ? this.deps.now() : new Date().toISOString();
+      const change = result ? { revision: this.revision, decisionId: patch.decisionId, kind: patch.changeKind ?? 'structure' as const, reason: patch.rationale,
+        added: result.spec.nodes.filter(node => !previous.state.has(node.id)).map(node => node.id),
+        updated: result.spec.nodes.filter(node => previous.spec.nodes.some(old => old.id === node.id && JSON.stringify(old) !== JSON.stringify(node))).map(node => node.id),
+        cancelled: result.cancelled } : undefined;
+      if (decision) { this.decisionEventSeqs.add(this.nextSeq); appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
+        kind: 'coordinator-decision', checkpointId: decision.checkpointId, decisionId: decision.decisionId, action: decision.action, baseRevision: decision.baseRevision,
+        consumedResults: decision.action === 'pause' ? [] : consumedResults, plannerPhase: this.planningPhase(),
+        continueRequest: decision.action === 'continue' ? { rationale: decision.rationale, consumedResults: decision.consumedResults, plannerPhase: decision.plannerPhase } : undefined }); }
+      if (result) { this.decisionEventSeqs.add(this.nextSeq); appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
+        kind: 'orchestration-patch', decisionId: patch.decisionId, baseRevision: patch.baseRevision, rationale: patch.rationale,
+        added: change!.added, updated: change!.updated, cancelled: result.cancelled.length ? result.cancelled : undefined, consumedResults, plannerPhase: this.planningPhase(), changeKind: patch.changeKind ?? 'structure' }); }
+      this.writeCheckpoint(this.nextSeq - 1);
+      if (change) this.planChanges.push(change);
+    } catch (error) {
+      this.spec = previous.spec; this.revision = previous.revision; this.state.clear(); for (const [id, state] of previous.state) this.state.set(id, state);
+      this.edges = previous.edges; this.dependents = previous.dependents;
+      this.seenDecisionIds.clear(); for (const id of previous.seen) this.seenDecisionIds.add(id);
+      this.completedCheckpointIds.clear(); for (const id of previous.completed) this.completedCheckpointIds.add(id);
+      this.consumedResultIds.clear(); for (const id of previous.consumed) this.consumedResultIds.add(id);
+      this.decisionEventSeqs.clear(); for (const seq of previous.decisionSeqs) this.decisionEventSeqs.add(seq);
+      this.plannerPhase = previous.phase;
+      this.invalidPatchCount = previous.invalid; this.nextSeq = previous.seq;
+      truncateSync(logPath, logLength);
+      throw error;
+    }
+  }
+
+  currentSpec(): TaskSpec {
+    return this.spec;
+  }
+
+  private pendingPlannerResults(): PlannerResultEvent[] {
+    return [...this.resultEvents.values()].filter(event => !this.consumedResultIds.has(event.id));
+  }
+
+  private allNodesSettled(): boolean {
+    return this.inFlight === 0 && [...this.state.values(), ...this.instances.values()].every(state => isTerminalNodeState(state.state));
+  }
+
+  private planningPhase(): PlannerPhase {
+    return this.plannerPhase === 'draining' && this.allNodesSettled() && !this.pendingPlannerResults().length ? 'exhausted' : this.plannerPhase;
+  }
+
+  private coordinatorCheckpoint(reason: string): void {
+    if (this.sourceVersion === 3) return;
+    if (!isTasksOrchestrateEnabled() || this.spec.runner !== 'orchestrate') return;
+    if (reason === 'batch') return;
+    const orch = this.opts.orchestratorSessionId;
+    if (!orch) return;
+    void this.sendToOrchestrator(
+      orch,
+      `Conductor checkpoint (${reason}). Revision ${this.revision}. Call submit_orchestration_patch or continue.`,
+    );
+  }
+
+  private coordinatorGateEnabled(): boolean {
+    return (
+      this.sourceVersion === 3
+      && this.spec.runner === 'orchestrate'
+      && this.plannerRequired
+      && !!this.opts.orchestratorSessionId
+      && (this.spec.execution?.coordinator_gate?.mode ?? 'required') !== 'off'
+    );
+  }
+
+  /** Frozen research retains stage review; known ordinary dependencies can advance automatically. */
+  private adaptiveScheduling(): boolean {
+    return this.spec.execution?.coordinator_gate?.mode === 'adaptive' && !this.spec.research;
+  }
+
+  private verificationMode(): VerificationMode {
+    return resolveVerificationMode(this.spec.execution?.verification);
+  }
+
+  /** Nodes whose values constitute the declared delivery; falls back to graph terminals. */
+  private deliveryNodeIds(): Set<string> {
+    const explicit = new Set<string>();
+    for (const value of Object.values(this.spec.outputs ?? {})) {
+      for (const ref of extractRefs(value)) if (ref.kind === 'node') explicit.add(ref.nodeId);
+    }
+    if (explicit.size) return explicit;
+    const terminals = this.spec.nodes.filter(node => node.kind !== 'finally' && (this.dependentsMap().get(node.id)?.size ?? 0) === 0);
+    return new Set((terminals.length ? terminals : this.spec.nodes.filter(node => node.kind !== 'finally')).map(node => node.id));
+  }
+
+  /** A verifier covers delivery only when it runs after every declared delivery node (or is itself the delivery). */
+  private coveringVerifierIds(requirePass: boolean): string[] {
+    const delivery = this.deliveryNodeIds();
+    return this.spec.nodes.flatMap(node => {
+      if (node.kind !== 'verify' && node.kind !== 'judge') return [];
+      const covered = dependencyAncestors(node.id, this.edges);
+      if (![...delivery].every(id => id === node.id || covered.has(id))) return [];
+      if (!requirePass) return [node.id];
+      const verdict = this.nodeVerdicts.get(node.id) ?? this.nodeTimings.get(node.id)?.verdict;
+      return this.state.get(node.id)?.state === 'done' && verdict?.result === 'pass' ? [node.id] : [];
+    });
+  }
+
+  private deterministicOnlyDelivery(): boolean {
+    const delivery = this.deliveryNodeIds();
+    const deliveryAndAncestors = new Set<string>();
+    for (const id of delivery) {
+      deliveryAndAncestors.add(id);
+      for (const ancestor of dependencyAncestors(id, this.edges)) deliveryAndAncestors.add(ancestor);
+    }
+    return deliveryAndAncestors.size > 0 && [...deliveryAndAncestors].every(id => {
+      const node = this.spec.nodes.find(candidate => candidate.id === id);
+      return !!node && !isSessionLikeKind(node.kind);
+    });
+  }
+
+  private finalVerificationDecision(): { mode: VerificationMode; resolution: VerificationResolution; reason: string } {
+    const mode = this.verificationMode();
+    if (mode === 'off') return { mode, resolution: 'disabled', reason: 'explicit-off' };
+    if (mode === 'required') return { mode, resolution: 'model', reason: 'explicit-required' };
+    if (!this.spec.acceptance_criteria?.trim()) return { mode, resolution: 'disabled', reason: 'no-acceptance-criteria' };
+    if (this.spec.research) return { mode, resolution: 'model', reason: 'research-requires-semantic-review' };
+    const covering = this.coveringVerifierIds(true);
+    if (covering.length) return { mode, resolution: 'reused-node-verdict', reason: `covering-verifier:${covering.join(',')}` };
+    if (this.deterministicOnlyDelivery()) return { mode, resolution: 'disabled', reason: 'deterministic-only-delivery' };
+    return { mode, resolution: 'model', reason: 'acceptance-not-covered-by-terminal-verifier' };
+  }
+
+  /** Whether worker scheduling must preserve a final-model reserve. */
+  private qualityGateEnabled(): boolean {
+    if (this.sourceVersion !== 3) return false;
+    const mode = this.verificationMode();
+    if (mode === 'off') return false;
+    if (mode === 'required') return true;
+    if (!this.spec.acceptance_criteria?.trim()) return false;
+    if (this.spec.research) return true;
+    if (this.coveringVerifierIds(false).length) return false;
+    return !this.deterministicOnlyDelivery();
+  }
+
+  private recordVerificationDecision(decision: { mode: VerificationMode; resolution: VerificationResolution; reason: string }, extra: { contextBytes?: number; reserveTokens?: number } = {}): void {
+    if (decision.resolution !== 'model' && this.verificationDecisionLogged) return;
+    this.verificationResolution = decision.resolution;
+    this.log({ kind: 'verification-decision', ...decision, ...extra });
+    if (decision.resolution !== 'model') this.verificationDecisionLogged = true;
+  }
+
+  recordProgressUsage(sessionId: string, tokens: number): void {
+    this.tokensUsed += tokens;
+    this.log({ kind: 'progress-usage', sessionId, tokens, tokensUsed: this.tokensUsed });
+  }
+
+  progressAllowance(evaluationTokens: number): number {
+    if (!this.tokenBudget) return Math.max(0, 32_000 - evaluationTokens);
+    const sessions = new Set([...this.sessionToNode.keys(), ...(this.opts.orchestratorSessionId ? [this.opts.orchestratorSessionId] : [])]);
+    const liveTokens = [...sessions].reduce((sum, id) => sum + (this.deps.host.getProgressLiveTokens?.(id) ?? 0), 0);
+    return Math.max(0, Math.min(this.tokenBudget * 0.1 - evaluationTokens,
+      this.tokenBudget - this.verifyReserveTokens() - this.tokensUsed - liveTokens));
+  }
+
+  requestProgressReview(revision: number | undefined, summary: string): boolean {
+    if (revision !== this.revision || this.coordinatorGate || this.runStatus !== 'running') return false;
+    if (!this.coordinatorGateEnabled()) { this.pause(); return true; }
+    return this.enterCoordinatorGate('progress-review', summary);
+  }
+
+  private verifyReserveTokens(): number {
+    if (!this.qualityGateEnabled()) return 0;
+    return computeVerifyReserve(this.tokenBudget, this.spec.execution?.verification?.reserve_ratio ?? 0.2);
+  }
+
+  private workerBudgetExhausted(): boolean {
+    if (this.tokenBudget === undefined || !this.qualityGateEnabled()) return false;
+    return this.tokensUsed >= this.tokenBudget - this.verifyReserveTokens();
+  }
+
+  private budgetBlocksDispatch(node: TaskNode): boolean {
+    if (this.sourceVersion === 3 && this.qualityGateEnabled() && node.kind !== 'verify' && node.kind !== 'judge') {
+      return this.workerBudgetExhausted();
+    }
+    return this.isOverBudget();
+  }
+
+  private enterCoordinatorGate(reason: CoordinatorGateReason, advisory?: string): boolean {
+    if (!this.coordinatorGateEnabled()) return false;
+    if (reason === 'first-schedule' && this.adaptiveScheduling()) return false;
+    if (this.coordinatorGate && !this.completedCheckpointIds.has(this.coordinatorGate.checkpointId)) return true;
+    const now = this.nowMs();
+    const checkpointId = `cp-${this.runId}-${this.revision}-${reason}-${this.nextSeq}`;
+    const deadline = new Date(now + COORDINATOR_GATE_TIMEOUT_SECONDS * 1000).toISOString();
+    this.coordinatorGate = { checkpointId, reason, revision: this.revision, deadline, resultEventIds: this.pendingPlannerResults().map(event => event.id) };
+    this.lastCoordinatorTimeout = false;
+    this.runStatus = 'waiting-coordinator';
+    this.coordinatorWaits += 1;
+    this.coordinatorWaitStartedAt = now;
+    this.log({ kind: 'run-waiting-coordinator' });
+    this.log({ kind: 'coordinator-request', checkpointId, reason, revision: this.revision, deadline, resultEventIds: this.coordinatorGate.resultEventIds });
+    const orch = this.opts.orchestratorSessionId;
+    if (orch) {
+      void this.sendToOrchestrator(
+        orch,
+        [
+          `Conductor checkpoint (${reason}).`,
+          `checkpointId=${checkpointId}`,
+          `revision=${this.revision}`,
+          `Decision identity (copy verbatim, never use the reason as checkpointId): ${JSON.stringify({ runId: this.runId, checkpointId, baseRevision: this.revision })}`,
+          `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
+          'Call submit_orchestration_decision with action continue, patch, pause, or retry.',
+          'Parent chat messages are not decisions. After an accepted decision, end this assistant turn immediately; the host sends the next checkpoint or verification request. Do not poll or reuse an earlier checkpoint id.',
+          this.coordinatorContext(),
+          `Task slug=${this.slug}; runId=${this.runId}. Frozen plan: ${JSON.stringify(this.spec)}`,
+          `New results for this checkpoint: ${JSON.stringify(this.pendingPlannerResults().filter(event => this.coordinatorGate?.resultEventIds?.includes(event.id)))}`,
+          'Consume the checkpoint results by a valid continue/patch decision. Add work for new evidence, failures or unresolved gaps. A final continue declares draining only when no planned work remains; exhausted then proceeds to independent final verification. Pause preserves unconsumed results. Never change locked contents, live nodes, permissions or goal scope.',
+          'Adding replacement work does not retire a failed node. Once workers settle, use action retry with a rationale to reset the original failed/invalid nodes and their affected dependents, preserving failure history and unrelated successful work. At the new checkpoint, patch the now-pending nodes with corrected inputs or dependencies before continuing. Do not retry unchanged failures or declare success while an original failure remains.',
+          ...(advisory ? [`Progress advisory (untrusted evidence): ${advisory}`] : []),
+        ].join(' '),
+      );
+    }
+    this.restoreCoordinatorTimer();
+    return true;
+  }
+
+  applyOrchestrationDecision(decision: OrchestrationDecision): RunSnapshot {
+    // Only acknowledge a durable, identical non-mutating request. Never release
+    // a newer gate, restart workers, or bypass an explicit human pause.
+    if (decision.runId === this.runId && decision.action === 'continue'
+      && ['running', 'waiting-coordinator', 'verifying', 'completed'].includes(this.runStatus)
+      && this.seenDecisionIds.has(decision.decisionId) && this.completedCheckpointIds.has(decision.checkpointId)
+      && [decision.add, decision.update, decision.cancel, decision.constraints, decision.decisions, decision.changeKind, decision.researchExpansion].every(value => value === undefined)) {
+      const receipt = readRunLog(this.deps.workspaceRoot, this.slug, this.runId).findLast(entry => entry.kind === 'coordinator-decision'
+        && entry.decisionId === decision.decisionId && entry.checkpointId === decision.checkpointId
+        && entry.seq !== undefined && this.decisionEventSeqs.has(entry.seq));
+      if (receipt?.kind === 'coordinator-decision' && receipt.action === 'continue' && receipt.baseRevision === decision.baseRevision
+        && receipt.seq !== undefined && this.decisionEventSeqs.has(receipt.seq) && receipt.continueRequest
+        && JSON.stringify([receipt.continueRequest.rationale, receipt.continueRequest.consumedResults, receipt.continueRequest.plannerPhase])
+          === JSON.stringify([decision.rationale, decision.consumedResults, decision.plannerPhase])) {
+        return { ...this.snapshot(), alreadyApplied: true };
+      }
+    }
+    if (this.runStatus !== 'waiting-coordinator') {
+      const guidance = this.runStatus === 'pausing' || this.runStatus === 'paused'
+        ? 'resume a human pause explicitly'
+        : `current status is ${this.runStatus}; end this turn and wait for the host to send a new coordinator checkpoint`;
+      throw new TaskControlError(this.runStatus, `Run is not waiting for a coordinator; ${guidance}`, {
+        runId: this.runId, revision: this.revision, status: this.runStatus,
+        coordinatorGate: this.coordinatorGate ? structuredClone(this.coordinatorGate) : undefined,
+      });
+    }
+    const result = validateOrchestrationDecision(
+      decision,
+      {
+        runId: this.runId,
+        revision: this.revision,
+        gate: this.coordinatorGate,
+        seenDecisionIds: this.seenDecisionIds,
+        completedCheckpointIds: this.completedCheckpointIds,
+        pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
+      },
+      {
+        spec: this.spec,
+        revision: this.revision,
+        runId: this.runId,
+        seenDecisionIds: this.seenDecisionIds,
+        nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
+        allowedModels: this.deps.allowedModels,
+        researchRecords: loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId)?.records,
+        invalidPatchCount: this.invalidPatchCount,
+        pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
+      },
+    );
+    if (!result.ok) {
+      const race = decision.baseRevision !== this.revision || decision.checkpointId !== this.coordinatorGate?.checkpointId || this.seenDecisionIds.has(decision.decisionId);
+      if (decision.action === 'patch' && !race) {
+        this.invalidPatchCount += 1;
+        this.writeCheckpoint(Math.max(0, this.nextSeq - 1));
+        if (result.pauseForReview) {
+          this.clearCoordinatorGate();
+          this.runStatus = 'paused';
+          this.log({ kind: 'run-paused' });
+          this.emitChanged();
+        }
+      }
+      throw new TaskControlError(this.runStatus, result.error, {runId:this.runId,revision:this.revision,status:this.runStatus,coordinatorGate:this.coordinatorGate ? structuredClone(this.coordinatorGate) : undefined});
+    }
+    const reason = this.coordinatorGate?.reason;
+    const consumedResults = decision.consumedResults ?? this.coordinatorGate?.resultEventIds ?? [];
+    if (result.action === 'retry') {
+      // Reuse explicit run recovery instead of hiding the failed node behind a
+      // replacement. Validate safe settlement before consuming this checkpoint.
+      if (this.inFlight || this.hasUnsettledRunningNode() || this.hasExpandingWork()) throw new TaskControlError(this.runStatus, 'Wait for active workers to settle before retrying failed nodes');
+      this.assertSensitiveReady();
+      if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+      // The authorized coordinator is executing this decision, not restarting
+      // itself. Every execution worker must still have confirmed shutdown.
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions(false));
+      this.commitPlanPatch(undefined, { ...decision, consumedResults, plannerPhase: 'active', rationale: decision.rationale! }, decision);
+      this.clearCoordinatorGate();
+      return this.retryFailedNodes(true);
+    }
+    if (result.action === 'patch' && result.patch) {
+      this.commitPlanPatch(result.patch, { ...decision, consumedResults, rationale: decision.rationale ?? '' }, decision);
+    } else {
+      this.commitPlanPatch(undefined, { ...decision, consumedResults, rationale: decision.rationale ?? '' }, decision);
+    }
+    this.clearCoordinatorGate();
+    if (result.action === 'pause') {
+      this.runStatus = 'paused';
+      this.log({ kind: 'run-paused' });
+      this.emitChanged();
+      return this.snapshot();
+    }
+    this.runStatus = 'running';
+    this.log({ kind: 'run-resumed' });
+    if (reason === 'before-verify' && this.allNodesSettled() && !this.pendingPlannerResults().length && this.planningPhase() === 'exhausted') this.enterVerifying({ skipGate: true });
+    else this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  submitNodeVerdict(sessionId: string, payload: TaskNodeVerdict): { ok: true } | { ok: false; error: string } {
+    const nodeId = payload.nodeId ?? this.sessionToNode.get(sessionId);
+    if (!nodeId) return { ok: false, error: 'Session is not a node in this run' };
+    const defId = definitionId(nodeId);
+    const node = this.spec.nodes.find((n) => n.id === defId);
+    if (!node || (node.kind !== 'verify' && node.kind !== 'judge')) {
+      return { ok: false, error: 'Only verify/judge nodes may submit a node verdict' };
+    }
+    const active = this.instances.get(nodeId) ?? this.state.get(defId);
+    if (!active || active.state !== 'running' || active.sessionId !== sessionId) {
+      return { ok: false, error: 'Session is not the active attempt for this node' };
+    }
+    if (this.nodeVerdicts.has(nodeId) || this.nodeVerdicts.has(defId)) {
+      return { ok: false, error: 'A node verdict was already submitted for this attempt' };
+    }
+    const parsed = validateTaskNodeVerdict(payload);
+    if (!parsed.ok) return parsed;
+    if (parsed.verdict.result === 'fail') {
+      const ancestors = dependencyAncestors(defId, this.edges);
+      const invalid = parsed.verdict.nodes!.filter(id => !ancestors.has(id) || this.state.get(id)?.state !== 'done');
+      if (invalid.length) return { ok: false, error: `FAIL may rework only completed producing dependencies, not pending, unknown or unrelated nodes: ${invalid.join(', ')}. An audit of supplied historical material can complete with defect findings; return those findings for the coordinator to schedule correction.` };
+    }
+    this.nodeVerdicts.set(nodeId, { ...parsed.verdict, nodeId });
+    this.nodeVerdicts.set(defId, { ...parsed.verdict, nodeId: defId });
+    this.timing(nodeId).verdict = {
+      result: parsed.verdict.result,
+      reason: parsed.verdict.reason,
+      evidence: parsed.verdict.evidence,
+      nodes: parsed.verdict.nodes,
+    };
+    this.timing(defId).verdict = this.timing(nodeId).verdict;
+    this.log({
+      kind: 'node-verdict',
+      nodeId: defId,
+      result: parsed.verdict.result,
+      reason: parsed.verdict.reason,
+      nodes: parsed.verdict.nodes,
+      evidence: parsed.verdict.evidence,
+    });
+    if (parsed.verdict.result === 'fail') {
+      if (this.repairsUsed >= this.maxRepairs) {
+        this.failNode(nodeId, parsed.verdict.reason ?? 'node verdict failed', sessionId);
+        return { ok: true };
+      }
+      this.repairsUsed += 1;
+      this.requeueVerifyAfterFail(nodeId, sessionId, parsed.verdict.reason);
+      this.repairForVerdict(parsed.verdict.reason, parsed.verdict.nodes);
+      this.notifyConnectionReleased();
+    }
+    return { ok: true };
+  }
+
+  taskHelp(sessionId: string, generation: number, input: TaskHelpInput): Promise<unknown> | unknown {
+    if (this.isTerminal() || this.stopRequested) throw new Error('Help belongs to an active run; stopped or completed attempts cannot receive replies');
+    if (input.action !== 'request') {
+      if (!input.responseId?.trim() || !input.response?.trim()) throw new Error('Root response requires an idempotent response identity and text');
+      if (sessionId !== this.opts.orchestratorSessionId || input.runId !== this.runId) throw new Error('Only the owning root may answer this run');
+      if (input.baseRevision !== this.revision) throw new Error(`Stale help response revision; current revision is ${this.revision}`);
+      const request = this.help.get(input.requestId);
+      if (!request || request.state === 'cancelled') throw new Error('Help request is unavailable or belongs to a retired attempt');
+      const old = request.responses.find(response => response.id === input.responseId);
+      if (old) {
+        if (old.action !== input.action || old.text !== input.response) throw new Error('Response identity already has a different disposition');
+        return { id: request.id, state: request.state };
+      }
+      if (request.state === 'answered') throw new Error('This help request already has an answer');
+      const state = this.instances.get(request.nodeId) ?? this.state.get(request.nodeId);
+      if (state?.state !== 'waiting-help' || state.sessionId !== request.sessionId || state.attempt !== request.attempt || state.generation !== undefined && state.generation !== request.generation) throw new Error('Help request no longer owns this execution attempt');
+      const summary = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      if (request.claimRefs.some(ref => !summary?.claims.some(claim => claim.id === ref.id && claim.version === ref.version))
+        || request.sourceRefs.some(ref => !summary?.sources.some(source => source.id === ref.id && source.version === ref.version))) {
+        // Reject the obsolete answer, but unblock its retained tool context so
+        // the worker can refresh canonical versions instead of waiting forever.
+        this.saveHelp({ ...request, state: 'cancelled', cancellationReason: 'Help inputs changed; refresh get_task_results and use current claim/source versions. No stale response was applied; no permissions were granted.' });
+        this.scheduleReady();
+        return { id: request.id, state: 'cancelled', needsRefresh: true };
+      }
+      const next: TaskHelpRecord = { ...request, state: input.action === 'answer' ? 'answered' : 'waiting-user',
+        responses: [...request.responses, { id: input.responseId!, action: input.action, text: input.response!, revision: this.revision }] };
+      this.saveHelp(next); this.scheduleReady();
+      return { id: next.id, state: next.state };
+    }
+    const nodeId = this.sessionToNode.get(sessionId);
+    const state = nodeId ? this.instances.get(nodeId) ?? this.state.get(nodeId) : undefined;
+    if (!nodeId || !state || !['running', 'waiting-help'].includes(state.state) || state.sessionId !== sessionId
+      || state.generation !== undefined && state.generation !== generation || !this.opts.orchestratorSessionId) throw new Error('Only a current bound task worker can request coordinator help');
+    if (!input.problem?.trim() || !input.tried?.length || !input.needed?.trim()) throw new Error('Structured help requires problem, attempted steps and needed decision');
+    const summary = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    if (input.claimRefs?.some(ref => !summary?.claims.some(claim => claim.id === ref.id && claim.version === ref.version))
+      || input.sourceRefs?.some(ref => !summary?.sources.some(source => source.id === ref.id && source.version === ref.version))) throw new Error('Help references unknown or stale claim/source versions');
+    const id = `${nodeId}@${state.attempt}@${generation}:${input.requestId}`;
+    const request: TaskHelpRecord = { id, requestId: input.requestId, runId: this.runId, nodeId, attempt: state.attempt,
+      revision: this.attemptRevisions.get(nodeId) ?? this.revision, sessionId, generation, problem: input.problem,
+      tried: input.tried, needed: input.needed, claimRefs: input.claimRefs ?? [], sourceRefs: input.sourceRefs ?? [], state: 'waiting', responses: [] };
+    const old = this.help.get(id);
+    if (old) {
+      if (planValueKey({ ...old, state: 'waiting', responses: [] }) !== planValueKey(request)) throw new Error('Request identity already has different content');
+      const waiter = this.helpWaiters.get(id);
+      if (waiter) return waiter.promise;
+      throw new Error('This request lost its execution context; recover the task checkpoint before requesting again');
+    }
+    if (state.state === 'waiting-help') throw new Error('Resolve the existing help request first');
+    if (this.submittedOutputs.has(nodeId)) throw new Error('A submitted result must settle before requesting a different task decision');
+    let resolve!: (value: unknown) => void, reject!: (error: Error) => void;
+    const promise = new Promise<unknown>((yes, no) => { resolve = yes; reject = no; });
+    // Install the waiter before notifying the coordinator; a synchronous reply
+    // cannot disappear between persistence and registering the continuation.
+    this.helpWaiters.set(id, { promise, resolve, reject });
+    try { this.saveHelp(request); }
+    catch (error) { this.helpWaiters.delete(id); throw error; }
+    state.state = 'waiting-help'; state.lastFailure = input.problem;
+    const timer = this.sessionTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer); this.sessionTimers.delete(sessionId);
+      this.helpTimeouts.set(id, Math.max(0, (this.sessionTimeoutDeadlines.get(sessionId) ?? this.nowMs()) - this.nowMs()));
+      this.sessionTimeoutDeadlines.delete(sessionId);
+    }
+    this.inFlight = Math.max(0, this.inFlight - 1); this.releaseConnection(nodeId);
+    this.log({ kind: 'node-finished', nodeId, sessionId, state: 'waiting-help', reason: input.problem });
+    const root = this.opts.orchestratorSessionId;
+    void Promise.resolve().then(() => this.deps.host.sendMessage(root,
+      `Structured worker help (only node ${JSON.stringify(nodeId)} is waiting): ${JSON.stringify(request)}\nInspect current run revision and answer with task_help. Resolve within existing authority; if the goal, locked decisions or permissions need change, record needs-user and call clarify so the user gets the shared clarification card. Do not ask that decision in free text. Unrelated tasks continue. A reply never grants permissions.`, undefined, undefined, { hidden: true })).catch(error => conductorLog.warn('help-notification-failed', { id, error }));
+    this.scheduleReady(); this.emitChanged();
+    return promise;
+  }
+
+  private saveHelp(help: TaskHelpRecord): void {
+    this.log({ kind: 'task-help', help: structuredClone(help) });
+    this.help.set(help.id, structuredClone(help)); this.emitChanged();
+  }
+
+  private cancelNodeHelp(nodeId: string, reason: string): void {
+    for (const request of this.help.values()) if (request.nodeId === nodeId && request.state !== 'cancelled'
+      && (this.helpWaiters.has(request.id) || ['waiting', 'waiting-user'].includes(request.state)
+        || (this.instances.get(nodeId) ?? this.state.get(nodeId))?.state === 'waiting-help')) {
+      this.saveHelp({ ...request, state: 'cancelled', cancellationReason: reason });
+      this.helpWaiters.get(request.id)?.reject(new Error(reason)); this.helpWaiters.delete(request.id);
+      this.helpTimeouts.delete(request.id);
+    }
+  }
+
+  private startSessionTimeout(nodeId: string, sessionId: string, remaining: number): void {
+    this.sessionTimeoutDeadlines.set(sessionId, this.nowMs() + remaining);
+    const timer = setTimeout(() => {
+      this.sessionTimers.delete(sessionId); this.sessionTimeoutDeadlines.delete(sessionId);
+      const active = this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId));
+      if (active?.state !== 'running' || active.sessionId !== sessionId) return;
+      this.failNode(nodeId, 'node-timeout', sessionId, 'error');
+      void (async () => {
+        try {
+          const stopped = await this.deps.host.stopSwarm?.(sessionId);
+          if (!stopped?.stoppedSessionIds.includes(sessionId)) await this.deps.host.cancelProcessing(sessionId, true);
+        } catch (error) { conductorLog.warn('timeout-cancel-failed', { slug: this.slug, runId: this.runId, sessionId, error }); }
+      })();
+    }, remaining);
+    this.sessionTimers.set(sessionId, timer);
+  }
+
+  private resumeAnsweredHelp(): void {
+    for (const request of this.help.values()) {
+      if (!['answered', 'cancelled'].includes(request.state) || !this.helpWaiters.has(request.id) || this.inFlight >= this.maxParallel) continue;
+      const state = this.instances.get(request.nodeId) ?? this.state.get(request.nodeId);
+      const node = this.spec.nodes.find(node => node.id === definitionId(request.nodeId));
+      if (state?.state !== 'waiting-help' || !node || state.sessionId !== request.sessionId || state.attempt !== request.attempt) continue;
+      if (!this.tryAcquireConnection(node, request.nodeId)) continue;
+      state.state = 'running'; delete state.lastFailure; this.inFlight++;
+      const remaining = this.helpTimeouts.get(request.id);
+      if (remaining !== undefined) {
+        this.startSessionTimeout(request.nodeId, request.sessionId, remaining);
+        this.helpTimeouts.delete(request.id);
+      }
+      this.log({ kind: 'node-help-resumed', nodeId: request.nodeId, requestId: request.id });
+      if (request.state === 'cancelled') this.helpWaiters.get(request.id)!.reject(new Error(request.cancellationReason));
+      else this.helpWaiters.get(request.id)!.resolve({ id: request.id, state: 'answered', response: request.responses.at(-1)!.text,
+        permissionGranted: false, instruction: 'Continue only the affected task from retained tool results; never replay completed operations.' });
+      this.helpWaiters.delete(request.id);
+    }
+  }
+
+  expireCoordinatorGate(nowIso?: string): void {
+    if (this.runStatus !== 'waiting-coordinator' || !this.coordinatorGate) return;
+    const now = nowIso ? Date.parse(nowIso) : Date.now();
+    if (Date.parse(this.coordinatorGate.deadline) > now) return;
+    const checkpointId = this.coordinatorGate.checkpointId;
+    this.lastCoordinatorTimeoutReason = this.coordinatorGate.reason;
+    this.log({ kind: 'coordinator-timeout', checkpointId });
+    this.clearCoordinatorGate();
+    this.lastCoordinatorTimeout = true;
+    this.runStatus = 'paused';
+    this.log({ kind: 'run-paused' });
+    this.emitChanged();
+  }
+
+  private clearCoordinatorGate(): void {
+    if (this.coordinatorWaitStartedAt !== undefined) {
+      this.coordinatorWaitMs += Math.max(0, this.nowMs() - this.coordinatorWaitStartedAt);
+      this.coordinatorWaitStartedAt = undefined;
+    }
+    this.coordinatorGate = null;
+    for (const timer of this.coordinatorTimers) clearTimeout(timer);
+    this.coordinatorTimers.clear();
+  }
+
+  private restoreCoordinatorTimer(): void {
+    if (!this.coordinatorGate || this.deps.now) return;
+    const remaining = Math.max(0, Date.parse(this.coordinatorGate.deadline) - Date.now());
+    const timer = setTimeout(() => {
+      this.coordinatorTimers.delete(timer);
+      this.expireCoordinatorGate();
+    }, remaining);
+    this.coordinatorTimers.add(timer);
+  }
+
+  private nowMs(): number {
+    return this.deps.now ? Date.parse(this.deps.now()) : Date.now();
+  }
+
+  private timing(nodeId: string): TaskNodeTiming {
+    let entry = this.nodeTimings.get(nodeId);
+    if (!entry) {
+      entry = {};
+      this.nodeTimings.set(nodeId, entry);
+    }
+    return entry;
+  }
+
+  private markCache(nodeId: string, status: CacheStatus, extra?: { createdAt?: string; sourceRunId?: string }): void {
+    const timing = this.timing(nodeId);
+    timing.cacheStatus = status;
+    if (extra?.createdAt) timing.cacheCreatedAt = extra.createdAt;
+    if (extra?.sourceRunId) timing.cacheSourceRunId = extra.sourceRunId;
+  }
+
+  private finishNodeTiming(nodeId: string, sessionId?: string): void {
+    const timing = this.timing(nodeId);
+    const now = this.nowMs();
+    timing.finishedAtMs = now;
+    if (timing.scheduledAtMs !== undefined && timing.startedAtMs === undefined) {
+      timing.startedAtMs = timing.scheduledAtMs;
+    }
+    if (timing.scheduledAtMs !== undefined && timing.startedAtMs !== undefined) {
+      timing.queueMs = Math.max(0, timing.startedAtMs - timing.scheduledAtMs);
+    }
+    if (timing.startedAtMs !== undefined) {
+      timing.elapsedMs = Math.max(0, now - timing.startedAtMs);
+      timing.modelMs = timing.elapsedMs;
+    }
+    if (sessionId && this.sessionTokens.get(sessionId) && timing.modelMs === undefined) {
+      timing.modelMs = 0;
+    }
+  }
+
+  private deterministicCheckCounts(): { pass: number; fail: number; unknown: number } {
+    const counts = { pass: 0, fail: 0, unknown: 0 };
+    const add = (status: keyof typeof counts) => { counts[status] += 1; };
+    for (const node of this.spec.nodes) {
+      const state = this.state.get(node.id)?.state;
+      if (state === 'done' || state === 'skipped') add('pass');
+      else if (state && ['failed', 'invalid', 'cancelled'].includes(state)) add('fail');
+      else add('unknown');
+      if (state === 'skipped') continue;
+      for (const declaration of node.outputs ?? []) {
+        if (declaration.required === false) continue;
+        if (declaration.name in (this.outputs[node.id]?.params ?? {})) add('pass');
+        else if (state === 'done') add('fail');
+        else add('unknown');
+      }
+    }
+    if (this.spec.research) {
+      const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+      if (!research) add('unknown');
+      else if (research.blockers.length) add('fail');
+      else add('pass');
+    }
+    if (this.unconfirmedShutdown.size || [...this.workers.values()].some(worker => ['reserved', 'running'].includes(worker.state))) add('unknown');
+    return counts;
+  }
+
+  private buildMetrics(): TaskRunMetrics {
+    const metrics = emptyRunMetrics();
+    metrics.elapsedMs = Math.max(0, this.nowMs() - this.runStartedAtMs);
+    metrics.tokensUsed = this.tokensUsed;
+    metrics.repairs = this.repairsUsed;
+    metrics.coordinatorWaitMs = this.coordinatorWaitMs
+      + (this.coordinatorWaitStartedAt !== undefined ? Math.max(0, this.nowMs() - this.coordinatorWaitStartedAt) : 0);
+    metrics.coordinatorWaits = this.coordinatorWaits;
+    metrics.cacheHits = this.cacheHits;
+    metrics.cacheMisses = this.cacheMisses;
+    metrics.cacheBypasses = this.cacheBypasses;
+    if (this.sourceVersion === 3) {
+      metrics.verificationMode = this.verificationMode();
+      metrics.verificationResolution = this.verificationResolution;
+      metrics.verificationModelRequested = this.verificationModelRequested;
+      metrics.verificationModelRequests = this.verificationModelRequests;
+      metrics.verificationContextBytes = this.verificationContextBytes;
+      metrics.verificationTokensUsed = this.verificationTokensUsed;
+      metrics.verificationFormatReasks = this.verificationFormatReasks;
+      metrics.deterministicChecks = this.deterministicCheckCounts();
+      metrics.verdictChecks = this.verdictChecks;
+    }
+    let retries = 0;
+    let queueMs = 0;
+    let modelMs = 0;
+    for (const [id, st] of this.state) {
+      retries += Math.max(0, st.attempt - 1);
+      const timing = this.nodeTimings.get(id);
+      queueMs += timing?.queueMs ?? 0;
+      modelMs += timing?.modelMs ?? 0;
+    }
+    metrics.retries = retries;
+    metrics.queueMs = queueMs;
+    metrics.modelMs = modelMs;
+    if (this.qualityGateEnabled() && this.tokenBudget !== undefined) {
+      metrics.verifyBudgetReserved = this.verifyReserveTokens();
+      metrics.verifyBudgetRemaining = Math.max(0, this.tokenBudget - this.tokensUsed);
+    }
+    if (this.sourceVersion === 3) {
+      const ranks = criticalPathRemaining(this.spec, this.state);
+      metrics.criticalPathNodeIds = this.spec.nodes
+        .filter((node) => (ranks.get(node.id) ?? 0) > 0)
+        .sort((a, b) => (ranks.get(b.id) ?? 0) - (ranks.get(a.id) ?? 0))
+        .map((node) => node.id);
+    }
+    return metrics;
+  }
+
+  private resolveNodeModel(node?: TaskNode): string | undefined {
+    return node?.model ?? this.spec.defaults?.model ?? this.orchestratorModel();
+  }
+
+  private orchestratorModel(): string | undefined {
+    const id = this.opts.orchestratorSessionId;
+    return id ? this.deps.host.getSessionModel?.(id) : undefined;
+  }
+
+  private orchestratorLlmConnection(): string | undefined {
+    const id = this.opts.orchestratorSessionId;
+    return id ? this.deps.host.getSessionLlmConnection?.(id) : undefined;
+  }
+
+  private connectionKey(node: TaskNode): string {
+    return node.llmConnection ?? this.spec.defaults?.llmConnection ?? this.orchestratorLlmConnection() ?? 'default';
+  }
+
+  private tryAcquireConnection(node: TaskNode, slotId = node.id): boolean {
+    if (this.sourceVersion !== 3) return true;
+    if (!isSessionLikeKind(node.kind) && node.kind !== 'map' && node.kind !== 'loop') return true;
+    const pool = this.deps.connectionPool;
+    if (!pool) return true;
+    const key = this.connectionKey(node);
+    if (!pool.tryAcquire(key)) return false;
+    this.acquiredConnections.set(slotId, key);
+    return true;
+  }
+
+  private releaseConnection(nodeId: string, notify = true): void {
+    const key = this.acquiredConnections.get(nodeId);
+    if (!key) return;
+    this.acquiredConnections.delete(nodeId);
+    this.deps.connectionPool?.release(key);
+    if (notify) this.notifyConnectionReleased();
+  }
+
+  private settleSessionSlot(nodeId: string, sessionId?: string, notify = true): void {
+    this.inFlight = Math.max(0, this.inFlight - 1);
+    this.finishNodeTiming(nodeId, sessionId);
+    this.releaseConnection(nodeId, notify);
+  }
+
+  private notifyConnectionReleased(): void {
+    this.deps.onConnectionReleased?.(`${this.slug}:${this.runId}`);
+  }
+
+  private hasExpandingWork(): boolean {
+    for (const node of this.spec.nodes) {
+      if (this.state.get(node.id)?.state !== 'running') continue;
+      if (this.replicaCounts.has(node.id)) {
+        const count = this.replicaCounts.get(node.id) ?? 0;
+        for (let i = 0; i < count; i++) {
+          const state = this.instances.get(instanceId(node.id, i))?.state;
+          if (!state || !isTerminalNodeState(state)) return true;
+        }
+      } else if (this.mapItems.has(node.id)) {
+        const items = this.mapItems.get(node.id) ?? [];
+        for (let i = 0; i < items.length; i++) {
+          const state = this.instances.get(instanceId(node.id, i))?.state;
+          if (!state || !isTerminalNodeState(state)) return true;
+        }
+      } else if (this.loopIndex.has(node.id)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private requeueVerifyAfterFail(nodeId: string, sessionId: string | undefined, reason: string | undefined): void {
+    const defId = definitionId(nodeId);
+    const st = this.instances.get(nodeId) ?? this.state.get(defId);
+    if (st?.state === 'running') this.settleSessionSlot(nodeId, sessionId, false);
+    if (st) {
+      st.state = 'pending';
+      st.lastFailure = `The previous verification failed: ${reason ?? 'node verdict failed'}. Submit a new verdict after the repaired nodes finish.`;
+    }
+    this.nodeVerdicts.delete(nodeId);
+    this.nodeVerdicts.delete(defId);
+    if (sessionId) this.applyCard(sessionId, TODO_STATUS);
+    this.log({
+      kind: 'node-retry',
+      nodeId: defId,
+      attempt: st?.attempt ?? 0,
+      reason: `node-verdict-fail: ${reason ?? ''}`,
+    });
+  }
+
+  private hasUnsettledRunningNode(): boolean {
+    if ([...this.state.values(), ...this.instances.values()].some(st => st.state === 'retry-wait')) return true;
+    return this.spec.nodes.some((node) => {
+      if (this.state.get(node.id)?.state !== 'running') return false;
+      return !this.mapItems.has(node.id) && !this.replicaCounts.has(node.id) && !this.loopIndex.has(node.id);
+    });
+  }
+
+  private requeueFailedNodeVerdict(
+    nodeId: string,
+    sessionId: string,
+    defId: string,
+    st: NodeStateEntry,
+  ): boolean {
+    if (this.sourceVersion !== 3) return false;
+    const node = this.spec.nodes.find((candidate) => candidate.id === defId);
+    if (!node || (node.kind !== 'verify' && node.kind !== 'judge')) return false;
+    const verdict = this.nodeVerdicts.get(nodeId) ?? this.nodeVerdicts.get(defId) ?? this.timing(defId).verdict;
+    if (verdict?.result !== 'fail') return false;
+    if (this.isTerminal() || this.settled) {
+      this.settleSessionSlot(nodeId, sessionId);
+      st.state = 'failed';
+      return true;
+    }
+    this.requeueVerifyAfterFail(nodeId, sessionId, verdict.reason);
+    this.emitChanged();
+    this.scheduleReady();
+    return true;
+  }
+
+  private lookupWorkspaceCache(node: TaskNode): NodeOutput | undefined {
+    if (this.skillContents() === null) {
+      this.markCache(node.id, 'bypass');
+      this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'skill-contents' });
+      return undefined;
+    }
+    const bypass = this.workspaceCacheBypass(node);
+    if (bypass) {
+      this.markCache(node.id, 'bypass');
+      this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: bypass });
+      return undefined;
+    }
+    const fingerprint = this.workspaceFingerprint(node);
+    const lookup = readWorkspaceCache(this.deps.workspaceRoot, this.connectionKey(node), fingerprint, this.nowMs());
+    if (lookup.status === 'bypass') {
+      this.markCache(node.id, 'bypass'); this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: lookup.reason ?? 'incomplete-reuse-record' }); return undefined;
+    }
+    if (lookup.record) {
+      const original = lookup.record.sourceTaskSlug ? readNodeOutput(this.deps.workspaceRoot, lookup.record.sourceTaskSlug, lookup.record.sourceRunId, lookup.record.sourceNodeId) : null;
+      const invalidContract = (node.outputs ?? []).some(declaration => declaration.required !== false && !(declaration.name in (lookup.record!.output.params ?? {}))
+        || declaration.kind !== 'artifact' && declaration.name in (lookup.record!.output.params ?? {}) && !!outputTypeError(declaration.type, declaration.enum, lookup.record!.output.params![declaration.name]));
+      if (!original || planValueKey(original) !== planValueKey(lookup.record.output) || invalidContract) {
+        this.markCache(node.id, 'bypass'); this.cacheBypasses += 1;
+        this.log({ kind: 'cache-bypass', nodeId: node.id, reason: !original ? 'source-version-unavailable' : invalidContract ? 'output-contract-changed' : 'source-output-version-changed' }); return undefined;
+      }
+    }
+    if (lookup.status === 'hit' && lookup.record && !invalidArtifactInput(this.deps.workspaceRoot, new Set([node.id]), [node], { [node.id]: lookup.record.output })) {
+      this.markCache(node.id, 'hit', { createdAt: lookup.record.createdAt, sourceRunId: lookup.record.sourceRunId });
+      this.cacheHits += 1;
+      this.log({
+        kind: 'cache-hit',
+        nodeId: node.id,
+        fingerprint,
+        createdAt: lookup.record.createdAt,
+        sourceRunId: lookup.record.sourceRunId,
+      });
+      return lookup.record.output;
+    }
+    this.markCache(node.id, 'miss');
+    this.cacheMisses += 1;
+    return undefined;
+  }
+
+  private storeWorkspaceCache(
+    node: TaskNode,
+    output: NodeOutput,
+    locals?: { item?: unknown; index?: number; prev?: string },
+  ): void {
+    const bypass = this.workspaceCacheBypass(node);
+    if (bypass || this.skillContents() === null) return;
+    writeWorkspaceCache(this.deps.workspaceRoot, {
+      fingerprint: this.workspaceFingerprint(node, locals),
+      createdAt: this.deps.now ? this.deps.now() : new Date().toISOString(),
+      sourceRunId: this.runId,
+      sourceTaskSlug: this.slug,
+      sourceNodeId: node.id,
+      connection: this.connectionKey(node),
+      output,
+    });
+  }
+
+  private workspaceFingerprint(node: TaskNode, locals?: { item?: unknown; index?: number; prev?: string }): string {
+    const prompt = interpolateLocals(
+      interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params }),
+      locals ?? {},
+    );
+    const dependencyOutputs: Record<string, { text: string; params?: Record<string, unknown> }> = {};
+    const artifactHashes: string[] = [];
+    for (const dep of dependencyAncestors(node.id, this.edges)) {
+      const out = this.outputs[dep];
+      if (!out) continue;
+      dependencyOutputs[dep] = { text: out.text, params: out.params };
+      for (const value of Object.values(out.params ?? {})) {
+        if (value && typeof value === 'object' && 'hash' in (value as object)) {
+          artifactHashes.push(String((value as { hash: string }).hash));
+        }
+      }
+    }
+    return fingerprintWorkspaceCache({
+      context: { actor: node.actor, actorPrefix: node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => ({ id: candidate.id, actor: candidate.actor, prompt: candidate.prompt, inputs: candidate.inputs, outputs: candidate.outputs })) : [],
+        outputs: node.outputs, sourceVersion: this.sourceVersion, sources: this.spec.sources, goal: this.spec.goal, constraints: this.spec.constraints, decisions: this.spec.decisions },
+      prompt,
+      inputs: Object.fromEntries(Object.entries(node.inputs ?? {}).map(([name, reference]) => [name, { definition: reference,
+        value: interpolateLocals(interpolateRefs(typeof reference === 'string' ? reference : reference.from, { nodeOutputs: this.outputs, params: this.opts.params }), locals ?? {}) }])),
+      dependencyOutputs,
+      artifactHashes,
+      model: this.resolveNodeModel(node),
+      connection: this.connectionKey(node),
+      skillContents: this.skillContents() ?? {},
+      runtimeVersion: CONDUCTOR_CACHE_RUNTIME_VERSION,
+      permissionMode: node.permissionMode ?? this.spec.defaults?.permissionMode ?? 'safe',
+    });
+  }
+
+  private skillContents(): Record<string, string> | null {
+    const slugs = this.spec.skills ?? [];
+    if (!slugs.length) return {};
+    const fromHost = this.deps.host.readSkillContents?.(slugs);
+    if (fromHost) {
+      return slugs.every((slug) => typeof fromHost[slug] === 'string') ? fromHost : null;
+    }
+    const out: Record<string, string> = {};
+    for (const slug of slugs) {
+      const skill = loadSkillBySlug(this.deps.workspaceRoot, slug);
+      if (!skill) return null;
+      out[slug] = `${skill.metadata.name}\n${skill.metadata.description}\n${skill.content}`;
+    }
+    return out;
+  }
+
+  private workspaceCacheBypass(node: TaskNode, sessionId?: string): string | undefined {
+    if (node.workspace_inputs?.length) return 'workspace-inputs-without-version-proof';
+    if (Object.values(node.inputs ?? {}).some(reference => typeof reference !== 'string' && reference.summarize)) return 'summary-version-unavailable';
+    const sensitive = sensitiveParamNames(this.spec.params);
+    const usedSensitive = sensitive.some((name) => JSON.stringify(this.opts.params ?? {}).includes(name) || (node.prompt ?? '').includes(`params.${name}`));
+    const writesEnabled = (node.permissionMode ?? this.spec.defaults?.permissionMode ?? 'safe') !== 'safe';
+    const usedTools = sessionId
+      ? this.deps.host.sessionUsedTools?.(sessionId)
+      : undefined;
+    return workspaceCacheBypassReason({
+      node,
+      spec: this.spec,
+      usedTools: usedTools === true,
+      usedSensitiveParams: usedSensitive || sensitive.length > 0,
+      hasDynamicSources: (this.spec.sources?.length ?? 0) > 0,
+      writesEnabled,
+    });
+  }
+
+  private shouldBypassWorkspaceCache(node: TaskNode, sessionId: string): boolean {
+    if (nodeCacheMode(node, this.sourceVersion) !== 'workspace-pure') return false;
+    const usedTools = this.deps.host.sessionUsedTools?.(sessionId);
+    return usedTools === true || usedTools === undefined;
+  }
+
+  private synthesizeDependencyInputs(node: TaskNode, outputs: Record<string, NodeOutput> = this.outputs): string {
+    const deps = [...(this.edges.get(node.id) ?? [])];
+    if (!deps.length) return '## Inputs by dependency\n(no dependency outputs)';
+    const sections = deps.map((id) => {
+      const out = outputs[id];
+      const depNode = this.spec.nodes.find((n) => n.id === id);
+      const title = depNode ? nodeTitle(depNode) : id;
+      return `### ${title} (${id})\n${out?.text ?? '(no output)'}`;
+    });
+    return ['## Inputs by dependency', ...sections].join('\n\n');
+  }
+
+  private recordAttempt(entry: RunLogEntryInput & { revision?: number; t?: string }): void {
+    if ((entry.kind === 'node-scheduled' || entry.kind === 'node-spawned') && !this.nodeStartedAt.has(entry.nodeId)) {
+      const startedAt = Date.parse(entry.t ?? '');
+      if (Number.isFinite(startedAt)) this.nodeStartedAt.set(entry.nodeId, startedAt);
+    }
+    if (entry.kind === 'node-scheduled') {
+      this.attemptNumbers.set(entry.nodeId, (this.attemptNumbers.get(entry.nodeId) ?? 0) + 1);
+      this.attemptRevisions.set(entry.nodeId, entry.revision ?? 0);
+    } else if (entry.kind === 'node-spawned') {
+      const attempts = this.attemptHistory.get(entry.nodeId) ?? [];
+      attempts.push({ attempt: this.attemptNumbers.get(entry.nodeId) ?? 1, sessionId: entry.sessionId, state: 'running', revision: this.attemptRevisions.get(entry.nodeId) ?? entry.revision ?? 0 });
+      this.attemptHistory.set(entry.nodeId, attempts);
+    } else if (entry.kind === 'node-finished' || entry.kind === 'node-retry') {
+      const attempts = this.attemptHistory.get(entry.nodeId);
+      const attempt = entry.kind === 'node-finished'
+        ? attempts?.findLast(item => item.sessionId === entry.sessionId)
+        : attempts?.at(-1);
+      // A retry schedules new work; it does not undo a completed execution.
+      // Preserve terminal attempt outcomes for live previews and log replay.
+      if (attempt && (entry.kind === 'node-finished' || attempt.state === 'running')) {
+        attempt.state = entry.kind === 'node-retry' ? 'failed' : entry.state;
+      }
+    }
+  }
+
   private log(entry: RunLogEntryInput): void {
+    if (entry.kind === 'node-finished' && this.coordinatorGateEnabled() && ['done', 'failed', 'invalid', 'skipped'].includes(entry.state)) {
+      const state = this.instances.get(entry.nodeId) ?? this.state.get(entry.nodeId);
+      const output = this.instanceOutputs.get(entry.nodeId) ?? this.outputs[entry.nodeId];
+      const revision = this.attemptRevisions.get(entry.nodeId) ?? this.revision;
+      const resultEvent: PlannerResultEvent = { id: `${this.runId}:${entry.nodeId}:${state?.attempt ?? 0}:${revision}:${entry.state}`, nodeId: entry.nodeId,
+        attempt: state?.attempt ?? 0, revision, state: entry.state, reason: entry.reason,
+        ...(output ? { output: structuredClone(output), outputHash: createHash('sha256').update(JSON.stringify(output)).digest('hex') } : {}) };
+      entry = { ...entry, resultEvent };
+      this.resultEvents.set(resultEvent.id, resultEvent);
+      this.plannerPhase = 'active';
+    }
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
-    appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { ...entry, t } as RunLogEntry);
+    const seq = this.nextSeq++;
+    appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, {
+      ...entry,
+      t,
+      seq,
+      revision: this.revision,
+    });
+    this.recordAttempt({ ...entry, t, revision: this.revision });
+    this.writeCheckpoint(seq);
+    if (
+      entry.kind === 'run-started' ||
+      entry.kind === 'run-completed' ||
+      entry.kind === 'run-failed' ||
+      entry.kind === 'run-stopped' ||
+      entry.kind === 'run-paused' ||
+      entry.kind === 'run-resumed'
+    ) {
+      conductorLog.info(entry.kind, {
+        slug: this.slug,
+        runId: this.runId,
+        revision: this.revision,
+        status: this.runStatus,
+      });
+    }
+  }
+
+  private writeCheckpoint(seq: number): void {
+    const sensitive = new Set(sensitiveParamNames(this.spec.params));
+    const persistedParams = Object.fromEntries(
+      Object.entries(this.opts.params ?? {}).filter(([name]) => !sensitive.has(name)),
+    );
+    writeRunState(this.deps.workspaceRoot, this.slug, this.runId, {
+      seq,
+      revision: this.revision,
+      tokensUsed: this.tokensUsed,
+      tokenBudget: this.tokenBudget,
+      ...(Object.keys(persistedParams).length ? { params: persistedParams } : {}),
+      seenDecisionIds: [...this.seenDecisionIds],
+      invalidPatchCount: this.invalidPatchCount,
+      plannerRequired: this.plannerRequired,
+      completedCheckpointIds: [...this.completedCheckpointIds],
+      decisionEventSeqs: [...this.decisionEventSeqs],
+      ...(this.coordinatorGate ? { coordinatorGate: this.coordinatorGate } : {}),
+      metrics: this.buildMetrics(),
+      ...(this.coordinatorGateEnabled() ? { plannerPhase: this.planningPhase(), consumedResultIds: [...this.consumedResultIds] } : {}),
+    });
   }
 }
 
@@ -988,10 +4566,27 @@ function skillsPreamble(skills: string[] | undefined): string {
 /**
  * Whether a node's `retry.when` trigger covers a given failure class. An absent `when`
  * defaults to retrying on `error` (the common "transient failure" case); `empty`/`invalid`
- * triggers are opt-in and not yet produced by the runner, so they never match here.
+ * triggers are opt-in and are emitted by declared-output validation.
  */
-function retryMatches(when: 'error' | 'empty' | 'invalid' | undefined, failure: 'error'): boolean {
-  return (when ?? 'error') === failure;
+function retryBackoffMs(
+  retry: { backoff?: { base?: number; factor?: number; max?: number } },
+  attempt: number,
+  reason?: string,
+): number {
+  const transient = reason === 'timeout' || /^error:(provider_timeout|network_error|service_error|stream_interrupted|rate_limited)$/.test(reason ?? '');
+  const base = retry.backoff?.base ?? (transient ? 1000 : 0);
+  if (base <= 0) return 0;
+  const factor = retry.backoff?.factor ?? 2;
+  const max = retry.backoff?.max ?? base * 16;
+  return Math.min(max, base * factor ** Math.max(0, attempt - 1));
+}
+
+function retryMatches(
+  when: 'error' | 'empty' | 'invalid' | readonly string[] | undefined,
+  failure: 'error' | 'empty' | 'invalid',
+): boolean {
+  const list = !when ? ['error'] : Array.isArray(when) ? when : [when];
+  return list.includes(failure);
 }
 
 /**
@@ -1023,21 +4618,71 @@ function parseVerdict(text: string): { result: 'pass' | 'fail' | 'unparsed'; rea
   return out;
 }
 
-/** A run is terminal (no further work) once completed/failed/stopped. running/paused/verifying are active. */
-function isTerminalRunStatus(status: RunStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'stopped';
+function resolveParams(spec: TaskSpec, provided?: Record<string, unknown>): Record<string, unknown> {
+  const declarations = new Map((spec.params ?? []).map((param) => [param.name, param]));
+  const extra = Object.keys(provided ?? {}).find((name) => !declarations.has(name));
+  if (extra) throw new Error(`Unknown task param "${extra}"`);
+  const out: Record<string, unknown> = {};
+  for (const param of spec.params ?? []) {
+    const value = provided && param.name in provided ? provided[param.name] : param.default;
+    if (value === undefined || value === '') throw new Error(`Missing required task param "${param.name}"`);
+    const typeError = outputTypeError(param.type, param.enum, value);
+    if (typeError) throw new Error(`Task param "${param.name}" ${typeError}`);
+    out[param.name] = value;
+  }
+  return out;
 }
 
-function resolveParams(spec: TaskSpec, provided?: Record<string, unknown>): Record<string, unknown> {
+function restoreParams(spec: TaskSpec, persisted?: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const p of spec.params ?? []) if (p.default !== undefined) out[p.name] = p.default;
-  return { ...out, ...(provided ?? {}) };
+  for (const param of spec.params ?? []) {
+    if (param.sensitive) out[param.name] = '***';
+    else if (persisted && param.name in persisted) out[param.name] = persisted[param.name];
+    else if (param.default !== undefined) out[param.name] = param.default;
+  }
+  return out;
+}
+
+function outputTypeError(type: string | undefined, values: string[] | undefined, value: unknown): string | null {
+  if (!type || type === 'json') {
+    try {
+      return JSON.stringify(value) === undefined ? 'must be JSON-serializable' : null;
+    } catch {
+      return 'must be JSON-serializable';
+    }
+  }
+  if (type === 'string' || type === 'text') return typeof value === 'string' ? null : `must be ${type}`;
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value) ? null : 'must be a finite number';
+  if (type === 'boolean') return typeof value === 'boolean' ? null : 'must be boolean';
+  if (type === 'enum') {
+    return typeof value === 'string' && values?.includes(value)
+      ? null
+      : `must be one of ${(values ?? []).join(', ')}`;
+  }
+  return `uses unsupported type ${type}`;
 }
 
 export class TaskRunner {
   private readonly runs = new Map<string, ActiveRun>();
+  private readonly deps: TaskRunnerDeps;
 
-  constructor(private readonly deps: TaskRunnerDeps) {}
+  constructor(deps: TaskRunnerDeps) {
+    this.deps = {
+      ...deps,
+      onConnectionReleased: (sourceRunKey?: string) => {
+        deps.onConnectionReleased?.();
+        this.wakeRunnableRuns(sourceRunKey);
+      },
+    };
+  }
+
+  private wakeRunnableRuns(sourceRunKey?: string): void {
+    // The source run schedules itself after its completion transaction. A pool
+    // release only needs to wake sibling runs that may be waiting for this slot.
+    for (const [key, run] of this.runs) {
+      if (key !== sourceRunKey) run.nudgeSchedule();
+    }
+  }
 
   private key(slug: string, runId: string): string {
     return `${slug}:${runId}`;
@@ -1045,23 +4690,38 @@ export class TaskRunner {
 
   /** Load + validate a task's yaml and start a run. Throws if the task is missing or invalid. */
   run(slug: string, opts: RunOptions = {}): RunSnapshot {
-    const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
+    this.deps.host.assertTaskRunAllowed?.(this.deps.workspaceId, opts.orchestratorSessionId, { slug });
+    const loaded = loadTaskDocument(this.deps.workspaceRoot, slug);
     if (!loaded?.spec) throw new Error(`Task "${slug}" not found or has no valid task.yaml`);
     if (!loaded.valid) {
       throw new Error(`Refusing to run invalid task "${slug}": ${loaded.errors.map((e) => e.message).join('; ')}`);
+    }
+    if (loaded.spec.runner === 'orchestrate' && opts.orchestrateAllowed !== true) {
+      throw new Error(`Refusing to run orchestrate task "${slug}": parent session Swarm mode is not enabled`);
+    }
+    if (loaded.sourceVersion >= 2) {
+      const unimplemented = unimplementedV2Nodes(loaded.spec.nodes);
+      if (unimplemented.length) {
+        throw new Error(
+          `Cannot start a v2 run: unimplemented kinds: ${unimplemented.map((n) => `${n.id} (${n.kind})`).join(', ')}`,
+        );
+      }
     }
     // One active run per orchestrator: a second concurrent run would race the same parent session's
     // verdict listener (two runs attaching onSessionComplete on the same orchestrator would cross
     // their verifications). Block it. NOTE: this does not guard against a human typing into the
     // orchestrator mid-`verifying` — that race is a known, bounded v1 limitation.
     const orchestrator = opts.orchestratorSessionId;
+    const latest = orchestrator ? this.getLatestRun(slug) : null;
+    const previousId = opts.resumedFrom ?? (latest?.orchestratorSessionId === orchestrator ? latest?.runId : undefined);
+    const previous = previousId ? this.runs.get(this.key(slug, previousId)) ?? this.rehydrate(slug, previousId, 'view') : undefined;
+    if (previous) {
+      const snapshot = previous.snapshot();
+      if (!orchestrator || snapshot.orchestratorSessionId !== orchestrator || !isTerminalRunStatus(snapshot.status)) throw new TaskControlError(snapshot.status, 'Predecessor is still active or belongs to a different root; stop it and wait for confirmed shutdown');
+      if (snapshot.supersededBy) throw new TaskControlError(snapshot.status, `Predecessor already has successor ${snapshot.supersededBy}`);
+      this.deps.host.assertTaskSafePoint?.(previous.executionSessions());
+    }
     if (orchestrator) {
-      // Tasks are one level deep: the board shows an orchestrator's children as its subtasks, so a
-      // sub-session can't orchestrate a run of its own. An unknown id is let through as before.
-      const parentId = this.deps.host.getSessionParentId(orchestrator);
-      if (parentId) {
-        throw new Error(`Task "${slug}" can't run on session ${orchestrator}: it is a sub-session of ${parentId}.`);
-      }
       for (const existing of this.runs.values()) {
         const snap = existing.snapshot();
         if (snap.orchestratorSessionId === orchestrator && !isTerminalRunStatus(snap.status)) {
@@ -1072,61 +4732,324 @@ export class TaskRunner {
       }
     }
     const runId = opts.runId ?? (this.deps.genRunId ? this.deps.genRunId() : `run-${Date.now()}`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId) || runId.includes('..')) {
+      throw new Error(`Invalid run id "${runId}"`);
+    }
+    const duplicateInMemory = [...this.runs.values()].some((run) => run.snapshot().runId === runId);
+    const duplicateOnDisk = listTaskSlugs(this.deps.workspaceRoot)
+      .some((taskSlug) => listRunIds(this.deps.workspaceRoot, taskSlug).includes(runId));
+    if (duplicateInMemory || duplicateOnDisk) {
+      throw new Error(`Run id "${runId}" already exists in this workspace`);
+    }
     const run = new ActiveRun(
       loaded.spec,
       slug,
       runId,
-      { ...opts, params: resolveParams(loaded.spec, opts.params), verifyOnComplete: opts.verifyOnComplete ?? true },
+      {
+        ...opts,
+        resumedFrom: previousId,
+        sourceVersion: loaded.sourceVersion,
+        params: resolveParams(loaded.spec, opts.params),
+        verifyOnComplete: opts.verifyOnComplete ?? true,
+      },
       this.deps,
     );
+    // Do not publish a half-started run. start() first freezes revision 0 and
+    // may fail on storage errors; only a durably started run enters the registry.
+    run.start(() => previous?.markSuperseded(runId));
     this.runs.set(this.key(slug, runId), run);
-    run.start();
     return run.snapshot();
   }
 
-  pause(slug: string, runId: string): void {
-    this.runs.get(this.key(slug, runId))?.pause();
+  pause(slug: string, runId: string): RunSnapshot {
+    return this.requireRun(slug, runId).pause();
   }
 
-  resume(slug: string, runId: string): void {
+  resume(slug: string, runId: string): RunSnapshot {
     const existing = this.runs.get(this.key(slug, runId));
-    if (existing) {
-      existing.resume();
-      return;
-    }
-    // Not in memory (e.g. after an app restart): reconstruct from the persisted run-log.
-    this.rehydrate(slug, runId);
+    if (existing) return existing.resume();
+    const run = this.rehydrate(slug, runId, 'hydrate');
+    return run.resume();
   }
 
-  /** Reconstruct an in-memory run from its persisted run-log + node outputs, then resume it. */
-  private rehydrate(slug: string, runId: string): RunSnapshot {
-    const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
-    if (!loaded?.spec || !loaded.valid) {
-      throw new Error(`Cannot resume "${slug}:${runId}": task.yaml is missing or invalid`);
+  continue(slug: string, runId: string): RunSnapshot {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.continueAfterInterrupt();
+    const run = this.rehydrate(slug, runId, 'scan');
+    return run.continueAfterInterrupt();
+  }
+
+  /**
+   * Load unfinished runs from disk without scheduling. Running nodes become
+   * `interrupted`. Paused / waiting-approval / waiting-budget keep those states.
+   */
+  applyOrchestrationPatch(slug: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    return this.requireRun(slug, runId).applyPatch(patch);
+  }
+
+  /** Manual UI uses exactly the coordinator validator and durable commit path. */
+  applyManualPlanPatch(slug: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    const run = this.requireRun(slug, runId);
+    const snapshot = run.snapshot();
+    if (snapshot.status === 'waiting-coordinator') {
+      const gate = readRunState(this.deps.workspaceRoot, slug, runId)?.coordinatorGate;
+      if (!gate) throw new TaskControlError(snapshot.status, 'Coordinator checkpoint is missing');
+      return run.applyOrchestrationDecision({ ...patch, checkpointId: gate.checkpointId, action: 'patch' });
     }
+    return run.applyPatch(patch);
+  }
+
+  applyOrchestrationDecisionByRunId(sessionId: string, decision: OrchestrationDecision): RunSnapshot {
+    for (const run of this.runs.values()) {
+      const snapshot = run.snapshot();
+      if (snapshot.runId !== decision.runId) continue;
+      if (snapshot.orchestratorSessionId !== sessionId) {
+        throw new TaskControlError(snapshot.status, 'Only the run coordinator may submit an orchestration decision');
+      }
+      return run.applyOrchestrationDecision(decision);
+    }
+    throw new TaskControlError('failed', `No active run ${decision.runId}`);
+  }
+
+  expireCoordinatorGate(slug: string, runId: string, nowIso?: string): RunSnapshot {
+    const run = this.requireRun(slug, runId);
+    run.expireCoordinatorGate(nowIso);
+    return run.snapshot();
+  }
+
+  applyOrchestrationPatchByRunId(sessionId: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    for (const run of this.runs.values()) {
+      const snapshot = run.snapshot();
+      if (snapshot.runId !== runId) continue;
+      if (snapshot.orchestratorSessionId !== sessionId) {
+        throw new TaskControlError(snapshot.status, 'Only the run coordinator may patch this orchestration');
+      }
+      return run.applyPatch(patch);
+    }
+    throw new TaskControlError('failed', `No active run ${runId}`);
+  }
+
+  assertRunCoordinator(sessionId: string, slug: string, runId: string): void {
+    const snapshot = this.requireRun(slug, runId).snapshot();
+    if (snapshot.orchestratorSessionId !== sessionId) {
+      throw new TaskControlError(snapshot.status, 'Only the run coordinator may control this run');
+    }
+  }
+
+  currentRunSpec(slug: string, runId: string): TaskSpec | null {
+    return this.runs.get(this.key(slug, runId))?.currentSpec() ?? null;
+  }
+
+  scanUnfinished(): RunSnapshot[] {
+    const out: RunSnapshot[] = [];
+    for (const slug of listTaskSlugs(this.deps.workspaceRoot)) {
+      for (const runId of listRunIds(this.deps.workspaceRoot, slug)) {
+        if (this.runs.has(this.key(slug, runId))) {
+          const snap = this.runs.get(this.key(slug, runId))!.snapshot();
+          if (!isTerminalRunStatus(snap.status)) out.push(snap);
+          continue;
+        }
+        const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+        if (log.length === 0) continue;
+        if (isTerminalRunStatus(deriveRunStatusFromLog(log))) continue;
+        out.push(this.rehydrate(slug, runId, 'scan').snapshot());
+      }
+    }
+    return out;
+  }
+
+  /** Called once by runtime initialization, separately from history scanning. */
+  resumePreparedDeliveries(): void {
+    for (const run of this.runs.values()) {
+      if (!run.canResumePreparedDelivery()) continue;
+      try { run.continueAfterInterrupt(); }
+      catch (error) { conductorLog.warn('prepared-delivery-resume-blocked', { error: error instanceof Error ? error.message : 'unknown' }); }
+    }
+  }
+
+  /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
+  private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate' | 'view'): ActiveRun {
+    const checkpoint = readRunState(this.deps.workspaceRoot, slug, runId);
     const log = readRunLog(this.deps.workspaceRoot, slug, runId);
-    if (log.length === 0) throw new Error(`Cannot resume "${slug}:${runId}": no run-log found`);
+    if (log.length === 0) throw new Error(`Cannot restore "${slug}:${runId}": no run-log found`);
+
+    // Restore only a revision which the durable state machine has observed.
+    // A newer spec-revisions file can exist if the process crashed between
+    // writing a patch and checkpointing its first event; adopting that orphan
+    // would mutate the graph across restart.
+    const loggedRevision = log.reduce(
+      (max, entry) => typeof entry.revision === 'number' ? Math.max(max, entry.revision) : max,
+      0,
+    );
+    const durableRevision = checkpoint?.revision ?? loggedRevision;
+    const spec = readSpecRevision(this.deps.workspaceRoot, slug, runId, durableRevision);
+    if (!spec) throw new Error(`Cannot restore "${slug}:${runId}": no spec snapshot`);
     const started = log.find((e) => e.kind === 'run-started');
     const orchestratorSessionId = started && started.kind === 'run-started' ? started.orchestratorSessionId : undefined;
     const run = new ActiveRun(
-      loaded.spec,
+      spec,
       slug,
       runId,
-      { orchestratorSessionId, params: resolveParams(loaded.spec), verifyOnComplete: true },
+      {
+        orchestratorSessionId,
+        params: restoreParams(spec, checkpoint?.params),
+        verifyOnComplete: true,
+        sourceVersion: taskSourceVersion(spec),
+        plannerRequired: checkpoint?.plannerRequired ?? (log.some(event => event.kind === 'coordinator-request') ? true : undefined),
+      },
       this.deps,
     );
-    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId));
-    this.runs.set(this.key(slug, runId), run);
-    run.resumeFromHydrated();
-    return run.snapshot();
+    run.restoreCheckpoint(checkpoint, durableRevision, log.reduce((max, entry) => Math.max(max, (entry.seq ?? -1) + 1), 0));
+    const committedLog = committedRunLog(log, checkpoint);
+    run.hydrate(committedLog, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode, checkpoint?.metrics);
+    if (mode !== 'view') this.runs.set(this.key(slug, runId), run);
+    return run;
   }
 
-  async stop(slug: string, runId: string): Promise<void> {
-    await this.runs.get(this.key(slug, runId))?.stop();
+  private requireRun(slug: string, runId: string): ActiveRun {
+    const run = this.runs.get(this.key(slug, runId));
+    if (!run) throw new TaskControlError('failed', `No active run ${slug}:${runId}`);
+    return run;
+  }
+
+  async stop(slug: string, runId: string): Promise<RunSnapshot> {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.stop();
+    return this.rehydrate(slug, runId, 'scan').stop();
+  }
+
+  respondApproval(slug: string, runId: string, nodeId: string, approved: boolean, feedback?: string, feedbackOnly = false): RunSnapshot {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.respondApproval(nodeId, approved, feedback, feedbackOnly);
+    return this.rehydrate(slug, runId, 'hydrate').respondApproval(nodeId, approved, feedback, feedbackOnly);
+  }
+
+  updateRunLimits(slug: string, runId: string, tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.updateLimits(tokenBudget, params);
+    return this.rehydrate(slug, runId, 'hydrate').updateLimits(tokenBudget, params);
+  }
+
+  submitNodeOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }) {
+    const run = this.findRunBySession(sessionId);
+    if (!run) return { ok: false as const, error: 'No active run owns this session' };
+    return run.acceptOutput(sessionId, payload);
+  }
+
+  hasAcceptedNodeOutput(sessionId: string, generation: number): boolean {
+    return this.findRunBySession(sessionId)?.hasAcceptedOutput(sessionId, generation) ?? false;
+  }
+
+  recordSourceRead(sessionId: string, proof: SourceReadProof, toolUseId: string, result: string): boolean {
+    return this.findRunBySession(sessionId)?.recordSourceRead(sessionId, proof, toolUseId, result) ?? false;
+  }
+
+  submitNodeVerdict(sessionId: string, payload: TaskNodeVerdict) {
+    const run = this.findRunBySession(sessionId);
+    if (!run) return { ok: false as const, error: 'No active run owns this session' };
+    return run.submitNodeVerdict(sessionId, payload);
+  }
+
+  taskHelp(sessionId: string, generation: number, input: TaskHelpInput): Promise<unknown> | unknown {
+    const run = input.action === 'request' ? this.findRunBySession(sessionId)
+      : [...this.runs.values()].find(run => run.snapshot().runId === input.runId && run.snapshot().orchestratorSessionId === sessionId);
+    if (!run) throw new Error('No active canonical run owns this help request');
+    return run.taskHelp(sessionId, generation, input);
+  }
+
+  submitVerdict(sessionId: string, payload: SubmitTaskVerdictInput): RunSnapshot {
+    const run = payload.runId
+      ? [...this.runs.values()].find((r) => {
+          const snapshot = r.snapshot();
+          return snapshot.runId === payload.runId && snapshot.orchestratorSessionId === sessionId;
+        })
+      : [...this.runs.values()].find((r) => r.snapshot().orchestratorSessionId === sessionId);
+    if (!run) throw new TaskControlError('failed', 'No verifying run for this session');
+    return run.submitStructuredVerdict(payload);
+  }
+
+  private findRunBySession(sessionId: string): ActiveRun | undefined {
+    for (const run of [...this.runs.values()].reverse()) if (run.hasSession(sessionId)) return run;
+    return undefined;
+  }
+
+  reserveTaskWorker(rootSessionId: string, binding: { runId: string; nodeId: string }, workerId: string, role: 'worker' | 'reviewer', permissionMode?: TaskSessionBinding['permissionMode']): TaskSessionBinding {
+    const run = [...this.runs.values()].find(candidate => candidate.snapshot().runId === binding.runId && candidate.snapshot().orchestratorSessionId === rootSessionId);
+    if (!run) throw new Error('No active canonical run belongs to this root');
+    return run.reserveWorker(rootSessionId, binding.nodeId, workerId, role, permissionMode);
+  }
+
+  bindTaskWorker(binding: TaskSessionBinding, workerId: string, sessionId: string): void {
+    this.requireRun(binding.taskSlug, binding.taskRunId).bindWorker(workerId, sessionId);
+  }
+
+  completeTaskWorker(slug: string, runId: string, workerId: string, sessionId: string | undefined, state: 'done' | 'failed' | 'stopped', output?: NodeOutput, reason?: string, tokensUsed?: number): void {
+    const run = this.runs.get(this.key(slug, runId)) ?? this.rehydrate(slug, runId, 'hydrate');
+    run.completeWorker(workerId, sessionId, state, output, reason, tokensUsed);
+  }
+
+  progressContext(sessionId: string): RunSnapshot | undefined { return this.findRunBySession(sessionId)?.snapshot(); }
+
+  recordProgressUsage(slug: string, runId: string, sessionId: string, tokens: number): void {
+    this.requireRun(slug, runId).recordProgressUsage(sessionId, tokens);
+  }
+
+  progressAllowance(slug: string, runId: string, evaluationTokens: number): number {
+    return this.requireRun(slug, runId).progressAllowance(evaluationTokens);
+  }
+
+  requestProgressReview(slug: string, runId: string, revision: number | undefined, summary: string): boolean {
+    return this.requireRun(slug, runId).requestProgressReview(revision, summary);
+  }
+
+  revalidateKnownArtifacts(): void {
+    for (const run of this.runs.values()) {
+      try { run.revalidateCompletedArtifacts(); }
+      catch { conductorLog.warn('artifact-revalidation-blocked', { workspaceId: this.deps.workspaceId }); }
+    }
+    for (const slug of listTaskSlugs(this.deps.workspaceRoot)) {
+      for (const runId of listRunIds(this.deps.workspaceRoot, slug)) {
+        if (this.runs.has(this.key(slug, runId))) continue;
+        try {
+          const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+          if (!isTerminalRunStatus(deriveRunStatusFromLog(log)) || !log.some(entry => entry.kind === 'node-artifact-inputs')) continue;
+          // Load a passive view: no worker, timers, recovery or task registration.
+          this.rehydrate(slug, runId, 'view').revalidateCompletedArtifacts();
+        } catch { conductorLog.warn('artifact-revalidation-blocked', { workspaceId: this.deps.workspaceId, slug, runId }); }
+      }
+    }
+  }
+
+  revalidateCompletedArtifacts(slug: string, runId: string): RunSnapshot {
+    return this.requireRun(slug, runId).revalidateCompletedArtifacts();
   }
 
   getRunState(slug: string, runId: string): RunSnapshot | null {
     return this.runs.get(this.key(slug, runId))?.snapshot() ?? null;
+  }
+
+  /** Read any durable run without registering it as active or executing recovery. */
+  getRunHistory(slug: string, orchestratorSessionId: string): RunSnapshot[] {
+    return listRunIds(this.deps.workspaceRoot, slug).flatMap(runId => {
+      const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+      const start = log.find(entry => entry.kind === 'run-started');
+      if (start?.kind !== 'run-started' || start.orchestratorSessionId !== orchestratorSessionId) return [];
+      const snapshot = this.getRunState(slug, runId) ?? this.rehydrate(slug, runId, 'view').snapshot();
+      return [snapshot];
+    });
+  }
+
+  getLatestRun(slug: string): RunSnapshot | null {
+    const last = listRunIds(this.deps.workspaceRoot, slug).at(-1);
+    if (!last) return null;
+    const active = this.getRunState(slug, last);
+    if (active) return active;
+    try {
+      const terminal = isTerminalRunStatus(deriveRunStatusFromLog(readRunLog(this.deps.workspaceRoot, slug, last)));
+      return this.rehydrate(slug, last, terminal ? 'view' : 'scan').snapshot();
+    } catch {
+      return null;
+    }
   }
 
   /** Await a run reaching a terminal state (completed/failed/stopped). */

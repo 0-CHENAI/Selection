@@ -8,10 +8,10 @@
 
 import {
   Building2,
+  Globe,
   Keyboard,
   MessageSquare,
   Palette,
-  Server,
   ShieldCheck,
   Sparkles,
   Tag,
@@ -27,10 +27,10 @@ export const AiSettingsIcon = ({ className }: IconProps) => <Sparkles className=
 export const AppearanceIcon = ({ className }: IconProps) => <Palette className={className} />
 export const InputIcon = ({ className }: IconProps) => <Keyboard className={className} />
 export const WorkspaceIcon = ({ className }: IconProps) => <Building2 className={className} />
+export const AdvancedSettingsIcon = ({ className }: IconProps) => <Globe className={className} />
 export const PermissionsIcon = ({ className }: IconProps) => <ShieldCheck className={className} />
 export const LabelsIcon = ({ className }: IconProps) => <Tag className={className} />
 export const MessagingSettingsIcon = ({ className }: IconProps) => <MessageSquare className={className} />
-export const ServerSettingsIcon = ({ className }: IconProps) => <Server className={className} />
 export const ShortcutsIcon = ({ className }: IconProps) => <Keyboard className={className} />
 export const PreferencesIcon = ({ className }: IconProps) => <UserCircle className={className} />
 
@@ -44,10 +44,10 @@ export const SETTINGS_ICONS: Record<SettingsSubpage, React.ComponentType<IconPro
   appearance: AppearanceIcon,
   input: InputIcon,
   workspace: WorkspaceIcon,
+  advanced: AdvancedSettingsIcon,
   permissions: PermissionsIcon,
   labels: LabelsIcon,
   messaging: MessagingSettingsIcon,
-  server: ServerSettingsIcon,
   shortcuts: ShortcutsIcon,
   preferences: PreferencesIcon,
 }

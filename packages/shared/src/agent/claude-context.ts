@@ -14,6 +14,8 @@ import { CONFIG_DIR } from '../config/paths.ts';
 import type {
   SessionToolContext,
   SessionToolCallbacks,
+  ClarificationAsk,
+  ClarificationGate,
   FileSystemInterface,
   CredentialManagerInterface,
   ValidatorInterface,
@@ -74,8 +76,14 @@ export interface ClaudeContextOptions {
   sessionId: string;
   workspacePath: string;
   workspaceId: string;
+  workingDirectory?: string;
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
+  onClarifyRequest?: (ask: ClarificationAsk) => ClarificationGate;
+  /** Current model image capability. Omit when unknown. */
+  supportsImages?: boolean;
+  /** Current session permission mode. */
+  permissionMode?: string;
 }
 
 /**
@@ -89,7 +97,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest } = options;
+  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest, onClarifyRequest, supportsImages, permissionMode } = options;
 
   // File system implementation
   const fs: FileSystemInterface = {
@@ -112,6 +120,10 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
   const callbacks: SessionToolCallbacks = {
     onPlanSubmitted,
     onAuthRequest: (request) => onAuthRequest(request),
+    onClarifyRequest: onClarifyRequest ?? (() => ({
+      accepted: false,
+      reason: 'Clarification is not available in this context. Continue with your best current understanding.',
+    })),
   };
 
   // Validators implementation
@@ -220,6 +232,9 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     plansFolderPath: getSessionPlansPath(workspacePath, sessionId),
     sessionPath: getSessionPath(workspacePath, sessionId),
     dataPath: getSessionDataPath(workspacePath, sessionId),
+    workingDirectory,
+    ...(permissionMode ? { permissionMode } : {}),
+    ...(supportsImages !== undefined ? { supportsImages } : {}),
     callbacks,
     fs,
     validators,

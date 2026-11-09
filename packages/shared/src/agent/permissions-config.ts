@@ -5,17 +5,16 @@
  * Users can create permissions.json files to extend the default rules.
  *
  * File locations:
- * - Workspace: ~/.craft-agent/workspaces/{slug}/permissions.json
- * - Per-source: ~/.craft-agent/workspaces/{slug}/sources/{sourceSlug}/permissions.json
+ * - Workspace: ~/.selection/workspaces/{slug}/permissions.json
+ * - Per-source: ~/.selection/workspaces/{slug}/sources/{sourceSlug}/permissions.json
  *
  * Rules are additive - custom configs extend the defaults (more permissive).
  */
 
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
-import { resolveConfigDir } from '../config/paths.ts';
+import { homedir } from 'os';
 import { join } from 'path';
 import { debug } from '../utils/debug.ts';
-import { isPlainMcpVerb } from './mcp-tool-names.ts';
 import { readJsonFileSync, safeJsonParse } from '../utils/files.ts';
 import { CONFIG_DIR } from '../config/paths.ts';
 import { getBundledAssetsDir } from '../utils/paths.ts';
@@ -33,6 +32,7 @@ import {
   type BlockedCommandHintRule,
   type PermissionPaths,
 } from './mode-types.ts';
+import { isPlainMcpVerb } from './mcp-tool-names.ts';
 
 // ============================================================
 // App-level Permissions Directory
@@ -43,11 +43,12 @@ let permissionsInitialized = false;
 
 /**
  * Get the app-level permissions directory.
- * Default permissions are stored at <CONFIG_DIR>/permissions/
- * Resolves the directory on every call so tests can override via CRAFT_CONFIG_DIR.
+ * Default permissions are stored at ~/.selection/permissions/
+ * Reads env var dynamically so tests can override via CRAFT_CONFIG_DIR.
  */
 export function getAppPermissionsDir(): string {
-  return join(resolveConfigDir(), 'permissions');
+  const configDir = process.env.CRAFT_CONFIG_DIR || CONFIG_DIR;
+  return join(configDir, 'permissions');
 }
 
 /**
@@ -182,7 +183,7 @@ function migratePermissions(
 }
 
 /**
- * Load default permissions from ~/.craft-agent/permissions/default.json
+ * Load default permissions from ~/.selection/permissions/default.json
  * Returns null if file doesn't exist or is invalid.
  */
 export function loadDefaultPermissions(): PermissionsCustomConfig | null {
@@ -578,12 +579,12 @@ class PermissionsConfigCache {
   private sourceConfigs: Map<string, PermissionsCustomConfig | null> = new Map();
   private mergedConfigs: Map<string, MergedPermissionsConfig> = new Map();
 
-  // App-level default permissions (loaded from ~/.craft-agent/permissions/default.json)
+  // App-level default permissions (loaded from ~/.selection/permissions/default.json)
   private defaultConfig: PermissionsCustomConfig | null | undefined = undefined; // undefined = not loaded yet
 
   /**
    * Get or load app-level default permissions
-   * These come from ~/.craft-agent/permissions/default.json
+   * These come from ~/.selection/permissions/default.json
    */
   private getDefaultConfig(): PermissionsCustomConfig | null {
     if (this.defaultConfig === undefined) {

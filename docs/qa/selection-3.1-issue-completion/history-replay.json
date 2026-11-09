@@ -1,0 +1,24 @@
+{
+  "codeCommit": "60e4a512e9dc1684ec0e26603573f8e70f23486b",
+  "packageMainSha256": "93ea5b6d7b5a72e929a6b3324f266fe396e8e366fc694f18d535bcb0519bc4c9",
+  "rootId": "261010-neat-elk",
+  "taskSlug": "pro-a544b8bd8bbbc07289d3f000",
+  "runId": "chat-5b1b0c9561a758b86c2b783a1af097d4c3a59891315b5c3868c20aeaa158e6fb",
+  "status": "completed",
+  "readOnly": true,
+  "cursor": 14,
+  "total": 14,
+  "toolCallsBefore": 28,
+  "toolCallsAfter": 28,
+  "eventsBefore": 14,
+  "eventsAfter": 14,
+  "originalInputsUnchanged": true,
+  "nativeUI": [
+    "Opened history at 14/14 with no cursor error",
+    "Decremented to 13/14, revision 0",
+    "Returned to current completed topology"
+  ],
+  "screenshot": "pro-history-replay.png",
+  "newModelCallsForInspectedRun": 0,
+  "scope": "The completed inspected run only; the separate new G7 sample runs after this capture."
+}

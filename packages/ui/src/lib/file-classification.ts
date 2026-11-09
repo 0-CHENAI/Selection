@@ -7,7 +7,7 @@
  */
 
 /** Preview types that map to specific overlay components */
-export type FilePreviewType = 'image' | 'code' | 'markdown' | 'json' | 'text' | 'pdf'
+export type FilePreviewType = 'image' | 'code' | 'markdown' | 'json' | 'text' | 'pdf' | 'html'
 
 export interface FileClassification {
   /** The preview type, or null if no in-app preview is available */
@@ -18,12 +18,12 @@ export interface FileClassification {
 
 /**
  * Image formats — rendered in ImagePreviewOverlay via data URL.
- * Only includes formats Chromium can natively decode.
- * HEIC/HEIF and TIFF are excluded — Chromium has no codec for these,
- * so they fall through to system open (external app).
+ * HEIC/HEIF are included because the file RPC transcodes them to JPEG.
+ * If that transcode fails, the link interceptor falls back to the system opener.
+ * TIFF stays external — Chromium has no codec and we do not transcode it.
  */
 const IMAGE_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'heic', 'heif',
 ])
 
 /**
@@ -35,7 +35,7 @@ const CODE_EXTENSIONS = new Set([
   'py', 'rb', 'rs', 'go', 'java', 'kt', 'swift',
   'c', 'cpp', 'h', 'hpp', 'cs',
   'css', 'scss', 'less',
-  'html', 'htm', 'xml', 'svg',  // SVG is also code-viewable, but image takes priority
+  'xml', 'svg',  // SVG is also code-viewable, but image takes priority
   'yaml', 'yml', 'toml',
   'sh', 'bash', 'zsh', 'fish',
   'sql', 'graphql',
@@ -44,6 +44,9 @@ const CODE_EXTENSIONS = new Set([
   'r', 'lua', 'perl', 'php',
   'vue', 'svelte', 'astro', 'prisma',
 ])
+
+/** HTML pages — opened as a webpage in the built-in browser */
+const HTML_EXTENSIONS = new Set(['html', 'htm', 'xhtml'])
 
 /** Markdown files — rendered with the Markdown component */
 const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx'])
@@ -77,7 +80,7 @@ const EXTERNAL_EXTENSIONS = new Set([
   'dmg', 'pkg', 'exe', 'msi',       // Installers
   'mp3', 'wav', 'flac', 'aac',      // Audio
   'mp4', 'mov', 'avi', 'mkv',       // Video
-  'heic', 'heif', 'tiff', 'tif',    // Images Chromium can't decode
+  'tiff', 'tif',                    // Images Chromium can't decode
 ])
 
 /**
@@ -85,7 +88,7 @@ const EXTERNAL_EXTENSIONS = new Set([
  * Handles compound extensions like .env.local by returning the last segment.
  */
 function getExtension(filePath: string): string {
-  const basename = filePath.split('/').pop() ?? filePath
+  const basename = filePath.split(/[/\\]/).pop() ?? filePath
   const dotIndex = basename.lastIndexOf('.')
   if (dotIndex === -1 || dotIndex === 0) return ''
   return basename.slice(dotIndex + 1).toLowerCase()
@@ -95,13 +98,14 @@ function getExtension(filePath: string): string {
  * Classify a file path by extension to determine preview capability.
  *
  * Priority order when an extension matches multiple sets (e.g. svg):
- * image > code > markdown > json > text > pdf
+ * image > html > markdown > json > code > text > pdf
  */
 export function classifyFile(filePath: string): FileClassification {
   const ext = getExtension(filePath)
   if (!ext) return { type: null, canPreview: false }
 
   if (IMAGE_EXTENSIONS.has(ext))    return { type: 'image', canPreview: true }
+  if (HTML_EXTENSIONS.has(ext))     return { type: 'html', canPreview: true }
   if (MARKDOWN_EXTENSIONS.has(ext)) return { type: 'markdown', canPreview: true }
   if (JSON_EXTENSIONS.has(ext))     return { type: 'json', canPreview: true }
   if (CODE_EXTENSIONS.has(ext))     return { type: 'code', canPreview: true }
@@ -118,6 +122,7 @@ export function classifyFile(filePath: string): FileClassification {
  */
 export const FILE_EXTENSIONS_PATTERN = [
   ...IMAGE_EXTENSIONS,
+  ...HTML_EXTENSIONS,
   ...CODE_EXTENSIONS,
   ...MARKDOWN_EXTENSIONS,
   ...JSON_EXTENSIONS,

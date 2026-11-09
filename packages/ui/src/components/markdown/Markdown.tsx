@@ -1,8 +1,11 @@
+import { remarkFileMentions } from './remark-file-mentions'
 import * as React from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
+import { remarkLiteralTildes } from './remark-literal-tildes'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { cn } from '../../lib/utils'
@@ -10,21 +13,36 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { MarkdownDiffBlock } from './MarkdownDiffBlock'
 import { MarkdownJsonBlock } from './MarkdownJsonBlock'
 import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
+import { NativeMarkdownTable } from './NativeMarkdownTable'
 import { MarkdownDatatableBlock } from './MarkdownDatatableBlock'
 import { MarkdownSpreadsheetBlock } from './MarkdownSpreadsheetBlock'
 import { MarkdownHtmlBlock } from './MarkdownHtmlBlock'
+import { FileTypeIcon, getFileIconKind } from '../chat/attachment-helpers'
+import { WebsiteIcon } from './WebsiteIcon'
+import { MarkdownImage } from './MarkdownImage'
 import { MarkdownImageBlock } from './MarkdownImageBlock'
 import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
+import { promoteBarePreviewBlocks } from './promote-preview-blocks'
 import { resolveMarkdownLinkTarget } from './link-target'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
 import { wrapWithSafeProxy } from './safe-components'
-import { MARKDOWN_MATH_OPTIONS } from './math-options'
+import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
+import { useSemanticReveal } from './useSemanticReveal'
+import { createStreamArrivalChunks, rehypeStreamChunks } from './rehype-stream-chunks'
+import { splitOpenRichFence } from './streaming-rich-fence'
+import { useFrameContent } from './useFrameContent'
+import { createStreamingMarkdownCache, remarkStreamingCache } from './remark-streaming-cache'
+import type { PluggableList } from 'unified'
+
+// Parent cards still receive every event. A pending frame must not rerun the
+// Markdown/KaTeX/HTML pipeline with unchanged painted content.
+const MemoizedReactMarkdown = React.memo(ReactMarkdown)
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -54,6 +72,9 @@ export type RenderMode = 'terminal' | 'minimal' | 'full'
 
 export interface MarkdownProps {
   children: string
+  /** Cosmetic only: complete Markdown stays available to selection/copy. */
+  revealStartTime?: number
+  isStreaming?: boolean
   /**
    * Render mode controlling formatting level
    * @default 'minimal'
@@ -61,8 +82,7 @@ export interface MarkdownProps {
   mode?: RenderMode
   className?: string
   /**
-   * Message ID for memoization (optional)
-   * When provided, memoizes parsed blocks to avoid re-parsing during streaming
+   * Stable message identity (optional), used to avoid replaying visual reveal.
    */
   id?: string
   /**
@@ -161,6 +181,18 @@ function createComponents(
     )
   }
 
+  const renderLanguageMath = (
+    className: string | undefined,
+    children: React.ReactNode,
+    nodePosition?: { start?: { line?: number }; end?: { line?: number } },
+  ) => {
+    const code = String(children).replace(/\n$/, '')
+    if (className?.includes('math-inline')) {
+      return <MarkdownLatexBlock code={code} displayMode={false} />
+    }
+    return wrapBlock('latex', code, <MarkdownLatexBlock code={code} className="my-2" />, nodePosition)
+  }
+
   const baseComponents: Partial<Components> = {
     // Section wrapper for collapsible headings
     div: ({ node, children, ...props }) => {
@@ -202,6 +234,23 @@ function createComponents(
       const trimmedHref = href?.trim() ?? ''
       const sanitized = trimmedHref ? defaultUrlTransform(trimmedHref) : ''
       const safeHref = sanitized ? sanitized : undefined
+      const resolved = resolveMarkdownLinkTarget(trimmedHref)
+      let fileName = resolved.kind === 'file' ? resolved.path.replace(/\\/g, '/').split('/').pop() : undefined
+      if (!fileName && /^https?:\/\//i.test(trimmedHref)) {
+        try {
+          const name = decodeURIComponent(new URL(trimmedHref).pathname.split('/').pop() ?? '')
+          if (/\.(?:docx?|docm|xlsx?|xlsm|pptx?|pptm|pdf|txt|md|markdown|png|jpe?g|gif|webp|svg|csv|rtf|odt|ods|odp)$/i.test(name)) fileName = name
+        } catch { /* Malformed URLs retain ordinary link rendering. */ }
+      }
+
+      const fileKind = fileName ? getFileIconKind({ fileName }) : undefined
+      const fileTint = fileKind === 'word' ? 'bg-blue-500/[0.07] hover:bg-blue-500/[0.12]'
+        : fileKind === 'excel' ? 'bg-green-500/[0.07] hover:bg-green-500/[0.12]'
+        : fileKind === 'powerpoint' ? 'bg-orange-500/[0.07] hover:bg-orange-500/[0.12]'
+        : fileKind === 'pdf' ? 'bg-destructive/[0.07] hover:bg-destructive/[0.12]'
+        : fileKind === 'image' ? 'bg-accent/[0.07] hover:bg-accent/[0.12]'
+        : fileKind === 'code' ? 'bg-success/[0.07] hover:bg-success/[0.12]'
+        : 'bg-foreground/[0.06] hover:bg-foreground/[0.10]'
 
       const handleClick = (e: React.MouseEvent) => {
         e.preventDefault()
@@ -228,12 +277,20 @@ function createComponents(
         <a
           href={safeHref}
           onClick={handleClick}
-          className="cursor-pointer text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-current"
+          title={fileName}
+          className={fileName
+            ? cn('inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg py-1 pl-1 pr-2.5 align-middle text-[0.9em] font-bold !text-foreground !no-underline transition-colors hover:!no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', fileTint)
+            : 'text-accent hover:underline cursor-pointer'}
         >
-          {children}
+          {fileName ? <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-background/80"><FileTypeIcon fileName={fileName} className="size-4" /></span>
+            : safeHref && /^https?:\/\//i.test(safeHref) && <WebsiteIcon key={safeHref} href={safeHref} />}
+          {fileName ? <span className="min-w-0 break-all font-bold leading-snug">{children}</span> : children}
         </a>
       )
     },
+    img: ({ src, alt }) => (
+      <MarkdownImage src={src} alt={alt} onFileClick={onFileClick} />
+    ),
   }
 
   // Terminal mode: minimal formatting
@@ -290,7 +347,7 @@ function createComponents(
           if (match?.[1] === 'spreadsheet') {
             return wrapBlock('spreadsheet', code, <MarkdownSpreadsheetBlock code={code} className="my-2" />, props.node?.position)
           }
-          // HTML preview blocks → sandboxed iframe
+          // HTML preview blocks → built-in browser entry
           if (match?.[1] === 'html-preview' && isPreviewEnabled('html-preview')) {
             return wrapBlock('html-preview', code, <MarkdownHtmlBlock code={code} className="my-2" />, props.node?.position)
           }
@@ -311,9 +368,9 @@ function createComponents(
               props.node?.position,
             )
           }
-          // LaTeX/math code blocks → KaTeX rendered display math
+          // Fenced ```latex / ```math → display. remark-math inline → keep inline.
           if (match?.[1] === 'latex' || match?.[1] === 'math') {
-            return wrapBlock('latex', code, <MarkdownLatexBlock code={code} className="my-2" />, props.node?.position)
+            return renderLanguageMath(className, children, props.node?.position)
           }
           // Mermaid code blocks → zinc-styled SVG diagram.
           // Hide the inline expand button when the mermaid block is the first
@@ -365,7 +422,7 @@ function createComponents(
               type="checkbox"
               checked={checked}
               readOnly
-              className="mr-2 rounded border-control align-middle"
+              className="mr-2 rounded border-muted-foreground align-middle"
             />
           )
         }
@@ -373,24 +430,22 @@ function createComponents(
       },
       // Clean tables
       table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-label-lg">{children}</table>
-        </div>
+        <NativeMarkdownTable>{children}</NativeMarkdownTable>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
-      th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-secondary">{children}</th>
+      th: ({ children, colSpan, rowSpan }) => (
+        <th colSpan={colSpan} rowSpan={rowSpan} className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
       ),
-      td: ({ children }) => (
-        <td className="py-2 px-3 border-b border-subtle">{children}</td>
+      td: ({ children, colSpan, rowSpan }) => (
+        <td colSpan={colSpan} rowSpan={rowSpan} className="py-2 px-3 border-b border-border/50">{children}</td>
       ),
-      // Headings - 16/24 (spec §7.4), differentiated by weight and spacing
-      h1: ({ children }) => <h1 className="font-sans text-copy-lg leading-6 font-bold mt-5 mb-3">{children}</h1>,
-      h2: ({ children }) => <h2 className="font-sans text-copy-lg leading-6 font-semibold mt-4 mb-2">{children}</h2>,
-      h3: ({ children }) => <h3 className="font-sans text-copy-lg leading-6 font-semibold mt-4 mb-1.5">{children}</h3>,
+      // Headings - H1/H2 same size, differentiated by weight
+      h1: ({ children }) => <h1 className="font-sans text-[16px] font-bold mt-5 mb-3">{children}</h1>,
+      h2: ({ children }) => <h2 className="font-sans text-[16px] font-semibold mt-4 mb-3">{children}</h2>,
+      h3: ({ children }) => <h3 className="font-sans text-[15px] font-semibold mt-4 mb-2">{children}</h3>,
       // Blockquotes
       blockquote: ({ children }) => (
-        <blockquote className="border-l-2 border-strong pl-3 my-2 text-secondary italic">
+        <blockquote className="border-l-2 border-muted-foreground/30 pl-3 my-2 text-muted-foreground italic">
           {children}
         </blockquote>
       ),
@@ -428,7 +483,7 @@ function createComponents(
         if (match?.[1] === 'spreadsheet') {
           return wrapBlock('spreadsheet', code, <MarkdownSpreadsheetBlock code={code} className="my-2" />, props.node?.position)
         }
-        // HTML preview blocks → sandboxed iframe
+        // HTML preview blocks → built-in browser entry
         if (match?.[1] === 'html-preview' && isPreviewEnabled('html-preview')) {
           return wrapBlock('html-preview', code, <MarkdownHtmlBlock code={code} className="my-2" />, props.node?.position)
         }
@@ -449,9 +504,9 @@ function createComponents(
             props.node?.position,
           )
         }
-        // LaTeX/math code blocks → KaTeX rendered display math
+        // Fenced ```latex / ```math → display. remark-math inline → keep inline.
         if (match?.[1] === 'latex' || match?.[1] === 'math') {
-          return wrapBlock('latex', code, <MarkdownLatexBlock code={code} className="my-2" />, props.node?.position)
+          return renderLanguageMath(className, children, props.node?.position)
         }
         // Mermaid code blocks → zinc-styled SVG diagram.
         // (Same first-block detection as minimal mode — see comment above.)
@@ -493,37 +548,35 @@ function createComponents(
     ),
     // Beautiful tables
     table: ({ children }) => (
-      <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="min-w-full divide-y divide-border">{children}</table>
-      </div>
+      <NativeMarkdownTable>{children}</NativeMarkdownTable>
     ),
-    thead: ({ children }) => <thead className="bg-fill-hover">{children}</thead>,
+    thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => (
-      <th className="text-left py-3 px-4 font-semibold text-label-lg">{children}</th>
+    th: ({ children, colSpan, rowSpan }) => (
+      <th colSpan={colSpan} rowSpan={rowSpan} className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
     ),
-    td: ({ children }) => (
-      <td className="py-3 px-4 text-label-lg">{children}</td>
+    td: ({ children, colSpan, rowSpan }) => (
+      <td colSpan={colSpan} rowSpan={rowSpan} className="py-3 px-4 text-sm">{children}</td>
     ),
     tr: ({ children }) => (
-      <tr className="transition-colors duration-micro ease-out-subtle hover:bg-fill-hover hover:duration-instant">{children}</tr>
+      <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
     ),
     // Rich headings - H1/H2 same size, differentiated by weight
     h1: ({ children }) => (
-      <h1 className="font-sans text-copy-lg leading-6 font-bold mt-7 mb-4">{children}</h1>
+      <h1 className="font-sans text-[16px] font-bold mt-7 mb-4">{children}</h1>
     ),
     h2: ({ children }) => (
-      <h2 className="font-sans text-copy-lg leading-6 font-semibold mt-6 mb-3">{children}</h2>
+      <h2 className="font-sans text-[16px] font-semibold mt-6 mb-3">{children}</h2>
     ),
     h3: ({ children }) => (
-      <h3 className="font-sans text-copy leading-6 font-semibold mt-5 mb-3">{children}</h3>
+      <h3 className="font-sans text-[15px] font-semibold mt-5 mb-3">{children}</h3>
     ),
     h4: ({ children }) => (
-      <h4 className="text-label-lg font-semibold mt-3 mb-1">{children}</h4>
+      <h4 className="text-[14px] font-semibold mt-3 mb-1">{children}</h4>
     ),
     // Styled blockquotes
     blockquote: ({ children }) => (
-      <blockquote className="border-l-4 border-strong bg-fill-hover pl-4 pr-3 py-2 my-3 rounded-r-md">
+      <blockquote className="border-l-4 border-foreground/30 bg-muted/30 pl-4 pr-3 py-2 my-3 rounded-r-md">
         {children}
       </blockquote>
     ),
@@ -535,7 +588,7 @@ function createComponents(
             type="checkbox"
             checked={checked}
             readOnly
-            className="mr-2 rounded border-control"
+            className="mr-2 rounded border-muted-foreground"
           />
         )
       }
@@ -546,7 +599,7 @@ function createComponents(
     // Strong/emphasis
     strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
     em: ({ children }) => <em className="italic">{children}</em>,
-    del: ({ children }) => <del className="line-through text-tertiary">{children}</del>,
+    del: ({ children }) => <del className="line-through text-muted-foreground">{children}</del>,
     // Handle unknown <markdown> tags that may come through rehype-raw
     // Type assertion needed because 'markdown' is not a standard HTML element
     markdown: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -573,7 +626,13 @@ export function Markdown({
   collapsible = false,
   hideFirstMermaidExpand = true,
   disablePreviewBlocks,
+  revealStartTime,
+  isStreaming = false,
 }: MarkdownProps) {
+  const revealRoot = React.useRef<HTMLDivElement>(null)
+  const arrivalChunks = React.useMemo(() => ({ split: createStreamArrivalChunks() }), [id])
+  const parseCache = React.useMemo(() => ({ parse: createStreamingMarkdownCache() }), [id])
+  const frameContent = useFrameContent(children, isStreaming, id)
   // Get collapsible context if enabled
   const collapsibleContext = useCollapsibleMarkdown()
 
@@ -595,68 +654,60 @@ export function Markdown({
     [mode, onUrlClick, onFileClick, collapsible, collapsibleContext, hideFirstMermaidExpand, disablePreviewBlocks]
   )
 
-  // Preprocess to convert raw URLs and file paths to markdown links
-  const processedContent = React.useMemo(
-    () => preprocessLinks(children),
-    [children]
+  // A table/diagram still being written renders as a small placeholder, not as
+  // raw source that grows and then collapses into the finished block.
+  const streamingSplit = React.useMemo(
+    () => isStreaming ? splitOpenRichFence(frameContent) : { body: frameContent },
+    [frameContent, isStreaming]
   )
+  // Linkify first, then shield currency `$` so `$A$` can be inline math.
+  const processedContent = React.useMemo(
+    () => protectCurrencyDollars(preprocessLinks(promoteBarePreviewBlocks(streamingSplit.body))),
+    [streamingSplit.body]
+  )
+  useSemanticReveal(revealRoot, processedContent, revealStartTime, isStreaming, id)
 
+  // Parse CJK punctuation beside emphasis markers without rewriting message text.
   // Conditionally include the collapsible sections plugin.
-  // IMPORTANT: Disable single-dollar inline math so currency like $2M–$4M
-  // stays plain text. Math should use $$...$$ delimiters.
-  const remarkPlugins = React.useMemo(
+  const remarkPlugins = React.useMemo<PluggableList>(
     () => {
       const mathPlugin: [typeof remarkMath, typeof MARKDOWN_MATH_OPTIONS] = [
         remarkMath,
         MARKDOWN_MATH_OPTIONS
       ]
       return collapsible
-        ? [remarkGfm, mathPlugin, remarkCollapsibleSections]
-        : [remarkGfm, mathPlugin]
+        ? [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections, [remarkStreamingCache, parseCache]]
+        : [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin, [remarkStreamingCache, parseCache]]
     },
-    [collapsible]
+    [collapsible, parseCache]
   )
+  const rehypePlugins = React.useMemo<PluggableList>(() => [
+    [rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw, [rehypeStreamChunks, arrivalChunks],
+  ], [arrivalChunks])
 
   return (
-    <div className={cn('markdown-content', className)}>
-      <ReactMarkdown
+    <div ref={revealRoot} className={cn('markdown-content', className)}>
+      <MemoizedReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        rehypePlugins={rehypePlugins}
         components={components}
         urlTransform={markdownUrlTransform}
       >
         {processedContent}
-      </ReactMarkdown>
+      </MemoizedReactMarkdown>
+      {streamingSplit.pending && (
+        <div
+          data-streaming-block-placeholder={streamingSplit.pending}
+          aria-hidden="true"
+          className="my-2 h-12 rounded-[8px] bg-foreground/[0.04] motion-safe:animate-pulse"
+        />
+      )}
     </div>
   )
 }
 
-/**
- * MemoizedMarkdown - Optimized for streaming scenarios
- *
- * Splits content into blocks and memoizes each block separately,
- * so only new/changed blocks re-render during streaming.
- */
-export const MemoizedMarkdown = React.memo(
-  Markdown,
-  (prevProps, nextProps) => {
-    // If id is provided, use it for memoization
-    if (prevProps.id && nextProps.id) {
-      return (
-        prevProps.id === nextProps.id &&
-        prevProps.children === nextProps.children &&
-        prevProps.mode === nextProps.mode &&
-        prevProps.disablePreviewBlocks === nextProps.disablePreviewBlocks
-      )
-    }
-    // Otherwise compare content and mode
-    return (
-      prevProps.children === nextProps.children &&
-      prevProps.mode === nextProps.mode &&
-      prevProps.disablePreviewBlocks === nextProps.disablePreviewBlocks
-    )
-  }
-)
+/** Skip unchanged documents while honoring every rendering and interaction prop. */
+export const MemoizedMarkdown = React.memo(Markdown)
 MemoizedMarkdown.displayName = 'MemoizedMarkdown'
 
 // Re-export for convenience

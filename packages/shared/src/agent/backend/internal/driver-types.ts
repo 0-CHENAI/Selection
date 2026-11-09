@@ -7,26 +7,38 @@ import type {
   LlmProviderType,
 } from '../types.ts';
 import type { LlmConnection } from '../../../config/storage.ts';
-import type { CustomEndpointConfig } from '../../../config/llm-connections.ts';
 import type { ModelFetchResult } from '../../../config/model-fetcher.ts';
 import type { CredentialManager } from '../../../credentials/manager.ts';
 import type { ResolvedBackendRuntimePaths } from './runtime-resolver.ts';
 
 export interface BackendRuntimePaths {
+  copilotCli?: string;
   interceptor?: string;
+  sessionServer?: string;
   node?: string;
+  bridgeServer?: string;
   piServer?: string;
 }
 
 export interface BackendRuntimePayload extends Record<string, unknown> {
   paths?: BackendRuntimePaths;
+  /** Trusted application roots for resolving bundled subprocess tools. */
+  officecliHost?: { appRootPath: string; resourcesPath?: string };
   piAuthProvider?: string;
   /** Custom base URL from the LLM connection (e.g. Azure OpenAI endpoint). */
   baseUrl?: string;
+  /** Connection-level image send overrides. Absent values use the shared defaults. */
+  imagePixelBudget?: number;
+  imageMaxBytes?: number;
+  imageMaxDimension?: number;
+  /** Explicit image-token family for the compaction precheck. */
+  imageTokenFamily?: string;
+  vlHighResolutionImages?: boolean;
+  imageMaxPixels?: number;
   /** Custom endpoint protocol config (api type for routing). */
-  customEndpoint?: CustomEndpointConfig;
-  /** Models registered for a custom endpoint. Strings default to 128K context; objects allow overrides. */
-  customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
+  customEndpoint?: { api: string; supportsImages?: boolean };
+  /** Models registered for a custom endpoint. Strings default to 128k/8k; objects carry catalog limits. */
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
 }
 
 export interface BackendResolutionContext {
@@ -113,9 +125,9 @@ export function getBackendRuntime(config: BackendConfig): BackendRuntimePayload 
 
 export function getDefaultProviderType(provider: AgentProvider): LlmProviderType {
   switch (provider) {
-    case 'anthropic':
-      return 'anthropic';
     case 'pi':
+      return 'pi';
+    default:
       return 'pi';
   }
 }

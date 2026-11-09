@@ -5,10 +5,10 @@
  * and the new Event Bus handlers (command-handler.ts, prompt-handler.ts).
  */
 
-import { join } from 'node:path';
 import type { BaseEventPayload } from './event-bus.ts';
-import type { AutomationEvent, AutomationMatcher, PromptReferences, AgentEvent, SdkAutomationInput } from './types.ts';
+import type { AutomationEvent, AutomationMatcher, PromptReferences } from './types.ts';
 import { matchesCron } from './cron-matcher.ts';
+import { sanitizeForShell } from './security.ts';
 import { evaluateConditions } from './conditions.ts';
 
 // ============================================================================
@@ -28,37 +28,18 @@ export function toSnakeCase(str: string): string {
 
 /**
  * Expand environment variables in a string.
- * Supports both $VAR and ${VAR} syntax; unknown variables become ''.
- *
- * One pass: an inserted value is never expanded again, so a session named
- * `$CRAFT_WH_SLACK_URL` stays that text instead of pulling in a webhook secret,
- * and values containing `$` arrive intact.
+ * Supports both $VAR and ${VAR} syntax.
  *
  * @example
  * expandEnvVars('Hello $NAME', { NAME: 'World' }) // 'Hello World'
  * expandEnvVars('${GREETING} World', { GREETING: 'Hi' }) // 'Hi World'
  */
 export function expandEnvVars(str: string, env: Record<string, string>): string {
-  return str.replace(
-    /\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/gi,
-    (_, braced: string | undefined, bare: string | undefined) => env[(braced ?? bare)!] ?? '',
-  );
-}
-
-/**
- * Expand environment variables in every string of a JSON value (object keys
- * included). Never expand serialized JSON: a value with a quote or a newline
- * would break it, or add fields.
- */
-export function expandEnvVarsInJson(value: unknown, env: Record<string, string>): unknown {
-  if (typeof value === 'string') return expandEnvVars(value, env);
-  if (Array.isArray(value)) return value.map(item => expandEnvVarsInJson(item, env));
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [expandEnvVars(key, env), expandEnvVarsInJson(item, env)]),
-    );
-  }
-  return value;
+  return str
+    // Replace ${VAR} syntax
+    .replace(/\$\{([^}]+)\}/g, (_, varName) => env[varName] ?? '')
+    // Replace $VAR syntax (word boundary)
+    .replace(/\$([A-Z_][A-Z0-9_]*)/gi, (_, varName) => env[varName] ?? '');
 }
 
 // ============================================================================
@@ -116,39 +97,11 @@ export function getMatchValue(event: AutomationEvent, data: Record<string, unkno
       return String(data.isFlagged ?? false);
     case 'SessionStatusChange':
       return String(data.newStatus ?? data.newState ?? '');
-    case 'PreToolUse':
-    case 'PostToolUse':
-      return String(data.toolName ?? (data.data as Record<string, unknown>)?.tool_name ?? '');
     case 'SchedulerTick':
       // SchedulerTick uses cron matching, not regex
       return '';
     default:
       return JSON.stringify(data);
-  }
-}
-
-/**
- * Get the match value for SDK agent events.
- * Mirrors the Claude SDK's `fieldToMatch` per event — each event type matches
- * against a specific field from the input.
- */
-export function getMatchValueForSdkInput(event: AgentEvent, input: SdkAutomationInput): string {
-  switch (event) {
-    case 'PreToolUse':
-    case 'PostToolUse':
-    case 'PostToolUseFailure':
-    case 'PermissionRequest':
-      return input.tool_name ?? '';
-    case 'Notification':
-      return input.message ?? '';
-    case 'SessionStart':
-      return input.source ?? '';
-    case 'SubagentStart':
-    case 'SubagentStop':
-      return input.agent_type ?? '';
-    default:
-      // UserPromptSubmit, Stop, SessionEnd — no meaningful match field
-      return '';
   }
 }
 
@@ -211,27 +164,27 @@ export function matcherMatches(matcher: AutomationMatcher, event: AutomationEven
   });
 }
 
-/**
- * SDK agent-event adapter for canonical matcher evaluation.
- */
-export function matcherMatchesSdk(matcher: AutomationMatcher, event: AgentEvent, input: SdkAutomationInput): boolean {
-  return matcherMatchesWithContext(matcher, event, {
-    matchValue: getMatchValueForSdkInput(event, input),
-    payload: input as unknown as Record<string, unknown>,
-    matcherTimezone: matcher.timezone,
-  });
-}
-
 // ============================================================================
 // Environment Variable Utilities
 // ============================================================================
+
+/**
+ * Get process.env as a clean Record<string, string> with undefined values filtered out.
+ * Avoids the unsafe `process.env as Record<string, string>` cast that turns undefined
+ * values into the string "undefined".
+ */
+export function cleanEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)
+  );
+}
 
 /** Keys skipped when iterating payload fields for env vars */
 const PAYLOAD_SKIP_KEYS = new Set(['sessionId', 'sessionName', 'workspaceId', 'timestamp']);
 
 /**
- * The event's CRAFT_* variables, shared by prompt, webhook and script actions:
- * event info, session metadata, scheduler time and payload fields, as raw text.
+ * Build the base CRAFT_* environment variables shared by both prompt and webhook actions.
+ * Contains event info, session metadata, scheduler time, and payload fields (unsanitized).
  */
 function buildBaseEventEnv(event: AutomationEvent, payload: BaseEventPayload): Record<string, string> {
   const env: Record<string, string> = {
@@ -258,7 +211,7 @@ function buildBaseEventEnv(event: AutomationEvent, payload: BaseEventPayload): R
     env.CRAFT_LOCAL_DATE = now.toISOString().split('T')[0]!;
   }
 
-  // Payload fields as CRAFT_ vars
+  // Payload fields as CRAFT_ vars (raw — callers apply sanitization if needed)
   for (const [key, value] of Object.entries(payload)) {
     if (PAYLOAD_SKIP_KEYS.has(key)) continue;
     const envKey = `CRAFT_${toSnakeCase(key).toUpperCase()}`;
@@ -269,23 +222,34 @@ function buildBaseEventEnv(event: AutomationEvent, payload: BaseEventPayload): R
 }
 
 /**
- * Variables for prompt actions: the event's CRAFT_* variables only, as raw text.
- *
- * The prompt text, labels and Telegram topic name are expanded with these, and
- * the result goes to the model, the session and Telegram. So no process
- * environment — in the app it holds the connection's OAuth token or API key
- * (ClaudeAgent.postInit sets them), and `$CLAUDE_CODE_OAUTH_TOKEN` in a prompt
- * used to expand to the real token — and no CRAFT_WH_* webhook secrets. Values are not shell-escaped: prompts are not a
- * shell (the old escaping put backslashes into session names and labels).
+ * Build environment variables from an event payload for prompt/command actions.
+ * Includes full process.env and sanitizes user-controlled values for shell safety.
  */
-export function buildPromptEnv(event: AutomationEvent, payload: BaseEventPayload): Record<string, string> {
-  return buildBaseEventEnv(event, payload);
+export function buildEnvFromPayload(event: AutomationEvent, payload: BaseEventPayload): Record<string, string> {
+  const base = buildBaseEventEnv(event, payload);
+  const env: Record<string, string> = { ...cleanEnv(), ...base };
+
+  // Sanitize session name for shell context
+  if (payload.sessionName) env.CRAFT_SESSION_NAME = sanitizeForShell(payload.sessionName);
+
+  // Sanitize payload field values for shell context
+  for (const [key, value] of Object.entries(payload)) {
+    if (PAYLOAD_SKIP_KEYS.has(key)) continue;
+    const envKey = `CRAFT_${toSnakeCase(key).toUpperCase()}`;
+    env[envKey] = typeof value === 'string' ? sanitizeForShell(value) : String(value);
+  }
+
+  return env;
 }
 
 /**
- * Build environment variables for webhook actions: the event's CRAFT_* variables
- * plus the user's CRAFT_WH_* variables from process.env (webhook secrets), and
- * nothing else from process.env.
+ * Build environment variables for webhook actions.
+ *
+ * Unlike buildEnvFromPayload (used by prompt actions), this:
+ * - Does NOT spread process.env (no secret leakage)
+ * - Does NOT apply shell sanitization (irrelevant for HTTP context)
+ * - Only injects CRAFT_WH_* user-defined vars from process.env (webhook secrets)
+ * - Includes CRAFT_* system vars derived from the event payload
  *
  * Users set webhook secrets in their shell profile:
  *   export CRAFT_WH_SLACK_URL="https://hooks.slack.com/services/T.../B.../xxx"
@@ -304,98 +268,6 @@ export function buildWebhookEnv(event: AutomationEvent, payload: BaseEventPayloa
       env[key] = value;
     }
   }
-
-  return env;
-}
-
-/**
- * Env vars that are not CRAFT_* but that script runtimes cannot function
- * without. Paths and OS plumbing only — never credentials.
- * - HOME/USERPROFILE: bun/uv cache + python interpreter installs
- * - SYSTEMROOT/WINDIR/SYSTEMDRIVE/COMSPEC/PATHEXT/TEMP/TMP: Windows can't
- *   spawn or do DNS/socket work without these
- */
-const SCRIPT_ENV_PLATFORM_ESSENTIALS = process.platform === 'win32'
-  ? ['USERPROFILE', 'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP']
-  : ['HOME'];
-
-export interface ScriptEnvOptions {
-  /** Workspace root, exposed as CRAFT_WORKSPACE_PATH */
-  workspaceRootPath: string;
-  /** Page slug when the script refreshes a page (adds CRAFT_PAGE_* vars) */
-  page?: string;
-}
-
-/** Platform essentials plus every CRAFT_* var from process.env (see buildScriptEnv). */
-function applyPlatformAndCraftEnv(env: Record<string, string>): void {
-  for (const key of SCRIPT_ENV_PLATFORM_ESSENTIALS) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith('CRAFT_') && value !== undefined) {
-      env[key] = value;
-    }
-  }
-}
-
-function applyWorkspaceAndPageEnv(env: Record<string, string>, options: ScriptEnvOptions): void {
-  env.CRAFT_WORKSPACE_PATH = options.workspaceRootPath;
-
-  if (options.page) {
-    const pageDir = join(options.workspaceRootPath, 'pages', options.page);
-    env.CRAFT_PAGE_SLUG = options.page;
-    env.CRAFT_PAGE_DIR = pageDir;
-    env.CRAFT_PAGE_DATA_DIR = join(pageDir, 'data');
-  }
-}
-
-/**
- * Event-independent script env: the CRAFT_*-only base without any automation
- * event context. Used by callers that run a script outside the automations
- * pipeline (e.g. a page action a user triggers by hand) — there is no event to
- * describe, so injecting a synthetic CRAFT_EVENT would be a lie.
- *
- * See buildScriptEnv for the full contract; this is that minus buildBaseEventEnv.
- */
-export function buildBaseScriptEnv(options: ScriptEnvOptions): Record<string, string> {
-  const env: Record<string, string> = {};
-  applyPlatformAndCraftEnv(env);
-  applyWorkspaceAndPageEnv(env, options);
-  return env;
-}
-
-/**
- * Build environment variables for script actions: CRAFT_*-only by design.
- *
- * process.env is NOT spread — a script's env is exactly:
- * - every CRAFT_* var from process.env (runtime hints like CRAFT_BUN/CRAFT_UV,
- *   user-defined CRAFT_* secrets, CRAFT_CONFIG_DIR, ...)
- * - CRAFT_* event context (same base as prompts and webhooks; no shell
- *   escaping — values are argv/env payloads, never interpreted by a shell)
- * - CRAFT_WORKSPACE_PATH and, for page refreshes, CRAFT_PAGE_SLUG /
- *   CRAFT_PAGE_DIR / CRAFT_PAGE_DATA_DIR
- * - a documented minimal set of non-secret platform essentials (HOME etc.)
- *
- * Notably absent: PATH (runtimes are spawned by absolute path) and every
- * non-CRAFT credential (ANTHROPIC_API_KEY, GITHUB_TOKEN, ...).
- */
-export function buildScriptEnv(
-  event: AutomationEvent,
-  payload: BaseEventPayload,
-  options: ScriptEnvOptions,
-): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  applyPlatformAndCraftEnv(env);
-
-  // Event context wins over any same-named pass-through
-  Object.assign(env, buildBaseEventEnv(event, payload));
-
-  // Workspace/page context is applied last so an event payload can never
-  // clobber CRAFT_WORKSPACE_PATH / CRAFT_PAGE_* (unchanged ordering).
-  applyWorkspaceAndPageEnv(env, options);
 
   return env;
 }

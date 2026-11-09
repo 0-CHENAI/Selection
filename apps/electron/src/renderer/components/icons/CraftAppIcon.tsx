@@ -1,21 +1,20 @@
-import craftLogo from "@/assets/craft_logo_c.svg"
+import { cn } from "@/lib/utils"
+import selectionIcon from "@/assets/selection-icon.svg"
 
 interface CraftAppIconProps {
   className?: string
   size?: number
 }
 
-/**
- * CraftAppIcon - Displays the Craft logo (colorful "C" icon)
- */
+/** Selection product mark used as the in-app app icon. */
 export function CraftAppIcon({ className, size = 64 }: CraftAppIconProps) {
   return (
     <img
-      src={craftLogo}
-      alt="Craft"
+      src={selectionIcon}
+      alt="Selection"
       width={size}
       height={size}
-      className={className}
+      className={cn("object-contain dark:invert", className)}
     />
   )
 }

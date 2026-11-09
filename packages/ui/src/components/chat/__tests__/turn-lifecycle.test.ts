@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { deriveTurnPhase, groupMessagesByTurn, type AssistantTurn } from '../turn-utils'
+import { deriveTurnPhase, groupMessagesByTurn, shouldShowStreamingFooter, type AssistantTurn } from '../turn-utils'
 import type { Message } from '@craft-agent/core'
 
 // ============================================================================
@@ -334,6 +334,7 @@ describe('turn lifecycle scenarios', () => {
       const turn = getLastAssistantTurn(turns)!
       expect(deriveTurnPhase(turn)).toBe('complete')
       expect(turn.response?.text).toBe('Response text') // promoted from the intermediate
+      expect(turn.activities.every(activity => activity.content !== 'Response text')).toBe(true)
     })
 
     it('intermediate text + completed tool + session still processing → phase awaiting', () => {
@@ -467,5 +468,557 @@ describe('hidden messages', () => {
     const userTurns = turns.filter(t => t.type === 'user')
     expect(userTurns.length).toBe(1)
     expect((userTurns[0] as { message: Message }).message.content).toBe('real user question')
+  })
+})
+
+describe('pending follow-up replies', () => {
+  it('keeps a pending reply as the response after tools, not a thought row', () => {
+    resetCounters()
+    const user = createUserMessage('查看结构')
+    const tool = createToolMessage('completed', 'Read')
+    tool.timestamp = user.timestamp + 5
+    const pending: Message = {
+      id: 'pending-reply',
+      role: 'assistant',
+      content: '报告分为三部分',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+
+    const turns = groupMessagesByTurn([user, tool, pending])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities).toHaveLength(1)
+      expect(assistant.response?.text).toBe('报告分为三部分')
+      expect(assistant.response?.isStreaming).toBe(true)
+    }
+  })
+
+  it('keeps a pending reply as the response when only intermediate thought exists', () => {
+    resetCounters()
+    const user = createUserMessage('用html')
+    const thought: Message = {
+      id: 'thought',
+      role: 'assistant',
+      content: '先整理章节',
+      timestamp: user.timestamp + 5,
+      isIntermediate: true,
+    }
+    const pending: Message = {
+      id: 'pending-reply',
+      role: 'assistant',
+      content: '<table>',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+
+    const turns = groupMessagesByTurn([user, thought, pending])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities.map(activity => activity.content)).toEqual(['先整理章节'])
+      expect(assistant.response?.text).toBe('<table>')
+      expect(assistant.response?.isStreaming).toBe(true)
+    }
+  })
+
+  it('shows pending text after a user message as a streaming response, not a thought row', () => {
+    resetCounters()
+    const user = createUserMessage('请使用列表展示')
+    const pending: Message = {
+      id: 'pending-reply',
+      role: 'assistant',
+      content: '好的，下面列出文稿的所有章节及其子项：',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+
+    const turns = groupMessagesByTurn([user, pending])
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities).toEqual([])
+      expect(assistant.response?.text).toBe('好的，下面列出文稿的所有章节及其子项：')
+      expect(assistant.response?.isStreaming).toBe(true)
+      expect(shouldShowStreamingFooter({
+        isStreaming: assistant.response.isStreaming,
+        hasToolActivities: assistant.activities.some(activity => activity.type === 'tool'),
+      })).toBe(true)
+    }
+  })
+
+  it('keeps a finished swarm preamble streaming on the card but hides the footer once spawn_session starts (#203)', () => {
+    resetCounters()
+    const user = createUserMessage('同时调研三个独立模型')
+    const preamble: Message = {
+      id: 'preamble',
+      role: 'assistant',
+      content: '好的，我将启动三个子代理并行调研这三个模型的最新信息。',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+    const spawn = createToolMessage('running', 'spawn_session')
+    spawn.timestamp = user.timestamp + 20
+
+    const turns = groupMessagesByTurn([user, preamble, spawn])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.response?.text).toBe('好的，我将启动三个子代理并行调研这三个模型的最新信息。')
+      expect(assistant.response?.isStreaming).toBe(true)
+      expect(assistant.activities.some(activity => activity.type === 'tool')).toBe(true)
+      expect(shouldShowStreamingFooter({
+        isStreaming: assistant.response.isStreaming,
+        hasToolActivities: true,
+      })).toBe(false)
+    }
+  })
+
+  it('keeps the managed Swarm turn open without presenting dispatch text as the final response (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('同时调研三个独立模型')
+    const spawn = createToolMessage('completed', 'session__spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'automatic',
+      lifecycle: 'managed',
+    })
+    spawn.toolResult = spawn.content
+    const dispatched: Message = {
+      id: 'dispatch-complete',
+      role: 'assistant',
+      content: '已成功启动 3 个子代理并行调研。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, dispatched], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(false)
+      expect(assistant.isStreaming).toBe(true)
+      expect(assistant.response).toBeUndefined()
+      expect(assistant.activities.some(activity =>
+        activity.type === 'intermediate'
+        && activity.content === dispatched.content
+      )).toBe(true)
+    }
+  })
+
+  it('restores completed chrome after the managed Swarm settles (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('同时调研三个独立模型')
+    const spawn = createToolMessage('completed', 'mcp__session__spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'automatic',
+      lifecycle: 'managed',
+    })
+    spawn.toolResult = spawn.content
+    const final: Message = {
+      id: 'swarm-final',
+      role: 'assistant',
+      content: '三个子代理均已完成，以下是汇总结论。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, final], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: false,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(true)
+      expect(assistant.isStreaming).toBe(false)
+      expect(assistant.response?.isStreaming).toBe(false)
+    }
+  })
+
+  it('does not hold a third-party spawn_session tool open (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('调用第三方会话工具')
+    const spawn = createToolMessage('completed', 'mcp__vendor__spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'automatic',
+      lifecycle: 'managed',
+    })
+    spawn.toolResult = spawn.content
+    const response: Message = {
+      id: 'vendor-complete',
+      role: 'assistant',
+      content: '第三方工具调用完成。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, response], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(true)
+      expect(assistant.isStreaming).toBe(false)
+    }
+  })
+
+  it('does not hold an explicit background delegation open while Swarm status is running (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('/delegate 后台检查日志')
+    const spawn = createToolMessage('completed', 'spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'user-requested',
+      lifecycle: 'managed',
+    })
+    spawn.toolResult = spawn.content
+    const delegated: Message = {
+      id: 'delegate-complete',
+      role: 'assistant',
+      content: '后台任务已经启动。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, delegated], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(true)
+      expect(assistant.response?.isStreaming).toBe(false)
+    }
+  })
+
+  it('does not hold an automatic detached worker open (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('后台启动独立 worker')
+    const spawn = createToolMessage('completed', 'spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'automatic',
+      lifecycle: 'detached',
+    })
+    spawn.toolResult = spawn.content
+    const response: Message = {
+      id: 'detached-complete',
+      role: 'assistant',
+      content: '独立 worker 已在后台启动。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, response], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(true)
+      expect(assistant.response?.isStreaming).toBe(false)
+    }
+  })
+
+  it('keeps a timed-out managed wait child open when it continues in background (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('等待子代理调研')
+    const spawn = createToolMessage('completed', 'spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'timeout',
+      spawnReason: 'automatic',
+      lifecycle: 'managed',
+      mode: 'wait',
+    })
+    spawn.toolResult = spawn.content
+    const response: Message = {
+      id: 'wait-timeout',
+      role: 'assistant',
+      content: '子代理仍在后台继续。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, response], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(false)
+      expect(assistant.isStreaming).toBe(true)
+      expect(assistant.response).toBeUndefined()
+    }
+  })
+
+  it('merges the hidden Swarm aggregation into the original visible turn (#224)', () => {
+    resetCounters()
+    const user = createUserMessage('同时调研三个独立模型')
+    const spawn = createToolMessage('completed', 'spawn_session')
+    spawn.timestamp = user.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'automatic',
+      lifecycle: 'managed',
+      mode: 'background',
+    })
+    spawn.toolResult = spawn.content
+    const dispatch: Message = {
+      id: 'dispatch-response',
+      role: 'assistant',
+      content: '已启动三个子代理。',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+    }
+    const hiddenNudge: Message = {
+      id: 'managed-swarm-nudge',
+      role: 'user',
+      content: '[managed-swarm-settled]',
+      timestamp: user.timestamp + 30,
+      hidden: true,
+    }
+    const aggregation: Message = {
+      id: 'aggregation-response',
+      role: 'assistant',
+      content: '三个子代理均已完成，以下是汇总结论。',
+      timestamp: user.timestamp + 40,
+      isStreaming: false,
+    }
+
+    const turns = groupMessagesByTurn([user, spawn, dispatch, hiddenNudge, aggregation], {
+      isSessionProcessing: false,
+      isManagedSwarmRunning: false,
+    })
+    const assistantTurns = turns.filter((turn): turn is AssistantTurn => turn.type === 'assistant')
+
+    expect(assistantTurns).toHaveLength(1)
+    expect(assistantTurns[0]?.isComplete).toBe(true)
+    expect(assistantTurns[0]?.response?.text).toBe(aggregation.content)
+    expect(assistantTurns[0]?.activities.some(activity => activity.toolName === 'spawn_session')).toBe(true)
+  })
+
+  it('does not reopen an older Swarm turn after a new visible user message (#224)', () => {
+    resetCounters()
+    const firstUser = createUserMessage('并行调研')
+    const spawn = createToolMessage('completed', 'spawn_session')
+    spawn.timestamp = firstUser.timestamp + 10
+    spawn.content = JSON.stringify({
+      status: 'started',
+      spawnReason: 'automatic',
+      lifecycle: 'managed',
+      mode: 'background',
+    })
+    spawn.toolResult = spawn.content
+    const dispatch: Message = {
+      id: 'older-dispatch',
+      role: 'assistant',
+      content: '子代理已经启动。',
+      timestamp: firstUser.timestamp + 20,
+      isStreaming: false,
+    }
+    const secondUser: Message = {
+      ...createUserMessage('顺便回答另一个问题'),
+      timestamp: firstUser.timestamp + 30,
+    }
+
+    const turns = groupMessagesByTurn([firstUser, spawn, dispatch, secondUser], {
+      isSessionProcessing: true,
+      isManagedSwarmRunning: true,
+    })
+    const assistant = turns.find((turn): turn is AssistantTurn => turn.type === 'assistant')
+
+    expect(turns.at(-1)?.type).toBe('user')
+    expect(assistant?.isComplete).toBe(true)
+    expect(assistant?.isStreaming).toBe(false)
+  })
+
+  it('keeps a task-definition confirmation open while the DAG is still running', () => {
+    resetCounters()
+    const user = createUserMessage('调研三个模型')
+    const submit = createToolMessage('completed', 'submit_task_definition')
+    submit.timestamp = user.timestamp + 10
+    const confirmation: Message = {
+      id: 'task-definition-complete',
+      role: 'assistant',
+      content: '任务定义已提交并通过校验 ✅',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, submit, confirmation], {
+      isSessionProcessing: false,
+      isTaskOrchestrationRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(false)
+      expect(assistant.isStreaming).toBe(true)
+      expect(assistant.response?.text).toBe(confirmation.content)
+      expect(assistant.response?.isStreaming).toBe(false)
+    }
+  })
+
+  it('restores completed chrome after the task DAG settles', () => {
+    resetCounters()
+    const user = createUserMessage('调研三个模型')
+    const submit = createToolMessage('completed', 'submit_task_definition')
+    submit.timestamp = user.timestamp + 10
+    const confirmation: Message = {
+      id: 'task-definition-settled',
+      role: 'assistant',
+      content: '任务定义已提交并通过校验 ✅',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, submit, confirmation], {
+      isSessionProcessing: false,
+      isTaskOrchestrationRunning: false,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(true)
+      expect(assistant.isStreaming).toBe(false)
+      expect(assistant.response?.text).toBe(confirmation.content)
+    }
+  })
+
+  it('does not reopen an older task-definition turn after a new visible user message', () => {
+    resetCounters()
+    const firstUser = createUserMessage('调研三个模型')
+    const submit = createToolMessage('completed', 'submit_task_definition')
+    submit.timestamp = firstUser.timestamp + 10
+    const confirmation: Message = {
+      id: 'older-definition',
+      role: 'assistant',
+      content: '任务定义已提交并通过校验 ✅',
+      timestamp: firstUser.timestamp + 20,
+      isStreaming: false,
+    }
+    const secondUser: Message = {
+      ...createUserMessage('先回答另一个问题'),
+      timestamp: firstUser.timestamp + 30,
+    }
+
+    const turns = groupMessagesByTurn([firstUser, submit, confirmation, secondUser], {
+      isSessionProcessing: true,
+      isTaskOrchestrationRunning: true,
+    })
+    const assistant = turns.find((turn): turn is AssistantTurn => turn.type === 'assistant')
+
+    expect(turns.at(-1)?.type).toBe('user')
+    expect(assistant?.isComplete).toBe(true)
+    expect(assistant?.isStreaming).toBe(false)
+  })
+})
+
+describe('queued messages', () => {
+  it('keeps queued user content out of the transcript until replay starts', () => {
+    resetCounters()
+
+    const activeUser = createUserMessage('current task')
+    const queuedUser: Message = {
+      ...createUserMessage('later task'),
+      isQueued: true,
+    }
+
+    const turns = groupMessagesByTurn([activeUser, queuedUser])
+    const userTurns = turns.filter(turn => turn.type === 'user')
+
+    expect(userTurns).toHaveLength(1)
+    expect((userTurns[0] as { message: Message }).message.content).toBe('current task')
+  })
+
+  it('keeps a replayed user message as a hard boundary even when turn ids are reused', () => {
+    resetCounters()
+
+    const firstUser = createUserMessage('first')
+    const firstTool = createToolMessage('completed', 'Read', 'shared-turn')
+    const replayedUser = createUserMessage('send now')
+    const replayedTool = createToolMessage('completed', 'Read', 'shared-turn')
+    firstUser.timestamp = 1
+    firstTool.timestamp = 2
+    replayedUser.timestamp = 3
+    replayedTool.timestamp = 4
+
+    const turns = groupMessagesByTurn([firstUser, firstTool, replayedUser, replayedTool])
+    const assistantTurns = turns.filter(turn => turn.type === 'assistant')
+
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(assistantTurns.map(turn => turn.activities.length)).toEqual([1, 1])
+  })
+})
+
+describe('context compaction marker', () => {
+  it('keeps a finished compaction inside the same work chain, at the step where it happened', () => {
+    resetCounters()
+    const user = createUserMessage('继续')
+    const before = createToolMessage('completed', 'Read')
+    const marker: Message = {
+      id: 'compacted',
+      role: 'info',
+      content: 'Compacted context to fit within limits',
+      timestamp: before.timestamp + 5,
+      statusType: 'compaction_complete',
+    }
+    const after = createToolMessage('completed', 'Bash')
+    after.timestamp = marker.timestamp + 5
+    const answer: Message = {
+      id: 'answer',
+      role: 'assistant',
+      content: '完成',
+      timestamp: after.timestamp + 5,
+      isIntermediate: false,
+    }
+
+    const turns = groupMessagesByTurn([user, before, marker, after, answer])
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities.map(activity => activity.statusType ?? activity.toolName)).toEqual(['Read', 'compaction_complete', 'Bash'])
+      expect(assistant.response?.text).toBe('完成')
+    }
   })
 })

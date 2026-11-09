@@ -24,7 +24,6 @@ import {
   apiAuthSpecFromConfig,
   appendQueryAuth,
   buildApiAuthHeaders,
-  describeApiAuth,
   isMultiHeaderCredential,
   parseStoredApiCredential,
 } from '../api-auth.ts';
@@ -478,17 +477,11 @@ async function testApiConnection(
     if (authResult.attempted) {
       return authResult;
     }
-    // Marked authenticated but nothing usable to send (missing, or expired and not refreshable):
-    // every api_<source> call would fail. The unauthenticated probe would get 401/403 and pass
-    // as "reachable", leaving the source green, so this is an auth error instead.
     return {
-      lines: [
-        '✗ Source is marked authenticated but no usable credential is stored (missing, or expired and not refreshable)',
-        '  Re-enter the credential with source_credential_prompt, or re-authenticate the source',
-      ],
+      lines: ['✗ Authenticated source is missing stored credentials'],
       success: false,
       hasError: true,
-      error: 'Stored credential missing or expired',
+      error: 'Missing credentials',
     };
   }
 
@@ -517,20 +510,20 @@ async function testApiConnectionWithAuth(
     workspaceId,
   };
 
-  // Get token from credential manager
+  // Cached token first; refresh fallback for expired-but-refreshable OAuth.
+  // getToken returns empty for expired credentials (credential-manager.ts),
+  // and source_test runs before TokenRefreshManager.
   let token: string | null = null;
   try {
     token = await ctx.credentialManager!.getToken(loadedSource);
   } catch {
-    // Couldn't get token, will fall through to basic test
+    // Couldn't read the cache; still try refresh below.
   }
-
   if (!token) {
-    // An expired OAuth token can be refreshed; checkAuthStatus would do it next anyway.
     try {
       token = await ctx.credentialManager!.refresh(loadedSource);
     } catch {
-      token = null;
+      // Refresh failed — report missing credentials to the caller.
     }
   }
 
@@ -538,15 +531,17 @@ async function testApiConnectionWithAuth(
     return { lines: [], success: false, hasError: false, attempted: false };
   }
 
-  // Assemble auth exactly as the runtime request path does (shared with
-  // api-tools.ts through ../api-auth.ts), so a passing test means the generated
-  // api_<source> tools can authenticate too (#1067).
+  // Assemble auth the same way api_<source> tools do, so a passing test means
+  // the generated tool sends the same headers (including unwrapping a JSON
+  // header map stored against a single headerName).
   const api = source.api!;
   const authSpec = apiAuthSpecFromConfig(api);
-  const credential = parseStoredApiCredential(token, api);
+  const credential = parseStoredApiCredential(token, {
+    authType: api.authType,
+    headerName: api.headerName,
+    headerNames: api.headerNames,
+  });
 
-  // headerNames sources must have one value per configured header; a lone
-  // headerNames entry equal to headerName is just single-header auth.
   const configuredHeaderNames = api.headerNames?.filter(Boolean) ?? [];
   const requiresHeaderMap =
     configuredHeaderNames.length > 1 ||
@@ -563,8 +558,15 @@ async function testApiConnectionWithAuth(
   }
 
   const headers = buildApiAuthHeaders(authSpec, credential, api.defaultHeaders);
+  // Drop the JSON default. GETs should not grow a Content-Type, and a body
+  // or testEndpoint header restores it below. Endpoint Content-Type wins.
+  if (headers['Content-Type'] === 'application/json') {
+    const defaultsSetContentType = Object.keys(api.defaultHeaders ?? {}).some(
+      (key) => key.toLowerCase() === 'content-type',
+    );
+    if (!defaultsSetContentType) delete headers['Content-Type'];
+  }
   const urlWithAuth = appendQueryAuth(testUrl, authSpec, credential);
-  lines.push(`✓ Credential loaded, sent as ${describeApiAuth(authSpec, credential)}`);
 
   // Make authenticated request
   try {
@@ -575,23 +577,20 @@ async function testApiConnectionWithAuth(
     const body = source.api!.testEndpoint?.body;
     const extraHeaders = source.api!.testEndpoint?.headers;
 
-    // Merge per-endpoint headers. Auth headers win on conflict so a stale
-    // testEndpoint header cannot shadow the live credential; Content-Type is
-    // the exception because the endpoint knows its own body encoding.
+    // Merge any per-endpoint headers; auth headers win on conflict so a stale
+    // testEndpoint header can't shadow the live token.
     if (extraHeaders) {
       for (const [k, v] of Object.entries(extraHeaders)) {
-        if (k.toLowerCase() === 'content-type') {
-          delete headers['Content-Type'];
-          headers[k] = v;
-        } else if (!(k in headers)) {
-          headers[k] = v;
-        }
+        if (!(k in headers)) headers[k] = v;
       }
     }
 
     const init: RequestInit = { method, headers, signal: controller.signal };
     if (body !== undefined && method !== 'GET') {
       init.body = typeof body === 'string' ? body : JSON.stringify(body);
+      // Default to JSON only if no Content-Type was provided by testEndpoint.headers.
+      const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
+      if (!hasContentType) headers['Content-Type'] = 'application/json';
     }
 
     const response = await fetch(urlWithAuth, init);
@@ -599,12 +598,11 @@ async function testApiConnectionWithAuth(
     clearTimeout(timeoutId);
 
     if (response.ok) {
-      lines.push(`✓ Authenticated request succeeded (HTTP ${response.status})`);
+      lines.push(`✓ API connection successful (authenticated)`);
+      lines.push(`  Status: ${response.status}`);
       return { lines, success: true, hasError: false, attempted: true };
     } else if (response.status === 401 || response.status === 403) {
       lines.push(`✗ API returned ${response.status} (credentials invalid or expired)`);
-      const excerpt = await readResponseExcerpt(response);
-      if (excerpt) lines.push(`  Response: ${excerpt}`);
       lines.push('  Re-authenticate the source to refresh credentials');
       return { lines, success: false, hasError: true, error: `Auth failed: ${response.status}`, attempted: true };
     } else if (response.status === 404) {
@@ -615,11 +613,6 @@ async function testApiConnectionWithAuth(
       return { lines, success: false, hasError: false, attempted: true };
     } else {
       lines.push(`⚠ API returned ${response.status}`);
-      const excerpt = await readResponseExcerpt(response);
-      if (excerpt) lines.push(`  Response: ${excerpt}`);
-      if (response.status === 400) {
-        lines.push('  A 400 that mentions the API key or token means the credential was rejected; re-authenticate the source');
-      }
       return { lines, success: false, hasError: false, attempted: true };
     }
   } catch (e) {
@@ -629,20 +622,6 @@ async function testApiConnectionWithAuth(
       lines.push('  Request timed out after 10 seconds');
     }
     return { lines, success: false, hasError: true, error: errorMsg, attempted: true };
-  }
-}
-
-/**
- * First line of an error body, trimmed, so a rejected key is visible in the
- * report (Google answers 400 API_KEY_INVALID, which otherwise reads as a bad endpoint).
- */
-async function readResponseExcerpt(response: Response, maxChars = 200): Promise<string | null> {
-  try {
-    const text = (await response.text()).replace(/\s+/g, ' ').trim();
-    if (!text) return null;
-    return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
-  } catch {
-    return null;
   }
 }
 
@@ -946,8 +925,7 @@ async function checkAuthStatus(
       try {
         const token = await ctx.credentialManager.getToken(loadedSource);
         if (token) {
-          // Presence and expiry only; whether the API accepts it is the connection test's job.
-          lines.push('✓ Credential stored and not expired');
+          lines.push('✓ Source is authenticated (token valid)');
         } else {
           // Token missing or expired — attempt refresh before reporting failure.
           // OAuth tokens are short-lived (typically 1h) and frequently expired in the

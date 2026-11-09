@@ -13,6 +13,12 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function waitForEvent(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2000
+  while (!condition() && Date.now() < deadline) await wait(25)
+  expect(condition()).toBe(true)
+}
+
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
   const pushed: Array<{ channel: string; target: any; args: any[] }> = []
@@ -103,7 +109,8 @@ describe('sessions file watchers', () => {
 
     writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}`)
     writeFileSync(join(sessionDirB, 'b.txt'), `b-${Date.now()}`)
-    await wait(300)
+    // Native filesystem notifications may take longer than the debounce interval.
+    await waitForEvent(() => ['client-a', 'client-b'].every(clientId => pushed.some(evt => evt.target?.clientId === clientId)))
 
     const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-a')
     const bEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-b')
@@ -116,6 +123,7 @@ describe('sessions file watchers', () => {
 
     writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}`)
     writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}`)
+    await waitForEvent(() => pushed.some(evt => evt.target?.clientId === 'client-b'))
     await wait(300)
 
     const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-a')

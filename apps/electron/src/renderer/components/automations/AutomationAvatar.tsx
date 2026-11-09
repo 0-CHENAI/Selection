@@ -12,9 +12,6 @@ import {
   Shield,
   Flag,
   ListChecks,
-  Zap,
-  CheckCircle2,
-  AlertTriangle,
   MessageSquare,
   Webhook,
 } from 'lucide-react'
@@ -38,18 +35,14 @@ const sizeConfig: Record<AvatarSize, { container: string; icon: string }> = {
 // Event → Icon + Color Mapping
 // ============================================================================
 
-// Role tints with their solved text colors (the pre-redesign `warning` color never existed: it is info/amber)
 const categoryConfig: Record<EventCategory, { icon: React.ElementType; bg: string; text: string }> = {
-  scheduled:    { icon: Clock,          bg: 'bg-success-tint',      text: 'text-success' },
-  label:        { icon: Tag,            bg: 'bg-accent-tint',       text: 'text-accent' },
-  permission:   { icon: Shield,         bg: 'bg-info-tint',         text: 'text-info' },
-  flag:         { icon: Flag,           bg: 'bg-info-tint',         text: 'text-info' },
-  todo:         { icon: ListChecks,     bg: 'bg-info-tint',         text: 'text-info' },
-  'agent-pre':  { icon: Zap,            bg: 'bg-info-tint',         text: 'text-info' },
-  'agent-post': { icon: CheckCircle2,   bg: 'bg-success-tint',      text: 'text-success' },
-  'agent-error':{ icon: AlertTriangle,  bg: 'bg-destructive-tint',  text: 'text-destructive' },
-  session:      { icon: MessageSquare,  bg: 'bg-fill-hover',        text: 'text-secondary' },
-  other:        { icon: Webhook,        bg: 'bg-fill-hover',        text: 'text-secondary' },
+  scheduled:    { icon: Clock,          bg: 'bg-success/10',      text: 'text-success' },
+  label:        { icon: Tag,            bg: 'bg-accent/10',       text: 'text-accent' },
+  permission:   { icon: Shield,         bg: 'bg-warning/10',      text: 'text-warning' },
+  flag:         { icon: Flag,           bg: 'bg-info/10',         text: 'text-info' },
+  todo:         { icon: ListChecks,     bg: 'bg-info/10',         text: 'text-info' },
+  session:      { icon: MessageSquare,  bg: 'bg-foreground/10',   text: 'text-foreground/70' },
+  other:        { icon: Webhook,        bg: 'bg-foreground/10',   text: 'text-foreground/70' },
 }
 
 // ============================================================================
@@ -73,9 +66,8 @@ export function AutomationAvatar({ event, size = 'md', fluid, className }: Autom
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center rounded-xs shrink-0',
-        // The hero tile draws its own hairline; small avatars carry theirs
-        fluid ? 'h-full w-full' : cn(sizes.container, 'ring-1 ring-border'),
+        'inline-flex items-center justify-center rounded-[4px] ring-1 ring-border/30 shrink-0',
+        fluid ? 'h-full w-full' : sizes.container,
         config.bg,
         className
       )}

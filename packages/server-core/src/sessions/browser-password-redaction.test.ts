@@ -1,90 +1,108 @@
 import { describe, expect, it } from 'bun:test'
-import type { AgentEvent } from '@craft-agent/core/types'
-import type { SessionEvent } from '@craft-agent/shared/protocol'
-import { SessionManager, createManagedSession } from './SessionManager.ts'
+import { createManagedSession, SessionManager } from './SessionManager.ts'
 
-type ManagedSession = ReturnType<typeof createManagedSession>
-type EventHarness = {
-  processEvent(managed: ManagedSession, event: AgentEvent): Promise<void>
-  sendEvent(event: SessionEvent, workspaceId?: string): void
-  persistSession(managed: ManagedSession): void
-  decisionFeatureActive(): boolean
-  monotonic(): number
-  sessionActivityListeners: Map<string, Set<() => void>>
-}
+describe('browser password redaction on tool_result', () => {
+  function setup(command: unknown, toolName = 'browser_tool') {
+    const manager = new SessionManager()
+    const managed = createManagedSession(
+      { id: 'session-password' },
+      { id: 'workspace-1', name: 'Workspace', rootPath: '/tmp/browser-password' } as never,
+      { messagesLoaded: true },
+    )
+    managed.isProcessing = true
+    managed.messages = [{
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      timestamp: 1,
+      toolName,
+      toolUseId: 'tool-1',
+      toolInput: { command },
+      toolStatus: 'executing',
+    }]
+    ;(manager as any).sessions.set(managed.id, managed)
+    ;(manager as any).persistSession = () => { persists += 1 }
+    const events: any[] = []
+    let persists = 0
+    manager.setEventSink((_channel, _target, event) => events.push(event))
+    return {
+      manager,
+      managed,
+      events,
+      persists: () => persists,
+    }
+  }
 
-/** The real tool_result handling, without agents, disk writes or the developer's config. */
-function harness(toolInput: Record<string, unknown>, toolName = 'mcp__session__browser_tool') {
-  const manager = Object.create(SessionManager.prototype) as EventHarness
-  const events: SessionEvent[] = []
-  let persisted = 0
-  manager.sendEvent = event => { events.push(event) }
-  manager.persistSession = () => { persisted += 1 }
-  manager.decisionFeatureActive = () => false
-  manager.monotonic = () => Date.now()
-  manager.sessionActivityListeners = new Map()
-  const managed = createManagedSession({ id: 'password-redaction' }, {
-    id: 'workspace', slug: 'workspace', name: 'Test', rootPath: '/unused-password-redaction', createdAt: Date.now(),
-  })
-  managed.messages.push({
-    id: 'tool-msg', role: 'tool', content: '', timestamp: 1,
-    toolName, toolUseId: 'tu-1', toolInput, toolStatus: 'executing',
-  })
-  const result = (text: string) => manager.processEvent(managed, { type: 'tool_result', toolUseId: 'tu-1', toolName, result: text, isError: false })
-  return { managed, events, result, persisted: () => persisted }
-}
+  async function finish(setupResult: ReturnType<typeof setup>, result: string, isError = false) {
+    await (setupResult.manager as any).processEvent(setupResult.managed, {
+      type: 'tool_result',
+      toolUseId: 'tool-1',
+      toolName: setupResult.managed.messages[0]?.toolName,
+      result,
+      isError,
+    })
+  }
 
-/** How Claude stores an MCP tool result: its content blocks as pretty-printed JSON. */
-const claudeResult = (text: string) => JSON.stringify([{ type: 'text', text }], null, 2)
+  it('stores a placeholder and tells the renderer to replace the input', async () => {
+    const session = setup('fill @e2 hunter2')
+    await finish(session, 'Filled password field @e2 (7 characters)')
 
-describe('browser_tool password fills in tool_result', () => {
-  it('redacts the stored input, persists it and sends it to the renderer', async () => {
-    const { managed, events, result, persisted } = harness({ command: 'fill @e1 user@example.com; fill @e2 hunter2; click @e3' })
-    await result(claudeResult('Filled element @e1 with "user@example.com"\nFilled password field @e2 (7 characters)\nClicked element @e3'))
-
-    const redacted = { command: 'fill @e1 user@example.com; fill @e2 [password: 7 characters]; click @e3' }
-    expect(managed.messages[0]!.toolInput).toEqual(redacted)
-    expect(managed.messages[0]!.toolStatus).toBe('completed')
-    expect(JSON.stringify(managed.messages)).not.toContain('hunter2')
-    expect(persisted()).toBe(1)
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ type: 'tool_result', toolUseId: 'tu-1', toolInput: redacted })
-  })
-
-  it('redacts an array-mode input from a plain-text (Pi) result', async () => {
-    const { managed, events, result } = harness({ command: ['fill', '@e2', 'hunter2'] }, 'browser_tool')
-    await result('Filled password field @e2 (7 characters)\nActive element after: input')
-
-    expect(managed.messages[0]!.toolInput).toEqual({ command: ['fill', '@e2', '[password: 7 characters]'] })
-    expect(events[0]).toMatchObject({ toolInput: { command: ['fill', '@e2', '[password: 7 characters]'] } })
+    expect(session.managed.messages[0]?.toolInput).toEqual({ command: 'fill @e2 [password: 7 characters]' })
+    expect(JSON.stringify(session.managed.messages)).not.toContain('hunter2')
+    expect(session.persists()).toBe(1)
+    expect(session.events.filter(event => event.type === 'tool_result')).toEqual([
+      expect.objectContaining({
+        toolInput: { command: 'fill @e2 [password: 7 characters]' },
+      }),
+    ])
   })
 
-  it('leaves other fills alone and sends no input', async () => {
-    const input = { command: 'fill @e1 user@example.com' }
-    const { managed, events, result } = harness(input)
-    await result(claudeResult('Filled element @e1 with "user@example.com"'))
-
-    expect(managed.messages[0]!.toolInput).toBe(input)
-    expect(events).toHaveLength(1)
-    expect(events[0]).not.toHaveProperty('toolInput')
+  it('redacts array-mode commands', async () => {
+    const session = setup(['fill', '@e2', 'hunter2 secret'])
+    await finish(session, 'Filled password field @e2 (14 characters)')
+    expect(session.managed.messages[0]?.toolInput).toEqual({
+      command: ['fill', '@e2', '[password: 14 characters]'],
+    })
   })
 
-  it('does not touch other tools whose output mentions a password fill', async () => {
-    const input = { command: 'fill @e2 notes.txt' }
-    const { managed, events, result } = harness(input, 'Bash')
-    await result('Filled password field @e2 (7 characters)')
+  it('stores a placeholder when page metrics could not confirm the field', async () => {
+    const session = setup('fill @e1 user@example.com; fill @e2 hunter2')
+    await finish(session, 'Filled field without page metrics @e1 (16 characters)\nFilled field without page metrics @e2 (7 characters)')
 
-    expect(managed.messages[0]!.toolInput).toBe(input)
-    expect(events[0]).not.toHaveProperty('toolInput')
+    expect(session.managed.messages[0]?.toolInput).toEqual({
+      command: 'fill @e1 [redacted: 16 characters]; fill @e2 [redacted: 7 characters]',
+    })
+    expect(JSON.stringify(session.managed.messages)).not.toContain('hunter2')
+    expect(JSON.stringify(session.managed.messages)).not.toContain('user@example.com')
+    expect(session.events.filter(event => event.type === 'tool_result')).toEqual([
+      expect.objectContaining({
+        toolInput: {
+          command: 'fill @e1 [redacted: 16 characters]; fill @e2 [redacted: 7 characters]',
+        },
+      }),
+    ])
   })
 
-  it('keeps the placeholder when the same result arrives twice', async () => {
-    const { managed, events, result } = harness({ command: 'fill @e2 hunter2' })
-    const text = claudeResult('Filled password field @e2 (7 characters)')
-    await result(text)
-    await result(text)
+  it('leaves an ordinary fill and a non-browser tool alone', async () => {
+    const ordinary = setup('fill @e2 hunter2')
+    await finish(ordinary, 'Filled element @e2 with "hunter2"')
+    expect(ordinary.managed.messages[0]?.toolInput).toEqual({ command: 'fill @e2 hunter2' })
+    expect(ordinary.events[0]?.toolInput).toBeUndefined()
 
-    expect(managed.messages[0]!.toolInput).toEqual({ command: 'fill @e2 [password: 7 characters]' })
-    expect(events).toHaveLength(1)
+    const bash = setup('echo Filled password field @e2', 'Bash')
+    await finish(bash, 'Filled password field @e2 (7 characters)')
+    expect(bash.managed.messages[0]?.toolInput).toEqual({ command: 'echo Filled password field @e2' })
+    expect(bash.events[0]?.toolInput).toBeUndefined()
+  })
+
+  it('does not send a second event when the same result arrives again', async () => {
+    const session = setup('fill @e2 hunter2')
+    const result = 'Filled password field @e2 (7 characters)'
+    await finish(session, result)
+    await finish(session, result)
+
+    expect(session.managed.messages[0]?.toolInput).toEqual({ command: 'fill @e2 [password: 7 characters]' })
+    expect(session.events.filter(event => event.type === 'tool_result')).toHaveLength(1)
+    expect(session.persists()).toBe(2)
   })
 })

@@ -23,11 +23,19 @@ export enum AbortReason {
   /** User clicked stop button */
   UserStop = 'user_stop',
 
+  ProgressRedirect = 'progress_redirect',
+
+  /** Ordinary answer committed; normal completion, not user cancellation. */
+  AnswerSubmitted = 'answer_submitted',
+
   /** Agent submitted a plan and is awaiting review */
   PlanSubmitted = 'plan_submitted',
 
   /** Auth request triggered (OAuth, credential prompt) */
   AuthRequest = 'auth_request',
+
+  /** Clarification card is waiting for the user */
+  Clarification = 'clarification',
 
   /** New message sent while processing (silent redirect) */
   Redirect = 'redirect',

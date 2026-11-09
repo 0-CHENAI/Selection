@@ -1,8 +1,5 @@
-import { BrowserWindow, clipboard, shell, nativeTheme, Menu, app } from 'electron'
-import { i18n } from '@craft-agent/shared/i18n'
+import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
 import { windowLog } from './logger'
-import { buildContextMenuTemplate } from './context-menu'
-import { applyDefaultZoom } from './zoom'
 import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
 import { release } from 'os'
@@ -11,32 +8,19 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
+import { trackWindowResize } from './window-resize'
+import { parseDeepLink } from './deep-link'
+import {
+  getWindowsBackgroundMaterial,
+  isWindowsWindowDark,
+  nativeThemeSourceForMode,
+  parseWindowsBuildNumber,
+  resolveWindowsTitleBarOverlay,
+  resolveWindowsWindowBackground,
+} from './windows-background-material'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
-
-/** First Windows build (11 22H2) on which Electron applies `backgroundMaterial`. */
-const WINDOWS_BACKGROUND_MATERIAL_MIN_BUILD = 22621
-
-/**
- * Mica behind the window on Windows 11 22H2+, else none. Electron ignores `backgroundMaterial` on
- * older builds (Windows 10, Windows 11 21H2) but still makes the web contents transparent, so
- * asking for it there would leave the translucent canvas over nothing.
- */
-function getWindowsBackgroundMaterial(): 'mica' | undefined {
-  if (process.platform !== 'win32') return undefined
-
-  // os.release() returns "10.0.xxxxx" where xxxxx is the build number
-  const buildNumber = parseInt(release().split('.')[2] || '0', 10)
-
-  if (buildNumber >= WINDOWS_BACKGROUND_MATERIAL_MIN_BUILD) {
-    windowLog.info('Windows build ' + buildNumber + ': using Mica')
-    return 'mica'
-  }
-
-  windowLog.info('Windows build ' + buildNumber + ': no background material (needs ' + WINDOWS_BACKGROUND_MATERIAL_MIN_BUILD + '+)')
-  return undefined
-}
 
 
 interface ManagedWindow {
@@ -64,6 +48,7 @@ export class WindowManager {
   private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
+  private lastThemeMode: string | undefined
 
   /**
    * Set the event sink and client resolver for pushing events via the RPC server
@@ -163,7 +148,7 @@ export class WindowManager {
 
   /**
    * Apply the window-title policy across all managed windows:
-   *   1 window  → app name ("Craft Agents") on the lone window
+   *   1 window  → app name ("Selection") on the lone window
    *   ≥2 windows → workspace name on each window, app-name fallback when the
    *                workspace can't be resolved (e.g. onboarding window).
    *
@@ -224,8 +209,15 @@ export class WindowManager {
     // Platform-specific window options
     const isMac = process.platform === 'darwin'
     const isWindows = process.platform === 'win32'
-    const windowsBackgroundMaterial = getWindowsBackgroundMaterial()
-    const windowVibrancy = isMac ? 'under-window' : windowsBackgroundMaterial
+    const windowsBackgroundMaterial = getWindowsBackgroundMaterial(process.platform, release())
+    if (isWindows) {
+      const buildNumber = parseWindowsBuildNumber(release())
+      windowLog.info(
+        windowsBackgroundMaterial
+          ? `Windows 11 detected (build ${buildNumber}), using Mica`
+          : `Windows 10 detected (build ${buildNumber}), using a solid window fill (no Acrylic)`,
+      )
+    }
 
     const window = new BrowserWindow({
       width: windowWidth,
@@ -235,6 +227,13 @@ export class WindowManager {
       show: false, // Don't show until ready-to-show event (faster perceived startup)
       title: '',
       icon: iconExists ? iconPath : undefined,
+      ...(isWindows ? {
+        backgroundColor: resolveWindowsWindowBackground(
+          this.lastThemeMode
+            ? isWindowsWindowDark(this.lastThemeMode, nativeTheme.shouldUseDarkColors)
+            : nativeTheme.shouldUseDarkColors,
+        ),
+      } : {}),
       // macOS-specific: hidden title bar with inset traffic lights
       ...(isMac && {
         titleBarStyle: 'hiddenInset',
@@ -242,10 +241,17 @@ export class WindowManager {
         vibrancy: 'under-window',
         visualEffectState: 'active',
       }),
-      // Windows: native frame, Mica on Windows 11 22H2+
+      // Windows: hide the extra native title-bar row and overlay caption
+      // buttons on the Selection top bar. Keep the native frame/border.
+      // Windows 11 still uses Mica; Windows 10 Acrylic is skipped (#53).
       ...(isWindows && {
-        frame: true, // Keep native frame for better UX
-        autoHideMenuBar: true, // Menu is null on Windows, this is just for safety
+        titleBarStyle: 'hidden',
+        autoHideMenuBar: true,
+        titleBarOverlay: resolveWindowsTitleBarOverlay(
+          this.lastThemeMode
+            ? isWindowsWindowDark(this.lastThemeMode, nativeTheme.shouldUseDarkColors)
+            : nativeTheme.shouldUseDarkColors,
+        ),
         // Note: Don't use transparent:true with backgroundMaterial - it hides the window frame
         ...(windowsBackgroundMaterial && {
           backgroundMaterial: windowsBackgroundMaterial,
@@ -261,19 +267,16 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
-        webviewTag: false, // Browser integration uses WebContentsView, not <webview>
-        // Tell the renderer which native material sits behind the window (ThemeContext data-vibrancy)
-        additionalArguments: windowVibrancy ? [`--craft-window-vibrancy=${windowVibrancy}`] : [],
+        webviewTag: false // Browser integration uses WebContentsView, not <webview>
       }
     })
+
+    trackWindowResize(window)
 
     // Show window when first paint is ready (faster perceived startup)
     window.once('ready-to-show', () => {
       window.show()
     })
-
-    // Chromium resets zoom when a load commits, so the default zoom goes on after each load
-    window.webContents.on('did-finish-load', () => applyDefaultZoom(window.webContents))
 
     // Open external links in default browser, but never hand known-dangerous
     // schemes directly to shell.openExternal. Markdown normal-clicks go through
@@ -294,19 +297,20 @@ export class WindowManager {
       this.openExternalFromRenderer(url, 'will-navigate', window)
     })
 
-    // Right-click menu in every build: spelling, Copy Link, edit actions (+ Inspect in dev)
-    window.webContents.on('context-menu', (_event, params) => {
-      const template = buildContextMenuTemplate(params, {
-        t: key => i18n.t(key),
-        replaceMisspelling: suggestion => window.webContents.replaceMisspelling(suggestion),
-        learnSpelling: word => window.webContents.session.addWordToSpellCheckerDictionary(word),
-        copyText: text => clipboard.writeText(text),
-        inspectElement: app.isPackaged ? undefined : (x, y) => window.webContents.inspectElement(x, y),
+    // Enable right-click context menu in development
+    if (!app.isPackaged) {
+      window.webContents.on('context-menu', (_event, params) => {
+        Menu.buildFromTemplate([
+          { label: 'Inspect Element', click: () => window.webContents.inspectElement(params.x, params.y) },
+          { type: 'separator' },
+          { label: 'Cut', role: 'cut', enabled: params.editFlags.canCut },
+          { label: 'Copy', role: 'copy', enabled: params.editFlags.canCopy },
+          { label: 'Paste', role: 'paste', enabled: params.editFlags.canPaste },
+        ]).popup()
       })
-      if (template.length > 0) Menu.buildFromTemplate(template).popup({ window })
-    })
+    }
 
-    // The renderer's index.html ships with `<title>Craft Agents</title>`, so
+    // The renderer's index.html ships with `<title>Selection</title>`, so
     // without this Electron auto-syncs every window's title back to that on
     // load — clobbering the workspace-name policy applied below. Suppress the
     // default sync so setTitle() calls from refreshWindowTitles() stick.
@@ -363,6 +367,11 @@ export class WindowManager {
     } else {
       // Build URL from options
       const query: Record<string, string> = { workspaceId }
+      const initialTarget = initialDeepLink ? parseDeepLink(initialDeepLink) : undefined
+      // Restore the explicit route after session metadata is ready. An early
+      // IPC push can be lost or overwritten by the renderer's initial restore.
+      if (initialTarget?.view) query.route = initialTarget.view
+      if (initialTarget?.rightSidebar) query.sidebar = initialTarget.rightSidebar
       if (focused) {
         query.focused = 'true' // Open in focused mode (no sidebars)
       }
@@ -395,7 +404,7 @@ export class WindowManager {
     })
 
     // If an initial deep link was provided, navigate to it after the window is ready
-    if (initialDeepLink) {
+    if (initialDeepLink && !parseDeepLink(initialDeepLink)?.view) {
       window.once('ready-to-show', () => {
         // Import parseDeepLink dynamically to avoid circular dependency
         import('./deep-link').then(({ parseDeepLink }) => {
@@ -417,6 +426,7 @@ export class WindowManager {
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
       this.pushToWindow(window, RPC_CHANNELS.theme.SYSTEM_CHANGED, nativeTheme.shouldUseDarkColors)
+      this.applyWindowsWindowChrome(window)
     }
     nativeTheme.on('updated', themeHandler)
 
@@ -523,8 +533,29 @@ export class WindowManager {
   }
 
   /**
-   * Get window by webContents.id (used by IPC handlers instead of BrowserWindow.fromId)
+   * Follow Appearance mode so Windows chrome (and Win11 Mica) is not stuck on a
+   * dark OS theme after the user switches the app to light (#53).
    */
+  applyThemeMode(mode: string): void {
+    this.lastThemeMode = mode
+    if (process.platform !== 'win32') return
+    nativeTheme.themeSource = nativeThemeSourceForMode(mode)
+    for (const { window } of this.getAllWindows()) {
+      this.applyWindowsWindowChrome(window)
+    }
+  }
+
+  /** Sync Windows frame fill and overlay caption colors with Appearance + OS theme. */
+  private applyWindowsWindowChrome(window: BrowserWindow): void {
+    if (process.platform !== 'win32' || window.isDestroyed()) return
+    const isDark = this.lastThemeMode
+      ? isWindowsWindowDark(this.lastThemeMode, nativeTheme.shouldUseDarkColors)
+      : nativeTheme.shouldUseDarkColors
+    window.setBackgroundColor(resolveWindowsWindowBackground(isDark))
+    window.setTitleBarOverlay(resolveWindowsTitleBarOverlay(isDark))
+  }
+
+  /** Get window by webContents.id (used by IPC handlers instead of BrowserWindow.fromId) */
   getWindowByWebContentsId(wcId: number): BrowserWindow | null {
     const managed = this.windows.get(wcId)
     return managed?.window ?? null

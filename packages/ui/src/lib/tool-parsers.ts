@@ -5,6 +5,7 @@
  * Used by both Electron and viewer apps for consistent overlay display.
  */
 
+import i18n from 'i18next'
 import type { ActivityItem } from '../components/chat/TurnCard'
 import type { ToolType } from '../components/terminal/TerminalOutput'
 
@@ -250,6 +251,18 @@ export function extractOverlayData(activity: ActivityItem): OverlayData | null {
   const rawContent = activity.content || ''
   const toolName = activity.toolName?.toLowerCase() || ''
 
+  // Reasoning is prose, even when a note happens to look like JSON.
+  // The details overlay renders this as markdown inside its scroll view.
+  if (activity.type === 'thinking') {
+    return {
+      type: 'document',
+      content: rawContent,
+      filePath: '',
+      toolName: i18n.t('turnCard.thoughtDeeply'),
+      error: activity.error,
+    }
+  }
+
   // Get file path from various input formats
   const filePath = (input?.file_path as string) || (input?.path as string) || 'file'
 
@@ -400,17 +413,6 @@ export function extractOverlayData(activity: ActivityItem): OverlayData | null {
     }
   }
 
-  // Decision model tool (decide) → Document overlay with questions in + answers table out
-  if (toolName === 'mcp__session__decide') {
-    return {
-      type: 'document',
-      content: buildDecideDocument(input, rawContent),
-      filePath: 'Decision',
-      toolName: 'decide',
-      error: activity.error,
-    }
-  }
-
   // Try to detect JSON content for unknown tools (MCP tools, WebFetch, etc.)
   // JSON objects/arrays get interactive tree viewer, other content falls through to generic
   const trimmedContent = rawContent.trim()
@@ -437,133 +439,6 @@ export function extractOverlayData(activity: ActivityItem): OverlayData | null {
     title: activity.displayName || activity.toolName || 'Activity',
     error: activity.error,
   }
-}
-
-// ============================================================
-// decide (decision model) overlay
-// ============================================================
-
-const DECIDE_STATE_PREVIEW_CHARS = 2000
-const DECIDE_MAX_TABLE_ROWS = 100
-
-function decideNumber(value: unknown): string {
-  return typeof value === 'number' ? value.toFixed(2) : '—'
-}
-
-/** One-cell rendering of a decide answer: choice + probability, score, or noul probability. */
-function formatDecideAnswerCell(answer: unknown): string {
-  if (!answer || typeof answer !== 'object') return '—'
-  const a = answer as Record<string, unknown>
-  switch (a.type) {
-    case 'choice': {
-      const probabilities = (a.probabilities ?? {}) as Record<string, number>
-      const top = typeof a.choice === 'string' ? probabilities[a.choice] : undefined
-      return `**${String(a.choice)}**${typeof top === 'number' ? ` (p ${top.toFixed(2)})` : ''}`
-    }
-    case 'score':
-      return `score ${decideNumber(a.score)}`
-    case 'noul':
-      return `yes ${decideNumber(a.noul)}`
-    default:
-      return '—'
-  }
-}
-
-function formatDecideConfidence(answer: unknown): string {
-  if (!answer || typeof answer !== 'object') return '—'
-  const a = answer as Record<string, unknown>
-  if (a.type === 'noul') return '—'
-  return decideNumber(a.confidence)
-}
-
-function escapeTableCell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
-}
-
-function buildDecideDocument(input: Record<string, unknown> | undefined, rawContent: string): string {
-  const sections: string[] = []
-  const questions = (input?.questions && typeof input.questions === 'object' ? input.questions : {}) as Record<string, Record<string, unknown>>
-  const questionKeys = Object.keys(questions)
-  const items = Array.isArray(input?.items) ? (input.items as unknown[]) : undefined
-
-  // --- Questions ---
-  sections.push('## Questions')
-  if (questionKeys.length === 0) {
-    sections.push('_none_')
-  } else {
-    sections.push(questionKeys.map(key => {
-      const q = questions[key] ?? {}
-      const instructions = typeof q.instructions === 'string' ? q.instructions : JSON.stringify(q.instructions ?? '')
-      let detail = ''
-      if (q.type === 'choice' && q.criteria && typeof q.criteria === 'object' && !Array.isArray(q.criteria)) {
-        detail = ` — options: ${Object.keys(q.criteria as object).join(', ')}`
-      } else if (q.type === 'score' && Array.isArray(q.criteria)) {
-        detail = ` — ${(q.criteria as unknown[]).length} levels`
-      }
-      return `- **${key}** (${String(q.type ?? '?')}): ${instructions}${detail}`
-    }).join('\n'))
-  }
-
-  // --- State / items ---
-  if (items) {
-    sections.push(`**Items:** ${items.length}`)
-  } else if (input?.state !== undefined) {
-    const stateText = typeof input.state === 'string' ? input.state : JSON.stringify(input.state, null, 2)
-    const shown = stateText.length > DECIDE_STATE_PREVIEW_CHARS
-      ? `${stateText.slice(0, DECIDE_STATE_PREVIEW_CHARS)}\n… (${stateText.length} chars)`
-      : stateText
-    sections.push(`**State:**\n\n\`\`\`\n${shown}\n\`\`\``)
-  }
-
-  // --- Answers ---
-  if (!rawContent) return sections.join('\n\n')
-  sections.push('---')
-  sections.push('## Answers')
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawContent)
-  } catch {
-    sections.push(rawContent)
-    return sections.join('\n\n')
-  }
-  const result = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
-
-  if (Array.isArray(result.results)) {
-    // Batch: one row per item, one column per question
-    const rows = result.results as Array<Record<string, unknown>>
-    const header = `| # | Item | ${questionKeys.map(k => escapeTableCell(k)).join(' | ')} |`
-    const divider = `|---|---|${questionKeys.map(() => '---').join('|')}|`
-    const body = rows.slice(0, DECIDE_MAX_TABLE_ROWS).map(row => {
-      const answers = (row.answers ?? {}) as Record<string, unknown>
-      const cells = questionKeys.map(k => (row.error ? '—' : formatDecideAnswerCell(answers[k])))
-      const preview = escapeTableCell(String(row.preview ?? ''))
-      const item = row.error ? `${preview} ⚠ ${escapeTableCell(String(row.error))}` : preview
-      return `| ${String(row.index ?? '')} | ${item} | ${cells.join(' | ')} |`
-    })
-    const summary = `**${String(result.succeeded ?? rows.length)}** of **${String(result.total ?? rows.length)}** items judged`
-      + (typeof result.failed === 'number' && result.failed > 0 ? `, ${result.failed} failed` : '')
-      + (result.model ? ` · ${String(result.model)}` : '')
-    sections.push(summary)
-    sections.push([header, divider, ...body].join('\n'))
-    if (rows.length > DECIDE_MAX_TABLE_ROWS) sections.push(`_… ${rows.length - DECIDE_MAX_TABLE_ROWS} more rows_`)
-  } else if (result.answers && typeof result.answers === 'object') {
-    const answers = result.answers as Record<string, unknown>
-    const meta: string[] = []
-    if (result.model) meta.push(String(result.model))
-    if (typeof result.latencyMs === 'number') meta.push(`${result.latencyMs} ms`)
-    if (meta.length > 0) sections.push(meta.join(' · '))
-    const lines = ['| Question | Answer | Confidence |', '|---|---|---|']
-    for (const key of Object.keys(answers)) {
-      lines.push(`| ${escapeTableCell(key)} | ${formatDecideAnswerCell(answers[key])} | ${formatDecideConfidence(answers[key])} |`)
-    }
-    sections.push(lines.join('\n'))
-    if (result.truncated) sections.push('_The state was cut to the size limit before judging._')
-  } else {
-    sections.push(`\`\`\`json\n${rawContent}\n\`\`\``)
-  }
-
-  return sections.join('\n\n')
 }
 
 function normalizeToolCommandName(toolName?: string): string {

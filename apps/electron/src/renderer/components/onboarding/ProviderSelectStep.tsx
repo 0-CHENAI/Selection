@@ -1,34 +1,24 @@
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
-import { Key, Monitor } from "lucide-react"
 import { CraftAgentsSymbol } from "@/components/icons/CraftAgentsSymbol"
+import { OrderWordmark } from "@/components/icons/OrderWordmark"
 import { StepFormLayout } from "./primitives"
-import { ProviderMark } from "./ProviderMark"
-
-import claudeIcon from "@/assets/provider-icons/claude.svg"
-import openaiIcon from "@/assets/provider-icons/openai.svg"
-import copilotIcon from "@/assets/provider-icons/copilot.svg"
 
 /**
  * The high-level provider choice the user makes on first launch.
  * This maps to one or more ApiSetupMethods downstream.
  */
-export type ProviderChoice = 'claude' | 'chatgpt' | 'copilot' | 'api_key' | 'local'
+export type ProviderChoice = 'order' | 'api_key' | 'local'
+
+/** ORDER gateway base (Anthropic-compatible path — no /v1). */
+export const ORDER_BASE_URL = 'https://order.ai.jxepdi.top'
+/** ORDER OpenAI-compatible base URL (requires /v1). */
+export const ORDER_OPENAI_BASE_URL = 'https://order.ai.jxepdi.top/v1'
 
 interface ProviderOption {
   id: ProviderChoice
   name: string
   description: string
-  icon: React.ReactNode
-}
-
-// Marks follow the text color (OpenAI and Copilot are monochrome); Claude keeps its brand color.
-const PROVIDER_ICONS: Record<ProviderChoice, React.ReactNode> = {
-  claude: <ProviderMark src={claudeIcon} />,
-  chatgpt: <ProviderMark src={openaiIcon} mono />,
-  copilot: <ProviderMark src={copilotIcon} mono />,
-  api_key: <Key className="size-6 p-0.5" strokeWidth={1.75} />,
-  local: <Monitor className="size-6 p-0.5" strokeWidth={1.75} />,
 }
 
 interface ProviderSelectStepProps {
@@ -41,7 +31,7 @@ interface ProviderSelectStepProps {
 /**
  * ProviderSelectStep — First screen after install.
  *
- * Welcomes the user and asks them to pick their subscription / auth method.
+ * Welcomes the user and asks them to pick their connection method.
  * Selecting a card immediately advances to the next step.
  */
 export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps) {
@@ -49,75 +39,67 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
 
   const PROVIDER_OPTIONS: ProviderOption[] = [
     {
-      id: 'claude',
-      name: t("onboarding.providerSelect.claudeProMax"),
-      description: t("onboarding.providerSelect.claudeProMaxDesc"),
-      icon: PROVIDER_ICONS.claude,
-    },
-    {
-      id: 'chatgpt',
-      name: t("onboarding.providerSelect.codexChatGPT"),
-      description: t("onboarding.providerSelect.codexChatGPTDesc"),
-      icon: PROVIDER_ICONS.chatgpt,
-    },
-    {
-      id: 'copilot',
-      name: t("onboarding.providerSelect.githubCopilot"),
-      description: t("onboarding.providerSelect.githubCopilotDesc"),
-      icon: PROVIDER_ICONS.copilot,
+      id: 'order',
+      name: t("onboarding.providerSelect.order"),
+      description: t("onboarding.providerSelect.orderDesc"),
     },
     {
       id: 'api_key',
       name: t("onboarding.providerSelect.otherProvider"),
       description: t("onboarding.providerSelect.otherProviderDesc"),
-      icon: PROVIDER_ICONS.api_key,
     },
     {
       id: 'local',
       name: t("onboarding.providerSelect.localModel"),
       description: t("onboarding.providerSelect.localModelDesc"),
-      icon: PROVIDER_ICONS.local,
     },
   ]
 
   return (
     <StepFormLayout
-      iconElement={<CraftAgentsSymbol className="h-7 text-accent" />}
+      iconElement={
+        <div className="flex size-16 items-center justify-center">
+          <CraftAgentsSymbol className="size-10 text-accent" />
+        </div>
+      }
       title={t("onboarding.providerSelect.title")}
       description={t("onboarding.providerSelect.description")}
     >
-      {/* Provider tiles (mockup .prov-opt): hairline ring, mark in the text color, name + one-line
-          description. Choosing one still advances immediately. */}
-      <div className="flex flex-col gap-1.5">
-        {PROVIDER_OPTIONS.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => onSelect(option.id)}
-            className={cn(
-              "motion-press flex w-full min-h-[52px] items-center gap-3 rounded-md px-3 py-2 text-left",
-              "ring-1 ring-inset ring-border hover:bg-fill-hover active:bg-fill-pressed",
-            )}
-          >
-            <span className="flex size-6 shrink-0 items-center justify-center text-foreground">
-              {option.icon}
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-label font-medium text-foreground">{option.name}</span>
-              <span className="block text-label-sm text-secondary">
+      <div className="space-y-2 sm:space-y-3">
+        {PROVIDER_OPTIONS.map((option) => {
+          const isOrder = option.id === 'order'
+          return (
+            <button
+              key={option.id}
+              onClick={() => onSelect(option.id)}
+              className={cn(
+                "flex w-full flex-col items-start rounded-xl bg-foreground-2 text-left transition-all",
+                isOrder ? "px-4 py-3.5 sm:px-4 sm:py-3.5" : "p-3 sm:p-4",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "hover:bg-foreground/[0.02] shadow-minimal",
+              )}
+            >
+              {isOrder ? (
+                <OrderWordmark className="block text-[2.15rem] sm:text-[2.35rem] leading-[0.85]" />
+              ) : (
+                <span className="font-medium text-sm">{option.name}</span>
+              )}
+              <p className={cn(
+                "hidden sm:block text-xs text-muted-foreground",
+                isOrder ? "mt-2" : "mt-1",
+              )}>
                 {option.description}
-              </span>
-            </span>
-          </button>
-        ))}
+              </p>
+            </button>
+          )
+        })}
       </div>
 
       {onSkip && (
         <div className="mt-4 text-center">
           <button
-            type="button"
             onClick={onSkip}
-            className="min-h-6 text-label text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             {t("onboarding.providerSelect.setupLater")}
           </button>

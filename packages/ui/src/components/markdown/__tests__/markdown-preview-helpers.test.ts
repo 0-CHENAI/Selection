@@ -125,3 +125,17 @@ describe('normalizePreviewItems', () => {
     expect(normalizePreviewItems({ items: [] })).toEqual([])
   })
 })
+
+
+describe('shared document preview spec validation', () => {
+  it('drops malformed items and non-string labels before rendering HTML or Markdown', () => {
+    const spec = parseMarkdownPreviewSpec(JSON.stringify({ items: [
+      null, 1, { src: 123 }, { src: '' },
+      { src: '/report.html', label: { invalid: true } },
+      { src: '/report.md', label: '报告' },
+    ] }))
+    expect(normalizePreviewItems(spec)).toEqual([
+      { src: '/report.html' }, { src: '/report.md', label: '报告' },
+    ])
+  })
+})

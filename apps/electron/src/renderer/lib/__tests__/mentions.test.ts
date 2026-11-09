@@ -75,6 +75,12 @@ describe('parseMentions - skill pattern with workspace IDs', () => {
       const result = parseMentions('[skill:My Cool-Workspace:review-pr]', availableSkills, [])
       expect(result.skills).toEqual(['review-pr'])
     })
+
+    it('parses skill with Chinese workspace ID', () => {
+      const result = parseMentions('[skill:巡察工作:inspection-workflow]', ['inspection-workflow'], [])
+      expect(result.skills).toEqual(['inspection-workflow'])
+      expect(result.invalidSkills).toEqual([])
+    })
   })
 
   describe('edge cases', () => {
@@ -132,6 +138,21 @@ describe('findMentionMatches - skill pattern with workspace IDs', () => {
     })
   })
 
+  it('finds skill with Chinese workspace ID (chip rendering)', () => {
+    const matches = findMentionMatches(
+      '[skill:巡察工作:inspection-workflow]',
+      ['inspection-workflow'],
+      [],
+    )
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      type: 'skill',
+      id: 'inspection-workflow',
+      fullMatch: '[skill:巡察工作:inspection-workflow]',
+      startIndex: 0,
+    })
+  })
+
   it('returns correct start index', () => {
     const text = 'Please use [skill:My Workspace:commit] for this'
     const matches = findMentionMatches(text, availableSkills, [])
@@ -167,6 +188,15 @@ describe('removeMention - skill pattern with workspace IDs', () => {
   it('removes simple skill mention', () => {
     const result = removeMention('[skill:commit] please', 'skill', 'commit')
     expect(result).toBe('please')
+  })
+
+  it('removes skill with Chinese workspace ID', () => {
+    const result = removeMention(
+      '[skill:巡察工作:inspection-workflow] 请执行',
+      'skill',
+      'inspection-workflow',
+    )
+    expect(result).toBe('请执行')
   })
 })
 

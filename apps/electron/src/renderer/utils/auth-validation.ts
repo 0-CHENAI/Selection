@@ -44,13 +44,15 @@ export function getPasswordValue(
  *
  * @param baseLabel - The base label (e.g., "Password")
  * @param passwordRequired - Whether password is required
- * @returns The label with " (optional)" suffix if not required
+ * @param optionalSuffix - Localized " (optional)" suffix when not required
+ * @returns The label with optional suffix if not required
  */
 export function getPasswordLabel(
   baseLabel: string,
-  passwordRequired: boolean = true
+  passwordRequired: boolean = true,
+  optionalSuffix: string = ' (optional)',
 ): string {
-  return passwordRequired ? baseLabel : `${baseLabel} (optional)`
+  return passwordRequired ? baseLabel : `${baseLabel}${optionalSuffix}`
 }
 
 /**
@@ -58,13 +60,17 @@ export function getPasswordLabel(
  *
  * @param baseLabel - The base label (e.g., "Password")
  * @param passwordRequired - Whether password is required
+ * @param enterLabel - Localized "Enter {{label}}" template or resolved string
+ * @param optionalPlaceholder - Localized optional placeholder when not required
  * @returns Appropriate placeholder text
  */
 export function getPasswordPlaceholder(
   baseLabel: string,
-  passwordRequired: boolean = true
+  passwordRequired: boolean = true,
+  enterLabel?: string,
+  optionalPlaceholder: string = 'Optional - leave blank',
 ): string {
   return passwordRequired
-    ? `Enter ${baseLabel.toLowerCase()}`
-    : 'Optional - leave blank'
+    ? (enterLabel ?? `Enter ${baseLabel.toLowerCase()}`)
+    : optionalPlaceholder
 }

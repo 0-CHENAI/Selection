@@ -13,7 +13,6 @@
  */
 
 import { RPC_CHANNELS } from './types'
-import { FEATURE_FLAGS } from '@craft-agent/shared/feature-flags'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -173,20 +172,9 @@ export const VIEW_MENU: MenuSection = {
     { type: 'separator' },
     {
       type: 'action',
-      id: 'toggleFocusMode',
-      actionId: 'view.toggleFocusMode',
-      labelKey: 'menu.toggleFocusMode',
-      shortcut: 'CmdOrCtrl+.',
-      shortcutDisplayMac: '⌘.',
-      shortcutDisplayOther: 'Ctrl+.',
-      ipcChannel: RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE,
-      icon: 'Focus',
-    },
-    {
-      type: 'action',
       id: 'toggleSidebar',
       actionId: 'view.toggleSidebar',
-      labelKey: 'menu.toggleSidebar',
+      labelKey: 'menu.immersiveMode',
       shortcut: 'CmdOrCtrl+B',
       shortcutDisplayMac: '⌘B',
       shortcutDisplayOther: 'Ctrl+B',
@@ -294,15 +282,8 @@ export const ROOT_MENU = {
  * sub-page (mobile). Excludes `keyboardShortcuts`, which is a `MenuItemAction`
  * and lives in `ROOT_MENU` so mobile can hoist it to the root list.
  */
-export const HELP_LINKS: MenuItemUrl[] = [
-  {
-    type: 'url',
-    id: 'helpAndDocs',
-    labelKey: 'menu.helpAndDocs',
-    url: 'https://thecraftagents.com/docs',
-    icon: 'HelpCircle',
-  },
-]
+/** External docs links removed from the product UI (no remote docs for this fork). */
+export const HELP_LINKS: MenuItemUrl[] = []
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug menu (dev-only)
@@ -365,7 +346,11 @@ export const DEBUG_MENU: MenuSection = {
  * Settings item definition
  * Used by both AppMenu (logo dropdown) and SettingsNavigator (sidebar panel)
  */
-import { SETTINGS_PAGES, type SettingsSubpage } from './settings-registry'
+import {
+  SETTINGS_PAGES,
+  isVisibleSettingsSubpage,
+  type SettingsSubpage,
+} from './settings-registry'
 
 export interface SettingsMenuItem {
   id: SettingsSubpage
@@ -384,10 +369,10 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   appearance: 'Palette',
   input: 'Keyboard',
   workspace: 'Building2',
+  advanced: 'SlidersHorizontal',
   permissions: 'ShieldCheck',
   labels: 'Tag',
   messaging: 'MessageSquare',
-  server: 'Server',
   shortcuts: 'Keyboard',
   preferences: 'UserCircle',
 }
@@ -397,7 +382,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
  * Order is determined by SETTINGS_PAGES in settings-registry.ts
  */
 export const SETTINGS_ITEMS: SettingsMenuItem[] = SETTINGS_PAGES
-  .filter(page => page.id !== 'server' || FEATURE_FLAGS.embeddedServer)
+  .filter(page => isVisibleSettingsSubpage(page.id))
   .map(page => ({
     id: page.id,
     labelKey: page.labelKey,

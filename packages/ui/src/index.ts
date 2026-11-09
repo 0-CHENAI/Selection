@@ -1,5 +1,5 @@
 /**
- * @craft-agent/ui - Shared React UI components for Craft Agent
+ * @craft-agent/ui - Shared React UI components for Selection
  *
  * This package provides platform-agnostic UI components that work in both:
  * - Electron desktop app (full interactive mode)
@@ -14,8 +14,7 @@
  * - PlatformProvider/usePlatform: Inject platform-specific actions
  */
 
-// Motion presets (tokens.css mirror) + Motion setting provider
-export * from './motion'
+export { SelectionMark } from './components/SelectionMark'
 
 // Context
 export {
@@ -32,10 +31,24 @@ export {
 export {
   SessionViewer,
   TurnCard,
+  ResponseActionRow,
+  TurnActionButton,
+  TurnRetryButton,
+  TodoList,
+  TaskProgressCard,
+  TaskTurnSummary,
+  useSessionTaskCard,
+  latestTodoList,
+  todoRailForTurn,
+  taskStepProgress,
   TurnCardActionsMenu,
   ResponseCard,
   UserMessageBubble,
+  formatUserMessageTime,
+  ClarificationCard,
+  ClarificationSummary,
   SystemMessage,
+  withTaskMessagePresentation,
   FileTypeIcon,
   getFileTypeLabel,
   asRecord,
@@ -49,12 +62,16 @@ export {
   mapToolEventToActivity,
   SIZE_CONFIG,
   ActivityStatusIcon,
+  HeightPresence,
   type SessionViewerProps,
   type SessionViewerMode,
   type TurnCardProps,
   type TurnCardActionsMenuProps,
   type ResponseCardProps,
   type UserMessageBubbleProps,
+  type ClarificationCardProps,
+  type ClarificationSummaryProps,
+  type ClarificationResponse,
   type SystemMessageProps,
   type SystemMessageType,
   type FileTypeIconProps,
@@ -79,6 +96,13 @@ export {
   MarkdownSpreadsheetBlock,
   MarkdownImageBlock,
   ImageCardStack,
+  preprocessLinks,
+  detectLinks,
+  hasLinks,
+  isFilePathTarget,
+  resolveMarkdownLinkTarget,
+  classifyMarkdownLinkTarget,
+  decodeFilePath,
   type MarkdownProps,
   type RenderMode,
   TiptapMarkdownEditor,
@@ -89,17 +113,14 @@ export {
   type MarkdownImageBlockProps,
   type ImageCardStackProps,
   type ImageCardStackItem,
-  RunCommandProvider,
-  useRunCommand,
-  type RunCommandHandler,
-  shellCommandFromBlock,
-  consoleSnippetCommand,
+  type ResolvedMarkdownLinkTarget,
 } from './components/markdown'
 
 // UI primitives
 export {
   Spinner,
   LoadingIndicator,
+  LatticeLoader,
   SimpleDropdown,
   SimpleDropdownItem,
   PreviewHeader,
@@ -122,9 +143,10 @@ export {
   IslandContentView,
   IslandFollowUpContentView,
   useIslandNavigation,
-  AnimatedCollapsibleContent,
   type SpinnerProps,
   type LoadingIndicatorProps,
+  type LatticeLoaderProps,
+  type LatticeStatus,
   type SimpleDropdownProps,
   type SimpleDropdownItemProps,
   type PreviewHeaderProps,
@@ -154,8 +176,15 @@ export {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
+  ErrorTooltipContent,
   TooltipProvider,
 } from './components/tooltip'
+export {
+  OverlayLayerProvider,
+  useOverlayLayer,
+  tooltipZIndexClass,
+  ERROR_TOOLTIP_CONTENT_CLASS,
+} from './components/overlay-layer'
 
 // Code viewer components
 export {
@@ -240,6 +269,11 @@ export {
   type FilePreviewType,
   type FileClassification,
 } from './lib/file-classification'
+export {
+  isHeicFilePath,
+  resolveFileOpenRoute,
+  type FileOpenRoute,
+} from './lib/file-open-route'
 
 // Utilities
 export { cn } from './lib/utils'
@@ -296,3 +330,8 @@ export {
   Icon_Inbox,
   type IconProps,
 } from './components/icons'
+
+export { renderContentWithBadges } from './components/chat/UserMessageBubble'
+export { markdownToPlainText } from './components/chat/markdown-to-plain-text'
+
+export { PANEL_SPRING, panelPushTransition } from './lib/panel-motion'

@@ -1,166 +1,184 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveSearchProvider } from './resolve-provider.ts';
-import { ResponsesApiSearchProvider } from './providers/openai.ts';
+import {
+  createDynamicSearchProvider,
+  requestAnySearchApiKey,
+  resolveSearchProvider,
+  type SearchProviderAuthConfig,
+} from './resolve-provider.ts';
+import { AnySearchSearchProvider } from './providers/anysearch.ts';
+import { AnthropicSearchProvider } from './providers/anthropic.ts';
 import { ChatGPTBackendSearchProvider } from './providers/chatgpt.ts';
+import { DeepSeekSearchProvider } from './providers/deepseek.ts';
 import { GoogleSearchProvider } from './providers/google.ts';
-import { DDGSearchProvider } from './providers/ddg.ts';
+import { KimiSearchProvider } from './providers/kimi.ts';
+import { ResponsesApiSearchProvider } from './providers/openai.ts';
 
-/** Build a minimal JWT with a chatgpt_account_id claim. */
 function makeJwt(accountId: string): string {
-  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const payload = btoa(
-    JSON.stringify({
-      'https://api.openai.com/auth': { chatgpt_account_id: accountId },
-    }),
-  );
-  return `${header}.${payload}.fakesig`;
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    'https://api.openai.com/auth': { chatgpt_account_id: accountId },
+  })).toString('base64url');
+  return `${header}.${payload}.signature`;
 }
 
 describe('resolveSearchProvider', () => {
-  // --- OpenAI (API key) ---
+  it('defaults to AnySearch without an LLM connection', () => {
+    expect(resolveSearchProvider()).toBeInstanceOf(AnySearchSearchProvider);
+    expect(resolveSearchProvider().name).toBe('AnySearch');
+  });
 
-  it('selects ResponsesApiSearchProvider for openai + api_key', () => {
-    const provider = resolveSearchProvider({
+  it('prefers ChatGPT native search for openai-codex bearer tokens', () => {
+    const accessToken = makeJwt('acc_native');
+
+    expect(resolveSearchProvider({
+      provider: 'openai-codex',
+      credential: { type: 'api_key', key: accessToken },
+    }, 'gpt-6.1-sol')).toBeInstanceOf(ChatGPTBackendSearchProvider);
+
+    expect(resolveSearchProvider({
+      provider: 'openai-codex',
+      credential: { type: 'oauth', access: accessToken, refresh: '', expires: 0 },
+    })).toBeInstanceOf(ChatGPTBackendSearchProvider);
+  });
+
+  it('selects official native search only for exact built-in provider ids', () => {
+    expect(resolveSearchProvider({
       provider: 'openai',
-      credential: { type: 'api_key', key: 'sk-test' },
-    });
+      credential: { type: 'api_key', key: 'sk-openai' },
+    }, 'pi/gpt-6.1-sol')).toBeInstanceOf(ResponsesApiSearchProvider);
 
-    expect(provider).toBeInstanceOf(ResponsesApiSearchProvider);
-    expect(provider.name).toBe('OpenAI');
-  });
+    expect(resolveSearchProvider({
+      provider: 'anthropic',
+      credential: { type: 'api_key', key: 'sk-ant-api' },
+    }, 'pi/claude-sonnet-4-6')).toBeInstanceOf(AnthropicSearchProvider);
 
-  // --- ChatGPT Plus (OAuth) ---
+    expect(resolveSearchProvider({
+      provider: 'deepseek',
+      credential: { type: 'api_key', key: 'sk-deepseek' },
+    })).toBeInstanceOf(DeepSeekSearchProvider);
 
-  it('selects ChatGPTBackendSearchProvider for openai-codex + oauth with valid JWT', () => {
-    const provider = resolveSearchProvider({
-      provider: 'openai-codex',
-      credential: {
-        type: 'oauth',
-        access: makeJwt('acc_123'),
-        refresh: 'r',
-        expires: Date.now() + 60_000,
-      },
-    });
-
-    expect(provider).toBeInstanceOf(ChatGPTBackendSearchProvider);
-    expect(provider.name).toBe('ChatGPT');
-  });
-
-  it('selects ChatGPTBackendSearchProvider for openai-codex + api_key with valid JWT token', () => {
-    const provider = resolveSearchProvider({
-      provider: 'openai-codex',
-      credential: { type: 'api_key', key: makeJwt('acc_999') },
-    });
-
-    expect(provider).toBeInstanceOf(ChatGPTBackendSearchProvider);
-    expect(provider.name).toBe('ChatGPT');
-  });
-
-  it('falls back to DDG for openai-codex + oauth with malformed JWT', () => {
-    const provider = resolveSearchProvider({
-      provider: 'openai-codex',
-      credential: {
-        type: 'oauth',
-        access: 'not-a-jwt',
-        refresh: 'r',
-        expires: Date.now() + 60_000,
-      },
-    });
-
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
-  });
-
-  it('falls back to DDG for openai-codex + api_key with malformed non-JWT token', () => {
-    const provider = resolveSearchProvider({
-      provider: 'openai-codex',
-      credential: { type: 'api_key', key: 'not-a-jwt' },
-    });
-
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
-  });
-
-  // --- OpenRouter ---
-
-  it('selects ResponsesApiSearchProvider for openrouter + api_key', () => {
-    const provider = resolveSearchProvider({
-      provider: 'openrouter',
-      credential: { type: 'api_key', key: 'sk-or-test' },
-    });
-
-    expect(provider).toBeInstanceOf(ResponsesApiSearchProvider);
-    expect(provider.name).toBe('OpenRouter');
-  });
-
-  // --- Google ---
-
-  it('selects Google provider for google + api_key', () => {
-    const provider = resolveSearchProvider({
+    expect(resolveSearchProvider({
       provider: 'google',
-      credential: { type: 'api_key', key: 'g-test' },
-    });
+      credential: { type: 'api_key', key: 'AIza-google' },
+    })).toBeInstanceOf(GoogleSearchProvider);
 
-    expect(provider).toBeInstanceOf(GoogleSearchProvider);
+    expect(resolveSearchProvider({
+      provider: 'moonshotai',
+      credential: { type: 'api_key', key: 'sk-moonshot' },
+    })).toBeInstanceOf(KimiSearchProvider);
+
+    expect(resolveSearchProvider({
+      provider: 'moonshotai-cn',
+      credential: { type: 'api_key', key: 'sk-moonshot-cn' },
+    })).toBeInstanceOf(KimiSearchProvider);
   });
 
-  // --- Fallback cases ---
-
-  it('falls back to DDG for openai + oauth (no ChatGPT backend for plain openai)', () => {
-    const provider = resolveSearchProvider({
+  it('keeps custom endpoints and incompatible credentials isolated on AnySearch', () => {
+    expect(resolveSearchProvider({
       provider: 'openai',
-      credential: {
-        type: 'oauth',
-        access: 'a',
-        refresh: 'r',
-        expires: Date.now() + 60_000,
-      },
-    });
+      credential: { type: 'api_key', key: 'custom-endpoint-secret' },
+    }, undefined, undefined, { customEndpoint: true })).toBeInstanceOf(AnySearchSearchProvider);
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
-  });
-
-  it('falls back to DDG when provider is unknown', () => {
-    const provider = resolveSearchProvider({
-      provider: 'unknown',
-      credential: { type: 'api_key', key: 'x' },
-    });
-
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
-  });
-
-  it('falls back to DDG when key is empty', () => {
-    const provider = resolveSearchProvider({
+    expect(resolveSearchProvider({
       provider: 'openai',
-      credential: { type: 'api_key', key: '' },
-    });
+      credential: { type: 'api_key', key: 'legacy-custom-secret' },
+    }, undefined, undefined, {
+      baseUrl: 'https://api.openai.com.evil.example/v1',
+    })).toBeInstanceOf(AnySearchSearchProvider);
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(resolveSearchProvider({
+      provider: 'openai-codex',
+      credential: { type: 'api_key', key: makeJwt('acc_custom') },
+    }, undefined, undefined, { customEndpoint: true })).toBeInstanceOf(AnySearchSearchProvider);
+
+    expect(resolveSearchProvider({
+      provider: 'deepseek',
+      credential: { type: 'api_key', key: 'oauth-access-token' },
+    }, undefined, undefined, { authType: 'oauth' })).toBeInstanceOf(AnySearchSearchProvider);
+
+    expect(resolveSearchProvider({
+      provider: 'anthropic',
+      credential: { type: 'api_key', key: 'sk-ant-oat-subscription-token' },
+    })).toBeInstanceOf(AnySearchSearchProvider);
+
+    expect(resolveSearchProvider({
+      provider: 'kimi-coding',
+      credential: { type: 'oauth', access: 'kimi-code-token', refresh: '', expires: 0 },
+    })).toBeInstanceOf(AnySearchSearchProvider);
+
+    expect(resolveSearchProvider({
+      provider: 'openai-codex',
+      credential: { type: 'api_key', key: 'malformed-token' },
+    })).toBeInstanceOf(AnySearchSearchProvider);
   });
 
-  it('falls back to DDG when no piAuth is provided', () => {
-    expect(resolveSearchProvider()).toBeInstanceOf(DDGSearchProvider);
-    expect(resolveSearchProvider(undefined)).toBeInstanceOf(DDGSearchProvider);
+  it('resolves the latest ChatGPT token without recreating the provider', async () => {
+    let auth: SearchProviderAuthConfig | undefined;
+    const seenAuthorization: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seenAuthorization.push((init?.headers as Record<string, string>).Authorization);
+      return new Response(JSON.stringify({
+        output: [{
+          type: 'message',
+          content: [{
+            type: 'output_text',
+            text: 'Result',
+            annotations: [{ type: 'url_citation', url: 'https://example.com', title: 'Example' }],
+          }],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      const provider = createDynamicSearchProvider(() => auth, () => 'gpt-6.1-sol');
+      expect(provider.name).toBe('AnySearch');
+
+      const firstToken = makeJwt('acc_first');
+      auth = { provider: 'openai-codex', credential: { type: 'api_key', key: firstToken } };
+      expect(provider.name).toBe('ChatGPT');
+      await provider.search('first', 1);
+
+      const refreshedToken = makeJwt('acc_refreshed');
+      auth = { provider: 'openai-codex', credential: { type: 'api_key', key: refreshedToken } };
+      await provider.search('second', 1);
+
+      expect(seenAuthorization).toEqual([
+        `Bearer ${firstToken}`,
+        `Bearer ${refreshedToken}`,
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
-  it('falls back to DDG for github-copilot (no search API available)', () => {
-    const provider = resolveSearchProvider({
-      provider: 'github-copilot',
-      credential: {
-        type: 'oauth',
-        access: 'ghu_token',
-        refresh: 'r',
-        expires: Date.now() + 60_000,
-      },
-    });
+  it('returns the current settings key and times out to anonymous access', async () => {
+    const pending = new Map<string, (apiKey: string) => void>();
+    const sent: Array<{ id: string }> = [];
+    const pendingResult = requestAnySearchApiKey(message => sent.push(message), pending);
+    expect(sent).toHaveLength(1);
+    pending.get(sent[0]!.id)?.('settings-key');
+    expect(await pendingResult).toBe('settings-key');
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    const timedOut = requestAnySearchApiKey(() => {}, new Map(), 1);
+    expect(await timedOut).toBe('');
   });
 
-  it('falls back to DDG for vercel-ai-gateway (not yet wired for provider-native search)', () => {
-    const provider = resolveSearchProvider({
-      provider: 'vercel-ai-gateway',
-      credential: { type: 'api_key', key: 'vercel-test-key' },
-    });
+  it('cancels a pending AnySearch key request immediately', async () => {
+    const pending = new Map<string, (apiKey: string) => void>();
+    const controller = new AbortController();
+    const result = requestAnySearchApiKey(() => {}, pending, 5_000, controller.signal);
+    expect(pending.size).toBe(1);
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    let rejected = false;
+    try {
+      await result;
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+    expect(pending.size).toBe(0);
   });
 });

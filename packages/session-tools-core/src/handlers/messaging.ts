@@ -36,7 +36,7 @@ export async function handleListMessagingChannels(
 
     const lines = bindings.map((b) => {
       const baseLabel = b.channelName || b.channelId;
-      // Topic-bound bindings (Telegram supergroup forums) read as
+      // Thread-bound messaging connections read as
       // "Group › Topic" so the model can disambiguate two topics in the
       // same supergroup. DMs and pre-topics bindings render unchanged.
       const channelLabel = b.threadId !== undefined
@@ -59,7 +59,7 @@ export async function handleListMessagingChannels(
 // ---------------------------------------------------------------------------
 
 export interface UnbindMessagingChannelArgs {
-  platform?: 'telegram' | 'whatsapp';
+  platform?: 'lark';
 }
 
 export async function handleUnbindMessagingChannel(

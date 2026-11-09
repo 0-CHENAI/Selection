@@ -24,7 +24,6 @@ import {
   WINDOW_MENU,
   SETTINGS_ITEMS,
   ROOT_MENU,
-  HELP_LINKS,
   DEBUG_MENU,
   getShortcutDisplay,
 } from "../../../shared/menu-schema"
@@ -71,7 +70,7 @@ function renderSubmenuItem(
       <StyledDropdownMenuItem key={item.id} onClick={() => window.electronAPI.openUrl(item.url)}>
         {Icon && <Icon className="h-3.5 w-3.5" />}
         {t(item.labelKey)}
-        <Icons.ExternalLink className="h-3 w-3 ml-auto text-tertiary" />
+        <Icons.ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />
       </StyledDropdownMenuItem>
     )
   }
@@ -226,19 +225,6 @@ export function DesktopAppMenu({
             {t("menu.help")}
           </StyledDropdownMenuSubTrigger>
           <StyledDropdownMenuSubContent>
-            {HELP_LINKS.map((link) => {
-              const Icon = getIcon(link.icon)
-              return (
-                <StyledDropdownMenuItem
-                  key={link.id}
-                  onClick={() => window.electronAPI.openUrl(link.url)}
-                >
-                  {Icon && <Icon className="h-3.5 w-3.5" />}
-                  {t(link.labelKey)}
-                  <Icons.ExternalLink className="h-3 w-3 ml-auto text-tertiary" />
-                </StyledDropdownMenuItem>
-              )
-            })}
             <StyledDropdownMenuItem onClick={onOpenKeyboardShortcuts}>
               <Icons.Keyboard className="h-3.5 w-3.5" />
               {t(ROOT_MENU.keyboardShortcuts.labelKey)}

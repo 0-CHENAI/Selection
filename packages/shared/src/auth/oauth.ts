@@ -8,7 +8,6 @@ import type { PreparedOAuthFlow, OAuthExchangeParams, OAuthExchangeResult } from
 
 export interface OAuthConfig {
   mcpUrl: string; // Full MCP URL including path (e.g., https://mcp.craft.do/my/mcp)
-  scopes?: string[]; // Sent as `scope` on authorize when non-empty
 }
 
 export interface OAuthTokens {
@@ -27,7 +26,7 @@ export interface OAuthCallbacks {
 const CALLBACK_PORT_START = 8914;
 const CALLBACK_PORT_END = 8924;
 const CALLBACK_PATH = '/oauth/callback';
-const CLIENT_NAME = 'Claude Code (Craft Agent)';
+const CLIENT_NAME = 'Claude Code (Selection)';
 
 // Generate PKCE code verifier and challenge
 function generatePKCE(): { verifier: string; challenge: string } {
@@ -284,14 +283,9 @@ export class CraftOAuth {
     authUrl.searchParams.set('state', state);
     authUrl.searchParams.set('code_challenge', pkce.challenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
-    if (this.config.scopes?.length) {
-      authUrl.searchParams.set('scope', this.config.scopes.join(' '));
-    }
-
-    // RFC 8707 resource indicator — required by resource-bound MCP servers so the
-    // issued token is audience-scoped to this MCP endpoint (OSS #1054). Only send
-    // when the server declared its resource in PRM; a derived fallback breaks
-    // servers (e.g. Azure v1) that reject an unexpected `resource` parameter.
+    // RFC 8707 resource indicator — only when the server declared its resource
+    // in PRM; a derived fallback breaks servers that reject an unexpected
+    // `resource` parameter.
     const resource = metadata.resource;
     if (resource) {
       authUrl.searchParams.set('resource', resource);
@@ -571,7 +565,7 @@ async function exchangeMcpCodeForTokens(
  */
 export async function prepareMcpOAuth(
   mcpUrl: string,
-  options: { callbackPort?: number; callbackUrl?: string; scopes?: string[] },
+  options: { callbackPort?: number; callbackUrl?: string },
 ): Promise<PreparedOAuthFlow> {
   const metadata = await discoverOAuthMetadata(mcpUrl);
   if (!metadata) {
@@ -605,9 +599,9 @@ export async function prepareMcpOAuth(
   }
 
   // RFC 8707 resource indicator: the canonical identifier the server declared in
-  // its protected resource metadata (OSS #1054). Only send when the server
-  // published it — a derived fallback (the MCP URL itself) breaks servers that
-  // reject an unexpected `resource` on authorize with no retry path.
+  // its protected resource metadata. Only send when the server published it —
+  // a derived fallback (the MCP URL itself) breaks servers that reject an
+  // unexpected `resource` on authorize with no retry path.
   const resource = metadata.resource;
 
   const authUrl = new URL(metadata.authorization_endpoint);
@@ -617,9 +611,6 @@ export async function prepareMcpOAuth(
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('code_challenge', pkce.challenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
-  if (options.scopes?.length) {
-    authUrl.searchParams.set('scope', options.scopes.join(' '));
-  }
   if (resource) {
     authUrl.searchParams.set('resource', resource);
   }
@@ -840,9 +831,8 @@ function parseResourceMetadataFromHeader(wwwAuthenticate: string | null): string
 }
 
 /**
- * Fetch protected resource metadata and return the authorization server URL and
- * the resource's canonical identifier. Per RFC 9728, the protected resource
- * metadata contains an authorization_servers array and a `resource` field.
+ * Fetch protected resource metadata and return the authorization server URL.
+ * Per RFC 9728, the protected resource metadata contains authorization_servers array.
  */
 async function fetchProtectedResourceMetadata(
   metadataUrl: string,
@@ -900,33 +890,6 @@ async function fetchProtectedResourceMetadata(
 }
 
 /**
- * Canonicalize an MCP server URL into a resource identifier suitable for the
- * RFC 8707 `resource` parameter: an absolute URI with no fragment.
- *
- * Used as the fallback audience when the server exposes no protected resource
- * metadata (RFC 9728) to state its own canonical identifier.
- */
-export function canonicalResourceIdentifier(mcpUrl: string): string | undefined {
-  let url: URL;
-  try {
-    url = new URL(mcpUrl);
-  } catch {
-    return undefined;
-  }
-
-  // RFC 8707 §2: the resource URI MUST NOT include a fragment component, and
-  // query parameters should be stripped to avoid leaking embedded secrets
-  // (e.g. ?apiKey=…) into the AS access log and browser address bar.
-  url.hash = '';
-  url.search = '';
-
-  // Normalize a bare root path away so `https://host/` and `https://host`
-  // produce the same identifier.
-  const canonical = url.toString();
-  return url.pathname === '/' && !url.search ? normalizeUrl(canonical) : canonical;
-}
-
-/**
  * Build the RFC 9728 §3.1 well-known protected resource metadata URLs for an
  * MCP server URL: path-scoped first (servers hosting several resources on one
  * origin), then the origin root.
@@ -950,9 +913,7 @@ function buildProtectedResourceMetadataUrls(mcpUrl: string): string[] {
 /**
  * POST a token request. If the authorization server rejects the RFC 8707
  * `resource` parameter with `invalid_target` (RFC 8707 §2), retry once without
- * it: the MCP flow now always sends a resource indicator, and servers that
- * predate resource indicators must keep working. The authorization step cannot
- * be retried, but such servers ignore unknown authorize parameters (RFC 6749 §3.1).
+ * it so servers that predate resource indicators keep working.
  */
 async function postTokenRequest(
   tokenEndpoint: string,
@@ -989,8 +950,7 @@ async function isInvalidTargetResponse(response: Response): Promise<boolean> {
 /**
  * Try to discover OAuth metadata via RFC 9728 flow:
  * 1. Make a request to the MCP endpoint to get 401 with WWW-Authenticate header
- * 2. Parse resource_metadata URL from the header, falling back to the
- *    well-known locations (RFC 9728 §3.1) for 401s that omit the hint
+ * 2. Parse resource_metadata URL from the header, falling back to well-known locations
  * 3. Fetch protected resource metadata
  * 4. Get authorization server URL and fetch its metadata
  *
@@ -1051,26 +1011,21 @@ async function discoverViaProtectedResource(
 
     // Candidate protected resource metadata URLs, most authoritative first:
     // the WWW-Authenticate hint, then the RFC 9728 §3.1 well-known locations.
-    // The well-known locations are only probed once we know the endpoint is
-    // 401-protected, so public servers pay no extra requests.
     const candidates = [
       ...(headerHint ? [headerHint] : []),
       ...buildProtectedResourceMetadataUrls(mcpUrl),
     ];
 
     for (const candidate of candidates) {
-      // SSRF protection: validate the resource_metadata URL
       const urlCheck = isUrlSafeToFetch(candidate);
       if (!urlCheck.safe) {
         onLog?.(`  ✗ Unsafe resource_metadata URL rejected: ${urlCheck.reason}`);
         continue;
       }
 
-      // Fetch protected resource metadata to get authorization server + resource id
       const prm = await fetchProtectedResourceMetadata(candidate, onLog);
       if (!prm) continue;
 
-      // Fetch authorization server metadata (normalize URL to avoid double slashes)
       const normalizedAuthServer = normalizeUrl(prm.authorizationServer);
       const authServerMetadataUrl = `${normalizedAuthServer}/.well-known/oauth-authorization-server`;
       const metadata = await tryFetchAuthServerMetadata(authServerMetadataUrl, onLog);

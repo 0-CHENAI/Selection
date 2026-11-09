@@ -1,5 +1,17 @@
+import type { SessionFilter } from '../../../shared/types'
+
 /** Filter mode for tri-state filtering: include shows only matching, exclude hides matching. */
 export type FilterMode = 'include' | 'exclude'
+
+/**
+ * Remove a project-scoped list filter while preserving the view's other
+ * secondary filters and display preferences.
+ */
+export function clearProjectFilter<T extends { projects?: Record<string, FilterMode> }>(
+  entry: T,
+): Omit<T, 'projects'> & { projects: Record<string, FilterMode> } {
+  return { ...entry, projects: {} }
+}
 
 export interface InheritedNewSessionParams {
   status?: string
@@ -33,4 +45,48 @@ export function resolveInheritedFilterParams<S extends string, L extends string,
   if (labelIncludes.length === 1) return { label: labelIncludes[0] }
   if (projectIncludes.length === 1) return { project: projectIncludes[0] }
   return null
+}
+
+/**
+ * Resolve metadata for a new session from the current navigation context.
+ *
+ * A project selected in the Projects navigator is explicit user intent and
+ * therefore takes precedence over any session-list filters left in memory.
+ * Outside a project, preserve the existing sole-include inheritance rule.
+ */
+export function resolveNewSessionParams<S extends string, L extends string, P extends string>(
+  _statusFilter: Map<S, FilterMode>,
+  _labelFilter: Map<L, FilterMode>,
+  projectFilter: Map<P, FilterMode>,
+  activeProjectId?: P | null,
+): InheritedNewSessionParams | null {
+  if (activeProjectId) return { project: activeProjectId }
+  return resolveInheritedFilterParams(new Map(), new Map(), projectFilter)
+}
+
+/** Resolve a visible detail session when entering a project-scoped list. */
+export function resolveProjectNavigationSessionId(
+  sessions: ReadonlyArray<{ id: string; projectId?: string }>,
+  projectId: string,
+  hasOtherSecondaryFilters = false,
+): string | null {
+  if (hasOtherSecondaryFilters) return null
+  return sessions.find(session => session.projectId === projectId)?.id ?? null
+}
+
+/**
+ * Resolve inheritance for the SessionList empty-state action.
+ *
+ * Primary state/label routes are implicit include filters, while the filter-bar
+ * maps contain the secondary status, label, and project filters. Combining them
+ * before delegating keeps this entry point aligned with the header new-session
+ * action and preserves the same ambiguity safeguards.
+ */
+export function resolveSessionListNewSessionParams(
+  _currentFilter: SessionFilter | undefined,
+  _statusFilter: Map<string, FilterMode>,
+  _labelFilter: Map<string, FilterMode>,
+  projectFilter: Map<string, FilterMode>
+): InheritedNewSessionParams | null {
+  return resolveInheritedFilterParams(new Map(), new Map(), projectFilter)
 }

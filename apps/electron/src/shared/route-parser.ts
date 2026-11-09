@@ -16,7 +16,11 @@ import type {
   AutomationFilter,
   RightSidebarPanel,
 } from './types'
-import { isValidSettingsSubpage, type SettingsSubpage } from './settings-registry'
+import {
+  isValidSettingsSubpage,
+  isVisibleSettingsSubpage,
+  type SettingsSubpage,
+} from './settings-registry'
 
 // =============================================================================
 // Route Types
@@ -35,7 +39,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'projects' | 'pages' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'projects' | 'settings'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -63,7 +67,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'board', 'sources', 'skills', 'automations', 'projects', 'pages', 'settings'
+  'allSessions', 'ppt', 'office', 'flagged', 'archived', 'state', 'label', 'view', 'board', 'sources', 'skills', 'automations', 'projects', 'settings'
 ]
 
 /**
@@ -192,30 +196,16 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
-  // Pages navigator
-  if (first === 'pages') {
-    if (segments.length === 1) {
-      return { navigator: 'pages', details: null }
-    }
-    if (segments[1] === 'page' && segments[2]) {
-      return {
-        navigator: 'pages',
-        details: { type: 'page', id: segments[2] },
-      }
-    }
-    return null
-  }
-
-  // Automations navigator - supports type filters (scheduled, event, agentic)
+  // Automations navigator - supports type filters (scheduled, event)
   if (first === 'automations') {
     if (segments.length === 1) {
       return { navigator: 'automations', details: null }
     }
 
-    // Check for type filter: automations/scheduled, automations/event, automations/agentic
-    const validAutomationTypes = ['scheduled', 'event', 'agentic']
+    // Check for type filter: automations/scheduled, automations/event
+    const validAutomationTypes = ['scheduled', 'event']
     if (validAutomationTypes.includes(segments[1])) {
-      const automationType = segments[1] as 'scheduled' | 'event' | 'agentic'
+      const automationType = segments[1] as 'scheduled' | 'event'
       const automationFilter: AutomationFilter = { kind: 'type', automationType }
 
       // Check for automation selection within filtered view: automations/scheduled/automation/{automationId}
@@ -247,6 +237,23 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
   let detailsStartIndex: number
 
   switch (first) {
+    case 'ppt':
+      sessionFilter = { kind: 'ppt' }
+      detailsStartIndex = 1
+      break
+    case 'office': {
+      const section = segments[1]
+      if (!section || section === 'session' || section === 'ppt') {
+        sessionFilter = { kind: 'ppt' }
+        detailsStartIndex = section === 'ppt' ? 2 : 1
+      } else if (section === 'word' || section === 'excel') {
+        sessionFilter = { kind: 'office', section }
+        detailsStartIndex = 2
+      } else {
+        return null
+      }
+      break
+    }
     case 'allSessions':
       sessionFilter = { kind: 'allSessions' }
       detailsStartIndex = 1
@@ -325,7 +332,7 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   }
 
   if (parsed.navigator === 'automations') {
-    // Build base from filter (automations, automations/scheduled, automations/event, automations/agentic)
+    // Build base from filter (automations, automations/scheduled, automations/event)
     let base = 'automations'
     if (parsed.automationFilter?.kind === 'type') {
       base = `automations/${parsed.automationFilter.automationType}`
@@ -339,11 +346,6 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
     return `projects/project/${parsed.details.id}`
   }
 
-  if (parsed.navigator === 'pages') {
-    if (!parsed.details) return 'pages'
-    return `pages/page/${parsed.details.id}`
-  }
-
   // Sessions navigator
   // Board is a standalone view of all sessions; emit its own prefix.
   if (parsed.viewMode === 'board') return 'board'
@@ -353,6 +355,12 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   if (!filter) return 'allSessions'
 
   switch (filter.kind) {
+    case 'ppt':
+      base = 'ppt'
+      break
+    case 'office':
+      base = `office/${filter.section}`
+      break
     case 'allSessions':
       base = 'allSessions'
       break
@@ -478,14 +486,6 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
     return { type: 'view', name: 'project-info', id: compound.details.id, params: {} }
   }
 
-  // Pages
-  if (compound.navigator === 'pages') {
-    if (!compound.details) {
-      return { type: 'view', name: 'pages', params: {} }
-    }
-    return { type: 'view', name: 'page-info', id: compound.details.id, params: {} }
-  }
-
   // Sessions
   if (compound.sessionFilter) {
     const filter = compound.sessionFilter
@@ -575,7 +575,11 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     if (!compound.details) {
       return { navigator: 'settings', subpage: null }
     }
-    return { navigator: 'settings', subpage: compound.details.type as SettingsSubpage }
+    const subpage = compound.details.type as SettingsSubpage
+    return {
+      navigator: 'settings',
+      subpage: isVisibleSettingsSubpage(subpage) ? subpage : 'app',
+    }
   }
 
   // Sources - include filter if present
@@ -632,17 +636,6 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     }
   }
 
-  // Pages
-  if (compound.navigator === 'pages') {
-    if (!compound.details) {
-      return { navigator: 'pages', details: null }
-    }
-    return {
-      navigator: 'pages',
-      details: { type: 'page', pageSlug: compound.details.id },
-    }
-  }
-
   // Sessions
   const filter = compound.sessionFilter || { kind: 'allSessions' as const }
   if (compound.details) {
@@ -674,10 +667,12 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
       return { navigator: 'settings', subpage: 'app' }
     case 'workspace':
       return { navigator: 'settings', subpage: 'workspace' }
+    case 'advanced':
+      return { navigator: 'settings', subpage: 'advanced' }
     case 'permissions':
-      return { navigator: 'settings', subpage: 'permissions' }
+      return { navigator: 'settings', subpage: 'app' }
     case 'labels':
-      return { navigator: 'settings', subpage: 'labels' }
+      return { navigator: 'settings', subpage: 'app' }
     case 'shortcuts':
       return { navigator: 'settings', subpage: 'shortcuts' }
     case 'preferences':
@@ -731,16 +726,6 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'projects', details: null }
-    case 'pages':
-      return { navigator: 'pages', details: null }
-    case 'page-info':
-      if (parsed.id) {
-        return {
-          navigator: 'pages',
-          details: { type: 'page', pageSlug: parsed.id },
-        }
-      }
-      return { navigator: 'pages', details: null }
     case 'session':
       if (parsed.id) {
         // Reconstruct filter from params
@@ -853,13 +838,6 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
     return {
       navigator: 'projects',
       details: state.details ? { type: 'project', id: state.details.projectSlug } : null,
-    }
-  }
-
-  if (state.navigator === 'pages') {
-    return {
-      navigator: 'pages',
-      details: state.details ? { type: 'page', id: state.details.pageSlug } : null,
     }
   }
 

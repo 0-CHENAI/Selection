@@ -87,11 +87,9 @@ describe('background task completion surfacing (idle keep-alive)', () => {
     expect(calls[0]!.msg).toContain('background-task-completed')
     expect(calls[0]!.msg).toContain("Look up today's AI news")
     expect(calls[0]!.msg).toContain('/tmp/tasks/task_1.output')
-    expect(calls[0]!.msg).toContain('Present it to the user now')
-    // An agent's output file is its whole transcript: never tell the agent to read it.
-    expect(calls[0]!.msg).not.toContain('Read that output file')
-    // Loop guard: the nudge must tell the agent not to re-spawn a background agent.
-    expect(calls[0]!.msg).toContain('Do NOT spawn another background agent')
+    expect(calls[0]!.msg).toContain('present the findings')
+    // Loop guard: the nudge must tell the agent not to re-spawn a background session.
+    expect(calls[0]!.msg).toContain('Do NOT spawn another background session')
     // Must be hidden so it never renders as a user-authored transcript bubble.
     expect(calls[0]!.hidden).toBe(true)
   })
@@ -105,6 +103,32 @@ describe('background task completion surfacing (idle keep-alive)', () => {
     await fireTaskCompleted(sessionId, { type: 'task_completed', taskId: 'task_2', status: 'completed' })
 
     expect(calls).toEqual([])
+  })
+
+  it('surfaces spawn_session children even when keep-alive is OFF', async () => {
+    const sessionId = 'spawn-keepalive-off'
+    buildSession(sessionId, { keepAlive: false, processing: false })
+    const managed = (sm as unknown as { sessions: Map<string, { backgroundTaskRegistry: Map<string, unknown> }> }).sessions.get(sessionId)!
+    managed.backgroundTaskRegistry.set('child-1', {
+      taskId: 'child-1',
+      startTime: Date.now(),
+      status: 'running',
+      source: 'spawn_session',
+      intent: 'Explore auth',
+    })
+    const calls = spyOnSendMessage()
+
+    await fireTaskCompleted(sessionId, {
+      type: 'task_completed',
+      taskId: 'child-1',
+      status: 'completed',
+      summary: 'Found login.ts',
+    })
+
+    expect(calls.length).toBe(1)
+    expect(calls[0]!.msg).toContain('Session ID: child-1')
+    expect(calls[0]!.msg).toContain('Found login.ts')
+    expect(calls[0]!.hidden).toBe(true)
   })
 
   it('does NOT surface when keep-alive is OFF', async () => {
@@ -143,57 +167,4 @@ describe('background task completion surfacing (idle keep-alive)', () => {
     expect(calls[0]!.msg).toContain('did not complete successfully')
     expect(calls[0]!.hidden).toBe(true)
   })
-
-  it('never wakes the session for a task it did not see launched (e.g. a subagent\'s own background command)', async () => {
-    const sessionId = 'unseen'
-    const managed = buildSession(sessionId, { keepAlive: true, processing: false })
-    const calls = spyOnSendMessage()
-
-    await fireTaskCompleted(sessionId, { type: 'task_completed', taskId: 'b_subagent', status: 'completed', outputFile: '/tmp/tasks/b_subagent.output' })
-
-    expect(calls).toEqual([])
-    const entry = managed.backgroundTaskRegistry.get('b_subagent') as { untracked?: boolean; status: string }
-    expect(entry).toMatchObject({ status: 'completed', untracked: true })
-  })
-
-  it('tracks a background command from its launch and reports it as a command, not an agent', async () => {
-    const sessionId = 'shell'
-    const managed = buildSession(sessionId, { keepAlive: true, processing: false })
-    const calls = spyOnSendMessage()
-    const process = (event: unknown) => (sm as unknown as { processEvent: (m: unknown, e: unknown) => Promise<void> }).processEvent(managed, event)
-
-    await process({ type: 'shell_backgrounded', toolUseId: 'toolu_1', shellId: 'b_build', intent: 'Run the test suites', command: 'bun test' })
-    const started = managed.backgroundTaskRegistry.get('b_build') as { status: string; kind?: string; startTime: number; intent?: string }
-    expect(started).toMatchObject({ status: 'running', kind: 'shell', intent: 'Run the test suites' })
-
-    await fireTaskCompleted(sessionId, { type: 'task_completed', taskId: 'b_build', status: 'completed', outputFile: '/tmp/tasks/b_build.output' })
-    expect(calls.length).toBe(1)
-    expect(calls[0]!.msg).toContain('The background command you started ("Run the test suites") has finished.')
-    expect(calls[0]!.msg).toContain('/tmp/tasks/b_build.output')
-    expect(calls[0]!.msg).not.toContain('background agent')
-  })
-
-  it('reports untracked completions without an invented start time', async () => {
-    const sessionId = 'list'
-    const managed = buildSession(sessionId, { keepAlive: true, processing: true })
-    await fireTaskCompleted(sessionId, { type: 'task_completed', taskId: 'b_unseen', status: 'completed' })
-    const listed = (sm as unknown as { listBackgroundTasks: (id: string) => Array<{ taskId: string; untracked?: boolean }> }).listBackgroundTasks(managed.id)
-    expect(listed.find(t => t.taskId === 'b_unseen')?.untracked).toBe(true)
-  })
-
-  it('wakes the session for its own task even when the launch was not seen', async () => {
-    const sessionId = 'own-unseen'
-    const managed = buildSession(sessionId, { keepAlive: true, processing: false })
-    const calls = spyOnSendMessage()
-
-    await (sm as unknown as { processEvent: (m: unknown, e: unknown) => Promise<void> }).processEvent(managed, {
-      type: 'task_completed', taskId: 'b_own', toolUseId: 'toolu_own', launchedHere: true, status: 'completed', outputFile: '/tmp/tasks/b_own.output',
-    })
-
-    expect(calls.length).toBe(1)
-    const entry = managed.backgroundTaskRegistry.get('b_own') as { untracked?: boolean; startUnknown?: boolean }
-    expect(entry).toMatchObject({ startUnknown: true })
-    expect(entry.untracked).toBeUndefined()
-  })
 })
-

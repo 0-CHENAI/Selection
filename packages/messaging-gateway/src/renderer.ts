@@ -3,13 +3,11 @@
  *
  * Three modes selected per binding via `BindingConfig.responseMode`:
  *
- *   - `streaming` (legacy): on Telegram, posts on first `text_delta` and
+ *   - `streaming` (legacy): posts on first `text_delta` and
  *     edits every ~editIntervalMs as tokens arrive; each `text_complete`
  *     finalises the current message, so one agent run with multiple turns
- *     produces multiple messages. Failed retry attempts are discarded by
- *     turn ID and an already-posted partial is reused for retry status and
- *     recovered output. On platforms without editing, accumulates per turn
- *     and sends on each `text_complete`.
+ *     produces multiple messages. On platforms without editing, accumulates
+ *     per turn and sends on each `text_complete`.
  *
  *   - `progress` (default): one evolving message per run. Posts
  *     "💭 thinking…" on first activity, edits to "🔧 <tool>…" on each
@@ -37,10 +35,8 @@ import type {
 } from './types'
 
 /**
- * Build the per-call options bag from a binding. Currently only `threadId`
- * (Telegram supergroup forum topic) flows through. WhatsApp and DMs leave
- * `threadId` undefined, which the adapters' `threadParams()` helper turns
- * into a no-op spread.
+ * Build the per-call options bag from a binding. A missing `threadId` is
+ * omitted from the adapter call.
  */
 function bindingOpts(binding: ChannelBinding): SendOptions {
   return binding.threadId !== undefined ? { threadId: binding.threadId } : {}
@@ -67,14 +63,10 @@ interface RenderState {
   // --- streaming mode ---------------------------------------------------
   /** Accumulated text for the current response (streaming mode). */
   textBuffer: string
-  /** Turn identity for the streaming buffer, used to scope retry discards. */
-  streamingTurnId: string | null
   /** Whether the agent is currently processing. */
   processing: boolean
-  /** Streaming: the message ID being edited (Telegram only). */
+  /** Streaming: the message ID being edited. */
   streamingMessageId: string | null
-  /** Whether the streaming bubble currently shows a transient retry status. */
-  streamingRetryPlaceholder: boolean
   /** Streaming: timer for next edit. */
   editTimer: ReturnType<typeof setTimeout> | null
   /** Streaming: length of text at last edit (to detect new content). */
@@ -103,12 +95,11 @@ const DEFAULT_EDIT_INTERVAL_MS = 3500
 const BACKOFF_RESET_MS = 30_000
 
 const THINKING_LABEL = '💭 thinking…'
-const DISCARDED_RESPONSE_LABEL = '⚠️ Incomplete response discarded.'
 
 /**
  * Max characters rendered inline with the buttons before we spill the full
- * plan into an attached file. Telegram's hard cap is 4096 — leaving margin
- * for the header, buttons, and formatting.
+ * plan into an attached file. Keep margin for the header, buttons, and
+ * formatting.
  */
 const PLAN_INLINE_LIMIT = 3500
 
@@ -116,7 +107,7 @@ const PLAN_INLINE_LIMIT = 3500
  * Hook the renderer calls when it wants to remember a plan message id.
  * Passes the full `ChannelBinding` so callers can attribute the message
  * to the exact chat that rendered it — not just the session, which may
- * have multiple Telegram bindings.
+ * have multiple channel bindings.
  */
 export type PlanMessageRecorder = (
   binding: ChannelBinding,
@@ -159,10 +150,8 @@ export class Renderer {
     if (!state) {
       state = {
         textBuffer: '',
-        streamingTurnId: null,
         processing: false,
         streamingMessageId: null,
-        streamingRetryPlaceholder: false,
         editTimer: null,
         lastEditedLength: 0,
         currentEditIntervalMs: DEFAULT_EDIT_INTERVAL_MS,
@@ -213,7 +202,7 @@ export class Renderer {
   }
 
   // ---------------------------------------------------------------------------
-  // Mode: streaming (legacy behaviour with retry-aware stream boundaries)
+  // Mode: streaming (legacy behaviour — unchanged)
   // ---------------------------------------------------------------------------
 
   private async handleStreaming(
@@ -227,98 +216,11 @@ export class Renderer {
       case 'text_delta': {
         const delta = typeof event.delta === 'string' ? event.delta : ''
         if (!delta) break
-
-        const turnId = typeof event.turnId === 'string' ? event.turnId : null
-        if (turnId) state.streamingTurnId = turnId
-
         state.textBuffer += delta
         state.processing = true
-        state.streamingRetryPlaceholder = false
 
         if (adapter.capabilities.messageEditing) {
           await this.handleStreamingDelta(state, binding, adapter)
-        }
-        break
-      }
-
-      case 'text_discard': {
-        const turnId = typeof event.turnId === 'string' ? event.turnId : null
-        if (!turnId || turnId !== state.streamingTurnId) break
-
-        this.cancelEditTimer(state)
-        state.textBuffer = ''
-        state.streamingTurnId = null
-        state.lastEditedLength = 0
-        state.streamingRetryPlaceholder = false
-
-        // External messages cannot be deleted reliably. Keep the posted ID so
-        // retry status and recovered output can overwrite this same bubble.
-        if (state.streamingMessageId && adapter.capabilities.messageEditing) {
-          await this.tryEditMessage(
-            adapter,
-            binding,
-            state.streamingMessageId,
-            DISCARDED_RESPONSE_LABEL,
-            state,
-          )
-        }
-        break
-      }
-
-      case 'retry': {
-        const phase = event.phase
-        if (phase === 'backoff') {
-          state.processing = true
-          const message = typeof event.message === 'string' ? event.message : ''
-          if (message && state.streamingMessageId && adapter.capabilities.messageEditing) {
-            await this.tryEditMessage(
-              adapter,
-              binding,
-              state.streamingMessageId,
-              message,
-              state,
-            )
-            state.streamingRetryPlaceholder = true
-          }
-          break
-        }
-
-        if (phase === 'active') {
-          state.processing = true
-          if (state.streamingMessageId && adapter.capabilities.messageEditing) {
-            await this.tryEditMessage(
-              adapter,
-              binding,
-              state.streamingMessageId,
-              THINKING_LABEL,
-              state,
-            )
-            state.streamingRetryPlaceholder = true
-          }
-          break
-        }
-
-        if (phase === 'end') {
-          this.cancelEditTimer(state)
-          if (
-            state.streamingRetryPlaceholder &&
-            state.streamingMessageId &&
-            adapter.capabilities.messageEditing
-          ) {
-            await this.tryEditMessage(
-              adapter,
-              binding,
-              state.streamingMessageId,
-              DISCARDED_RESPONSE_LABEL,
-              state,
-            )
-          }
-          state.textBuffer = ''
-          state.streamingTurnId = null
-          state.streamingMessageId = null
-          state.streamingRetryPlaceholder = false
-          state.lastEditedLength = 0
-          state.processing = false
         }
         break
       }
@@ -336,9 +238,7 @@ export class Renderer {
         }
 
         state.textBuffer = ''
-        state.streamingTurnId = null
         state.streamingMessageId = null
-        state.streamingRetryPlaceholder = false
         state.lastEditedLength = 0
         break
       }
@@ -367,9 +267,7 @@ export class Renderer {
               state,
             )
             state.streamingMessageId = null
-            state.streamingRetryPlaceholder = false
             state.textBuffer = ''
-            state.streamingTurnId = null
             state.lastEditedLength = 0
           }
           await adapter.sendText(binding.channelId, `🔧 ${displayName}...`, bindingOpts(binding))
@@ -397,12 +295,7 @@ export class Renderer {
       }
       return
     }
-
-    // This also restarts editing after a discarded partial retained its
-    // message ID but canceled the failed attempt's timer.
-    if (state.streamingMessageId && state.textBuffer.length > state.lastEditedLength) {
-      this.scheduleEdit(state, binding, adapter)
-    }
+    // Subsequent chunks: edit timer handles batched updates
   }
 
   private scheduleEdit(
@@ -484,6 +377,11 @@ export class Renderer {
       }
 
       case 'complete': {
+        if (event.orchestrationPending === true) {
+          state.finalBuffer = ''
+          state.lastAssistantText = ''
+          return
+        }
         // Prefer the clean non-intermediate final; fall back to the last
         // assistant text so a tool-terminated run still delivers a message
         // instead of freezing the bubble on "thinking…".
@@ -500,9 +398,9 @@ export class Renderer {
           }
           // If the run produced no assistant text at all, leave the last
           // status in place rather than editing to an empty string — avoids
-          // Telegram "message is not modified" errors and keeps a trace.
+          // "Message is not modified" errors and keeps a trace.
         } else if (finalText) {
-          // Adapter can't edit (WhatsApp) — send one message at the end.
+          // Adapter can't edit — send one message at the end.
           await this.sendText(adapter, binding, finalText)
         }
         this.resetRun(state)
@@ -514,7 +412,7 @@ export class Renderer {
   /**
    * Post the progress bubble if needed, and edit it to `status` if the
    * status has changed since the last write. Collapses redundant edits so
-   * we stay under Telegram's per-chat edit budget.
+   * we stay under the platform's per-chat edit budget.
    */
   private async ensureProgressBubble(
     state: RenderState,
@@ -567,6 +465,11 @@ export class Renderer {
       }
 
       case 'complete': {
+        if (event.orchestrationPending === true) {
+          state.finalBuffer = ''
+          state.lastAssistantText = ''
+          return
+        }
         // Prefer the clean non-intermediate final; fall back to the last
         // assistant text so final_only still delivers something rather than
         // staying silent when the run ends on a tool call.
@@ -610,16 +513,6 @@ export class Renderer {
       state.lastEditedLength = 0
     }
 
-    if (binding.platform === 'whatsapp') {
-      await adapter.sendText(
-        binding.channelId,
-        `⏸ Permission required: ${request.description}
-Approve it in the desktop app to continue.`,
-        bindingOpts(binding),
-      )
-      return
-    }
-
     if (binding.config.approvalChannel === 'chat' && adapter.capabilities.inlineButtons) {
       const text = formatPermissionText(request)
       const buttons: InlineButton[] = [
@@ -642,7 +535,6 @@ Approve in the desktop app to continue.`,
     binding: ChannelBinding,
     adapter: PlatformAdapter,
   ): Promise<void> {
-    if (binding.platform !== 'whatsapp') return
     await adapter.sendText(
       binding.channelId,
       '🔐 Credentials are required to continue. Open the desktop app to review and submit them securely.',
@@ -655,21 +547,6 @@ Approve in the desktop app to continue.`,
     binding: ChannelBinding,
     adapter: PlatformAdapter,
   ): Promise<void> {
-    // WhatsApp: no interactive buttons yet — keep the generic pointer.
-    if (binding.platform === 'whatsapp') {
-      await adapter.sendText(
-        binding.channelId,
-        '📝 A plan is ready for review. Open the desktop app to inspect and approve it.',
-        bindingOpts(binding),
-      )
-      return
-    }
-
-    // Telegram + Lark both support inline buttons through the same
-    // `sendButtons` contract; either gets the rich plan card. Anything else
-    // is treated like WhatsApp above and gated out earlier.
-    if (binding.platform !== 'telegram' && binding.platform !== 'lark') return
-
     // Token registry is optional for backwards compatibility; without it we
     // degrade to the generic pointer so the bot still sees *something*.
     if (!this.planTokens) {
@@ -753,7 +630,7 @@ Approve in the desktop app to continue.`,
     const truncated = truncateForAdapter(text, adapter)
 
     try {
-      // editMessage on Telegram is keyed by (chat_id, message_id) and ignores
+      // editMessage is keyed by channel and message identifiers and ignores
       // message_thread_id, but we pass it for caller uniformity.
       await adapter.editMessage(binding.channelId, messageId, truncated, bindingOpts(binding))
       state.currentEditIntervalMs = DEFAULT_EDIT_INTERVAL_MS
@@ -782,9 +659,7 @@ Approve in the desktop app to continue.`,
   private resetRun(state: RenderState): void {
     this.cancelEditTimer(state)
     state.textBuffer = ''
-    state.streamingTurnId = null
     state.streamingMessageId = null
-    state.streamingRetryPlaceholder = false
     state.lastEditedLength = 0
     state.processing = false
     state.finalBuffer = ''

@@ -19,16 +19,15 @@
 import type { EntityColor } from '../colors/types.ts'
 
 /**
- * Regex auto-label rule: scans user messages and automatically applies the
- * label — with the extracted value on a valued label (`valueType` set), as the
- * bare id on a plain one.
+ * Auto-label rule: regex pattern that scans user messages and automatically
+ * applies labels with extracted values.
  *
  * Uses capture groups ($1, $2, etc.) in the pattern and substitutes them
  * into the valueTemplate. Rules are evaluated in order. Multiple rules on
  * the same label means multiple ways to trigger it (e.g., URL regex + bare
  * key regex for issue IDs).
  */
-export interface RegexAutoLabelRule {
+export interface AutoLabelRule {
   /** Regex pattern with capture groups for value extraction */
   pattern: string
   /** Regex flags (default: 'gi' for global, case-insensitive). 'g' is always enforced. */
@@ -38,42 +37,6 @@ export interface RegexAutoLabelRule {
   /** Human-readable description of what this rule matches */
   description?: string
 }
-
-/**
- * Semantic auto-label rule: a yes/no question the decision model (Jev) answers
- * about the user message; the label is applied when the "yes" probability
- * reaches `threshold`. Only evaluated when the user enabled the decision model
- * (Settings > AI) — otherwise the rule is inert. Because label changes can fire
- * automations, the default threshold is deliberately high.
- */
-export interface SemanticAutoLabelRule {
-  /** The yes/no question, e.g. "Is the user asking about billing or invoices?" (English works best) */
-  semantic: string
-  /** Probability of "yes" required to apply the label; 0 < threshold <= 1 (default 0.9) */
-  threshold?: number
-  /** Fixed value for valued labels (e.g. "billing"); omitted → the plain label id is applied */
-  value?: string
-  /** Human-readable description of what this rule catches */
-  description?: string
-}
-
-export type AutoLabelRule = RegexAutoLabelRule | SemanticAutoLabelRule
-
-/**
- * Mutually exclusive guards. Config validation rejects rules carrying both
- * fields; if one slips through anyway, the regex half wins everywhere (it did
- * before semantic rules existed), so a hybrid rule never fires twice.
- */
-export function isRegexAutoLabelRule(rule: AutoLabelRule): rule is RegexAutoLabelRule {
-  return typeof (rule as RegexAutoLabelRule).pattern === 'string'
-}
-
-export function isSemanticAutoLabelRule(rule: AutoLabelRule): rule is SemanticAutoLabelRule {
-  return !isRegexAutoLabelRule(rule) && typeof (rule as SemanticAutoLabelRule).semantic === 'string'
-}
-
-/** Default "yes" probability for semantic rules — high because LabelAdd automations may fire. */
-export const DEFAULT_SEMANTIC_RULE_THRESHOLD = 0.9
 
 /**
  * Label configuration (stored in labels/config.json).
@@ -94,17 +57,17 @@ export interface LabelConfig {
   children?: LabelConfig[];
 
   /**
-   * Whether (and how) this label carries a value. Set: entries are `id::value`
-   * (e.g. "priority::3"), the UI shows the matching input widget and agents
-   * write that format (the parser still infers the type from the raw value).
-   * Omitted: a presence-only label — never stored with a value (see
-   * canonicalizeSessionLabels).
+   * Optional value type hint for UI rendering and agent affordances.
+   * When set, indicates this label carries a typed value (e.g., "priority::3").
+   * Parser always infers the type from raw value, but this hint tells UI
+   * what input widget to show and tells the agent what format to write.
+   * Omit for boolean (presence-only) labels.
    */
   valueType?: 'string' | 'number' | 'date' | 'link';
 
   /**
-   * Auto-label rules: regex patterns or semantic questions that scan user messages
-   * and automatically apply this label (with extracted values when it is valued).
+   * Auto-label rules: regex patterns that scan user messages and automatically
+   * apply this label with extracted values.
    * Multiple rules = multiple ways to trigger (evaluated in order, all matches collected).
    */
   autoRules?: AutoLabelRule[];

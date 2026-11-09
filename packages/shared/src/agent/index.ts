@@ -1,16 +1,12 @@
-// Export ClaudeAgent (renamed from CraftAgent) and backward-compatible aliases
-export * from './claude-agent.ts';
 export * from './conversation-summary.ts';
+export type { AgentEvent } from '@craft-agent/core/types';
 
 // Export PiAgent for direct use
 export { PiAgent, PiBackend } from './pi-agent.ts';
 export * from './errors.ts';
-export * from './options.ts';
 
 // Export session-scoped-tools - tools scoped to a specific session
 export {
-  // Session-scoped tools provider
-  getSessionScopedTools,
   cleanupSessionScopedTools,
   // Plan file management
   getSessionPlansDir,
@@ -44,20 +40,11 @@ export {
   cyclePermissionMode,
   subscribeModeChanges,
   PERMISSION_MODE_ORDER,
-  DEFAULT_PERMISSION_MODES,
   PERMISSION_MODE_CONFIG,
-  availablePermissionModes,
-  planExecutionMode,
-  parsePermissionMode,
-  isAutonomousPermissionMode,
-  isPermissionMode,
-  clampPermissionMode,
   type PermissionMode,
   getModeState,
   hydratePreviousPermissionMode,
   getPermissionModeDiagnostics,
-  resolveEffectivePermissionMode,
-  setGuardedModeActiveResolver,
   initializeModeState,
   cleanupModeState,
   // Tool blocking (centralized)
@@ -110,7 +97,7 @@ export {
   loadRawSourcePermissions,
   saveWorkspacePermissions,
   saveSourcePermissions,
-  // App-level default permissions (at ~/.craft-agent/permissions/)
+  // App-level default permissions (at ~/.selection/permissions/)
   getAppPermissionsDir,
   ensureDefaultPermissions,
   loadDefaultPermissions,
@@ -130,6 +117,16 @@ export {
   BaseAgent,
   // Mini agent configuration (centralized for all backends)
   type MiniAgentConfig,
+  type SpawnSessionMode,
+  type SpawnSessionResultStatus,
+  type SpawnSessionLifecycle,
+  type SpawnSessionRole,
+  type SpawnSessionReason,
+  type SpawnSessionQualificationTrack,
+  type SpawnSessionQualification,
+  type SpawnSessionRequest,
+  type SpawnSessionResult,
+  type SpawnSessionHelpResult,
   MINI_AGENT_TOOLS,
   MINI_AGENT_MCP_KEYS,
 } from './base-agent.ts';
@@ -170,15 +167,38 @@ export {
   isBrowserToolNameOrAlias,
 } from './browser-tool-names.ts';
 
-// Keep passwords typed with browser_tool fill out of stored tool inputs
 export {
+  keepPasswordEntryLines,
   passwordFillRefs,
-  redactBrowserToolInput,
   redactBrowserPasswordFills,
+  redactBrowserToolInput,
 } from './browser-tool-redaction.ts';
 
 // Export PowerShell validator root setter (for Electron startup on Windows)
 export { setPowerShellValidatorRoot } from './powershell-validator.ts';
+
+// User message sanitization (system-reminder / activation suffix stripping)
+export {
+  INTERRUPTION_SYSTEM_REMINDER,
+  stripSystemReminderBlocks,
+  stripSourceActivationSuffix,
+  sanitizeUserMessageForDisplay,
+  sanitizeUserMessageForRetry,
+} from './user-message-sanitize.ts';
+
+export {
+  DEFAULT_SPAWN_SESSION_MODE,
+  DEFAULT_SPAWN_WAIT_TIMEOUT_MS,
+  MAX_SPAWN_WAIT_TIMEOUT_MS,
+  resolveSpawnSessionMode,
+  resolveSpawnWaitTimeoutMs,
+  synthesizeFanOutQualification,
+  extractParallelTrackNames,
+  readCurrentTurnSpawnContext,
+  synthesizeAutomaticQualification,
+  createSpawnSessionTool,
+  wrapSpawnSessionToolError,
+} from './spawn-session-tool.ts';
 
 // WS2 keep-alive: shared flag resolver + pushable streaming-input utility.
 export {
@@ -186,8 +206,3 @@ export {
   createPushableInputStream,
   type PushableInputStream,
 } from './backend/claude/persistent-input.ts';
-
-// Guarded-mode risk check seam (the host implements the check; see core/guarded-mode.ts)
-export type { GuardedModeCheck, GuardedModeCall, GuardedModeRisk, GuardedModeVerdict } from './core/guarded-mode.ts';
-// Subagent model choice seam (Settings default + optional host picker; see core/subagent-model.ts)
-export type { SubagentModelPicker, SubagentTask } from './core/subagent-model.ts';

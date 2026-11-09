@@ -1,8 +1,7 @@
 /**
  * Session Self-Management Bindings
  *
- * Attaches the session-scoped tool properties (session management, tasks,
- * messaging, pages, MCP resources/prompts, decide) to a SessionToolContext using
+ * Attaches 6 session management properties to a SessionToolContext using
  * Object.defineProperty with non-memoized lazy getters. Each access resolves
  * the callback from the session-scoped tool callback registry at call time,
  * so late merges and callback replacements are immediately visible without
@@ -25,9 +24,8 @@ import { getSessionScopedToolCallbacks } from './session-scoped-tool-callback-re
 /**
  * Attach session self-management bindings to a SessionToolContext.
  *
- * Defines lazy getters for the session-management callbacks (labels, status,
- * archive, list/info, resolve helpers), messaging, createTask, project memory
- * appends, pages, MCP source resources/prompts, and decide.
+ * Defines lazy getters for: setSessionLabels, setSessionStatus,
+ * getSessionInfo, listSessions, resolveLabels, resolveStatus.
  *
  * @param context - The SessionToolContext to augment (mutated in place)
  * @param sessionId - The session ID for registry lookup and getSessionInfo defaulting
@@ -36,6 +34,41 @@ export function attachSessionSelfManagementBindings(
   context: SessionToolContext,
   sessionId: string,
 ): void {
+  Object.defineProperty(context, 'artifactVersions', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.artifactVersionsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'officeTools', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeToolsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'pptTools', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.pptToolsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'officeBusiness', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeBusinessFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'officeRender', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeRenderFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
   // Direct pass-through bindings — signatures match, no wrapping needed.
   // Each getter resolves fresh from the registry on every access.
 
@@ -62,6 +95,8 @@ export function attachSessionSelfManagementBindings(
     configurable: true,
     enumerable: true,
   });
+
+  Object.defineProperty(context, 'projectHistory', { get() { return getSessionScopedToolCallbacks(sessionId)?.projectHistoryFn; }, configurable: true, enumerable: true });
 
   Object.defineProperty(context, 'listSessions', {
     get() {
@@ -143,41 +178,84 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
-  Object.defineProperty(context, 'appendProjectMemory', {
+  Object.defineProperty(context, 'runTask', {
     get() {
-      return getSessionScopedToolCallbacks(sessionId)?.appendProjectMemoryFn;
+      return getSessionScopedToolCallbacks(sessionId)?.runTaskFn;
     },
     configurable: true,
     enumerable: true,
   });
 
-  Object.defineProperty(context, 'pages', {
+  Object.defineProperty(context, 'getTaskResults', {
     get() {
-      return getSessionScopedToolCallbacks(sessionId)?.pages;
+      return getSessionScopedToolCallbacks(sessionId)?.getTaskResultsFn;
     },
     configurable: true,
     enumerable: true,
   });
 
-  Object.defineProperty(context, 'mcpSources', {
+  Object.defineProperty(context, 'updateTaskList', {
+    get() { return getSessionScopedToolCallbacks(sessionId)?.updateTaskListFn; },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'submitTaskOutput', {
     get() {
-      return getSessionScopedToolCallbacks(sessionId)?.mcpSources;
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskOutputFn;
     },
     configurable: true,
     enumerable: true,
   });
 
-  Object.defineProperty(context, 'decide', {
+  Object.defineProperty(context, 'submitTaskVerdict', {
     get() {
-      return getSessionScopedToolCallbacks(sessionId)?.decide;
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskVerdictFn;
     },
     configurable: true,
     enumerable: true,
   });
 
-  Object.defineProperty(context, 'prWatch', {
+  Object.defineProperty(context, 'submitOrchestrationPatch', {
     get() {
-      return getSessionScopedToolCallbacks(sessionId)?.prWatch;
+      return getSessionScopedToolCallbacks(sessionId)?.submitOrchestrationPatchFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitOrchestrationDecision', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitOrchestrationDecisionFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitTaskNodeVerdict', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskNodeVerdictFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'taskHelp', {
+    get() { return getSessionScopedToolCallbacks(sessionId)?.taskHelpFn; },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitTaskDefinition', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskDefinitionFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'controlTaskRun', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.controlTaskRunFn;
     },
     configurable: true,
     enumerable: true,

@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -105,14 +105,13 @@ export function SearchableModelInput({
       <Popover open={isOpen} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
-            variant="secondary"
-            size="icon-sm"
-            className="absolute right-1 top-1/2 -translate-y-1/2"
+            variant="outline"
+            size="sm"
+            className="absolute right-1 top-1 h-7"
             onClick={handleFetchClick}
             disabled={fetchDisabled || isLoading}
-            aria-label={t("apiSetup.searchModels")}
           >
-            {isLoading ? <Spinner className="text-label-sm" /> : <ChevronDown aria-hidden />}
+            {isLoading ? <Spinner className="size-3" /> : '▼'}
           </Button>
         </PopoverTrigger>
         {models.length > 0 && (
@@ -120,26 +119,30 @@ export function SearchableModelInput({
             align="end"
             sideOffset={4}
             collisionPadding={8}
-            className="p-1 w-[var(--radix-popover-trigger-width)]"
+            className="p-1.5 w-[var(--radix-popover-trigger-width)]"
             style={{ minWidth: 280 }}
           >
             {/* Search input */}
-            <div className="relative mb-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-tertiary" aria-hidden />
+            <div className="relative mb-1.5">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t("apiSetup.searchModels")}
-                aria-label={t("apiSetup.searchModels")}
-                className="field-surface h-control-lg w-full rounded-md pl-8 pr-3 text-label"
+                className={cn(
+                  'w-full h-8 pl-8 pr-3 text-sm rounded-md',
+                  'bg-foreground/5 border-0',
+                  'placeholder:text-muted-foreground/50',
+                  'focus:outline-none focus:ring-1 focus:ring-foreground/20'
+                )}
               />
             </div>
             {/* Model list */}
-            <div className="max-h-64 overflow-auto space-y-px">
+            <div className="max-h-64 overflow-auto space-y-0.5">
               {filteredModels.length === 0 ? (
-                <div className="px-2.5 py-3 text-center text-label text-tertiary">
+                <div className="px-2.5 py-3 text-sm text-muted-foreground text-center">
                   No models found
                 </div>
               ) : (
@@ -148,9 +151,9 @@ export function SearchableModelInput({
                     key={model.id}
                     type="button"
                     className={cn(
-                      'flex min-h-row-menu w-full items-center rounded-md px-2 py-1.5 text-left text-label -outline-offset-2',
-                      'transition-colors duration-micro ease-out-subtle hover:bg-fill-hover hover:duration-instant',
-                      value === model.id && 'bg-fill-selected'
+                      'w-full px-2.5 py-2 text-left text-sm rounded-lg',
+                      'hover:bg-foreground/5 transition-colors',
+                      value === model.id && 'bg-foreground/3'
                     )}
                     onClick={() => handleSelect(model.id)}
                   >

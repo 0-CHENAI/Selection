@@ -4,19 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' http://localhost:8097; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: file: thumbnail:; connect-src 'self' https: http://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* wss:; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; object-src 'self' file:;">
-  <title>Craft Agents</title>
-  <script>
-    // Apply the saved light/dark mode before first paint: the canvas is opaque, so waiting for
-    // ThemeContext would flash the light canvas in dark mode. ThemeContext takes over after mount.
-    try {
-      var mode = (JSON.parse(localStorage.getItem('craft-theme') || 'null') || {}).mode
-      var dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-      if (dark) document.documentElement.classList.replace('light', 'dark')
-    } catch (e) {}
-  </script>
+  <title>Selection</title>
+  <!-- Critical viewport layout must apply before main.tsx and its CSS load. -->
+  <style>
+    html, body, #root { height:100%; margin:0; overflow:hidden; }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Alumni+Sans+Pinstripe&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
   <script>
@@ -31,7 +26,7 @@
     <!-- Initial loading state: visible until React mounts and replaces #root contents.
          Prevents blank screen on cold start / post-update launch when code cache is stale. -->
     <style>
-      #_loader { display:flex; align-items:center; justify-content:center; height:100vh; opacity:0; animation:_fade 0.4s 0.3s forwards; }
+      #_loader { display:flex; align-items:center; justify-content:center; height:100%; opacity:0; animation:_fade 0.4s 0.3s forwards; }
       #_loader svg { width:24px; height:24px; animation:_spin 1s linear infinite; }
       @keyframes _fade { to { opacity:1 } }
       @keyframes _spin { to { transform:rotate(360deg) } }

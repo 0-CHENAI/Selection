@@ -3,7 +3,7 @@
  */
 
 export { Spinner, type SpinnerProps, LoadingIndicator, type LoadingIndicatorProps } from './LoadingIndicator'
-export { AnimatedCollapsibleContent } from './AnimatedCollapsibleContent'
+export { default as LatticeLoader, type LatticeLoaderProps, type LatticeStatus } from './LatticeLoader'
 export {
   SimpleDropdown,
   SimpleDropdownItem,

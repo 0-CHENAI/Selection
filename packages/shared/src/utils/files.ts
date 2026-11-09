@@ -1,8 +1,28 @@
-import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempSync, renameSync } from 'fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempSync, renameSync, closeSync, openSync, fstatSync, readSync } from 'fs';
 import { extname, basename, resolve, join, relative, sep } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
-import { randomBytes } from 'crypto';
+import { resolveImageSendPolicy, resolveImageSendSize } from './image-send-size.ts';
+import { convertHeicToJpeg, heicCacheKey, isHeicImage, type HeicConvertFn } from './heic.ts';
+
+export interface FileFingerprint { hash: string; size: number }
+
+/** Hash a stable regular file without loading its complete contents into memory. */
+export function fileFingerprint(path: string): FileFingerprint | undefined {
+  let fd: number | undefined;
+  try {
+    if (!statSync(path).isFile()) throw new Error('File is not a regular file');
+    fd = openSync(path, 'r');
+    const before = fstatSync(fd), hash = createHash('sha256'), buffer = Buffer.allocUnsafe(1024 * 1024);
+    let size = 0, length: number;
+    while ((length = readSync(fd, buffer, 0, buffer.length, null)) > 0) { hash.update(buffer.subarray(0, length)); size += length; }
+    const after = fstatSync(fd);
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || size !== after.size) throw new Error('File changed during verification');
+    return { hash: hash.digest('hex'), size };
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
 
 /**
  * Strip UTF-8 BOM (Byte Order Mark) from a string.
@@ -35,13 +55,11 @@ export function readJsonFileSync<T = unknown>(filePath: string): T {
  * Uses write-to-temp-then-rename pattern which is atomic on POSIX systems.
  */
 export function atomicWriteFileSync(filePath: string, data: string): void {
-  // Unique temp name per write: a fixed `${filePath}.tmp` lets two concurrent
-  // writers to the same target (e.g. a page's refresh script and a host one-shot
-  // both regenerating snapshot.json) clobber each other's temp mid-rename,
-  // producing a torn/empty file or ENOENT. pid + random keeps them disjoint.
-  const tmpPath = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  const tmpPath = filePath + '.tmp';
   try {
-    writeFileSync(tmpPath, data);
+    // Always write UTF-8 so Chinese (and other non-ASCII) content survives
+    // on Windows code pages and when the path itself contains non-ASCII.
+    writeFileSync(tmpPath, data, 'utf-8');
     renameSync(tmpPath, filePath);
   } catch (error) {
     // Clean up temp file if rename failed
@@ -60,7 +78,14 @@ export interface FileAttachment {
   size: number;
   /** Path where file is stored in session attachments folder (set by Electron app) */
   storedPath?: string;
-  /** Path to converted markdown version (for office files) */
+  /** Full-resolution sibling, set only when storedPath was downscaled for the model. */
+  originalPath?: string;
+  originalWidth?: number;
+  originalHeight?: number;
+  /** Pixel size of the copy actually sent to the model, when it differs from the original. */
+  sentWidth?: number;
+  sentHeight?: number;
+  /** Legacy converted Markdown path. Modern Office files no longer generate or expose this sidecar. */
   markdownPath?: string;
 }
 
@@ -91,7 +116,7 @@ const TEXT_EXTENSIONS = new Set([
   '.csv', '.log', '.conf', '.ini', '.cfg',
 ]);
 
-// Office file extensions (will be converted to markdown via markitdown-js)
+// Office file extensions (stored as binary; agents use built-in OfficeCLI skills)
 const OFFICE_EXTENSIONS: Record<string, string> = {
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -120,8 +145,7 @@ const MAX_TEXT_SIZE = 100 * 1024; // 100KB for text files
 // Claude API image limits - images exceeding these will fail silently
 // See: https://docs.anthropic.com/en/docs/build-with-claude/vision
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB - Claude API hard limit
-const MAX_IMAGE_DIMENSION = 8000; // 8000x8000 max pixels
-const OPTIMAL_IMAGE_EDGE = 1568; // Recommended max edge for quality/cost balance (~1.15MP)
+const MAX_IMAGE_DIMENSION = 8000; // Historical per-side note; the send resolver shrinks past this.
 
 /**
  * Result of validating an image for Claude API compatibility
@@ -163,29 +187,15 @@ export function validateImageForClaudeAPI(
     };
   }
 
-  // Check dimensions if provided
-  if (width !== undefined && height !== undefined) {
-    // Hard limit on dimensions - can be fixed by resizing
-    if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-      return {
-        valid: false,
-        errorCode: 'dimension_exceeded',
-        error: `Image dimensions too large (${width}×${height}). Maximum is ${MAX_IMAGE_DIMENSION}×${MAX_IMAGE_DIMENSION} pixels.`,
-      };
-    }
-
-    // Check if resize is recommended for optimal performance
-    const maxEdge = Math.max(width, height);
-    if (maxEdge > OPTIMAL_IMAGE_EDGE) {
-      const scale = OPTIMAL_IMAGE_EDGE / maxEdge;
+  // Oversized geometry is shrunk by the shared pixel budget. It is not a hard failure.
+  if (width !== undefined && height !== undefined && width > 0 && height > 0) {
+    const target = resolveImageSendSize(width, height, resolveImageSendPolicy());
+    if (target.width !== width || target.height !== height) {
       return {
         valid: true,
         needsResize: true,
-        warning: `Large image (${width}×${height}). Will be resized to optimize tokens and latency.`,
-        suggestedSize: {
-          width: Math.round(width * scale),
-          height: Math.round(height * scale),
-        },
+        warning: `Large image (${width}×${height}). Will be resized to ${target.width}×${target.height}.`,
+        suggestedSize: target,
       };
     }
   }
@@ -199,7 +209,6 @@ export const IMAGE_LIMITS = {
   /** Max raw file size before base64 encoding (base64 inflates by 4/3, so 5MB base64 ≈ 3.75MB raw) */
   MAX_RAW_SIZE: Math.floor(MAX_IMAGE_SIZE * 3 / 4),
   MAX_DIMENSION: MAX_IMAGE_DIMENSION,
-  OPTIMAL_EDGE: OPTIMAL_IMAGE_EDGE,
   /** JPEG quality for photo-like images */
   JPEG_QUALITY_HIGH: 90,
   /** JPEG quality for fallback compression when size still exceeds limits */
@@ -352,9 +361,179 @@ export function getMimeType(filePath: string): string {
   return 'application/octet-stream';
 }
 
+/** Persisted attachment fields needed to rebuild a model-input FileAttachment. */
+export interface StoredAttachmentSource {
+  type: FileAttachment['type']
+  name: string
+  mimeType: string
+  size: number
+  storedPath: string
+  markdownPath?: string
+  resizedBase64?: string
+  originalPath?: string
+  originalWidth?: number
+  originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
+}
+
 /**
- * Read a file and return attachment info
+ * Rebuild FileAttachments from persisted session metadata so regenerate/retry
+ * can still send image bytes after lastSentAttachments is gone (app restart).
  */
+export function fileAttachmentsFromStored(
+  stored: StoredAttachmentSource[] | undefined,
+): FileAttachment[] | undefined {
+  if (!stored?.length) return undefined
+  return stored.map((attachment) => ({
+    type: attachment.type,
+    path: attachment.storedPath,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    base64: attachment.resizedBase64,
+    storedPath: attachment.storedPath,
+    markdownPath: attachment.markdownPath,
+    ...(attachment.originalPath ? {
+      originalPath: attachment.originalPath,
+      originalWidth: attachment.originalWidth,
+      originalHeight: attachment.originalHeight,
+    } : {}),
+    ...(attachment.sentWidth && attachment.sentHeight ? {
+      sentWidth: attachment.sentWidth,
+      sentHeight: attachment.sentHeight,
+    } : {}),
+  }))
+}
+
+/**
+ * Prefer the in-memory send payload when it still matches this prompt;
+ * otherwise rebuild from persisted attachment paths.
+ */
+export function resolveRegenerateAttachments(
+  lastSentMessage: string | undefined,
+  lastSentAttachments: FileAttachment[] | undefined,
+  content: string,
+  storedAttachments: StoredAttachmentSource[] | undefined,
+): FileAttachment[] | undefined {
+  if (lastSentMessage === content && lastSentAttachments?.length) {
+    return lastSentAttachments
+  }
+  return fileAttachmentsFromStored(storedAttachments)
+}
+
+/**
+ * Prefer live attachments, but restore `storedPath` from session metadata
+ * when regenerate/retry kept an in-memory object that only has the original path.
+ */
+export function withStoredImagePaths(
+  attachments: FileAttachment[] | undefined,
+  stored: StoredAttachmentSource[] | undefined,
+): FileAttachment[] | undefined {
+  if (!attachments?.length) return fileAttachmentsFromStored(stored)
+  if (!stored?.length) return attachments
+  return attachments.map((attachment, index) => {
+    const isImage = attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true
+    const byIndex = stored[index]
+    const match = byIndex?.type === 'image' && (byIndex.storedPath || byIndex.originalPath)
+      ? byIndex
+      : stored.find(item => item.type === 'image' && item.name === attachment.name && !!(item.storedPath || item.originalPath))
+    const withOriginal = (base: FileAttachment): FileAttachment => {
+      if (!isImage || base.originalPath || !match?.originalPath) return base
+      return {
+        ...base,
+        originalPath: match.originalPath,
+        originalWidth: match.originalWidth,
+        originalHeight: match.originalHeight,
+        ...(match.sentWidth && match.sentHeight ? {
+          sentWidth: match.sentWidth,
+          sentHeight: match.sentHeight,
+        } : {}),
+      }
+    }
+    if (!isImage || attachment.base64 || attachment.storedPath) return withOriginal(attachment)
+    if (!match?.storedPath) return attachment
+    return withOriginal({
+      ...attachment,
+      storedPath: match.storedPath,
+      path: attachment.path || match.storedPath,
+    })
+  })
+}
+
+/**
+ * Fill missing image/PDF base64 from disk so vision-capable models receive
+ * pixels instead of a path-only placeholder. Oversized or unreadable files
+ * stay path-only; callers must treat remaining path-only images as a send failure.
+ */
+export function hydrateAttachmentBytes(attachments: FileAttachment[] | undefined): FileAttachment[] | undefined {
+  if (!attachments?.length) return attachments
+  return attachments.map((attachment) => {
+    const needsBytes = !attachment.base64 && (
+      attachment.type === 'image'
+      || attachment.mimeType?.startsWith('image/') === true
+      || attachment.type === 'pdf'
+    )
+    if (!needsBytes) return attachment
+    const sourcePath = attachment.storedPath || attachment.path
+    if (!sourcePath) return attachment
+    try {
+      const loaded = readFileAttachment(sourcePath)
+      if (!loaded?.base64) return attachment
+      return {
+        ...attachment,
+        base64: loaded.base64,
+        mimeType: attachment.mimeType || loaded.mimeType,
+        size: loaded.size || attachment.size,
+      }
+    } catch {
+      return attachment
+    }
+  })
+}
+
+/**
+ * Hydrate bytes, then transcode leftover HEIC/HEIF so the model receives JPEG.
+ * Attach-time conversion is preferred; this covers regenerate / path-only retries.
+ */
+export async function hydrateAndTranscodeAttachments(
+  attachments: FileAttachment[] | undefined,
+  convert?: HeicConvertFn,
+): Promise<FileAttachment[] | undefined> {
+  const hydrated = hydrateAttachmentBytes(attachments)
+  if (!hydrated?.length) return hydrated
+  return Promise.all(hydrated.map(async (attachment) => {
+    if (!attachment.base64 || !isHeicImage({
+      mimeType: attachment.mimeType,
+      name: attachment.name,
+      bytes: Buffer.from(attachment.base64, 'base64'),
+    })) {
+      return attachment
+    }
+    try {
+      const bytes = Buffer.from(attachment.base64, 'base64')
+      const jpeg = await convertHeicToJpeg(bytes, convert, attachment.path ? heicCacheKey(attachment.path, bytes) : undefined)
+      return {
+        ...attachment,
+        base64: jpeg.toString('base64'),
+        mimeType: 'image/jpeg',
+        size: jpeg.length,
+      }
+    } catch {
+      return attachment
+    }
+  }))
+}
+
+export function imageAttachmentsMissingBytes(
+  attachments: FileAttachment[] | undefined,
+): FileAttachment[] {
+  return (attachments ?? []).filter(attachment =>
+    (attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true)
+    && !attachment.base64,
+  )
+}
+
 export function readFileAttachment(filePath: string): FileAttachment | null {
   try {
     const resolved = resolvePath(filePath);
@@ -855,10 +1034,8 @@ function readImageFile(tempFile: string): FileAttachment | null {
 }
 
 /**
- * Normalize a session working directory into a base for path relativizing.
- * Returns undefined when there is nothing sensible to relativize against:
- * no cwd at all, or a filesystem root (`/`, `C:\`). Relativizing against the
- * root only rewrites `/Users/x` into `./Users/x` (OSS #1056).
+ * Reject missing cwd, a filesystem root (`/`, `C:\`), or a trailing-slash-only
+ * path. Relativizing against the root rewrites `/Users/x` into `./Users/x`.
  */
 function normalizeRelativizeBase(cwd: string | undefined): string | undefined {
   if (!cwd) return undefined;
@@ -891,18 +1068,6 @@ export function formatSinglePathToRelative(absolutePath: string, cwd?: string): 
 }
 
 /**
- * Absolute POSIX paths rooted at common top-level directories.
- *
- * Anchored on both sides: the leading slash must not follow a word character,
- * dot, slash or tilde, so a root name embedded in a longer path
- * (`/Volumes/home/x`, `/private/tmp/x`, `//host/home`, `~/tmp`) is not taken
- * for a standalone path, and the root name must be a complete segment
- * (`/Usersfoo` is not `/Users`). Both were the source of the inserted dots in
- * OSS #1056.
- */
-const ABSOLUTE_PATH_REGEX = /(?<![\w.\/~])\/(?:Users|home|var|tmp|opt|etc)(?![^\/\s:,\]\})"'`])[^\s:,\]\})"'`]*/g;
-
-/**
  * Format absolute file paths in text to relative paths from cwd
  * Converts paths like /Users/john/project/src/file.ts to ./src/file.ts
  *
@@ -914,7 +1079,14 @@ export function formatPathsToRelative(text: string, cwd?: string): string {
   const basePath = normalizeRelativizeBase(cwd);
   if (!basePath) return text;
 
-  return text.replace(ABSOLUTE_PATH_REGEX, (match) => formatSinglePathToRelative(match, basePath));
+  // Regex to match absolute file paths
+  // Matches paths starting with / followed by path segments
+  // Handles paths with common file extensions and directory paths
+  const absolutePathRegex = /(\/(?:Users|home|var|tmp|opt|etc)[^\s\n:,\]\})"'`]*)/g;
+
+  return text.replace(absolutePathRegex, (match) => {
+    return formatSinglePathToRelative(match, basePath);
+  });
 }
 
 /**

@@ -1,14 +1,15 @@
 /**
  * Tests for PiEventAdapter
  *
- * Tests the Pi SDK AgentEvent / AgentSessionEvent → Craft AgentEvent conversion.
+ * Tests the Pi SDK AgentEvent / AgentSessionEvent → SelectionEvent conversion.
  * Each test provides mock Pi SDK event objects and verifies the AgentEvents produced.
  */
 import { describe, it, expect, beforeEach, afterEach, jest } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiEventAdapter } from '../backend/pi/event-adapter.ts';
+import { createTypedError } from '../errors.ts';
 import { toolMetadataStore } from '../../interceptor-common.ts';
 
 // Helper: collect all events from a generator
@@ -33,6 +34,48 @@ describe('PiEventAdapter', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
+  it('surfaces the local request limit and allows the failed turn to complete', () => {
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'Model request time limit reached.',
+    } } as any));
+    expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'model_request_timeout', canRetry: false } });
+    expect(adapter.shouldCompleteQueue(true)).toBe(true);
+  });
+
+  it('attaches current session SSE diagnostics to a typed timeout', () => {
+    const details = ['{"httpStatus":200,"phase":"provider-error","errorCategory":"timeout","requestId":"req-297"}'];
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'The model service is taking too long to respond.', craftTransportDiagnostics: details,
+    } } as any));
+    expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'provider_timeout', details } });
+  });
+  it('does not attach a stale SSE diagnostic from another request in the same turn', () => {
+    writeFileSync(join(sessionDir, 'api-error.json'), JSON.stringify({ status: 200, statusText: 'OK', message: 'Request timed out', timestamp: Date.now(), details: ['stale'] }));
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'The model service is taking too long to respond.',
+    } } as any));
+    expect(events[0].error.details).toBeUndefined();
+  });
+
+  it('preserves structured diagnostics for unknown upstream errors', () => {
+    const details = ['{"phase":"provider-error","httpStatus":200}'];
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'Custom stream failure', craftTransportDiagnostics: details,
+    } } as any));
+    expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'unknown_error', details } });
+  });
+
+  it('trusts read-range metadata only from successful native readers, never an index, Bash, MCP or an error', () => {
+    const proof = { path: '/source', contentHash: 'hash', startLine: 1, endLine: 1, returnedTextHash: 'returned' };
+    for (const [toolName, isError] of [['read', false], ['web_fetch', false], ['document_read', false], ['document_index', false], ['bash', false], ['mcp__source__read', false], ['read', true], ['web_fetch', true], ['document_read', true]] as const) {
+      const toolCallId = `${toolName}-${isError}`;
+      collect(adapter.adaptEvent({ type: 'tool_execution_start', toolName, toolCallId, args: { path: '/source', command: 'cat /source' } } as any));
+      const events = collect(adapter.adaptEvent({ type: 'tool_execution_end', toolName, toolCallId, isError,
+        result: { content: [{ type: 'text', text: 'original' }], details: { sourceRead: proof } } } as any));
+      expect(events.find(event => event.type === 'tool_result')?.sourceRead).toEqual(['read', 'web_fetch', 'document_read'].includes(toolName) && !isError ? proof : undefined);
+    }
+  });
+
   // ============================================================
   // Agent lifecycle
   // ============================================================
@@ -48,25 +91,6 @@ describe('PiEventAdapter', () => {
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ type: 'complete' });
     });
-
-    it('should count the output and cost of every call in the turn, not only the last', () => {
-      const usage = (input: number, output: number, cost: number) =>
-        ({ input, output, cacheRead: 0, cacheWrite: 0, totalTokens: input + output, cost: { total: cost } });
-      const callOf = (u: ReturnType<typeof usage>, stopReason: string) => ({
-        type: 'message_end',
-        message: { role: 'assistant', stopReason, content: [{ type: 'text', text: 'x' }], usage: u },
-      });
-      const run = () => {
-        collect(adapter.adaptEvent(callOf(usage(1000, 300, 0.25), 'toolUse') as any));
-        collect(adapter.adaptEvent(callOf(usage(1500, 200, 0.5), 'stop') as any));
-        return collect(adapter.adaptEvent({ type: 'agent_end' } as any)).find(e => e.type === 'complete');
-      };
-
-      expect(run().usage).toMatchObject({ inputTokens: 1500, outputTokens: 500, costUsd: 0.75 });
-      // The next turn starts counting from zero
-      adapter.startTurn();
-      expect(run().usage).toMatchObject({ outputTokens: 500, costUsd: 0.75 });
-    });
   });
 
   // ============================================================
@@ -75,9 +99,8 @@ describe('PiEventAdapter', () => {
 
   describe('turn lifecycle', () => {
     it('should set currentTurnId on turn_start', () => {
-      // turn_start is handled internally — emits no events
       const events = collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      expect(events).toHaveLength(0);
+      expect(events).toEqual([{ type: 'model_call_start' }]);
     });
 
     it('should emit nothing on turn_end', () => {
@@ -129,8 +152,322 @@ describe('PiEventAdapter', () => {
       expect(events[0]).toMatchObject({
         type: 'text_delta',
         text: 'Hello',
+        phase: 'unclassified',
       });
       expect(events[0].turnId).toMatch(/^pi-turn-1__m0$/);
+    });
+
+    it('should buffer Codex text deltas until their response phase is known', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          delta: 'Let me verify the original file.',
+          partial: {
+            role: 'assistant',
+            api: 'openai-codex-responses',
+            provider: 'openai-codex',
+            content: [{ type: 'text', text: 'Let me verify the original file.' }],
+          },
+        },
+      } as any));
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('should stream the current Codex final-answer block after commentary', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          contentIndex: 1,
+          delta: 'Verified result',
+          partial: {
+            role: 'assistant',
+            api: 'openai-codex-responses',
+            provider: 'openai-codex',
+            content: [
+              {
+                type: 'text',
+                text: 'I checked the files.',
+                textSignature: JSON.stringify({ phase: 'commentary' }),
+              },
+              {
+                type: 'text',
+                text: 'Verified result',
+                textSignature: JSON.stringify({ phase: 'final_answer' }),
+              },
+            ],
+          },
+        },
+      } as any));
+
+      expect(events).toMatchObject([{
+        type: 'text_delta',
+        text: 'Verified result',
+        phase: 'final',
+      }]);
+    });
+
+    it('should attach a streamed Codex final body to the final segment, not commentary', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const streamed = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          delta: 'Verified result',
+          partial: {
+            role: 'assistant',
+            api: 'openai-codex-responses',
+            content: [{
+              type: 'text',
+              text: 'Verified result',
+              textSignature: JSON.stringify({ phase: 'final_answer' }),
+            }],
+          },
+        },
+      } as any));
+      const completed = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'I checked the files.',
+              textSignature: JSON.stringify({ phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'Verified result',
+              textSignature: JSON.stringify({ phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(completed).toMatchObject([
+        { type: 'text_complete', text: 'I checked the files.', isIntermediate: true },
+        { type: 'text_complete', text: 'Verified result', isIntermediate: false },
+      ]);
+      expect(completed[0].turnId).not.toBe(streamed[0].turnId);
+      expect(completed[1].turnId).toBe(streamed[0].turnId);
+    });
+
+    it('routes a leaked think block out of the visible text stream', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const opened = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '<think>先整理' },
+      } as any));
+      const closed = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '结构</think>结论在这里。' },
+      } as any));
+      const done = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: '<think>先整理结构</think>结论在这里。' }],
+        },
+      } as any));
+      const visible = [...opened, ...closed].filter(event => event.type === 'text_delta' && !String(event.turnId).includes('__think'));
+      expect(visible.map(event => event.text).join('')).toBe('结论在这里。');
+      expect([...opened, ...closed].some(event => event.type === 'text_delta' && String(event.turnId).includes('__think'))).toBe(true);
+      const answer = done.find(event => event.type === 'text_complete' && event.isIntermediate !== true);
+      expect(answer).toMatchObject({ text: '结论在这里。', isIntermediate: false });
+      expect(done.filter(event => event.type === 'text_complete' && event.isIntermediate).map(event => event.text)).not.toContain('先整理结构');
+    });
+
+    it('splits a bare </think> that arrives only on message_end', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const done = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: '推理过程</think>\n\n最终答案' }],
+        },
+      } as any));
+      expect(done.find(event => event.type === 'text_complete' && event.isIntermediate)).toMatchObject({
+        text: '推理过程',
+        phase: 'intermediate',
+      });
+      expect(String(done.find(event => event.type === 'text_complete' && event.isIntermediate).turnId)).toContain('__think');
+      expect(done.find(event => event.type === 'text_complete' && !event.isIntermediate)).toMatchObject({
+        text: '最终答案',
+      });
+    });
+
+    it('streams thinking as it arrives and closes it before the reply', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const first = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_delta', delta: '先' },
+      } as any));
+      const second = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_delta', delta: '想' },
+      } as any));
+      const closed = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_end', content: '先想' },
+      } as any));
+      const answer = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '好' },
+      } as any));
+      const textEvents = (events: typeof first) => events.filter(event => event.type !== 'model_activity')
+      expect(textEvents(first).map(event => event.type === 'text_delta' ? event.text : event.type)).toEqual(['先']);
+      expect(textEvents(second).map(event => event.type === 'text_delta' ? event.text : event.type)).toEqual(['想']);
+      expect(first[0].phase).toBe('intermediate');
+      expect(String(first[0].turnId)).toContain('__think');
+      expect(second[0].turnId).toBe(first[0].turnId);
+      expect(closed).toMatchObject([{ type: 'text_complete', text: '先想', isIntermediate: true, phase: 'intermediate' }]);
+      expect(answer).toMatchObject([{ type: 'text_delta', text: '好', phase: 'unclassified' }]);
+      expect(answer[0].turnId).not.toBe(first[0].turnId);
+    });
+
+    it('keeps each thinking → text → tool round on its own step ids', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const rounds = [
+        { think: '先看安装情况', text: 'Zen 1.23.2b installed', tool: 'toolu_1' },
+        { think: '签名已经失效', text: 'Crash reason: Code Signature Invalid', tool: 'toolu_2' },
+      ];
+      const thinkingIds: string[] = [];
+      const textIds: string[] = [];
+      for (const round of rounds) {
+        const think = collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'thinking_delta', delta: round.think },
+        } as any)).find(event => event.type === 'text_delta');
+        thinkingIds.push(String(think.turnId));
+        const closed = collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'thinking_end' },
+        } as any));
+        expect(closed[0]).toMatchObject({ type: 'text_complete', text: round.think, isIntermediate: true, phase: 'intermediate' });
+        expect(String(closed[0].turnId)).toContain('__think');
+        const delta = collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: round.text },
+        } as any)).find(event => event.type === 'text_delta');
+        textIds.push(String(delta.turnId));
+        expect(String(delta.turnId)).not.toContain('__think');
+        const done = collect(adapter.adaptEvent({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            stopReason: 'toolUse',
+            content: [
+              { type: 'text', text: round.text },
+              { type: 'toolCall', id: round.tool, name: 'bash' },
+            ],
+          },
+        } as any));
+        const commentary = done.find(event => event.type === 'text_complete');
+        expect(commentary).toMatchObject({ text: round.text, isIntermediate: true, phase: 'intermediate' });
+        expect(String(commentary.turnId)).toBe(String(delta.turnId));
+        expect(String(commentary.turnId)).not.toContain('__think');
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_start',
+          toolCallId: round.tool,
+          toolName: 'bash',
+          args: { command: 'true' },
+        } as any));
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_end',
+          toolCallId: round.tool,
+          toolName: 'bash',
+          isError: false,
+          result: { content: [{ type: 'text', text: 'ok' }] },
+        } as any));
+      }
+      expect(new Set(thinkingIds).size).toBe(2);
+      expect(new Set(textIds).size).toBe(2);
+      const finalDone = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Key finding' }] },
+      } as any));
+      const reply = finalDone.find(event => event.type === 'text_complete');
+      expect(reply).toMatchObject({ text: 'Key finding', isIntermediate: false });
+      expect(String(reply.turnId)).not.toContain('__think');
+      expect(reply.text).not.toContain('Zen 1.23.2b');
+      expect(reply.text).not.toContain('Crash reason');
+    });
+
+    it('streams deepseek reasoning_content plus tool calls as thinking, not body text', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      adapter.setPresentationProtocol('legacy');
+      const rounds = [
+        { think: ['Now I can read', ' the template.'], tool: 'call_1', name: 'read' },
+        { think: ['The numbers do not add up', ' so I will check the source.'], tool: 'call_2', name: 'bash' },
+      ];
+      const thinkingIds: string[] = [];
+      for (const round of rounds) {
+        const deltas = round.think.flatMap(piece => collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'thinking_delta', delta: piece },
+        } as any)).filter(event => event.type === 'text_delta'));
+        expect(deltas.map(event => event.text).join('')).toBe(round.think.join(''));
+        expect(deltas.every(event => event.streamKind === 'thinking' && event.phase === 'intermediate' && event.presentationProtocol === 'legacy')).toBe(true);
+        expect(new Set(deltas.map(event => event.turnId)).size).toBe(1);
+        expect(String(deltas[0].turnId)).toContain('__think');
+        thinkingIds.push(String(deltas[0].turnId));
+        const done = collect(adapter.adaptEvent({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            stopReason: 'toolUse',
+            content: [
+              { type: 'thinking', thinking: round.think.join(''), thinkingSignature: 'reasoning_content' },
+              { type: 'toolCall', id: round.tool, name: round.name },
+            ],
+          },
+        } as any));
+        const completes = done.filter(event => event.type === 'text_complete');
+        expect(completes).toEqual([expect.objectContaining({
+          text: round.think.join(''),
+          isIntermediate: true,
+          phase: 'intermediate',
+          streamKind: 'thinking',
+          turnId: deltas[0].turnId,
+        })]);
+        expect(done.some(event => event.type === 'text_delta')).toBe(false);
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_start',
+          toolCallId: round.tool,
+          toolName: round.name,
+          args: {},
+        } as any));
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_end',
+          toolCallId: round.tool,
+          toolName: round.name,
+          isError: false,
+          result: { content: [{ type: 'text', text: 'ok' }] },
+        } as any));
+      }
+      expect(new Set(thinkingIds).size).toBe(2);
+      const answerDelta = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '结论在这里。' },
+      } as any)).find(event => event.type === 'text_delta');
+      expect(answerDelta).toMatchObject({ text: '结论在这里。', phase: 'unclassified' });
+      expect(answerDelta.streamKind).toBeUndefined();
+      expect(String(answerDelta.turnId)).not.toContain('__think');
+      const answer = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '结论在这里。' }] },
+      } as any)).find(event => event.type === 'text_complete' && event.streamKind !== 'thinking');
+      expect(answer).toMatchObject({ text: '结论在这里。', isIntermediate: false });
+      expect(String(answer.turnId)).not.toContain('__think');
+      expect(answer.text).not.toContain('Now I can read');
+      expect(answer.text).not.toContain('numbers do not add up');
     });
 
     it('should skip message_update without text_delta type', () => {
@@ -181,6 +518,95 @@ describe('PiEventAdapter', () => {
       });
     });
 
+    it('should separate Codex commentary from the final assistant body', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'Let me confirm this against the original file.',
+              textSignature: JSON.stringify({ v: 1, id: 'msg_commentary', phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'The validation errors were already present in the original document.',
+              textSignature: JSON.stringify({ v: 1, id: 'msg_final', phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(events).toMatchObject([
+        {
+          type: 'text_complete',
+          text: 'Let me confirm this against the original file.',
+          isIntermediate: true,
+        },
+        {
+          type: 'text_complete',
+          text: 'The validation errors were already present in the original document.',
+          isIntermediate: false,
+        },
+      ]);
+    });
+
+    it('should keep separating commentary when response signature versions advance', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'Internal process note.',
+              textSignature: JSON.stringify({ v: 2, phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'Visible answer.',
+              textSignature: JSON.stringify({ v: 2, phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(events).toMatchObject([
+        { text: 'Internal process note.', isIntermediate: true },
+        { text: 'Visible answer.', isIntermediate: false },
+      ]);
+    });
+
+    it('should emit commentary-only Codex output as intermediate text', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'text',
+              text: 'I will inspect the file now.',
+              textSignature: JSON.stringify({ v: 1, id: 'msg_commentary', phase: 'commentary' }),
+            },
+            { type: 'toolCall', id: 'call_1', name: 'read', arguments: {} },
+          ],
+        },
+      } as any));
+
+      expect(events).toMatchObject([{
+        type: 'text_complete',
+        text: 'I will inspect the file now.',
+        isIntermediate: true,
+      }]);
+    });
+
     it('should attach sdkMessageId from message_end onto the text_complete', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
@@ -199,7 +625,7 @@ describe('PiEventAdapter', () => {
       expect((events[0] as { sdkTurnAnchor?: string }).sdkTurnAnchor).toBeUndefined();
     });
 
-    it('should forward pi_turn_anchor events as Craft AgentEvents', () => {
+    it('should forward pi_turn_anchor events as SelectionEvents', () => {
       const events = collect(adapter.adaptEvent({
         type: 'pi_turn_anchor',
         sdkMessageId: 'msg_pi_abc123',
@@ -275,6 +701,67 @@ describe('PiEventAdapter', () => {
       } as any));
       expect(events).toHaveLength(0);
     });
+
+    it('should preserve complete per-call usage in usage_update events', () => {
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: 'Done',
+          usage: {
+            input: 200,
+            output: 30,
+            cacheRead: 150,
+            cacheWrite: 10,
+            totalTokens: 390,
+            cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 },
+          },
+        },
+      } as any));
+
+      expect(events.at(-1)).toEqual({
+        type: 'usage_update',
+        usage: {
+          inputTokens: 200,
+          outputTokens: 30,
+          cacheReadTokens: 150,
+          cacheCreationTokens: 10,
+          costUsd: 0.0033,
+          contextTokens: 350,
+          contextWindow: undefined,
+          cacheHitRate: 150 / 350,
+        },
+      });
+    });
+
+    it('should forward estimated context breakdown on usage_update', () => {
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: 'Done',
+          usage: {
+            input: 200,
+            output: 30,
+            cacheRead: 50,
+            cacheWrite: 0,
+            totalTokens: 280,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        },
+        contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56, skills: 7 },
+      } as any));
+
+      expect(events.at(-1)).toMatchObject({
+        type: 'usage_update',
+        usage: {
+          cacheHitRate: 50 / 250,
+          contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56, skills: 7 },
+        },
+      });
+    });
   });
 
   // ============================================================
@@ -317,6 +804,48 @@ describe('PiEventAdapter', () => {
         type: 'text_complete',
         text: 'Here is the final answer.',
         isIntermediate: false,
+      });
+    });
+
+    it('should treat toolCall content as intermediate even when stopReason is stop', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            { type: 'text', text: '先读 skill 文件。' },
+            { type: 'toolCall', id: 'tool1', name: 'read', arguments: { path: '/tmp/skill.md' } },
+          ],
+        },
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'text_complete',
+        text: '先读 skill 文件。',
+        isIntermediate: true,
+      });
+    });
+
+    it('does not commit a final-answer phase while the same message calls a tool', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            { type: 'text', text: '仍需读取文件', textSignature: '{"phase":"final_answer"}' },
+            { type: 'toolCall', id: 'tool1', name: 'read', arguments: { path: '/tmp/skill.md' } },
+          ],
+        },
+      } as any));
+
+      expect(events.find(event => event.type === 'text_complete')).toMatchObject({
+        text: '仍需读取文件',
+        isIntermediate: true,
+        phase: 'intermediate',
       });
     });
 
@@ -512,6 +1041,24 @@ describe('PiEventAdapter', () => {
   // ============================================================
 
   describe('error surfacing', () => {
+    it('still emits complete after a terminal message_end error', () => {
+      const errorEvents = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'Stream ended without finish_reason',
+        },
+      } as any))
+      const completeEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any))
+
+      expect(errorEvents).toHaveLength(0)
+      expect(completeEvents).toEqual([
+        { type: 'error', message: 'Stream ended without finish_reason' },
+        { type: 'complete' },
+      ])
+    })
+
     it('should emit plain error for unclassified error messages', () => {
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
@@ -590,11 +1137,7 @@ describe('PiEventAdapter', () => {
       expect(events[0].error.code).toBe('billing_error');
     });
 
-    it('parks rate limits, then ends retry UI before releasing the error when no retry runs', () => {
-      // 429 is retryable: the SDK's auto-retry decides what happens next, so the
-      // adapter holds the typed error back (see 'auto-retry recovery'). Even when
-      // retries are disabled, release first emits retry/end as a UI fail-safe,
-      // then the original typed error and normal completion.
+    it('should emit typed_error for rate limit errors', () => {
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
         message: {
@@ -603,31 +1146,83 @@ describe('PiEventAdapter', () => {
           errorMessage: '429 Too many requests - rate limit exceeded',
         },
       } as any));
-      expect(events).toHaveLength(0);
 
-      const released = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(released).toMatchObject([
-        { type: 'retry', phase: 'end' },
-        { type: 'typed_error', error: { code: 'rate_limited' } },
-        { type: 'complete' },
-      ]);
+      expect(events).toHaveLength(0);
+      const terminal = collect(adapter.adaptEvent({ type: 'agent_end', willRetry: false } as any));
+      expect(terminal[0].type).toBe('typed_error');
+      expect(terminal[0].error.code).toBe('rate_limited');
     });
 
-    it('should not emit error without errorMessage even if stopReason is error', () => {
+    it('should not emit error when the user stops a turn', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted by the user',
+          content: [{ type: 'text', text: '尚未完成的内容' }],
+        },
+      } as any));
+
+      expect(events.every(event => event.type !== 'error' && event.type !== 'typed_error')).toBe(true);
+      expect(events.find(event => event.type === 'text_complete')).toMatchObject({
+        isIntermediate: true,
+        text: '尚未完成的内容',
+      });
+    });
+
+    it('keeps a user-aborted Codex final-answer segment intermediate', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          provider: 'openai-codex',
+          api: 'openai-codex-responses',
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted by the user',
+          content: [{ type: 'text', text: '未完成的正文', textSignature: '{"phase":"final_answer"}' }],
+        },
+      } as any));
+
+      expect(events.find(event => event.type === 'text_complete')).toMatchObject({
+        text: '未完成的正文',
+        isIntermediate: true,
+        phase: 'intermediate',
+      });
+    });
+
+    it('should not emit error for unrelated aborted turns', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted',
+          content: '',
+        },
+      } as any));
+
+      expect(events.every(event => event.type !== 'error')).toBe(true);
+      expect(events.some(event => event.type === 'typed_error' && event.error.code === 'stream_interrupted')).toBe(true);
+    });
+
+    it('preserves a terminal failure even without provider errorMessage', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
         message: {
           role: 'assistant',
           stopReason: 'error',
-          // No errorMessage — fall through to normal text extraction
+          // No errorMessage: do not promote partial text to a successful final.
           content: 'Some partial content',
         },
       } as any));
 
-      // Should emit as text_complete, not error
       expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('text_complete');
+      expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'stream_interrupted', canRetry: false } });
     });
   });
 
@@ -737,6 +1332,29 @@ describe('PiEventAdapter', () => {
         intent: 'Stored intent',
         displayName: 'Stored name',
       });
+    });
+
+    it('removes a misplaced intent parameter marker from stored tool display metadata', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      toolMetadataStore.set('call_bad_label', {
+        displayName: '<parameter=intent>读取 HTML 模板',
+        timestamp: Date.now(),
+      });
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_start',
+        toolCallId: 'call_bad_label',
+        toolName: 'read',
+        args: { path: '/tmp/template.html' },
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_start',
+        toolName: 'Read',
+        displayName: '读取 HTML 模板',
+        input: { file_path: '/tmp/template.html' },
+      });
+      expect(events[0].intent).toBeUndefined();
     });
 
     it('should use canonical metadata from event payload', () => {
@@ -871,8 +1489,95 @@ describe('PiEventAdapter', () => {
         toolUseId: 'call_1',
         toolName: 'Read',
         result: 'file contents',
+        content: [{ type: 'text', text: 'file contents' }],
         isError: false,
       });
+    });
+
+    it('honors proxy-tool details.isError when the Pi SDK event flag is false', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start',
+        toolCallId: 'call_proxy_error',
+        toolName: 'mcp__session__skill_validate',
+        args: { slug: 'missing' },
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_proxy_error',
+        result: {
+          content: [{ type: 'text', text: '[ERROR] target does not exist' }],
+          details: { isError: true },
+        },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'mcp__session__skill_validate',
+        result: '[ERROR] target does not exist',
+        isError: true,
+      });
+    });
+
+    it('preserves live image blocks without folding Base64 into the text result', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start', toolCallId: 'call_image', toolName: 'Read', args: {},
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_image',
+        result: { content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/preview/preview.png"}]}' },
+          { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+        ] },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        result: '{"artifacts":[{"path":"data/preview/preview.png"}]}',
+        content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/preview/preview.png"}]}' },
+          { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+        ],
+      });
+      expect(events[0].result).not.toContain('aW1hZ2U=');
+    });
+
+    it('preserves final images when partial text output was already streamed', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start', toolCallId: 'call_partial_image', toolName: 'Read', args: {},
+      } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'call_partial_image',
+        partialResult: { content: [{ type: 'text', text: '{"artifacts":[' }] },
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_partial_image',
+        result: { content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/preview/preview.png"}]}' },
+          { type: 'image', data: 'ZmluYWwtaW1hZ2U=', mimeType: 'image/png' },
+        ] },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        result: '{"artifacts":[{"path":"data/preview/preview.png"}]}',
+        content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/preview/preview.png"}]}' },
+          { type: 'image', data: 'ZmluYWwtaW1hZ2U=', mimeType: 'image/png' },
+        ],
+      });
+      expect(events[0].result).not.toContain('ZmluYWwtaW1hZ2U=');
     });
 
     it('should handle string result in tool_execution_end', () => {
@@ -917,7 +1622,7 @@ describe('PiEventAdapter', () => {
       });
     });
 
-    it('should accumulate partial output from tool_execution_update', () => {
+    it('uses the latest output snapshot only when the final result is missing', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       collect(adapter.adaptEvent({
         type: 'tool_execution_start',
@@ -935,18 +1640,33 @@ describe('PiEventAdapter', () => {
       collect(adapter.adaptEvent({
         type: 'tool_execution_update',
         toolCallId: 'call_1',
-        partialResult: { content: [{ type: 'text', text: 'line 2\n' }] },
+        partialResult: { content: [{ type: 'text', text: 'line 1\nline 2\n' }] },
       } as any));
 
       // End — should use accumulated output
       const events = collect(adapter.adaptEvent({
         type: 'tool_execution_end',
         toolCallId: 'call_1',
-        result: 'ignored because accumulated',
+        result: null,
         isError: false,
       } as any));
 
       expect(events[0].result).toBe('line 1\nline 2\n');
+    });
+
+    it.each([['summary: full output saved to file', false], ['Command exited with code 2', true], ['', false]])('prefers the authoritative final %s over partial stdout', (final, isError) => {
+      collect(adapter.adaptEvent({ type: 'tool_execution_start', toolCallId: 'final', toolName: 'bash', args: {} } as any));
+      collect(adapter.adaptEvent({ type: 'tool_execution_update', toolCallId: 'final', partialResult: { content: [{ type: 'text', text: 'stale output' }] } } as any));
+      const events = collect(adapter.adaptEvent({ type: 'tool_execution_end', toolCallId: 'final', result: { content: [{ type: 'text', text: final }] }, isError } as any));
+      expect(events[0].result).toBe(final);
+      expect(events[0].isError).toBe(isError);
+    });
+
+    it('replaces sliding output windows and bounds retained fallback text', () => {
+      collect(adapter.adaptEvent({ type: 'tool_execution_start', toolCallId: 'bounded', toolName: 'bash', args: {} } as any));
+      for (const text of ['old window', 'x'.repeat(100_000)]) collect(adapter.adaptEvent({ type: 'tool_execution_update', toolCallId: 'bounded', partialResult: { content: [{ type: 'text', text }] } } as any));
+      const events = collect(adapter.adaptEvent({ type: 'tool_execution_end', toolCallId: 'bounded', result: null, isError: false } as any));
+      expect(events[0].result).toBe('x'.repeat(64 * 1024));
     });
 
     it('should use description as intent for bash tools', () => {
@@ -1033,15 +1753,46 @@ describe('PiEventAdapter', () => {
         aborted: false,
       } as any));
 
-      expect(events).toHaveLength(2);
+      expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        type: 'context_usage',
-        contextUsage: { usedTokens: null, isStale: true },
-      });
-      expect(events[1]).toMatchObject({
         type: 'info',
         message: 'Compacted context to fit within limits',
       });
+    });
+
+    it('should account for the provider usage of a successful compaction', () => {
+      adapter.setContextWindow(262_144);
+      const events = collect(adapter.adaptEvent({
+        type: 'compaction_end',
+        result: {
+          usage: {
+            input: 10_000,
+            output: 1_000,
+            cacheRead: 2_000,
+            cacheWrite: 500,
+            totalTokens: 13_500,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.1 },
+          },
+        },
+        aborted: false,
+      } as any));
+
+      expect(events).toEqual([
+        {
+          type: 'usage_update',
+          usage: {
+            inputTokens: 10_000,
+            outputTokens: 1_000,
+            cacheReadTokens: 2_000,
+            cacheCreationTokens: 500,
+            costUsd: 0.1,
+            contextTokens: 12_000,
+            contextWindow: 262_144,
+            cacheHitRate: 2_000 / 12_000,
+          },
+        },
+        { type: 'info', message: 'Compacted context to fit within limits' },
+      ]);
     });
 
     it('should emit error for failed compaction_end', () => {
@@ -1052,73 +1803,58 @@ describe('PiEventAdapter', () => {
         errorMessage: 'Out of memory',
       } as any));
 
-      expect(events).toHaveLength(2);
-      expect(events[0]).toEqual({ type: 'compaction_failed' });
-      expect(events[1]).toMatchObject({
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
         type: 'error',
         message: 'Context compaction failed: Out of memory',
       });
     });
 
-    it('should emit compaction_failed for aborted compaction', () => {
+    it('should emit nothing for aborted compaction', () => {
       const events = collect(adapter.adaptEvent({
         type: 'compaction_end',
         result: null,
         aborted: true,
       } as any));
 
-      expect(events).toEqual([{ type: 'compaction_failed' }]);
+      expect(events).toHaveLength(0);
     });
 
-    it('should emit retry/backoff with reason and delay for auto_retry_start', () => {
+    it('should emit status for auto_retry_start', () => {
       const events = collect(adapter.adaptEvent({
         type: 'auto_retry_start',
         attempt: 2,
         maxAttempts: 3,
-        delayMs: 4_000,
-        errorMessage: 'fetch failed',
       } as any));
 
-      expect(events).toEqual([{
-        type: 'retry',
-        phase: 'backoff',
-        message: 'fetch failed. Retrying in 4s (attempt 2/3)...',
-      }]);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'status',
+        message: 'Retrying (attempt 2/3)...',
+      });
     });
 
-    it('stays silent for a trailing failed auto_retry_end once the turn completed', () => {
-      // On exhaustion the SDK emits agent_end { willRetry: false } first (which
-      // releases the parked error) and auto_retry_end { success: false } after.
-      // Surfacing the same failure twice would show two error bubbles.
+    it('should emit error for failed auto_retry_end', () => {
       const events = collect(adapter.adaptEvent({
         type: 'auto_retry_end',
         success: false,
         finalError: 'Max retries exceeded',
       } as any));
 
-      expect(events).toHaveLength(0);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'error',
+        message: 'Retry failed: Max retries exceeded',
+      });
     });
 
-    it('should emit retry/end without recovery info when successful auto_retry_end has no retry count', () => {
+    it('clears the transient status for successful auto_retry_end', () => {
       const events = collect(adapter.adaptEvent({
         type: 'auto_retry_end',
         success: true,
       } as any));
 
-      expect(events).toEqual([{ type: 'retry', phase: 'end' }]);
-    });
-
-    it('should emit retry/end then transient recovery info after retries', () => {
-      const events = collect(adapter.adaptEvent({
-        type: 'auto_retry_end',
-        success: true,
-        attempt: 2,
-      } as any));
-
-      expect(events).toEqual([
-        { type: 'retry', phase: 'end' },
-        { type: 'info', message: 'Recovered after 2 retries' },
-      ]);
+      expect(events).toEqual([{ type: 'status', message: '' }]);
     });
 
     it('should emit nothing for queue_update', () => {
@@ -1203,270 +1939,6 @@ describe('PiEventAdapter', () => {
   });
 
   // ============================================================
-  // Auto-retry recovery state machine
-  // ============================================================
-  //
-  // The Pi SDK retries transient provider/transport errors itself
-  // (isRetryableAssistantError → AgentSession._prepareRetry). It emits
-  // agent_end { willRetry: true } BEFORE the retry, then auto_retry_start,
-  // sleeps the backoff and re-runs the turn via agent.continue(). The adapter
-  // used to complete the queue on that first agent_end, so the retried answer
-  // streamed into a closed iterator and the user only saw the raw provider
-  // error. It now parks the classified error and holds the queue open.
-
-  describe('auto-retry recovery', () => {
-    const transientError = (errorMessage: string) => ({
-      type: 'message_end',
-      message: { role: 'assistant', stopReason: 'error', errorMessage },
-    });
-
-    it('success path: emits backoff/active/end around one recovered answer', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-
-      // 1. Transient provider error — nothing reaches the UI yet.
-      const errEvents = collect(adapter.adaptEvent(
-        transientError('overloaded_error: The API is temporarily overloaded') as any,
-      ));
-      expect(errEvents).toHaveLength(0);
-
-      // 2. agent_end { willRetry: true } — no complete, queue stays open.
-      const heldEnd = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: true } as any));
-      expect(heldEnd).toHaveLength(0);
-      expect(adapter.shouldCompleteQueue(true)).toBe(false);
-      expect(adapter.isHoldingTurn).toBe(true);
-
-      // 3. auto_retry_start announces the classified backoff explicitly.
-      const startEvents = collect(adapter.adaptEvent({
-        type: 'auto_retry_start',
-        attempt: 1,
-        maxAttempts: 4,
-        delayMs: 2_000,
-        errorMessage: 'overloaded_error: The API is temporarily overloaded',
-      } as any));
-      expect(startEvents).toEqual([{
-        type: 'retry',
-        phase: 'backoff',
-        message: 'Service Error. Retrying in 2s (attempt 1/4)...',
-      }]);
-      expect(adapter.shouldCompleteQueue(false)).toBe(false);
-
-      // 4. The retried agent_start activates output, then success ends retry UI before recovery info.
-      const active = collect(adapter.adaptEvent({ type: 'agent_start' } as any));
-      expect(active).toEqual([{ type: 'retry', phase: 'active' }]);
-      const text = collect(adapter.adaptEvent({
-        type: 'message_end',
-        message: { role: 'assistant', stopReason: 'stop', content: 'Recovered answer' },
-      } as any));
-      expect(text).toMatchObject([{ type: 'text_complete', text: 'Recovered answer' }]);
-      const recovered = collect(adapter.adaptEvent({ type: 'auto_retry_end', success: true, attempt: 1 } as any));
-      expect(recovered).toEqual([
-        { type: 'retry', phase: 'end' },
-        { type: 'info', message: 'Recovered after 1 retry' },
-      ]);
-
-      const finalEnd = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(finalEnd).toMatchObject([{ type: 'complete' }]);
-      expect(adapter.shouldCompleteQueue(true)).toBe(true);
-      expect(adapter.isHoldingTurn).toBe(false);
-
-      // The transient error never reached the UI.
-      const all = [...errEvents, ...heldEnd, ...startEvents, ...active, ...text, ...recovered, ...finalEnd];
-      expect(all.filter(e => e.type === 'error' || e.type === 'typed_error')).toHaveLength(0);
-    });
-
-    it('exhaustion path: surfaces the parked error exactly once when the last attempt fails too', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-
-      // Attempt 0 fails; the SDK announces its (only) retry.
-      collect(adapter.adaptEvent(transientError('fetch failed') as any));
-      collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: true } as any));
-      const backoff = collect(adapter.adaptEvent({
-        type: 'auto_retry_start', attempt: 1, maxAttempts: 1, delayMs: 2_000, errorMessage: 'fetch failed',
-      } as any));
-      expect(backoff).toEqual([{
-        type: 'retry', phase: 'backoff', message: 'Connection Error. Retrying in 2s (attempt 1/1)...',
-      }]);
-      expect(collect(adapter.adaptEvent({ type: 'agent_start' } as any))).toEqual([
-        { type: 'retry', phase: 'active' },
-      ]);
-
-      // The retried attempt fails as well. agent_end ends retry UI before releasing the held error.
-      expect(collect(adapter.adaptEvent(transientError('fetch failed') as any))).toHaveLength(0);
-      const finalEnd = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(finalEnd).toMatchObject([
-        { type: 'retry', phase: 'end' },
-        { type: 'typed_error', error: { code: 'network_error', originalError: 'fetch failed' } },
-        { type: 'complete' },
-      ]);
-      expect(adapter.shouldCompleteQueue(true)).toBe(true);
-
-      // …then the trailing auto_retry_end, which must not add a second error bubble.
-      const trailing = collect(adapter.adaptEvent({
-        type: 'auto_retry_end', success: false, attempt: 1, finalError: 'fetch failed',
-      } as any));
-      expect(trailing).toHaveLength(0);
-    });
-
-    it('no retry: agent_end ends retry UI before releasing the parked error and completing', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-
-      // "socket hang up" is unknown to parseError but retryable per the SDK: it
-      // surfaces as a typed connection error, not a raw transport string.
-      expect(collect(adapter.adaptEvent(transientError('socket hang up') as any))).toHaveLength(0);
-      const end = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(end).toMatchObject([
-        { type: 'retry', phase: 'end' },
-        { type: 'typed_error', error: { code: 'network_error', originalError: 'socket hang up' } },
-        { type: 'complete' },
-      ]);
-      expect(adapter.shouldCompleteQueue(true)).toBe(true);
-    });
-
-    it('classifies unknown provider-side transients as service errors', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      collect(adapter.adaptEvent(transientError('Provider returned error') as any));
-      const end = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(end).toMatchObject([
-        { type: 'retry', phase: 'end' },
-        { type: 'typed_error', error: { code: 'service_error', originalError: 'Provider returned error' } },
-        { type: 'complete' },
-      ]);
-    });
-
-    it('cancelled retry: auto_retry_end { success: false } while holding releases the error and completes', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      collect(adapter.adaptEvent(transientError('fetch failed') as any));
-      collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: true } as any));
-      expect(collect(adapter.adaptEvent({
-        type: 'auto_retry_start', attempt: 1, maxAttempts: 4, delayMs: 2_000, errorMessage: 'fetch failed',
-      } as any))).toEqual([{
-        type: 'retry', phase: 'backoff', message: 'Connection Error. Retrying in 2s (attempt 1/4)...',
-      }]);
-
-      // session.abort() during the backoff → abortRetry() → "Retry cancelled"; no agent_end follows.
-      // The explicit end event removes transient UI before the held error is surfaced.
-      const cancelled = collect(adapter.adaptEvent({
-        type: 'auto_retry_end', success: false, attempt: 1, finalError: 'Retry cancelled',
-      } as any));
-      expect(cancelled).toMatchObject([
-        { type: 'retry', phase: 'end' },
-        { type: 'typed_error', error: { code: 'network_error' } },
-        { type: 'complete' },
-      ]);
-      // Queue terminates on this non-agent_end event, exactly once.
-      expect(adapter.shouldCompleteQueue(false)).toBe(true);
-      expect(adapter.shouldCompleteQueue(false)).toBe(false);
-      expect(adapter.isHoldingTurn).toBe(false);
-    });
-
-    it('fallback: no auto_retry_start after willRetry drains the parked error', () => {
-      jest.useFakeTimers();
-      try {
-        const enqueued: any[] = [];
-        let completed = false;
-        adapter.setRecoveryFallbackHandlers(
-          (event) => enqueued.push(event),
-          () => { completed = true; },
-        );
-
-        collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-        collect(adapter.adaptEvent(transientError('fetch failed') as any));
-        collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: true } as any));
-
-        jest.advanceTimersByTime(5_000);
-
-        // Fallback closes retry UI before enqueueing the parked error.
-        expect(enqueued).toMatchObject([
-          { type: 'retry', phase: 'end' },
-          { type: 'typed_error', error: { code: 'network_error' } },
-        ]);
-        expect(completed).toBe(true);
-        expect(adapter.isHoldingTurn).toBe(false);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    it('fallback: retried run never starts after the announced backoff', () => {
-      jest.useFakeTimers();
-      try {
-        const enqueued: any[] = [];
-        let completed = false;
-        adapter.setRecoveryFallbackHandlers(
-          (event) => enqueued.push(event),
-          () => { completed = true; },
-        );
-
-        collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-        collect(adapter.adaptEvent(transientError('fetch failed') as any));
-        collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: true } as any));
-        expect(collect(adapter.adaptEvent({
-          type: 'auto_retry_start', attempt: 1, maxAttempts: 4, delayMs: 8_000, errorMessage: 'fetch failed',
-        } as any))).toEqual([{
-          type: 'retry', phase: 'backoff', message: 'Connection Error. Retrying in 8s (attempt 1/4)...',
-        }]);
-
-        // Announced backoff (8 s) + grace (15 s) not yet elapsed: still holding.
-        jest.advanceTimersByTime(8_000 + 14_000);
-        expect(enqueued).toHaveLength(0);
-        expect(completed).toBe(false);
-
-        jest.advanceTimersByTime(1_001);
-        // The backoff fallback ends transient UI before surfacing the held error.
-        expect(enqueued).toMatchObject([
-          { type: 'retry', phase: 'end' },
-          { type: 'typed_error', error: { code: 'network_error' } },
-        ]);
-        expect(completed).toBe(true);
-        expect(adapter.isHoldingTurn).toBe(false);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    it('non-retryable errors still surface immediately', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-
-      const events = collect(adapter.adaptEvent(transientError('401 Unauthorized: invalid api key') as any));
-      expect(events).toMatchObject([{ type: 'typed_error', error: { code: 'invalid_api_key' } }]);
-      expect(adapter.isHoldingTurn).toBe(false);
-
-      const end = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(end).toMatchObject([{ type: 'complete' }]);
-      expect(adapter.shouldCompleteQueue(true)).toBe(true);
-    });
-
-    it('context overflow takes the compaction path, never the retry path', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      collect(adapter.adaptEvent(transientError(
-        'Your input exceeds the context window of this model. Please adjust your input and try again. (context_length_exceeded)',
-      ) as any));
-
-      // The SDK never auto-retries overflow (willRetry: false); the overflow
-      // machine holds the queue for compaction instead.
-      const end = collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: false } as any));
-      expect(end).toHaveLength(0);
-      expect(adapter.shouldCompleteQueue(true)).toBe(false);
-      expect(adapter.isHoldingTurn).toBe(true);
-
-      adapter.resetRecoveryState();
-      expect(adapter.isHoldingTurn).toBe(false);
-    });
-
-    it('startTurn() clears stale recovery state', () => {
-      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      collect(adapter.adaptEvent(transientError('fetch failed') as any));
-      collect(adapter.adaptEvent({ type: 'agent_end', messages: [], willRetry: true } as any));
-      expect(adapter.isHoldingTurn).toBe(true);
-
-      adapter.startTurn();
-
-      expect(adapter.isHoldingTurn).toBe(false);
-      expect(adapter.shouldCompleteQueue(true)).toBe(true);
-    });
-  });
-
-  // ============================================================
   // Overflow recovery state machine
   // ============================================================
   //
@@ -1503,16 +1975,13 @@ describe('PiEventAdapter', () => {
       const startEvents = collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
       expect(startEvents).toMatchObject([{ type: 'status', message: 'Compacting context...' }]);
 
-      // 4. compaction_end success — occupancy invalidates the old count, info surfaces, still no complete.
+      // 4. compaction_end success — info surfaces, still no complete.
       const endEvents = collect(adapter.adaptEvent({
         type: 'compaction_end',
         result: { /* compaction result */ },
         aborted: false,
       } as any));
-      expect(endEvents).toMatchObject([
-        { type: 'context_usage', contextUsage: { usedTokens: null, isStale: true } },
-        { type: 'info', message: 'Compacted context to fit within limits', compactionTrigger: 'auto' },
-      ]);
+      expect(endEvents).toMatchObject([{ type: 'info', message: 'Compacted context to fit within limits' }]);
       expect(adapter.shouldCompleteQueue(false)).toBe(false);
 
       // 5. Recovered text + final agent_end — text_complete + complete arrive.
@@ -1547,8 +2016,10 @@ describe('PiEventAdapter', () => {
       } as any));
 
       expect(failureEvents).toEqual([
-        { type: 'compaction_failed' },
-        { type: 'error', message: 'Context compaction failed: Out of memory during summary' },
+        {
+          type: 'typed_error',
+          error: createTypedError('context_limit'),
+        },
         { type: 'complete' },
       ]);
       // Queue should terminate even though the event wasn't agent_end.
@@ -1562,7 +2033,7 @@ describe('PiEventAdapter', () => {
       try {
         const enqueued: any[] = [];
         let completed = false;
-        adapter.setRecoveryFallbackHandlers(
+        adapter.setOverflowFallbackHandlers(
           (event) => enqueued.push(event),
           () => { completed = true; },
         );
@@ -1574,14 +2045,17 @@ describe('PiEventAdapter', () => {
         // No compaction events arrive. Advance past the 5 s fallback timeout.
         jest.advanceTimersByTime(5_000);
 
-        expect(enqueued).toEqual([{ type: 'error', message: overflowMessage.errorMessage }]);
+        expect(enqueued).toEqual([{
+          type: 'typed_error',
+          error: createTypedError('context_limit'),
+        }]);
         expect(completed).toBe(true);
       } finally {
         jest.useRealTimers();
       }
     });
 
-    it('non-overflow: rate-limit error takes the auto-retry path, not the overflow path', () => {
+    it('non-overflow regression: rate-limit error preserves existing behavior', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
 
       const events = collect(adapter.adaptEvent({
@@ -1593,17 +2067,11 @@ describe('PiEventAdapter', () => {
         },
       } as any));
 
-      // Rate-limit is retryable: the typed error is parked (see 'auto-retry
-      // recovery'), overflow state stays 'none'. An agent_end without
-      // willRetry first ends any retry UI, then releases and completes.
+      // Retryable failures are held until the SDK confirms no retry follows.
       expect(events).toHaveLength(0);
 
-      const agentEndEvents = collect(adapter.adaptEvent({ type: 'agent_end', willRetry: false } as any));
-      expect(agentEndEvents).toMatchObject([
-        { type: 'retry', phase: 'end' },
-        { type: 'typed_error', error: { code: 'rate_limited' } },
-        { type: 'complete' },
-      ]);
+      const agentEndEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+      expect(agentEndEvents).toMatchObject([{ type: 'typed_error' }, { type: 'complete' }]);
       expect(adapter.shouldCompleteQueue(true)).toBe(true);
     });
 
@@ -1621,8 +2089,10 @@ describe('PiEventAdapter', () => {
       } as any));
 
       expect(events).toEqual([
-        { type: 'compaction_failed' },
-        { type: 'error', message: 'Auto-compaction hit a transient error. Try /compact manually.' },
+        {
+          type: 'typed_error',
+          error: createTypedError('context_limit'),
+        },
         { type: 'complete' },
       ]);
       // The raw `_autoCompactionAbortController.signal` text is not in any yield.

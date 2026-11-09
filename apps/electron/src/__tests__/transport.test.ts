@@ -261,6 +261,28 @@ describe('RPC', () => {
     expect(seen).toBeInstanceOf(Uint8Array)
     expect(Array.from(seen!)).toEqual([1, 2, 3, 4])
   })
+
+  test('ordinary RPCs still honor a short client request timeout', async () => {
+    const { server, client } = await createPair({}, { requestTimeout: 80 })
+
+    server.handle('system:homeDir', async () => {
+      await new Promise(r => setTimeout(r, 200))
+      return '/tmp'
+    })
+
+    await expect(client.invoke('system:homeDir')).rejects.toThrow('Request timeout: system:homeDir (80ms)')
+  })
+
+  test('folder pickers wait for the user past the default RPC deadline', async () => {
+    const { server, client } = await createPair({}, { requestTimeout: 80 })
+
+    server.handle('dialog:openFolder', async () => {
+      await new Promise(r => setTimeout(r, 200))
+      return '/Users/someone/Documents'
+    })
+
+    await expect(client.invoke('dialog:openFolder')).resolves.toBe('/Users/someone/Documents')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -864,5 +886,21 @@ describe('invokeClient', () => {
 
     const result = await server.invokeClient(clientId, 'client:async', 20)
     expect(result).toBe('done')
+  })
+
+  test('file dialogs do not use the 30s client-capability deadline', async () => {
+    const { server, client, clientId } = await createPair(
+      {},
+      { clientCapabilities: ['client:openFileDialog'] },
+    )
+
+    client.handleCapability('client:openFileDialog', async () => {
+      await new Promise(r => setTimeout(r, 50))
+      return { canceled: false, filePaths: ['/tmp/project'] }
+    })
+
+    await expect(server.invokeClient(clientId, 'client:openFileDialog', {
+      properties: ['openDirectory'],
+    })).resolves.toEqual({ canceled: false, filePaths: ['/tmp/project'] })
   })
 })

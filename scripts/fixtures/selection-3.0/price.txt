@@ -1,0 +1,3 @@
+Selection F6 fixed electricity tariff
+Region X, year 2025, currency CNY, tax included, same tariff class: 1 yuan per kWh.
+Do not extrapolate this tariff to 2026 or a tax-excluded basis. No reliability evidence is provided.

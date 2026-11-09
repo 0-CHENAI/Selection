@@ -9,6 +9,17 @@ import { attachSessionSelfManagementBindings } from '../session-self-management-
 import type { SessionToolContext, SessionInfo } from '@craft-agent/session-tools-core';
 import { SESSION_TOOL_REGISTRY } from '@craft-agent/session-tools-core';
 
+it('preserves Task List host binding in the per-invocation Pi context spread', async () => {
+  const ctx = createBaseContext('task-list-spread');
+  attachSessionSelfManagementBindings(ctx, 'task-list-spread');
+  let calls = 0;
+  mergeSessionScopedToolCallbacks('task-list-spread', { updateTaskListFn: async () => { calls++; } });
+  const result = await SESSION_TOOL_REGISTRY.get('update_task_list')!.handler!({ ...ctx }, { items: [] });
+  expect(result.isError).toBeFalsy();
+  expect(calls).toBe(1);
+  unregisterSessionScopedToolCallbacks('task-list-spread');
+});
+
 // Minimal noop callbacks for createClaudeContext
 const noopPlan = () => {};
 const noopAuth = () => {};
@@ -144,34 +155,6 @@ describe('attachSessionSelfManagementBindings', () => {
 
     // Should now be defined without recreating ctx
     expect(ctx.setSessionLabels).toBeDefined();
-  });
-
-  it('project memory appends resolve from callbacks merged after the context was created', () => {
-    const ctx = createBaseContext(sessionId);
-    attachSessionSelfManagementBindings(ctx, sessionId);
-    expect(ctx.appendProjectMemory).toBeUndefined();
-
-    const appendProjectMemoryFn = async () => ({ path: '/ws/projects/p/MEMORY.md', heading: 'h', bytesAppended: 1 });
-    mergeSessionScopedToolCallbacks(sessionId, { appendProjectMemoryFn });
-    expect(ctx.appendProjectMemory).toBe(appendProjectMemoryFn);
-  });
-
-  it('MCP source resource/prompt callbacks resolve from the registry, so the MCP source tools can run', async () => {
-    const ctx = createBaseContext(sessionId);
-    attachSessionSelfManagementBindings(ctx, sessionId);
-    expect(ctx.mcpSources).toBeUndefined();
-
-    const mcpSources = {
-      listResources: async () => ({ resources: [], resourceTemplates: [] }),
-      readResource: async (_slug: string, uri: string) => `contents of ${uri}`,
-      listPrompts: async () => ({ prompts: [] }),
-      getPrompt: async () => '',
-    };
-    mergeSessionScopedToolCallbacks(sessionId, { mcpSources });
-    expect(ctx.mcpSources).toBe(mcpSources);
-
-    const result = await SESSION_TOOL_REGISTRY.get('source_read_resource')!.handler!(ctx, { sourceSlug: 'liza', uri: 'liza://guides/a' });
-    expect(result.content[0]!.text).toBe('contents of liza://guides/a');
   });
 
   it('callback replacement is visible without recreating the context', () => {
@@ -316,5 +299,36 @@ describe('Claude/Pi session self-management parity', () => {
     const listResult = await listHandler(ctx, {});
     expect(listResult.isError).toBe(true);
     expect(listResult.content[0]!.text).toContain('not available in this context');
+  });
+
+  it('resolves artifact version callbacks registered after the agent context exists', async () => {
+    const ctx = createBaseContext(sessionId);
+    attachSessionSelfManagementBindings(ctx, sessionId);
+    expect(ctx.artifactVersions).toBeUndefined();
+    const calls: unknown[] = [];
+    mergeSessionScopedToolCallbacks(sessionId, { artifactVersionsFn: async request => {
+      calls.push(request);
+      return { currentVersion: 'new' };
+    } });
+    const result = await SESSION_TOOL_REGISTRY.get('artifact_versions')!.handler!(ctx, {
+      action: 'restore', artifactId: 'artifact', versionId: 'old', expectedVersion: 'current',
+    });
+    expect(result.isError).toBeFalsy();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('resolves the office_render host callback late and passes the cancellation signal', async () => {
+    const ctx = createBaseContext(sessionId);
+    attachSessionSelfManagementBindings(ctx, sessionId);
+    expect(ctx.officeRender).toBeUndefined();
+    const signal = new AbortController().signal;
+    const seen: unknown[] = [];
+    mergeSessionScopedToolCallbacks(sessionId, { officeRenderFn: async (request, received) => {
+      seen.push(request, received);
+      return { file: '/w/a.docx', kind: 'docx', renderer: 'officecli-html-electron-capturePage', pageCount: 1, images: [], missingFonts: [] };
+    } });
+    const result = await SESSION_TOOL_REGISTRY.get('office_render')!.handler!({ ...ctx, officeRender: ctx.officeRender, signal } as typeof ctx, { path: '/w/a.docx', pages: '1' });
+    expect(result.isError).toBe(false);
+    expect(seen).toEqual([{ path: '/w/a.docx', pages: '1' }, signal]);
   });
 });

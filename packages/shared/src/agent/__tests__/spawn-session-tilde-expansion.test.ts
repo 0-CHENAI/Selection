@@ -28,6 +28,14 @@ function setup() {
       sessionId: 'spawned-id',
       name: 'spawned',
       status: 'started',
+      orchestrationId: 'orch-1',
+      parentSessionId: 'parent',
+      rootSessionId: 'parent',
+      depth: 1,
+      role: 'worker',
+      lifecycle: 'managed',
+      spawnReason: 'automatic',
+      mode: 'background',
     };
     return result;
   };

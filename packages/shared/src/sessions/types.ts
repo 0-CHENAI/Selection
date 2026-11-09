@@ -1,3 +1,6 @@
+import type { OfficeDocumentState } from '../protocol/office'
+import type { PptProgress, PptRequest } from '../protocol/ppt'
+import type { HandoverLink } from '../protocol/handover'
 /**
  * Session Types
  *
@@ -10,9 +13,9 @@
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { WorkModeMetadata } from './work-mode.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
-import type { BoundPr, PrMonitorState } from '../protocol/pr-watch.ts';
-import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage, ContextUsageSnapshot } from '@craft-agent/core/types';
+import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@craft-agent/core/types';
 
 /**
  * Session fields that persist to disk.
@@ -35,14 +38,13 @@ export const SESSION_PERSISTENT_FIELDS = [
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'workMode', 'workModeNeedsReview', 'executionRootSessionId', 'handover',
+  'ppt',
+  'office',
+  'pptProgress',
+  'sharedProjectMemoryEnabled',
   // Model/Connection
-  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
-  // Coding mode (lean coding prompt + tool profile; fixed once the session has messages)
-  'codingMode',
-  // Coding mode: PRs pinned to this session (chat-header PR carousel; see protocol/pr-watch BoundPr)
-  'boundPrs',
-  // Coding mode: per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
-  'prMonitors',
+  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel', 'fastMode',
   // Sharing
   'sharedUrl', 'sharedId',
   // Plan execution
@@ -69,9 +71,24 @@ export const SESSION_PERSISTENT_FIELDS = [
   'taskSlug',
   'taskRunId',
   'taskNodeId',
+  'taskAttempt',
+  'taskRevision',
+  'taskActor',
+  'taskWorkerId',
   'taskNodeCount',
   'taskDraft',
-  'taskContextFingerprint',
+  // Per-session Swarm preview state and lineage
+  'swarmEnabled',
+  'orchestrationId',
+  'orchestrationRootSessionId',
+  'orchestrationDepth',
+  'orchestrationRole',
+  'orchestrationLifecycle',
+  'orchestrationStatus',
+  'orchestrationBlocker',
+  'orchestrationTokensUsed',
+  'orchestrationTokenBudget',
+  'orchestrationAggregation',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -85,6 +102,46 @@ export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
  */
 export type SessionStatus = string;
 
+export interface SwarmAggregationContract {
+  orchestrationId: string;
+  finalAggregation: string;
+  phase: 'waiting-workers' | 'awaiting-aggregation' | 'repairing';
+  repairAttempts: number;
+  /** Stable references to the exact terminal worker results selected for aggregation. */
+  workers?: Array<{
+    sessionId: string;
+    status: 'completed' | 'failed' | 'stopped';
+    finalMessageId?: string;
+  }>;
+}
+
+export interface SwarmSessionMetadata {
+  /** Autonomous delegation is opt-in per session; missing legacy values resolve to false. */
+  swarmEnabled?: boolean;
+  orchestrationId?: string;
+  orchestrationRootSessionId?: string;
+  orchestrationDepth?: number;
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer';
+  orchestrationLifecycle?: 'managed' | 'detached';
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
+  orchestrationBlocker?: string;
+  orchestrationTokensUsed?: number;
+  orchestrationTokenBudget?: number;
+  /** Durable final-answer contract for the active managed Swarm run. */
+  orchestrationAggregation?: SwarmAggregationContract;
+}
+
+/** True only for an agent spawned inside a Swarm, never for its root coordinator. */
+export function isSpawnedSwarmAgent(
+  session: Pick<SwarmSessionMetadata, 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth'> & { id: string },
+): boolean {
+  if (!session.orchestrationId) return false;
+  if (session.orchestrationRootSessionId) {
+    return session.orchestrationRootSessionId !== session.id;
+  }
+  return (session.orchestrationDepth ?? 0) > 0;
+}
+
 /**
  * Built-in status IDs (for TypeScript consumers)
  * These are the default statuses but users can add/remove custom ones
@@ -95,6 +152,9 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Session token usage tracking
  */
 export interface SessionTokenUsage {
+  /** Independent progress assessment usage; included in totalTokens and costUsd. */
+  evaluationTokens?: number;
+  evaluationCostUsd?: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -104,10 +164,51 @@ export interface SessionTokenUsage {
   cacheCreationTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
-  /** Current occupancy, independent from billable/cumulative token counters. */
-  contextUsage?: ContextUsageSnapshot;
-  /** Backend running totals already counted into costUsd/outputTokens (see AgentEventUsage.runningTotals). */
-  lastRunningTotals?: { costUsd: number; outputTokens: number };
+  /** Cache read share of the latest request input (0-1). */
+  cacheHitRate?: number;
+  /** Estimated context composition. Optional fields appear only when Selection can measure them. */
+  contextBreakdown?: {
+    systemPrompt: number;
+    tools: number;
+    messages: number;
+    rules?: number;
+    skills?: number;
+    mcpTools?: number;
+    subagents?: number;
+    summarized?: number;
+  };
+  /** Usage reported by the most recent individual model call. Absent on legacy sessions. */
+  lastCall?: SessionModelCallUsage;
+  /** Live aggregate for the user task that is currently processing. Runtime-only in normal operation. */
+  currentTurn?: SessionTurnUsageSnapshot;
+  /** Aggregate usage for the most recently completed user turn. Absent on legacy sessions. */
+  lastTurn?: SessionTurnUsage;
+}
+
+/** Provider-normalized usage for one model invocation. */
+export interface SessionModelCallUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+}
+
+/** Provider-normalized aggregate snapshot for an in-progress user turn. */
+export interface SessionTurnUsageSnapshot extends SessionModelCallUsage {
+  modelCallCount: number;
+  wallClockMs: number;
+  startedAt: number;
+  updatedAt: number;
+}
+
+/** Provider-normalized aggregate for one user turn, including orchestration overhead. */
+export interface SessionTurnUsage extends SessionModelCallUsage {
+  modelCallCount: number;
+  wallClockMs: number;
+  startedAt: number;
+  completedAt: number;
 }
 
 /**
@@ -119,7 +220,11 @@ export type { StoredMessage } from '@craft-agent/core/types';
 /**
  * Session configuration (persisted metadata)
  */
-export interface SessionConfig {
+export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
+  ppt?: PptRequest;
+  office?: OfficeDocumentState | null;
+  pptProgress?: PptProgress;
+  handover?: HandoverLink;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -134,7 +239,7 @@ export interface SessionConfig {
   lastMessageAt?: number;
   /** Whether this session is flagged */
   isFlagged?: boolean;
-  /** Permission mode for this session ('safe', 'ask', 'guarded', 'allow-all') */
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode;
   /** Previous permission mode (used to preserve modeTransition context across restarts) */
   previousPermissionMode?: PermissionMode;
@@ -162,18 +267,13 @@ export interface SessionConfig {
   sharedId?: string;
   /** Model to use for this session (overrides global config if set) */
   model?: string;
-  /** LLM connection slug for this session (locked after first message) */
+  /** LLM connection slug for this session */
   llmConnection?: string;
-  /** Whether the connection is locked (cannot be changed after first agent creation) */
+  /** When true, workspace/global defaults and queued snapshots cannot retarget this session */
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
-  codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
-  boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
-  prMonitors?: Record<string, PrMonitorState>;
+  fastMode?: boolean;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -220,6 +320,8 @@ export interface SessionConfig {
    * - Pi: session entry ID (used with SessionManager.branch(anchor))
    */
   branchFromSdkTurnId?: string;
+  /** Force the provider to create a new native session instead of resuming recent history. */
+  forceFreshSdkSession?: boolean;
   /** One-shot hidden summary injected on the first turn after a remote transfer. */
   transferredSessionSummary?: string;
   /** Whether the transferred-session summary has already been injected. */
@@ -227,15 +329,13 @@ export interface SessionConfig {
   /** Metadata for sessions created by automations */
   triggeredBy?: {
     automationName?: string;
-    /** Matcher id of the automation that created the session (loop guard: it never re-triggers itself). */
-    automationId?: string;
     event?: string;
     timestamp?: number;
-    /** 1 for a session an automation created from a user event; +1 per automation-created hop. */
-    depth?: number;
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
+  /** When true, this session was created with shared project MEMORY.md. Runtime ignores it. */
+  sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
   /** Kanban board column id ('todo' | 'in-progress' | 'done'). Drag-to-move target; independent of sessionStatus. */
@@ -246,12 +346,15 @@ export interface SessionConfig {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
   taskDraft?: boolean;
-  /** Tasks Conductor: fingerprint of the task spec context last sent to this task session's agent (sent again when the spec changes). */
-  taskContextFingerprint?: string;
 }
 
 /**
@@ -268,7 +371,11 @@ export interface StoredSession extends SessionConfig {
  * Contains all metadata needed for list views (pre-computed at save time).
  * This enables fast session listing without parsing message content.
  */
-export interface SessionHeader {
+export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
+  ppt?: PptRequest;
+  office?: OfficeDocumentState | null;
+  pptProgress?: PptProgress;
+  handover?: HandoverLink;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -282,7 +389,7 @@ export interface SessionHeader {
   lastMessageAt?: number;
   /** Whether this session is flagged */
   isFlagged?: boolean;
-  /** Permission mode for this session ('safe', 'ask', 'guarded', 'allow-all') */
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode;
   /** Previous permission mode (used to preserve modeTransition context across restarts) */
   previousPermissionMode?: PermissionMode;
@@ -310,18 +417,13 @@ export interface SessionHeader {
   sharedId?: string;
   /** Model to use for this session (overrides global config if set) */
   model?: string;
-  /** LLM connection slug for this session (locked after first message) */
+  /** LLM connection slug for this session */
   llmConnection?: string;
-  /** Whether the connection is locked (cannot be changed after first agent creation) */
+  /** When true, workspace/global defaults and queued snapshots cannot retarget this session */
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
-  codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
-  boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
-  prMonitors?: Record<string, PrMonitorState>;
+  fastMode?: boolean;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -350,15 +452,13 @@ export interface SessionHeader {
   /** Metadata for sessions created by automations */
   triggeredBy?: {
     automationName?: string;
-    /** Matcher id of the automation that created the session (loop guard: it never re-triggers itself). */
-    automationId?: string;
     event?: string;
     timestamp?: number;
-    /** 1 for a session an automation created from a user event; +1 per automation-created hop. */
-    depth?: number;
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
+  sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
   /** Kanban board column id ('todo' | 'in-progress' | 'done'). Drag-to-move target; independent of sessionStatus. */
@@ -369,12 +469,15 @@ export interface SessionHeader {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
   taskDraft?: boolean;
-  /** Tasks Conductor: fingerprint of the task spec context last sent to this task session's agent (sent again when the spec changes). */
-  taskContextFingerprint?: string;
   // Pre-computed fields for fast list loading
   /** Number of messages in session */
   messageCount: number;
@@ -391,7 +494,11 @@ export interface SessionHeader {
 /**
  * Session metadata (lightweight, for lists)
  */
-export interface SessionMetadata {
+export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata {
+  ppt?: PptRequest;
+  office?: OfficeDocumentState | null;
+  pptProgress?: PptProgress;
+  handover?: HandoverLink;
   id: string;
   workspaceRootPath: string;
   name?: string;
@@ -429,18 +536,13 @@ export interface SessionMetadata {
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error';
   /** Model to use for this session (overrides global config if set) */
   model?: string;
-  /** LLM connection slug for this session (locked after first message) */
+  /** LLM connection slug for this session */
   llmConnection?: string;
-  /** Whether the connection is locked (cannot be changed after first agent creation) */
+  /** When true, workspace/global defaults and queued snapshots cannot retarget this session */
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
-  codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
-  boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
-  prMonitors?: Record<string, PrMonitorState>;
+  fastMode?: boolean;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
   /** ID of the last final (non-intermediate) assistant message - for unread detection */
@@ -463,6 +565,8 @@ export interface SessionMetadata {
   branchFromMessageId?: string;
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
+  sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
   /** Kanban board column id ('todo' | 'in-progress' | 'done'). Drag-to-move target; independent of sessionStatus. */
@@ -473,10 +577,20 @@ export interface SessionMetadata {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
   taskDraft?: boolean;
-  /** Tasks Conductor: fingerprint of the task spec context last sent to this task session's agent (sent again when the spec changes). */
-  taskContextFingerprint?: string;
+}
+
+/** Project sessions use independent memory; shared MEMORY.md is retired. */
+export function isSharedProjectMemoryEnabled(
+  _session?: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null,
+): boolean {
+  return false;
 }

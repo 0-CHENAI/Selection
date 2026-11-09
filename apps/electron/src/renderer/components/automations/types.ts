@@ -13,7 +13,6 @@
 import { computeNextRuns } from './utils'
 import type { PermissionMode } from '../../../shared/types'
 import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
-import { AUTOMATIONS_LOAD_ISSUES_KEY, type AutomationLoadIssue } from '@craft-agent/shared/protocol'
 import { DEFAULT_WEBHOOK_METHOD } from './constants'
 
 // ============================================================================
@@ -30,32 +29,11 @@ export type AppEvent =
   | 'SessionStatusChange'
   | 'SchedulerTick'
 
-export type AgentEvent =
-  | 'PreToolUse'
-  | 'PostToolUse'
-  | 'PostToolUseFailure'
-  | 'Notification'
-  | 'UserPromptSubmit'
-  | 'SessionStart'
-  | 'SessionEnd'
-  | 'Stop'
-  | 'SubagentStart'
-  | 'SubagentStop'
-  | 'PreCompact'
-  | 'PermissionRequest'
-  | 'Setup'
-
-export type AutomationTrigger = AppEvent | AgentEvent
+export type AutomationTrigger = AppEvent
 
 export const APP_EVENTS: AppEvent[] = [
   'LabelAdd', 'LabelRemove', 'LabelConfigChange',
   'PermissionModeChange', 'FlagChange', 'TodoStateChange', 'SessionStatusChange', 'SchedulerTick'
-]
-
-export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
-  'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
-  'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
 ]
 
 export interface PromptAction {
@@ -80,18 +58,7 @@ export interface WebhookAction {
   auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string }
 }
 
-export interface ScriptAction {
-  type: 'script'
-  /** Script path relative to the workspace root */
-  script: string
-  args?: string[]
-  runtime?: 'bun' | 'node' | 'python3'
-  timeoutMs?: number
-  /** Slug of the page this script refreshes */
-  page?: string
-}
-
-export type AutomationAction = PromptAction | WebhookAction | ScriptAction
+export type AutomationAction = PromptAction | WebhookAction
 
 // ============================================================================
 // Conditions (mirrored from packages/shared/src/automations/types.ts)
@@ -235,26 +202,15 @@ export interface AutomationListItem {
   conditions?: AutomationConditionUI[]
   /** The actions this automation performs */
   actions: AutomationAction[]
-  /**
-   * Optional Telegram forum-topic name. When set, sessions spawned by this
-   * matcher are bound to a topic of this name in the workspace's paired
-   * supergroup (created on first use).
-   */
-  telegramTopic?: string
   /** Timestamp of last execution (ms since epoch) */
   lastExecutedAt?: number
-  /**
-   * Why this automation does not run, from the server's load of automations.json
-   * (invalid entry skipped, or an event that never runs). Undefined when it runs.
-   */
-  issues?: string[]
 }
 
 // ============================================================================
 // Filter
 // ============================================================================
 
-export type AutomationFilterKind = 'all' | 'app' | 'agent' | 'scheduled'
+export type AutomationFilterKind = 'all' | 'app' | 'scheduled'
 
 export interface AutomationListFilter {
   kind: AutomationFilterKind
@@ -264,15 +220,21 @@ export interface AutomationListFilter {
 export const AUTOMATION_TYPE_TO_FILTER_KIND: Record<string, AutomationFilterKind> = {
   scheduled: 'scheduled',
   event: 'app',
-  agentic: 'agent',
 }
 
 // ============================================================================
 // Execution History
 // ============================================================================
 
-/** `skipped`: the matcher's semanticCondition was not met, so no action ran. */
-export type ExecutionStatus = 'success' | 'error' | 'blocked' | 'skipped'
+export type ExecutionStatus =
+  | 'success'
+  | 'error'
+  | 'blocked'
+  | 'matched'
+  | 'scheduled'
+  | 'running'
+  | 'rate-limited'
+  | 'suppressed'
 
 export interface WebhookDetails {
   method: string
@@ -313,6 +275,8 @@ export interface TestResult {
   state: TestState
   stderr?: string
   duration?: number
+  mode?: 'actions' | 'match'
+  matches?: Array<{ matcherId: string; name: string; event: string }>
 }
 
 // ============================================================================
@@ -331,20 +295,6 @@ export const EVENT_DISPLAY_NAMES: Record<AutomationTrigger, string> = {
   SessionStatusChange:  'Status Changed',
   SchedulerTick:        'Scheduled',
 
-  // Agent events
-  PreToolUse:           'Before Tool Runs',
-  PostToolUse:          'After Tool Runs',
-  PostToolUseFailure:   'When Tool Fails',
-  Notification:         'Notification',
-  UserPromptSubmit:     'Message Sent',
-  SessionStart:         'Session Started',
-  SessionEnd:           'Session Ended',
-  Stop:                 'Agent Stopped',
-  SubagentStart:        'Sub-agent Started',
-  SubagentStop:         'Sub-agent Stopped',
-  PreCompact:           'Before Memory Cleanup',
-  PermissionRequest:    'Permission Requested',
-  Setup:                'Initial Setup',
 }
 
 export function getEventDisplayName(event: AutomationTrigger): string {
@@ -355,8 +305,6 @@ export function getEventDisplayName(event: AutomationTrigger): string {
 export const PERMISSION_DISPLAY_NAMES: Record<PermissionMode, string> = {
   'safe':      'Explore',
   'ask':       'Ask',
-  // Not selectable for automations (they run unattended); listed for completeness.
-  'guarded':   'Guarded',
   'allow-all': 'Execute',
 }
 
@@ -375,9 +323,6 @@ export type EventCategory =
   | 'permission'
   | 'flag'
   | 'todo'
-  | 'agent-pre'
-  | 'agent-post'
-  | 'agent-error'
   | 'session'
   | 'other'
 
@@ -391,21 +336,9 @@ interface AutomationsConfigFile {
   automations?: Record<string, AutomationsConfigMatcher[]>
 }
 
-/** A raw action is whatever the file holds — including types that no longer exist (e.g. "command"). */
-type LooseAction = { type?: unknown; [key: string]: unknown }
-
-function isLooseAction(value: unknown): value is LooseAction {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** Actions the screen can show: prompt, webhook and script (all three run). */
-function isKnownAction(value: unknown): value is AutomationAction {
-  if (!isLooseAction(value)) return false
-  if (value.type === 'prompt') return typeof value.prompt === 'string'
-  if (value.type === 'webhook') return typeof value.url === 'string'
-  if (value.type === 'script') return typeof value.script === 'string'
-  return false
-}
+type RawAction =
+  | { type: 'prompt'; prompt: string; llmConnection?: string; model?: string; thinkingLevel?: ThinkingLevel; }
+  | { type: 'webhook'; url: string; method?: string; headers?: Record<string, string>; bodyFormat?: 'json' | 'form' | 'raw'; body?: unknown; captureResponse?: boolean; auth?: WebhookAction['auth'] }
 
 interface AutomationsConfigMatcher {
   id?: string
@@ -417,25 +350,23 @@ interface AutomationsConfigMatcher {
   labels?: string[]
   conditions?: AutomationConditionUI[]
   enabled?: boolean
-  actions?: unknown[]
+  actions?: RawAction[]
 }
 
 /** Derive a human-readable name from task actions and event */
 function deriveAutomationName(event: string, matcher: AutomationsConfigMatcher): string {
   if (matcher.name) return matcher.name
-  const firstAction = (Array.isArray(matcher.actions) ? matcher.actions : [])[0]
-  // Missing or unknown action (e.g. the removed "command" type): name it after the event
-  if (!isKnownAction(firstAction)) return getEventDisplayName(event as AutomationTrigger)
+  const allActions = matcher.actions ?? []
+  const firstAction = allActions[0]
+  if (!firstAction) return getEventDisplayName(event as AutomationTrigger)
 
   if (firstAction.type === 'webhook') {
     const label = `Webhook ${firstAction.method ?? DEFAULT_WEBHOOK_METHOD} ${firstAction.url}`
     return label.length > 40 ? label.slice(0, 40) + '...' : label
   }
 
-  if (firstAction.type === 'script') {
-    const label = `Script ${firstAction.script}`
-    return label.length > 40 ? label.slice(0, 40) + '...' : label
-  }
+
+  if (firstAction.type !== 'prompt') return getEventDisplayName(event as AutomationTrigger)
 
   // Extract @skill mentions or use first ~40 chars
   const mentionMatch = firstAction.prompt.match(/@(\S+)/)
@@ -448,7 +379,7 @@ function deriveAutomationName(event: string, matcher: AutomationsConfigMatcher):
 /** Derive a summary line from the matcher/cron/event */
 function deriveAutomationSummary(event: string, matcher: AutomationsConfigMatcher): string {
   if (matcher.cron) {
-    const runs = computeNextRuns(matcher.cron, 1, matcher.timezone)
+    const runs = computeNextRuns(matcher.cron, 1)
     if (runs.length > 0) {
       const next = runs[0]!
       const tz = matcher.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -470,56 +401,9 @@ function deriveAutomationSummary(event: string, matcher: AutomationsConfigMatche
   return `On ${getEventDisplayName(event as AutomationTrigger)}`
 }
 
-/** Key that ties a load issue to the row it describes: raw event name + index in that event's list. */
-function matcherKey(event: string, index: number): string {
-  return `${event}#${index}`
-}
-
-/**
- * The automations that will not run, and why, as attached by the server to the
- * automations.json it returns (empty for older servers that don't send them).
- */
-export function parseAutomationLoadIssues(json: unknown): AutomationLoadIssue[] {
-  if (!json || typeof json !== 'object') return []
-  const raw = (json as Record<string, unknown>)[AUTOMATIONS_LOAD_ISSUES_KEY]
-  if (!Array.isArray(raw)) return []
-  const issues: AutomationLoadIssue[] = []
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const e = entry as Record<string, unknown>
-    const messages = Array.isArray(e.messages) ? e.messages.filter((m): m is string => typeof m === 'string') : []
-    if (messages.length === 0) continue
-    const issue: AutomationLoadIssue = { messages }
-    if (typeof e.event === 'string') issue.event = e.event
-    if (typeof e.index === 'number') issue.index = e.index
-    if (typeof e.id === 'string') issue.id = e.id
-    if (typeof e.name === 'string') issue.name = e.name
-    issues.push(issue)
-  }
-  return issues
-}
-
-/**
- * Load issues no listed row shows — the whole file (e.g. not valid JSON), an
- * event whose value isn't a list, an entry that isn't an object. The list puts
- * these in its banner so nothing that won't run goes unexplained.
- */
-export function getUnattachedLoadIssues(json: unknown, items: AutomationListItem[]): string[] {
-  const listed = new Set(items.map(item => matcherKey(item.event, item.matcherIndex)))
-  return parseAutomationLoadIssues(json)
-    .filter(issue => issue.event === undefined || issue.index === undefined || !listed.has(matcherKey(issue.event, issue.index)))
-    .map((issue) => {
-      if (issue.event === undefined) return issue.messages.join(' ')
-      const where = `${issue.name ?? issue.event}${issue.index === undefined ? '' : ` #${issue.index + 1}`}`
-      return `${where}: ${issue.messages.join(' ')}`
-    })
-}
-
 /**
  * Parse an automations.json file into a flat list of AutomationListItem[].
- * Each matcher entry under each event becomes one item. Entries the server
- * reports as not running carry `issues`, and are listed even when they have no
- * action the screen can show (e.g. only the removed "command" type).
+ * Each matcher entry under each event becomes one item.
  */
 export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
   if (!json || typeof json !== 'object') return []
@@ -527,32 +411,22 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
   const eventMap = config.automations
   if (!eventMap || typeof eventMap !== 'object') return []
 
-  const issuesByMatcher = new Map<string, string[]>()
-  for (const issue of parseAutomationLoadIssues(json)) {
-    if (issue.event === undefined || issue.index === undefined) continue
-    const key = matcherKey(issue.event, issue.index)
-    issuesByMatcher.set(key, [...(issuesByMatcher.get(key) ?? []), ...issue.messages])
-  }
-
+  const allEvents = APP_EVENTS as string[]
   const items: AutomationListItem[] = []
   let index = 0
 
   for (const [eventName, matchers] of Object.entries(eventMap)) {
-    if (!Array.isArray(matchers)) continue
+    if (!Array.isArray(matchers) || !allEvents.includes(eventName)) continue
     const event = eventName as AutomationTrigger
 
     for (let matcherIdx = 0; matcherIdx < matchers.length; matcherIdx++) {
-      const matcher = matchers[matcherIdx] as AutomationsConfigMatcher | null
-      if (!matcher || typeof matcher !== 'object' || Array.isArray(matcher)) continue
-      const issues = issuesByMatcher.get(matcherKey(eventName, matcherIdx))
+      const matcher = matchers[matcherIdx]
+      const rawActions = matcher.actions
+      if (!rawActions || !Array.isArray(rawActions) || rawActions.length === 0) continue
 
-      const actions = (Array.isArray(matcher.actions) ? matcher.actions : []).filter(isKnownAction)
-      // Nothing to show: list it only when the server says why it won't run.
-      if (actions.length === 0 && !issues) continue
-
-      const rawTopic = (matcher as { telegramTopic?: unknown }).telegramTopic
-      const telegramTopic =
-        typeof rawTopic === 'string' && rawTopic.trim().length > 0 ? rawTopic.trim() : undefined
+      const actions: AutomationAction[] = rawActions
+        .filter((a): a is AutomationAction => a.type === 'prompt' || a.type === 'webhook')
+      if (actions.length === 0) continue
 
       items.push({
         id: matcher.id ?? `${eventName}-${index}`,
@@ -568,8 +442,6 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
         labels: matcher.labels,
         conditions: matcher.conditions,
         actions,
-        telegramTopic,
-        issues,
       })
       index++
     }
@@ -587,29 +459,12 @@ export function getEventCategory(event: AutomationTrigger): EventCategory {
     case 'LabelConfigChange':
       return 'label'
     case 'PermissionModeChange':
-    case 'PermissionRequest':
       return 'permission'
     case 'FlagChange':
       return 'flag'
     case 'TodoStateChange':
     case 'SessionStatusChange':
       return 'todo'
-    case 'PreToolUse':
-    case 'UserPromptSubmit':
-    case 'Setup':
-    case 'PreCompact':
-    case 'SubagentStart':
-      return 'agent-pre'
-    case 'PostToolUse':
-    case 'SessionEnd':
-    case 'SubagentStop':
-    case 'Stop':
-      return 'agent-post'
-    case 'PostToolUseFailure':
-      return 'agent-error'
-    case 'SessionStart':
-    case 'Notification':
-      return 'session'
     default:
       return 'other'
   }

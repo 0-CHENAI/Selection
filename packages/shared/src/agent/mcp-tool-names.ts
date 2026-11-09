@@ -58,7 +58,7 @@ export function mcpToolNameWords(name: string): string[] {
     .map(word => word.toLowerCase());
 }
 
-/** Words of the source slug in `mcp__<slug>__<tool>`: tool names often start with them (`slack_get_…`). */
+/** Words of the source slug in `mcp__<source>__<tool>`: tool names often start with them (`slack_get_…`). */
 function mcpSourceWords(toolName: string): Set<string> {
   if (!toolName.startsWith('mcp__')) return new Set();
   const separator = toolName.indexOf('__', 'mcp__'.length);

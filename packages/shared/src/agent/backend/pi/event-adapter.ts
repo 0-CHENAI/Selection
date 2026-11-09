@@ -1,17 +1,17 @@
+import { AnswerBoundary } from './answer-boundary.ts';
 /**
  * Pi SDK Event Adapter
  *
  * Maps Pi Agent Core events (AgentEvent / AgentSessionEvent) to
- * Craft Agent's AgentEvent format for UI compatibility.
+ * Selection's AgentEvent format for UI compatibility.
  *
  * Pi emits fine-grained lifecycle events. We translate them into
  * the same event vocabulary the renderer already understands from
  * Claude / Codex / Copilot backends.
  */
 
-import type { AgentEvent as CraftAgentEvent, ContextUsageSnapshot } from '@craft-agent/core/types';
-import { contextAfterCompaction, contextFromPi } from '../../context-usage.ts';
-import type { PiContextUsagePayload } from './protocol.ts';
+import type { AgentEvent as CraftAgentEvent, AgentEventUsage } from '@craft-agent/core/types';
+import { ThinkLeakBuffer, visibleTextAfterThinkLeak } from '@craft-agent/core/utils';
 import type {
   AgentEvent as PiAgentEvent,
 } from '@earendil-works/pi-agent-core';
@@ -21,9 +21,14 @@ import type {
 import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { isContextOverflow, isRetryableAssistantError } from '@earendil-works/pi-ai';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
+import { AnswerArgumentStream } from '../../../answer-argument-stream';
+import { streamTrace } from '../../../stream-trace.ts';
 import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
-import { createAgentError, parseError } from '../../errors.ts';
+import { parseError, createTypedError } from '../../errors.ts';
+import { normalizeToolResultContent } from '../../tool-matching.ts';
+import { cleanToolMetadataLabel } from '../../../utils/toolNames.ts';
+import { readContextBreakdownFields } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -36,54 +41,150 @@ import { createAgentError, parseError } from '../../errors.ts';
  */
 const SDK_AUTOCOMPACT_RACE_SIGNATURE = /_autoCompactionAbortController\.signal/;
 
+type PiUsage = {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost: { total: number };
+};
+
+function cacheHitRateFromPiUsage(usage: PiUsage): number | undefined {
+  const cacheRead = usage.cacheRead || 0;
+  const totalInput = usage.input + cacheRead;
+  if (totalInput <= 0) return undefined;
+  return Math.min(1, cacheRead / totalInput);
+}
+
+function readContextBreakdown(event: object): AgentEventUsage['contextBreakdown'] | undefined {
+  return readContextBreakdownFields((event as { contextBreakdown?: unknown }).contextBreakdown);
+}
+
+function toAgentUsage(usage: PiUsage, contextWindow: number | undefined, contextBreakdown?: AgentEventUsage['contextBreakdown']): AgentEventUsage {
+  const cacheRead = usage.cacheRead || 0;
+  return {
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheCreationTokens: usage.cacheWrite,
+    costUsd: usage.cost.total,
+    contextTokens: usage.input + cacheRead,
+    contextWindow,
+    cacheHitRate: cacheHitRateFromPiUsage(usage),
+    ...(contextBreakdown ? { contextBreakdown } : {}),
+  };
+}
+
 /** How long to wait after a held overflow `agent_end` for a `compaction_start`
  *  before giving up and surfacing the original error. The SDK fires
  *  `_checkCompaction` on the same event-queue tick, so the only delay is event
  *  serialization — 5 s is well above any plausible jitter. */
 const OVERFLOW_FALLBACK_TIMEOUT_MS = 5_000;
 
-/** How long to wait after an `agent_end { willRetry: true }` for the SDK's
- *  `auto_retry_start`. `_prepareRetry` emits it synchronously right after the
- *  agent loop returns, so — as with overflow — only event serialization can
- *  delay it. */
-const RETRY_START_FALLBACK_TIMEOUT_MS = 5_000;
-
-/** Grace added on top of the backoff the SDK announced in
- *  `auto_retry_start.delayMs` before we stop waiting for the retried run's
- *  `agent_start` and surface the parked error instead. */
-const RETRY_RUN_GRACE_MS = 15_000;
-
-/** Retryable provider errors that the shared `parseError` cannot classify are
- *  split into provider-side incidents (surfaced as `service_error`) and
- *  transport failures (surfaced as `network_error`). Patterns mirror the
- *  provider-side group of pi-ai's `RETRYABLE_PROVIDER_ERROR_PATTERN`. */
-const RETRYABLE_PROVIDER_SIDE_PATTERN =
-  /overloaded|provider.?returned.?error|retry your request|request again|resource.?exhausted|retry delay|server.?error|internal.?error|service.?unavailable|exceeded request buffer limit/i;
-
 /**
  * Combined event type the adapter can handle.
  * AgentSessionEvent is a superset of PiAgentEvent (adds compaction_*, auto_retry_*, queue_update).
  */
-type PiEvent = (PiAgentEvent | AgentSessionEvent | { type: 'context_usage' }) & PiContextUsagePayload;
+type PiEvent = PiAgentEvent | AgentSessionEvent;
+
+type TextPhase = 'commentary' | 'final_answer';
 
 /**
- * Maps Pi SDK events to Craft AgentEvents for UI compatibility.
+ * OpenAI Responses stores the message phase inside Pi's text signature.
+ * Treat malformed/legacy signatures as unclassified text so older providers
+ * keep their existing behavior.
+ */
+function getTextPhase(textSignature: unknown): TextPhase | undefined {
+  if (typeof textSignature !== 'string' || !textSignature.startsWith('{')) return undefined;
+  try {
+    const parsed = JSON.parse(textSignature) as { phase?: unknown };
+    if (parsed.phase === 'commentary' || parsed.phase === 'final_answer') {
+      return parsed.phase;
+    }
+  } catch {
+    // Legacy opaque signatures are not phase metadata.
+  }
+  return undefined;
+}
+
+function isCodexResponsesMessage(message: AssistantMessage | undefined): boolean {
+  return message?.api === 'openai-codex-responses' || message?.provider === 'openai-codex';
+}
+
+function getStreamingTextPhase(
+  message: AssistantMessage | undefined,
+  contentIndex?: number,
+): TextPhase | undefined {
+  if (!Array.isArray(message?.content)) return undefined;
+  if (contentIndex !== undefined) {
+    const part = message.content[contentIndex];
+    return part?.type === 'text'
+      ? getTextPhase((part as { textSignature?: unknown }).textSignature)
+      : undefined;
+  }
+  const phases = message.content
+    .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
+    .map((part) => getTextPhase((part as { textSignature?: unknown }).textSignature));
+  if (phases.length === 0 || phases.some((phase) => phase === undefined)) return undefined;
+  return phases.every((phase) => phase === phases[0]) ? phases[0] : undefined;
+}
+
+/**
+ * Maps Pi SDK events to SelectionEvents for UI compatibility.
  *
  * Event mapping:
  * - message_update (text_delta in assistantMessageEvent) → text_delta
  * - message_end → text_complete
  * - tool_execution_start → tool_start
  * - tool_execution_end → tool_result
- * - agent_end → complete (deferred while overflow recovery or an auto-retry is in flight)
+ * - agent_end → complete
  * - compaction_start → status (with "Compacting" keyword)
  * - compaction_end → info/error
- * - failed message_end → text_discard (only its unfinished text)
- * - auto_retry_start / retried agent_start → retry (backoff / active)
- * - auto_retry_end → retry (end) + info on success; releases errors on cancellation
- * - queue_update / agent_settled / entry_appended / summarization_retry_* → ignored
+ * - auto_retry_start → status
+ * - auto_retry_end → status
+ * - queue_update → ignored (no current UI consumer)
  */
 export class PiEventAdapter extends BaseEventAdapter {
+  private presentationProtocol: 'native' | 'marker-v1' | 'legacy' = 'legacy';
+  private boundary?: AnswerBoundary;
+  private boundaryStreamed = false;
+  private markerAnswerStarted = false;
+  /** Host-committed answer turns split prose at the optional final-answer marker. */
+  private hostAnswerBoundary = false;
+  setPresentationProtocol(protocol: 'native' | 'marker-v1' | 'legacy'): void {
+    this.presentationProtocol = protocol;
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+  }
+  setHostAnswerBoundary(enabled: boolean): void {
+    if (this.hostAnswerBoundary === enabled) return;
+    this.hostAnswerBoundary = enabled;
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+  }
+  private usesAnswerBoundary(message?: AssistantMessage): boolean {
+    // Native commentary/final_answer signatures remain authoritative even if
+    // a forwarded event omits api/provider fields. Optional legacy markers
+    // must not concatenate process text into the host-committed final answer.
+    // marker-v1 (`<<<FINAL_ANSWER>>>`) still exists on some connections. Do not
+    // parse it here — a second pass over the model output is forbidden. Leaked
+    // `<think>` / bare `</think>` in that text is peeled at presentation time.
+    if (this.hostAnswerBoundary && (isCodexResponsesMessage(message) || (
+      Array.isArray(message?.content) && message.content.some(part =>
+        part.type === 'text' && getTextPhase((part as { textSignature?: unknown }).textSignature) !== undefined)
+    ))) return false;
+    return this.presentationProtocol === 'marker-v1' || this.hostAnswerBoundary;
+  }
+  private answerBoundary(): AnswerBoundary {
+    return this.boundary ??= new AnswerBoundary(() => this.nextSubTurnId('m'),
+      name => console.warn('[answer-boundary]', name),
+      this.hostAnswerBoundary ? 'native' : 'marker-v1');
+  }
+
   // Track tool names from execution_start for proper tool_result correlation
+  private answerPreviewTimes = new Map<string, number>();
+  private answerStreams = new Map<string, AnswerArgumentStream>();
+  private toolProgressAt = new Map<string, number>();
   private toolNames: Map<string, string> = new Map();
 
   // Track whether streaming deltas have been received for the current message
@@ -95,34 +196,36 @@ export class PiEventAdapter extends BaseEventAdapter {
   // Sub-turnId isolation for tool calls within a single Pi turn
   private subTurnCounter: number = 0;
   private messageSubTurnId: string | null = null;
+  private streamingTextPhase: TextPhase | 'unclassified' | undefined;
 
+  private activityAt = 0;
+  private toolInputBytes = 0;
+  private showingToolArguments = false;
+  private reasoningBytes = 0;
+  private visibleBytes = 0;
+  /** Live reasoning is its own intermediate turn so it never joins the answer. */
+  private thinkingTurnId: string | null = null;
+  private thinkingText = '';
+  /** `<think>` that arrived inside a text part because reasoning was disabled. */
+  private thinkLeak = new ThinkLeakBuffer();
+  private leakedThinkEmitted = false;
+  // message_end precedes the SDK's retry decision. Keep transient failures out
+  // of the durable transcript until agent_end confirms they are terminal.
+  private pendingRetryError: CraftAgentEvent | null = null;
+  private awaitingRetry = false;
+  private retryErrorDelivered = false;
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
-  // Mini model ID for call_llm display default (#596).
+  // Current session model for call_llm display default (#192).
   // Used when the caller didn't specify an explicit model — we fill args.model
   // on the tool_start event so the UI shows the effective default instead of
   // leaving the badge blank.
-  private miniModel: string | undefined;
-
-  // Occupancy is independent of API billing; never fall back to lastUsage.
-  private contextUsage: ContextUsageSnapshot | undefined;
-
-  /** Normalize raw subprocess metadata at the host boundary (also used by manual RPC). */
-  *adaptContextUsage(payload: PiContextUsagePayload, afterCompaction = false, estimatedTokensAfter?: number): Generator<CraftAgentEvent> {
-    const snapshot = contextFromPi(payload.contextUsage, payload.compactionSettings, estimatedTokensAfter)
-      ?? (afterCompaction ? contextAfterCompaction(estimatedTokensAfter, this.contextUsage) : undefined);
-    if (snapshot) {
-      this.contextUsage = snapshot;
-      yield { type: 'context_usage', contextUsage: snapshot };
-    }
-  }
+  private callLlmDefaultModel: string | undefined;
 
   // Track last usage for emitting with complete event
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
-  // Output and cost of every assistant message in the turn (lastUsage holds only the final call)
-  private turnOutputTokens = 0;
-  private turnCostUsd = 0;
+  private lastContextBreakdown: AgentEventUsage['contextBreakdown'];
 
   // ============================================================
   // Overflow-recovery state machine
@@ -139,39 +242,12 @@ export class PiEventAdapter extends BaseEventAdapter {
   private overflowState: 'none' | 'held' | 'awaiting' | 'compacting' | 'recovering' = 'none';
   private heldOverflowError: string | null = null;
   private fallbackTimerId: ReturnType<typeof setTimeout> | null = null;
-
-  // ============================================================
-  // Auto-retry state machine
-  // ============================================================
-  //
-  // The Pi SDK retries transient provider/transport errors on its own
-  // (`isRetryableAssistantError`: 429/5xx/overloaded, "fetch failed",
-  // "terminated", "socket hang up", …) with exponential backoff. The event
-  // sequence is: message_end(error) → agent_end { willRetry: true } →
-  // auto_retry_start → [backoff] → agent_start … agent_end. Exactly like
-  // overflow recovery, the retried run arrives AFTER an agent_end, so the
-  // adapter must not complete the queue on that agent_end. It also parks the
-  // classified error instead of surfacing it: the user sees a "retrying"
-  // status and either the recovered answer or, if every attempt fails, one
-  // error at the end.
-  //
-  //   none ──message_end(retryable)──► held
-  //   held ──agent_end{willRetry:false}──► none        (release error, complete)
-  //   held ──agent_end{willRetry:true}───► awaitingRetry (5 s fallback)
-  //   awaitingRetry ──auto_retry_start──► backoff      (delayMs + grace fallback)
-  //   backoff ──agent_start────────────► recovering
-  //   recovering ──agent_end───────────► none          (normal complete)
-  //   awaitingRetry|backoff ──auto_retry_end{success:false}──► none (release, complete)
-  private retryState: 'none' | 'held' | 'awaitingRetry' | 'backoff' | 'recovering' = 'none';
-  private heldRetryError: CraftAgentEvent | null = null;
-  private retryFallbackTimerId: ReturnType<typeof setTimeout> | null = null;
-
   /** Set when the adapter wants the caller to call `eventQueue.complete()`
-   *  on a non-`agent_end` event (e.g. `compaction_end` failure, cancelled
-   *  auto-retry). Consumed by `shouldCompleteQueue()`. */
+   *  on a non-`agent_end` event (e.g. `compaction_end` failure). Consumed by
+   *  `shouldCompleteQueue()`. */
   private pendingQueueComplete: boolean = false;
-  /** Caller-supplied callbacks for the asynchronous fallback timer paths —
-   *  the timers fire outside `adaptEvent()` so we can't yield through the
+  /** Caller-supplied callbacks for the asynchronous fallback timer path —
+   *  the timer fires outside `adaptEvent()` so we can't yield through the
    *  generator. */
   private onFallbackEvent: ((event: CraftAgentEvent) => void) | null = null;
   private onFallbackComplete: (() => void) | null = null;
@@ -188,13 +264,12 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   /**
-   * Register handlers invoked when a recovery fallback timer fires — the SDK
-   * didn't emit a `compaction_start` after a held overflow `agent_end`, or no
-   * `auto_retry_start` / retried `agent_start` followed an
-   * `agent_end { willRetry: true }`. The adapter calls `onEvent` to enqueue the
-   * parked error, then `onComplete` to terminate the iterator.
+   * Register handlers invoked when the overflow-recovery fallback timer fires
+   * (the SDK didn't emit a `compaction_start` after a held overflow `agent_end`
+   * within `OVERFLOW_FALLBACK_TIMEOUT_MS`). Adapter calls `onEvent` to enqueue
+   * the buffered original error, then `onComplete` to terminate the iterator.
    */
-  setRecoveryFallbackHandlers(
+  setOverflowFallbackHandlers(
     onEvent: (event: CraftAgentEvent) => void,
     onComplete: () => void,
   ): void {
@@ -205,110 +280,29 @@ export class PiEventAdapter extends BaseEventAdapter {
   /**
    * Decide whether the caller should call `eventQueue.complete()` after
    * processing this SDK event. The historical rule was "always on
-   * `agent_end`"; with overflow recovery and auto-retry we defer completion
-   * until the recovered turn finishes (or recovery fails / times out).
+   * `agent_end`"; with overflow recovery we defer completion until the
+   * recovered turn finishes (or recovery fails / times out).
    */
   shouldCompleteQueue(isAgentEnd: boolean): boolean {
     if (this.pendingQueueComplete) {
       this.pendingQueueComplete = false;
       return true;
     }
-    return isAgentEnd && this.overflowState === 'none' && this.retryState === 'none';
+    return isAgentEnd && this.overflowState === 'none' && !this.awaitingRetry;
   }
 
   /**
-   * Reset overflow-recovery and auto-retry state. Call from session disposal
-   * and hard aborts so a stale fallback timer doesn't fire on a torn-down
-   * adapter and a held turn can't leak into the next one.
+   * Reset overflow-recovery state. Call from session disposal so a stale
+   * fallback timer doesn't fire on a torn-down adapter.
    */
-  resetRecoveryState(): void {
+  resetOverflowState(): void {
     this.cancelOverflowFallbackTimer();
     this.overflowState = 'none';
     this.heldOverflowError = null;
-    this.cancelRetryFallbackTimer();
-    this.retryState = 'none';
-    this.heldRetryError = null;
     this.pendingQueueComplete = false;
-  }
-
-  /** Whether an overflow recovery or auto-retry currently holds the turn open. */
-  get isHoldingTurn(): boolean {
-    return this.overflowState !== 'none' || this.retryState !== 'none';
-  }
-
-  /**
-   * Yield the parked retryable error (if any) and leave the retry state
-   * machine. Used when the SDK will not retry (disabled/exhausted) or when a
-   * retry was cancelled.
-   */
-  private *releaseHeldRetryError(): Generator<CraftAgentEvent> {
-    const held = this.heldRetryError;
-    this.heldRetryError = null;
-    this.retryState = 'none';
-    this.cancelRetryFallbackTimer();
-    yield { type: 'retry', phase: 'end' };
-    if (held) yield held;
-  }
-
-  /**
-   * Arm the auto-retry fallback timer. Fires only if the state is unchanged
-   * when the timeout elapses (a late event may already have moved us on).
-   */
-  private armRetryFallbackTimer(timeoutMs: number, reason: string): void {
-    this.cancelRetryFallbackTimer();
-    const armedState = this.retryState;
-    this.retryFallbackTimerId = setTimeout(() => {
-      this.retryFallbackTimerId = null;
-      if (this.retryState !== armedState) return;
-      this.log.warn(`Auto-retry fallback fired — ${reason}`, { timeoutMs, state: armedState });
-      const held: CraftAgentEvent = this.heldRetryError ?? {
-        type: 'error',
-        message: 'The model request failed and the automatic retry did not start. Please try again.',
-      };
-      this.heldRetryError = null;
-      this.retryState = 'none';
-      this.onFallbackEvent?.({ type: 'retry', phase: 'end' });
-      this.onFallbackEvent?.(held);
-      this.onFallbackComplete?.();
-    }, timeoutMs);
-  }
-
-  private cancelRetryFallbackTimer(): void {
-    if (this.retryFallbackTimerId !== null) {
-      clearTimeout(this.retryFallbackTimerId);
-      this.retryFallbackTimerId = null;
-    }
-  }
-
-  /**
-   * Classify a failed assistant message for the UI.
-   *
-   * Auth/billing/rate-limit/5xx errors go through the shared `parseError` so
-   * SessionManager can run its auth-retry pipeline (refresh token + resend).
-   * Transient errors that parser doesn't know but the SDK retries ("terminated",
-   * "socket hang up", "stream ended before message_stop", …) become typed
-   * connection/service errors so the UI offers Retry instead of a raw string.
-   */
-  private classifyAssistantError(message: AssistantMessage, errorMessage: string): CraftAgentEvent {
-    const parsed = parseError(new Error(errorMessage));
-    if (parsed.code !== 'unknown_error') {
-      return { type: 'typed_error', error: parsed };
-    }
-    if (isRetryableAssistantError(message)) {
-      const code = RETRYABLE_PROVIDER_SIDE_PATTERN.test(errorMessage) ? 'service_error' : 'network_error';
-      return { type: 'typed_error', error: createAgentError(code, errorMessage) };
-    }
-    return { type: 'error', message: errorMessage };
-  }
-
-  /** Short human-readable label for the retry status line. */
-  private retryReasonLabel(sdkErrorMessage: string | undefined): string {
-    const held = this.heldRetryError;
-    if (held?.type === 'typed_error') return held.error.title;
-    const raw = (held?.type === 'error' ? held.message : sdkErrorMessage) ?? '';
-    const oneLine = raw.replace(/\s+/g, ' ').trim();
-    if (!oneLine) return 'Temporary model error';
-    return oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine;
+    this.pendingRetryError = null;
+    this.awaitingRetry = false;
+    this.retryErrorDelivered = false;
   }
 
   private armOverflowFallbackTimer(): void {
@@ -318,13 +312,12 @@ export class PiEventAdapter extends BaseEventAdapter {
       // Re-check state at fire time — a late `compaction_start` may have
       // already transitioned us to `compacting`.
       if (this.overflowState !== 'awaiting') return;
-      const errorMessage = this.heldOverflowError ?? 'Context overflow';
       this.heldOverflowError = null;
       this.overflowState = 'none';
       this.log.warn('Overflow recovery fallback fired — SDK emitted no compaction events', {
         timeoutMs: OVERFLOW_FALLBACK_TIMEOUT_MS,
       });
-      this.onFallbackEvent?.({ type: 'error', message: errorMessage });
+      this.onFallbackEvent?.({ type: 'typed_error', error: createTypedError('context_limit') });
       this.onFallbackComplete?.();
     }, OVERFLOW_FALLBACK_TIMEOUT_MS);
   }
@@ -337,13 +330,13 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   /**
-   * Set the mini model ID for call_llm badge default.
+   * Set the default model shown on the call_llm badge.
    * When the agent's call_llm invocation omits `args.model`, we fill it with
    * this so the UI badge shows the effective default instead of nothing.
    * Explicit `args.model` values from the agent are always preserved.
    */
-  setMiniModel(model: string | undefined): void {
-    this.miniModel = model;
+  setCallLlmDefaultModel(model: string | undefined): void {
+    this.callLlmDefaultModel = model;
   }
 
   /**
@@ -354,31 +347,103 @@ export class PiEventAdapter extends BaseEventAdapter {
     return `${base}__${prefix}${this.subTurnCounter++}`;
   }
 
+  /** Model reasoning, shown while it is still being produced. Not the reply. */
+  private *pushThinking(delta: string): Generator<CraftAgentEvent> {
+    if (!delta) return;
+    if (!this.thinkingTurnId) this.thinkingTurnId = this.nextSubTurnId('think');
+    this.thinkingText += delta;
+    streamTrace('adapter-delta', { event: 'thinking_delta', chars: delta.length });
+    yield {
+      type: 'text_delta',
+      text: delta,
+      phase: 'intermediate',
+      streamKind: 'thinking',
+      presentationProtocol: this.presentationProtocol,
+      turnId: this.thinkingTurnId,
+    };
+  }
+
+  /** Route a leaked `<think>` block onto the thinking turn; other text stays visible. */
+  private *emitTextPieces(
+    pieces: ReturnType<ThinkLeakBuffer['push']>,
+    textPhase: TextPhase | undefined,
+  ): Generator<CraftAgentEvent> {
+    for (const piece of pieces) {
+      if (piece.kind === 'thinking') {
+        if (piece.text) {
+          this.leakedThinkEmitted = true;
+          yield* this.pushThinking(piece.text);
+        }
+        if (piece.done) yield* this.finishThinking();
+        continue;
+      }
+      if (!piece.text) continue;
+      this.hasStreamedDeltas = true;
+      if (!this.messageSubTurnId) this.messageSubTurnId = this.nextSubTurnId('m');
+      this.streamingTextPhase = textPhase ?? 'unclassified';
+      streamTrace('adapter-delta', { event: 'text_delta', chars: piece.text.length });
+      yield {
+        type: 'text_delta',
+        presentationProtocol: this.presentationProtocol,
+        text: piece.text,
+        phase: textPhase === 'commentary'
+          ? 'intermediate'
+          : textPhase === 'final_answer'
+            ? 'final'
+            : 'unclassified',
+        turnId: this.messageSubTurnId,
+      };
+    }
+  }
+
+  private *finishThinking(): Generator<CraftAgentEvent> {
+    if (!this.thinkingTurnId || !this.thinkingText) {
+      this.thinkingTurnId = null;
+      this.thinkingText = '';
+      return;
+    }
+    const text = this.thinkingText;
+    const turnId = this.thinkingTurnId;
+    this.thinkingTurnId = null;
+    this.thinkingText = '';
+    yield {
+      type: 'text_complete',
+      text,
+      phase: 'intermediate',
+      streamKind: 'thinking',
+      isIntermediate: true,
+      presentationProtocol: this.presentationProtocol,
+      turnId,
+    };
+  }
+
   protected onTurnStart(): void {
+    this.toolInputBytes = 0;
+    this.showingToolArguments = false;
+    this.pendingRetryError = null;
+    this.awaitingRetry = false;
+    this.retryErrorDelivered = false;
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+    this.markerAnswerStarted = false;
     this.toolNames.clear();
+    this.toolProgressAt.clear();
     this.hasStreamedDeltas = false;
     this.hasEmittedFinalText = false;
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
-    this.turnOutputTokens = 0;
-    this.turnCostUsd = 0;
-    // A new Craft turn can only start once the previous queue completed (or
-    // was force-aborted), so any recovery state left here is stale.
-    this.resetRecoveryState();
+    this.streamingTextPhase = undefined;
+    this.thinkingTurnId = null;
+    this.thinkingText = '';
+    this.thinkLeak.reset();
+    this.leakedThinkEmitted = false;
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
   /**
-   * Adapt a Pi SDK event to zero or more Craft AgentEvents.
+   * Adapt a Pi SDK event to zero or more SelectionEvents.
    */
   *adaptEvent(event: PiEvent): Generator<CraftAgentEvent> {
-    // Occupancy metadata must arrive before completion can close the queue. A
-    // compaction success uses its fresh result estimate below, not old API usage.
-    if (event.type !== 'compaction_end') {
-      yield* this.adaptContextUsage(event);
-    }
-    if (event.type === 'context_usage') return;
-
     // Craft-injected event from pi-agent-server (not part of the Pi SDK).
     // The subprocess emits this immediately after each `message_end` to deliver
     // the correct `sdkTurnAnchor` (the leaf id AFTER the SDK has appended the
@@ -401,19 +466,30 @@ export class PiEventAdapter extends BaseEventAdapter {
       // Agent lifecycle events
       // ============================================================
 
-      case 'agent_start':
-        // After an auto-retry backoff the SDK re-runs the turn via
-        // agent.continue(); this agent_start is the retried run. Stop waiting
-        // for it and let the run flow through normally.
-        if (this.retryState === 'backoff') {
-          this.cancelRetryFallbackTimer();
-          this.retryState = 'recovering';
-          this.heldRetryError = null;
-          yield { type: 'retry', phase: 'active' };
-        }
+      case 'agent_settled':
         break;
 
-      case 'agent_end': {
+      case 'agent_start':
+        if (this.awaitingRetry) yield { type: 'status', message: '' };
+        // Internal — agent run has started
+        break;
+
+      case 'agent_end':
+        if (this.showingToolArguments) {
+          this.showingToolArguments = false;
+          yield { type: 'status', message: '', statusType: 'tool_arguments' };
+        }
+        if ((event as { willRetry?: boolean }).willRetry === true) {
+          this.pendingRetryError = null;
+          this.awaitingRetry = true;
+          break;
+        }
+        this.awaitingRetry = false;
+        if (this.pendingRetryError) {
+          yield this.pendingRetryError;
+          this.pendingRetryError = null;
+          this.retryErrorDelivered = true;
+        }
         // Overflow recovery: hold the queue open while the SDK runs
         // _runAutoCompaction("overflow") + agent.continue(). The recovered
         // turn will arrive as a fresh agent_start … agent_end pair.
@@ -432,70 +508,40 @@ export class PiEventAdapter extends BaseEventAdapter {
           // Recovered turn just finished — fall through to normal completion.
           this.overflowState = 'none';
         }
-
-        // Auto-retry: AgentSession stamps `willRetry` on agent_end
-        // (`_willRetryAfterAgentEnd`). When true, `_prepareRetry` follows with
-        // auto_retry_start, sleeps the backoff and re-runs the turn, so this
-        // agent_end is NOT the end of the Craft turn.
-        const willRetry = (event as { willRetry?: boolean }).willRetry === true;
-        if (willRetry && this.retryState !== 'awaitingRetry' && this.retryState !== 'backoff') {
-          this.retryState = 'awaitingRetry';
-          this.armRetryFallbackTimer(
-            RETRY_START_FALLBACK_TIMEOUT_MS,
-            'no auto_retry_start followed agent_end { willRetry: true }',
-          );
-          break;
-        }
-        if (this.retryState === 'awaitingRetry' || this.retryState === 'backoff') {
-          // Defensive: no agent run is active in these states, so an agent_end
-          // is unexpected. Keep the queue open; the fallback timer drains it.
-          break;
-        }
-        if (this.retryState === 'held') {
-          // Retries disabled or exhausted: surface the parked error, then
-          // complete the turn normally below.
-          yield* this.releaseHeldRetryError();
-        } else if (this.retryState === 'recovering') {
-          // The retried run finished cleanly.
-          this.retryState = 'none';
-        }
         if (this.lastUsage) {
-          const inputTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
           yield {
             type: 'complete',
-            usage: {
-              inputTokens,
-              outputTokens: this.turnOutputTokens,
-              cacheReadTokens: this.lastUsage.cacheRead,
-              cacheCreationTokens: this.lastUsage.cacheWrite,
-              costUsd: this.turnCostUsd,
-              contextWindow: this.contextWindow,
-            },
+            usage: toAgentUsage(this.lastUsage, this.contextWindow, this.lastContextBreakdown),
           };
         } else {
           yield { type: 'complete' };
         }
         break;
-      }
 
       // ============================================================
       // Turn events
       // ============================================================
 
       case 'turn_start':
+        this.answerStreams.clear();
+        this.answerPreviewTimes.clear();
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
+        this.reasoningBytes = 0; this.visibleBytes = 0; this.activityAt = 0; this.toolInputBytes = 0; this.showingToolArguments = false;
+        yield { type: 'model_call_start' };
         break;
 
       case 'turn_end':
+        yield* this.finishThinking();
         // Don't emit 'complete' here — agent_end handles it.
         // Emitting from both causes duplicate messages in session persistence.
         this.currentTurnId = null;
         this.hasStreamedDeltas = false;
         this.hasEmittedFinalText = false;
-        // Keep sub-turn IDs unique across SDK turns/retries within this Craft
-        // turn. startTurn() is the only place the counter resets.
+        // Keep counting across model calls of one chat run: every text stream
+        // gets a unique sub-turn id, which the renderer uses as its block key.
         this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
         break;
 
       // ============================================================
@@ -509,16 +555,58 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_update': {
         // Pi SDK emits message_update only for assistant messages (streaming deltas)
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
-        if (amEvent.type === 'text_delta' && amEvent.delta) {
-          this.hasStreamedDeltas = true;
-          if (!this.messageSubTurnId) {
-            this.messageSubTurnId = this.nextSubTurnId('m');
+        if (amEvent.type === 'thinking_delta') this.reasoningBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'text_delta') this.visibleBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'thinking_delta' && amEvent.delta) yield* this.pushThinking(amEvent.delta);
+        if (amEvent.type === 'thinking_end') yield* this.finishThinking();
+        if (amEvent.type === 'thinking_delta' && amEvent.delta && Date.now() - this.activityAt >= 1000) {
+          this.activityAt = Date.now();
+          yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes };
+        }
+        if (amEvent.type === 'toolcall_delta') {
+          this.toolInputBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+          if (amEvent.delta && !this.showingToolArguments) {
+            this.showingToolArguments = true;
+            yield { type: 'status', message: 'Generating tool arguments', statusType: 'tool_arguments' };
           }
-          yield {
-            type: 'text_delta',
-            text: amEvent.delta,
-            turnId: this.messageSubTurnId,
-          };
+          if (amEvent.delta && Date.now() - this.activityAt >= 1000) {
+            this.activityAt = Date.now();
+            yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes, toolInputBytes: this.toolInputBytes };
+          }
+          const part = amEvent.partial.content[amEvent.contentIndex];
+          if (part?.type === 'toolCall' && /^(?:mcp__session__|session__)?submit_answer$/.test(part.name)) {
+            let decoder = this.answerStreams.get(part.id);
+            if (!decoder) { decoder = new AnswerArgumentStream(); this.answerStreams.set(part.id, decoder); }
+            const text = decoder.push(amEvent.delta);
+            const now = Date.now();
+            if (!text || now - (this.answerPreviewTimes.get(part.id) ?? 0) >= 50) {
+              this.answerPreviewTimes.set(part.id, now);
+              yield { type: 'answer_preview', toolCallId: part.id, text };
+            }
+          }
+        }
+        if (amEvent.type === 'toolcall_end' && /^(?:mcp__session__|session__)?submit_answer$/.test(amEvent.toolCall.name)) {
+          const markdown = amEvent.toolCall.arguments.markdown;
+          yield { type: 'answer_preview', toolCallId: amEvent.toolCall.id, text: typeof markdown === 'string' ? markdown : '' };
+        }
+        if (amEvent.type === 'text_delta' && amEvent.delta) {
+          yield* this.finishThinking();
+          if (this.usesAnswerBoundary(amEvent.partial)) {
+            this.boundaryStreamed = true;
+            const chunks = this.answerBoundary().push(amEvent.delta);
+            if (chunks.some(chunk => chunk.type === 'text_delta' && chunk.phase === 'final')) this.markerAnswerStarted = true;
+            yield* chunks;
+            break;
+          }
+
+          // Codex attaches the phase only after the Responses output item
+          // finishes. Hold only phase-less Codex deltas; other providers emit
+          // an explicit unclassified stream that the UI keeps in the work chain
+          // until message_end proves it is the final answer (#87).
+          const textPhase = getStreamingTextPhase(amEvent.partial, amEvent.contentIndex);
+          if (isCodexResponsesMessage(amEvent.partial) && !textPhase) break;
+
+          yield* this.emitTextPieces(this.thinkLeak.push(amEvent.delta), textPhase);
         }
         break;
       }
@@ -526,22 +614,33 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_end': {
         // Pi SDK emits message_end for ALL messages (user, assistant, toolResult).
         // Only process assistant messages — skip user prompts and tool results.
-        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
+        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; craftContextLimit?: boolean; craftTransportDiagnostics?: string[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
         // SDK message id, set by pi-agent-server when forwarding the event.
         // SessionManager uses this to correlate the follow-up `pi_turn_anchor`
         // event to the Craft assistant message created here (#782).
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
+        if (this.showingToolArguments) {
+          this.showingToolArguments = false;
+          yield { type: 'status', message: '', statusType: 'tool_arguments' };
+        }
+        yield* this.finishThinking();
+        const transportDetails = Array.isArray(msg.craftTransportDiagnostics)
+          ? msg.craftTransportDiagnostics.filter(detail => typeof detail === 'string').slice(0, 8).map(detail => detail.slice(0, 4096))
+          : undefined;
 
-        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures
+        if (this.boundary && ['error', 'aborted', 'length', 'max_tokens'].includes(msg.stopReason ?? '')) {
+          yield* this.boundary.finish(false, sdkMessageId, true);
+          this.boundary = undefined;
+          this.boundaryStreamed = false;
+        }
+        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
-          // Failed streams never become text_complete. Explicitly discard the
-          // partial before the SDK can retry (or terminate), including any
-          // pending server-side delta batch. Completed messages are untouched.
-          if (this.messageSubTurnId) {
-            yield { type: 'text_discard', turnId: this.messageSubTurnId };
-            this.messageSubTurnId = null;
-            this.hasStreamedDeltas = false;
+          // Runtime admission failures are already final. Do not infer their
+          // purpose from translated text or wait for another SDK compaction.
+          if (msg.craftContextLimit === true) {
+            yield { type: 'typed_error', error: createTypedError('context_limit') };
+            break;
           }
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
           // and keep the UI quiet until we know the outcome (recovered turn
@@ -555,70 +654,118 @@ export class PiEventAdapter extends BaseEventAdapter {
             break;
           }
 
-          const errorEvent = this.classifyAssistantError(event.message as AssistantMessage, msg.errorMessage);
-
-          // Transient provider/transport errors: the SDK's retry loop uses the
-          // same `isRetryableAssistantError` classifier, so it will retry
-          // unless retries are disabled or exhausted — and the following
-          // agent_end { willRetry } tells us which. Park the error instead of
-          // showing it now; agent_end either releases it or holds the queue
-          // open for the retried run.
-          if (
-            (this.retryState === 'none' || this.retryState === 'recovering') &&
-            isRetryableAssistantError(event.message as AssistantMessage)
-          ) {
-            this.retryState = 'held';
-            this.heldRetryError = errorEvent;
-            break;
+          // Classify the error — auth/billing errors should be typed so SessionManager
+          // can trigger its auth-retry pipeline (refresh token + resend).
+          const parsed = parseError(new Error(msg.errorMessage));
+          if (transportDetails?.length) parsed.details = transportDetails;
+          const isClassified = parsed.code !== 'unknown_error' || !!parsed.details?.length;
+          const failure: CraftAgentEvent = isClassified
+            ? { type: 'typed_error', error: parsed }
+            : { type: 'error', message: msg.errorMessage };
+          if (isRetryableAssistantError(event.message as AssistantMessage)) this.pendingRetryError = failure;
+          else {
+            yield failure;
+            this.retryErrorDelivered = true;
           }
-
-          yield errorEvent;
           break;
         }
 
-        // Extract text content from the final assistant message
-        const textContent = this.extractTextFromMessage(event.message);
+        // A failed/truncated terminal message may carry no provider error text.
+        // Preserve its terminal meaning instead of degrading to an empty reply.
+        // A user stop is abort-by-design, not an unexpected stream failure.
+        const userStopped = msg.stopReason === 'aborted'
+          && /aborted by the user/i.test(msg.errorMessage ?? '')
+        if (!userStopped && (msg.stopReason === 'error' || msg.stopReason === 'aborted' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens')) {
+          yield { type: 'typed_error', error: createTypedError(msg.stopReason === 'error' || msg.stopReason === 'aborted' ? 'stream_interrupted' : 'output_limit', {
+            details: transportDetails,
+          }) };
+          break;
+        }
+
+        // Extract phase-aware text segments from the completed assistant
+        // message. Codex may return commentary and final-answer parts together;
+        // keep the commentary as a separate work-chain item instead of dropping
+        // it from the transcript.
+        const textSegments = this.extractTextSegments(event.message);
         // Pi SDK stopReason: 'toolUse' means the model will call tools next (intermediate commentary),
         // 'stop'/'end_turn' means final response. Same logic as Claude's stop_reason === 'tool_use'.
-        const isIntermediate = msg.stopReason === 'toolUse';
-        if (textContent && (isIntermediate || !this.hasEmittedFinalText)) {
+        // Some providers still attach toolCall parts with stopReason 'stop'; treat those
+        // and user-aborted output as intermediate so the work chain is not flushed (#81).
+        const rawContent = (event.message as { content?: unknown } | undefined)?.content;
+        const hasToolCall = Array.isArray(rawContent) && rawContent.some((part) => {
+          const type = (part as { type?: string } | undefined)?.type;
+          return type === 'toolCall' || type === 'tool_use';
+        });
+        const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall || userStopped;
+        if (this.usesAnswerBoundary(event.message as AssistantMessage)) {
+          if (!this.boundaryStreamed) yield* this.answerBoundary().push(textSegments.map(segment => segment.text).join('\n'));
+          yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId, userStopped);
+          if (messageIsIntermediate) this.markerAnswerStarted = false;
+          this.boundary = undefined;
+          this.boundaryStreamed = false;
+        } else {
+        yield* this.emitTextPieces(this.thinkLeak.finish(), this.streamingTextPhase === 'commentary' || this.streamingTextPhase === 'final_answer'
+          ? this.streamingTextPhase
+          : undefined);
+        const streamedSegmentIndex = this.messageSubTurnId
+          ? textSegments.findIndex((segment) => (
+              this.streamingTextPhase === 'unclassified'
+                ? segment.phase === undefined
+                : segment.phase === this.streamingTextPhase
+            ))
+          : -1;
+        for (const [index, segment] of textSegments.entries()) {
+          const peeled = visibleTextAfterThinkLeak(segment.text, this.leakedThinkEmitted);
+          if (peeled.thinking.trim()) {
+            yield {
+              type: 'text_complete',
+              presentationProtocol: this.presentationProtocol,
+              text: peeled.thinking,
+              isIntermediate: true,
+              phase: 'intermediate',
+              streamKind: 'thinking',
+              turnId: this.nextSubTurnId('think'),
+              sdkMessageId,
+            };
+            this.leakedThinkEmitted = true;
+          }
+          const isIntermediate = messageIsIntermediate || segment.phase === 'commentary';
+          if (!peeled.answer.trim()) continue;
+          if (!isIntermediate && this.hasEmittedFinalText) continue;
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
-          const mTurnId = this.messageSubTurnId || this.nextSubTurnId('m');
-          this.messageSubTurnId = null;
+          const usesStreamingTurn = index === streamedSegmentIndex;
+          const mTurnId = usesStreamingTurn
+            ? this.messageSubTurnId!
+            : this.nextSubTurnId('m');
+          if (usesStreamingTurn) {
+            this.messageSubTurnId = null;
+          }
 
           yield {
             type: 'text_complete',
-            text: textContent,
+            presentationProtocol: this.presentationProtocol,
+            text: peeled.answer,
             isIntermediate,
+            phase: isIntermediate ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
             turnId: mTurnId,
             sdkMessageId,
           };
-          this.hasStreamedDeltas = false;
-        } else if (!textContent && !isIntermediate && !this.hasEmittedFinalText && msg.usage && (msg.usage as { output?: number }).output) {
-          // The model used output tokens but produced no text. This typically means
-          // reasoning consumed the entire output budget (observed with DeepSeek models
-          // when context is large and no budget_tokens cap is set). Without this warning
-          // the turn silently completes and the user sees no reply with no error.
-          console.warn(
-            `[PiEventAdapter] Turn produced ${(msg.usage as { output?: number }).output} output token(s) but zero text. ` +
-            `Reasoning likely consumed the full output budget (seen with DeepSeek + thinkingLevel≥medium at large contexts). ` +
-            `Lower the thinking level or start a fresh session to recover.`
-          );
         }
+        this.thinkLeak.reset();
+        this.leakedThinkEmitted = false;
+        }
+        this.hasStreamedDeltas = false;
+        this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
 
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
           this.lastUsage = msg.usage;
-          this.turnOutputTokens += msg.usage.output || 0;
-          this.turnCostUsd += msg.usage.cost?.total || 0;
-          const inputTokens = msg.usage.input + (msg.usage.cacheRead || 0);
+          this.lastContextBreakdown = readContextBreakdown(event);
           yield {
             type: 'usage_update',
-            usage: {
-              inputTokens,
-              contextWindow: this.contextWindow,
-            },
+            usage: toAgentUsage(msg.usage, this.contextWindow, this.lastContextBreakdown),
           };
         }
         break;
@@ -629,6 +776,10 @@ export class PiEventAdapter extends BaseEventAdapter {
       // ============================================================
 
       case 'tool_execution_start': {
+        if (this.markerAnswerStarted) {
+          console.warn('[answer-boundary]', 'tool_after_boundary');
+          this.markerAnswerStarted = false;
+        }
         const toolCallId = event.toolCallId;
         const toolName = this.resolveToolName(event.toolName);
         this.toolNames.set(toolCallId, toolName);
@@ -638,10 +789,11 @@ export class PiEventAdapter extends BaseEventAdapter {
         const args = this.normalizeToolInput(toolName, (event.args ?? {}) as Record<string, unknown>);
 
         // For call_llm, fill in the default display model when the caller didn't
-        // specify one — Pi's call_llm defaults to miniModel. We only fill the gap;
-        // we never overwrite an explicit agent-provided model (that was the #596 bug).
-        if (toolName.includes('call_llm') && this.miniModel && !args.model) {
-          args.model = this.miniModel;
+        // specify one — unspecified call_llm inherits the current session model.
+        // We only fill the gap; we never overwrite an explicit agent-provided
+        // model (that was the #596 bug).
+        if (toolName.includes('call_llm') && this.callLlmDefaultModel && !args.model) {
+          args.model = this.callLlmDefaultModel;
         }
 
         // Canonical metadata from subprocess event payload (interceptor/bridge-authoritative path).
@@ -655,14 +807,14 @@ export class PiEventAdapter extends BaseEventAdapter {
         const argsIntent = typeof args._intent === 'string' ? args._intent : undefined;
         const argsDisplayName = typeof args._displayName === 'string' ? args._displayName : undefined;
 
-        const intent = eventMeta?.intent
-          || storedMeta?.intent
-          || argsIntent
-          || (typeof args.description === 'string' ? args.description : undefined);
+        const intent = cleanToolMetadataLabel(eventMeta?.intent)
+          || cleanToolMetadataLabel(storedMeta?.intent)
+          || cleanToolMetadataLabel(argsIntent)
+          || cleanToolMetadataLabel(typeof args.description === 'string' ? args.description : undefined);
 
-        const displayName = eventMeta?.displayName
-          || storedMeta?.displayName
-          || argsDisplayName
+        const displayName = cleanToolMetadataLabel(eventMeta?.displayName)
+          || cleanToolMetadataLabel(storedMeta?.displayName)
+          || cleanToolMetadataLabel(argsDisplayName)
           || this.getToolDisplayName(toolName);
 
         const metadataSource = eventMeta
@@ -708,15 +860,24 @@ export class PiEventAdapter extends BaseEventAdapter {
       }
 
       case 'tool_execution_update': {
-        // Accumulate partial output for streaming tool results
+        if (!this.toolNames.has(event.toolCallId)) break;
+        // Pi updates are complete snapshots (including a sliding truncation
+        // window), not deltas. Retain only a bounded fallback for missing finals.
         const partialResult = event.partialResult;
         if (partialResult && typeof partialResult === 'object') {
           const content = (partialResult as { content?: Array<{ type: string; text?: string }> }).content;
           if (Array.isArray(content)) {
-            for (const part of content) {
-              if (part.type === 'text' && part.text) {
-                this.accumulateOutput(event.toolCallId, part.text);
-              }
+            const text = content.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n');
+            if (content.some(part => part.type === 'text')) this.commandOutput.set(event.toolCallId, text.slice(-64 * 1024));
+            const phase = (partialResult as { details?: { selectionToolProgress?: { phase?: string; executionMs?: number } } }).details?.selectionToolProgress;
+            const now = Date.now();
+            if (this.toolNames.has(event.toolCallId) && (phase || now - (this.toolProgressAt.get(event.toolCallId) ?? 0) >= 1000)) {
+              this.toolProgressAt.set(event.toolCallId, now);
+              yield { type: 'tool_progress', toolUseId: event.toolCallId, progress: {
+                phase: phase?.phase === 'processing_result' ? 'processing_result' : 'running', at: now,
+                ...(text ? { outputBytes: new TextEncoder().encode(text).byteLength } : {}),
+                ...(typeof phase?.executionMs === 'number' && Number.isFinite(phase.executionMs) ? { executionMs: Math.max(0, phase.executionMs) } : {}),
+              } };
             }
           }
         }
@@ -727,6 +888,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         const toolCallId = event.toolCallId;
         const resolvedToolName = this.toolNames.get(toolCallId) || 'tool';
         this.toolNames.delete(toolCallId);
+        this.toolProgressAt.delete(toolCallId);
 
         // Check for block reason
         const blockReason = this.consumeBlockReason(toolCallId, resolvedToolName);
@@ -734,29 +896,35 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Use accumulated output from partial results if available
         const accumulatedOutput = this.consumeOutput(toolCallId);
 
-        const isError = event.isError;
-        let result: string;
-
-        if (accumulatedOutput) {
-          result = accumulatedOutput;
-        } else if (blockReason) {
-          result = blockReason;
-        } else {
-          result = this.extractToolResult(event.result, isError);
-        }
+        const resultDetails = event.result && typeof event.result === 'object'
+          ? (event.result as { details?: { isError?: unknown; sourceRead?: import('@craft-agent/core/types').SourceReadProof } }).details
+          : undefined;
+        const isError = event.isError === true || resultDetails?.isError === true;
+        const normalizedContent = blockReason ? undefined : normalizeToolResultContent(event.result);
+        const content = normalizedContent;
+        // A final result owns summaries, exit failures, images and redactions.
+        // Partial stdout must never override it, including an explicitly empty final.
+        const result = blockReason ?? (event.result == null && !isError && accumulatedOutput !== undefined
+          ? accumulatedOutput
+          : this.extractToolResult(event.result, isError));
 
         // After tool completion, the assistant may generate new text
         this.hasEmittedFinalText = false;
         this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
 
         // Check if this was classified as a file read
         const readInfo = this.consumeReadCommand(toolCallId);
-        if (readInfo) {
-          yield this.createToolResult(toolCallId, 'Read', result, isError);
-          break;
+        const toolResult = this.createToolResult(toolCallId, readInfo ? 'Read' : resolvedToolName, result, isError, undefined, content);
+        const executionOutcome = (event.result as { details?: { selectionExecutionOutcome?: unknown } } | undefined)?.details?.selectionExecutionOutcome;
+        if (toolResult.type === 'tool_result' && ['completed', 'not-performed', 'unknown'].includes(String(executionOutcome))) {
+          toolResult.executionOutcome = executionOutcome as 'completed' | 'not-performed' | 'unknown';
         }
-
-        yield this.createToolResult(toolCallId, resolvedToolName, result, isError);
+        // Only native original-reading implementations own this metadata; MCP or Bash summaries cannot assert it.
+        if (toolResult.type === 'tool_result' && ['read', 'web_fetch', 'document_read'].includes(event.toolName) && !isError && !blockReason) {
+          toolResult.sourceRead = resultDetails?.sourceRead;
+        }
+        yield toolResult;
         break;
       }
 
@@ -786,20 +954,35 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.overflowState = 'recovering';
             this.heldOverflowError = null;
           }
-          yield* this.adaptContextUsage(event, true, compactionEvent.result.estimatedTokensAfter);
-          // Explicit trigger keeps automatic compaction from accepting a pending plan.
-          yield {
-            type: 'info', message: 'Compacted context to fit within limits',
-            compactionTrigger: compactionEvent.reason === 'manual' ? 'manual' : 'auto',
-          };
-        } else {
-          yield { type: 'compaction_failed' };
+          const usage = compactionEvent.result.usage;
+          if (usage && typeof usage.input === 'number') {
+            this.lastUsage = usage;
+            this.lastContextBreakdown = readContextBreakdown(event);
+            // Summary generation is a real provider call. Forward its usage so
+            // per-agent budgets include compaction instead of hiding that cost.
+            yield {
+              type: 'usage_update',
+              usage: toAgentUsage(usage, this.contextWindow, this.lastContextBreakdown),
+            };
+          }
+          // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'
+          yield { type: 'info', message: 'Compacted context to fit within limits' };
+        } else if (compactionEvent.errorMessage) {
+          const wasRecoveringOverflow =
+            this.overflowState === 'compacting' ||
+            this.overflowState === 'awaiting' ||
+            this.overflowState === 'held';
           // Defensive handler for the Pi SDK auto-compaction race (cause A
           // in plans/fix-pi-gpt-compaction.md). The raw stack
           // `undefined is not an object (evaluating 'this._autoCompactionAbortController.signal')`
           // is unhelpful to the user; convert it to a friendly retry hint and
           // log for diagnostics. Remove once the upstream fix ships.
-          if (compactionEvent.errorMessage && SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
+          if (wasRecoveringOverflow) {
+            this.log.warn('Context overflow recovery failed', {
+              errorMessage: compactionEvent.errorMessage,
+            });
+            yield { type: 'typed_error', error: createTypedError('context_limit') };
+          } else if (SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
             this.log.warn('Pi SDK auto-compaction race; recommend manual /compact', {
               errorMessage: compactionEvent.errorMessage,
             });
@@ -807,7 +990,7 @@ export class PiEventAdapter extends BaseEventAdapter {
               type: 'error',
               message: 'Auto-compaction hit a transient error. Try /compact manually.',
             };
-          } else if (compactionEvent.errorMessage) {
+          } else {
             yield {
               type: 'error',
               message: `Context compaction failed: ${compactionEvent.errorMessage}`,
@@ -817,11 +1000,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           // the turn now — no recovered agent_end will arrive on the failure
           // path. pendingQueueComplete signals the caller to terminate the
           // iterator since this is a non-agent_end event.
-          if (
-            this.overflowState === 'compacting' ||
-            this.overflowState === 'awaiting' ||
-            this.overflowState === 'held'
-          ) {
+          if (wasRecoveringOverflow) {
             yield { type: 'complete' };
             this.pendingQueueComplete = true;
             this.overflowState = 'none';
@@ -833,19 +1012,13 @@ export class PiEventAdapter extends BaseEventAdapter {
       }
 
       case 'auto_retry_start': {
+        this.awaitingRetry = true;
+        this.pendingRetryError = null;
+        this.retryErrorDelivered = false;
         const retryEvent = event as Extract<AgentSessionEvent, { type: 'auto_retry_start' }>;
-        // The SDK is about to sleep `delayMs` and re-run the turn. Keep the
-        // queue open until the retried run's agent_start arrives (plus grace).
-        const delayMs = typeof retryEvent.delayMs === 'number' ? retryEvent.delayMs : 0;
-        this.cancelRetryFallbackTimer();
-        this.retryState = 'backoff';
-        this.armRetryFallbackTimer(delayMs + RETRY_RUN_GRACE_MS, 'retried run did not start after the announced backoff');
-        const attempt = `attempt ${retryEvent.attempt}/${retryEvent.maxAttempts}`;
-        const wait = delayMs > 0 ? ` in ${Math.max(1, Math.round(delayMs / 1000))}s` : '';
         yield {
-          type: 'retry',
-          phase: 'backoff',
-          message: `${this.retryReasonLabel(retryEvent.errorMessage)}. Retrying${wait} (${attempt})...`,
+          type: 'status',
+          message: `Retrying (attempt ${retryEvent.attempt}/${retryEvent.maxAttempts})...`,
         };
         break;
       }
@@ -853,41 +1026,17 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'auto_retry_end': {
         const retryEndEvent = event as Extract<AgentSessionEvent, { type: 'auto_retry_end' }>;
         if (retryEndEvent.success) {
-          // Emitted on the first successful assistant message after one or
-          // more retries, before that run's agent_end. Nothing is held here.
-          yield { type: 'retry', phase: 'end' };
-          const n = retryEndEvent.attempt;
-          if (n > 0) {
-            yield { type: 'info', message: `Recovered after ${n} ${n === 1 ? 'retry' : 'retries'}` };
+          yield { type: 'status', message: '' };
+        } else if (!this.retryErrorDelivered && retryEndEvent.finalError) {
+          yield { type: 'error', message: `Retry failed: ${retryEndEvent.finalError}` };
+          // Cancellation during backoff has no subsequent agent_end.
+          if (this.awaitingRetry) {
+            yield { type: 'complete' };
+            this.pendingQueueComplete = true;
           }
-          break;
         }
-        if (
-          this.retryState === 'held' ||
-          this.retryState === 'awaitingRetry' ||
-          this.retryState === 'backoff'
-        ) {
-          // The retry was cancelled (abort during backoff) or never ran while
-          // we were still holding the turn open. No agent_end follows on this
-          // path, so surface the parked error and finalize the turn here.
-          this.cancelRetryFallbackTimer();
-          if (this.heldRetryError) {
-            yield* this.releaseHeldRetryError();
-          } else {
-            this.retryState = 'none';
-            yield { type: 'retry', phase: 'end' };
-            if (retryEndEvent.finalError) {
-              yield { type: 'error', message: `Retry failed: ${retryEndEvent.finalError}` };
-            }
-          }
-          yield { type: 'complete' };
-          this.pendingQueueComplete = true;
-          break;
-        }
-        // Exhaustion ordering: the final agent_end { willRetry: false } already
-        // released the parked error and completed the turn; this trailing
-        // event describes the same failure. Stay quiet so the user gets one
-        // error, not two.
+        this.awaitingRetry = false;
+        this.pendingRetryError = null;
         break;
       }
 
@@ -895,19 +1044,6 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Queue contents are currently reflected by existing session/message state.
         // Ignore the event explicitly so newer Pi SDK sessions don't log noisy
         // "Unknown Pi event" warnings until we add a dedicated UI consumer.
-        break;
-
-      case 'agent_settled':
-      case 'entry_appended':
-      case 'session_info_changed':
-      case 'thinking_level_changed':
-      case 'bash_execution_update':
-      case 'summarization_retry_scheduled':
-      case 'summarization_retry_attempt_start':
-      case 'summarization_retry_finished':
-        // Session bookkeeping and compaction/branch-summary retry telemetry
-        // (Pi SDK 0.84+/0.85). Compaction progress already surfaces through
-        // compaction_start/compaction_end; nothing to show for these.
         break;
 
       default:
@@ -1035,26 +1171,43 @@ export class PiEventAdapter extends BaseEventAdapter {
    * Extract text content from a Pi AgentMessage.
    * Pi messages use the pi-ai Message format with content arrays.
    */
-  private extractTextFromMessage(message: unknown): string | null {
-    if (!message || typeof message !== 'object') return null;
+  private extractTextSegments(message: unknown): Array<{ text: string; phase?: TextPhase }> {
+    if (!message || typeof message !== 'object') return [];
 
     const msg = message as {
       role?: string;
-      content?: string | Array<{ type: string; text?: string }>;
+      content?: string | Array<{ type: string; text?: string; textSignature?: string }>;
     };
 
     if (typeof msg.content === 'string') {
-      return msg.content || null;
+      return msg.content ? [{ text: msg.content }] : [];
     }
 
     if (Array.isArray(msg.content)) {
       const textParts = msg.content
-        .filter((c) => c.type === 'text' && c.text)
-        .map((c) => c.text!);
-      return textParts.length > 0 ? textParts.join('') : null;
+        .filter((part): part is { type: string; text: string; textSignature?: string } => (
+          part.type === 'text' && typeof part.text === 'string' && part.text.length > 0
+        ));
+      if (textParts.length === 0) return [];
+      const hasPhaseMetadata = textParts.some((part) => getTextPhase(part.textSignature) !== undefined);
+      if (!hasPhaseMetadata) {
+        return [{ text: textParts.map((part) => part.text).join('') }];
+      }
+
+      const segments: Array<{ text: string; phase?: TextPhase }> = [];
+      for (const part of textParts) {
+        const phase = getTextPhase(part.textSignature);
+        const previous = segments.at(-1);
+        if (previous && previous.phase === phase) {
+          previous.text += part.text;
+        } else {
+          segments.push({ text: part.text, phase });
+        }
+      }
+      return segments;
     }
 
-    return null;
+    return [];
   }
 
   /**
@@ -1075,7 +1228,7 @@ export class PiEventAdapter extends BaseEventAdapter {
 
     if (Array.isArray(typed.content)) {
       const texts = typed.content
-        .filter((c) => c.type === 'text' && c.text)
+        .filter((c) => c.type === 'text' && typeof c.text === 'string')
         .map((c) => c.text!);
       if (texts.length > 0) return texts.join('\n');
     }

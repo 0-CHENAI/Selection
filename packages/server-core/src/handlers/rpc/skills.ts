@@ -2,18 +2,55 @@ import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import { RPC_CHANNELS, type SkillFile } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
+import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { getPptCatalogWithLibrary, getPptTemplatePages, getPptTemplatePreview } from '../../services/ppt-catalog'
+import { customTemplateCard, customTemplatePages, customTemplatePreview, deletePptTemplate, exportPptTemplate, importPptTemplate, materializeTemplateProject, renamePptTemplate, thumbnailPptTemplateCard, upgradePendingTemplateProjects } from '../../services/ppt-library'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
+  RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.GET_PPT_CATALOG,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW,
+  RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE,
   RPC_CHANNELS.skills.GET_FILES,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
   RPC_CHANNELS.skills.OPEN_FINDER,
+  RPC_CHANNELS.skills.SET_DISPLAY_TITLE,
 ] as const
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.skills.GET_PPT_CATALOG, async () => {
+    await upgradePendingTemplateProjects().catch(() => undefined)
+    return getPptCatalogWithLibrary()
+  })
+  server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW, (_ctx, templateId: string, page?: number) => {
+    if (typeof templateId !== 'string') throw new Error('Unknown PPT template')
+    return templateId.startsWith('custom-') ? customTemplatePreview(templateId, page) : getPptTemplatePreview(templateId)
+  })
+  server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES, (_ctx, templateId: string) => {
+    if (typeof templateId !== 'string') throw new Error('Unknown PPT template')
+    return templateId.startsWith('custom-') ? customTemplatePages(templateId) : getPptTemplatePages(templateId)
+  })
+  server.handle(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE, async (_ctx, input: { name?: string; base64?: string }) => {
+    if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 255 || typeof input.base64 !== 'string') throw new Error('Invalid PPT template')
+    if (!/\.(pptx|json)$/i.test(input.name)) throw new Error('Invalid PPT template')
+    if (input.base64.length === 0 || input.base64.length > 12_000_000 || input.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw new Error('Invalid PPT template')
+    const imported = importPptTemplate(new Uint8Array(Buffer.from(input.base64, 'base64')), input.name)
+    const record = imported.duplicate ? imported.record : await materializeTemplateProject(imported.record.id).catch(() => imported.record)
+    return { template: await thumbnailPptTemplateCard(customTemplateCard(record)), duplicate: imported.duplicate }
+  })
+  server.handle(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE, (_ctx, id: string, title: string) => thumbnailPptTemplateCard(customTemplateCard(renamePptTemplate(id, title))))
+  server.handle(RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE, (_ctx, id: string) => { deletePptTemplate(id) })
+  server.handle(RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE, (_ctx, id: string) => {
+    const file = exportPptTemplate(id)
+    return { name: file.name, base64: Buffer.from(file.bytes).toString('base64') }
+  })
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)
@@ -27,8 +64,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
       ? workingDirectory
       : undefined
-    const { loadAllSkills } = await import('@craft-agent/shared/skills')
-    const skills = loadAllSkills(workspace.rootPath, effectiveWorkingDir)
+    const { filterUserFacingSkills, loadAllSkills } = await import('@craft-agent/shared/skills')
+    const skills = filterUserFacingSkills(loadAllSkills(workspace.rootPath, effectiveWorkingDir))
     deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length} skills from ${workspace.rootPath}`)
     return skills
   })
@@ -87,9 +124,28 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { deleteSkill } = await import('@craft-agent/shared/skills')
+    const { deleteSkill, loadSkillBySlug } = await import('@craft-agent/shared/skills')
+    const existing = loadSkillBySlug(workspace.rootPath, skillSlug)
+    if (existing?.source === 'bundled') {
+      throw new Error('Cannot delete a built-in skill')
+    }
     deleteSkill(workspace.rootPath, skillSlug)
     deps.platform.logger?.info(`Deleted skill: ${skillSlug}`)
+  })
+
+  server.handle(RPC_CHANNELS.skills.SET_DISPLAY_TITLE, async (_ctx, workspaceId: string, skillSlug: string, title: string, workingDirectory?: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+    const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
+      ? workingDirectory
+      : undefined
+    const { filterUserFacingSkills, loadAllSkills, loadSkillBySlug } = await import('@craft-agent/shared/skills')
+    const existing = loadSkillBySlug(workspace.rootPath, skillSlug, effectiveWorkingDir)
+    if (!existing) throw new Error('Skill not found')
+    const displayTitle = setDisplayTitle(workspace.rootPath, 'skills', skillSlug, title, existing.metadata.name)
+    const skills = filterUserFacingSkills(loadAllSkills(workspace.rootPath, effectiveWorkingDir))
+    pushTyped(server, RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
+    return { displayTitle }
   })
 
   // Open skill SKILL.md in editor

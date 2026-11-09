@@ -1,0 +1,92 @@
+# Scheduled draft PR for OfficeCLI upgrades. Permissions stay scoped to
+# contents/pull-requests/actions write. No new secrets. See docs/ci.md.
+name: OfficeCLI Upgrade Draft
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: officecli-upgrade-draft
+  cancel-in-progress: false
+
+env:
+  OFFICECLI_BASE_BRANCH: test
+  HUSKY: "0"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout OfficeCLI integration branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.OFFICECLI_BASE_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
+        with:
+          install-dependencies: "false"
+
+      - name: Synchronize latest stable OfficeCLI release
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/sync-officecli.ts --update --allow-unclassified
+
+      - name: Detect reviewed resource changes
+        id: changes
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/electron/resources/officecli; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enforce reviewed command and resource policy
+        if: steps.changes.outputs.changed == 'true'
+        run: bun scripts/sync-officecli.ts --check --download-runtime
+
+      - name: Publish new draft upgrade PR
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OFFICECLI_VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="codex/officecli-upgrade-v${OFFICECLI_VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          title="构建：升级 OfficeCLI 至 v${OFFICECLI_VERSION}"
+          body_file="apps/electron/resources/officecli/officecli-upgrade-report.md"
+          pr_number=$(gh pr list --state open --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --json number --jq '.[0].number // empty')
+          if [[ -n "$pr_number" ]]; then
+            echo "OfficeCLI upgrade PR #${pr_number} already exists; preserving its reviewed branch and PR state."
+            exit 0
+          fi
+          existing_branch=$(git ls-remote --heads origin "refs/heads/${branch}")
+          if [[ -n "$existing_branch" ]]; then
+            echo "::warning::OfficeCLI upgrade branch ${branch} already exists without an open PR; preserving it for manual review."
+            exit 0
+          fi
+
+          git checkout -b "$branch"
+          git add apps/electron/resources/officecli
+          git commit -m "构建：同步 OfficeCLI v${OFFICECLI_VERSION}"
+          git push origin "HEAD:refs/heads/${branch}"
+          gh pr create --draft --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --title "$title" --body-file "$body_file"
+          # GITHUB_TOKEN-created PRs do not trigger pull_request workflows.
+          gh workflow run validate.yml --ref "$branch"
+          gh workflow run officecli-integration.yml --ref "$branch"
+          gh workflow run validate-macos-native.yml --ref "$branch"

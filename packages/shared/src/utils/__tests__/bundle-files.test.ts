@@ -109,6 +109,11 @@ describe('bundle-files', () => {
       expect(validateBundleFile(file)).toContain('Size mismatch')
     })
 
+    it('rejects malformed base64 even when its decoded size would match', () => {
+      const error = validateBundleFile({ relativePath: 'bad.txt', contentBase64: '!!!!', size: 0 })
+      expect(error).toContain('Invalid base64')
+    })
+
     it('rejects empty relativePath', () => {
       const file: BundleFile = {
         relativePath: '',

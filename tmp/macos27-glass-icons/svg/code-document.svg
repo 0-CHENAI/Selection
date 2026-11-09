@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="glass-code" x1="18%" y1="0%" x2="86%" y2="100%">
+      <stop offset="0%" stop-color="#93c1be"/>
+      <stop offset="46%" stop-color="#44948e"/>
+      <stop offset="100%" stop-color="#0f5b5b"/>
+    </linearGradient>
+    <linearGradient id="sheen-code" x1="20%" y1="0%" x2="70%" y2="80%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.72"/>
+      <stop offset="38%" stop-color="#fff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fold-code" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#93c1be" stop-opacity="0.55"/>
+    </linearGradient>
+    <filter id="shadow-code" x="-20%" y="-10%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#0F766E" flood-opacity="0.22"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.16"/>
+    </filter>
+    <clipPath id="page-code">
+      <path d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"/>
+    </clipPath>
+  </defs>
+  <path filter="url(#shadow-code)" fill="url(#glass-code)"
+    d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"/>
+  <g clip-path="url(#page-code)">
+    <rect width="1024" height="1024" fill="url(#sheen-code)"/>
+    <path d="M220 150h520l-180 240H180z" fill="#fff" opacity="0.22"/>
+    <ellipse cx="390" cy="250" rx="210" ry="70" fill="#fff" opacity="0.28"/>
+  </g>
+  <path d="M640 168v148h148z" fill="url(#fold-code)" stroke="#93c1be" stroke-width="2"/>
+  <path d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"
+    fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="3"/>
+  <g transform="translate(512 560)" color="#1e293b" opacity="0.86"><g fill="none" stroke="currentColor" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"><path d="M-70 -70L-150 0l80 70M70 -70L150 0l-80 70"/></g></g>
+</svg>

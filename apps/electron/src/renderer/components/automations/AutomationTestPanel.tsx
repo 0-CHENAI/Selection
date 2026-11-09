@@ -6,8 +6,7 @@
  */
 
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, XCircle } from 'lucide-react'
-import { Spinner } from '@craft-agent/ui'
+import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Info_Alert } from '@/components/info'
 import { cn } from '@/lib/utils'
 import type { TestResult } from './types'
@@ -24,8 +23,8 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
   // Running state
   if (result.state === 'running') {
     return (
-      <div className={cn('flex items-center gap-2 px-3.5 py-3 text-label text-tertiary', className)}>
-        <Spinner />
+      <div className={cn('flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground', className)}>
+        <Loader2 className="h-4 w-4 animate-spin" />
         <span>{t('automations.testRunning')}</span>
       </div>
     )
@@ -34,15 +33,22 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
   // Success state
   if (result.state === 'success') {
     return (
-      <Info_Alert variant="success" icon={<CheckCircle2 />} className={className}>
+      <Info_Alert variant="success" icon={<CheckCircle2 className="h-4 w-4" />} className={className}>
         <Info_Alert.Title>
-          {t('automations.testPassed')}
+          {result.mode === 'match' ? t('automations.matchSimulateResult') : t('automations.testPassed')}
           {result.duration != null && (
-            <span className="ml-2 text-label-sm font-normal text-tertiary tabular-nums">
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
               {result.duration}ms
             </span>
           )}
         </Info_Alert.Title>
+        <Info_Alert.Description>
+          {result.mode === 'match'
+            ? (result.matches && result.matches.length > 0
+              ? result.matches.map(m => m.name).join(', ')
+              : t('automations.matchSimulateNone'))
+            : t('automations.runTestHint')}
+        </Info_Alert.Description>
       </Info_Alert>
     )
   }
@@ -50,11 +56,11 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
   // Error state
   if (result.state === 'error') {
     return (
-      <Info_Alert variant="error" icon={<XCircle />} className={className}>
+      <Info_Alert variant="error" icon={<XCircle className="h-4 w-4" />} className={className}>
         <Info_Alert.Title>{t('automations.testFailed')}</Info_Alert.Title>
         {result.stderr && (
           <Info_Alert.Description>
-            <pre className="mt-1 whitespace-pre-wrap font-mono text-mono-ui text-destructive">{result.stderr}</pre>
+            <pre className="font-mono text-xs mt-1 whitespace-pre-wrap text-destructive">{result.stderr}</pre>
           </Info_Alert.Description>
         )}
       </Info_Alert>

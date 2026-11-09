@@ -1,0 +1,394 @@
+import { AnswerBoundary } from '../../../../../../../packages/shared/src/agent/backend/pi/answer-boundary'
+import { describe, expect, it } from 'bun:test'
+import { deriveTurnPhase, groupMessagesByTurn } from '@craft-agent/ui/chat/turn-utils'
+import { completedParagraphs } from '../../../../../../../packages/ui/src/components/chat/paragraph-stream'
+import { handleTextComplete, handleTextDelta } from '../text'
+import { handleToolStart } from '../tool'
+import { handleComplete, handleError, handleInterrupted } from '../session'
+import type { SessionState } from '../../types'
+
+function state(): SessionState {
+  return {
+    session: {
+      id: 'session-1',
+      workspaceId: 'workspace-1',
+      messages: [{ id: 'user-1', role: 'user', content: '检查项目', timestamp: 1 }],
+      isProcessing: true,
+      lastMessageAt: 1,
+    } as SessionState['session'],
+    streaming: null,
+  }
+}
+
+function assistantTurn(current: SessionState, isSessionProcessing = true) {
+  const turn = groupMessagesByTurn(current.session.messages, { isSessionProcessing })
+    .findLast((item) => item.type === 'assistant')
+  if (!turn || turn.type !== 'assistant') throw new Error('expected assistant turn')
+  return turn
+}
+
+describe('issue #87 text stream phases', () => {
+  it('moves a native streaming draft into the work chain when completion identifies commentary', () => {
+    const draft = handleTextDelta(state(), {
+      type: 'text_delta', sessionId: 'session-1', delta: '先查询数据库。',
+      phase: 'unclassified', turnId: 'native-draft',
+    })
+    expect(assistantTurn(draft).response).toMatchObject({ text: '先查询数据库。', isStreaming: true })
+    const commentary = handleTextComplete(draft, {
+      type: 'text_complete', sessionId: 'session-1', text: '先查询数据库。',
+      isIntermediate: true, turnId: 'native-draft', messageId: 'commentary',
+    })
+    expect(assistantTurn(commentary).response).toBeUndefined()
+    expect(assistantTurn(commentary).activities[0]?.content).toBe('先查询数据库。')
+  })
+
+  it('shows native unclassified text while the model is still streaming', () => {
+    const pending = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '我先检查配置。',
+      phase: 'unclassified',
+      turnId: 'message-1',
+    })
+    const pendingTurn = assistantTurn(pending)
+    expect(pendingTurn.response).toMatchObject({ text: '我先检查配置。', isStreaming: true })
+
+    const final = handleTextComplete(pending, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '配置检查完成。',
+      isIntermediate: false,
+      turnId: 'message-1',
+      messageId: 'answer-1',
+    })
+    const finalTurn = assistantTurn(final)
+    expect(finalTurn.activities).toEqual([])
+    expect(finalTurn.response).toMatchObject({
+      text: '配置检查完成。',
+      isStreaming: false,
+      messageId: 'answer-1',
+    })
+  })
+
+  it('shows final deltas before the complete response arrives', () => {
+    const intermediate = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '正在核对测试。',
+      phase: 'intermediate',
+      turnId: 'message-1',
+    })
+    const withTool = handleToolStart(intermediate, {
+      type: 'tool_start',
+      sessionId: 'session-1',
+      toolUseId: 'tool-1',
+      toolName: 'Bash',
+      toolInput: { command: 'bun test' },
+      turnId: 'tool-turn',
+    })
+    const finalStreaming = handleTextDelta(withTool, {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '测试全部通过',
+      phase: 'final',
+      turnId: 'message-2',
+    })
+    const turn = assistantTurn(finalStreaming)
+
+    expect(turn.activities.map((activity) => activity.type)).toEqual(['intermediate', 'tool'])
+    expect(turn.response).toMatchObject({ text: '测试全部通过', isStreaming: true })
+    expect(finalStreaming.streaming).toMatchObject({
+      content: '测试全部通过',
+      phase: 'final',
+      turnId: 'message-2',
+    })
+
+    const completed = handleTextComplete(finalStreaming, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '测试全部通过。',
+      isIntermediate: false,
+      turnId: 'message-2',
+      timestamp: 10,
+      messageId: 'answer-1',
+    })
+    const completedTurn = assistantTurn(completed)
+    const completedMessage = completed.session.messages.find(message => message.id === 'answer-1')
+    expect(completedTurn.response).toMatchObject({
+      text: '测试全部通过。',
+      isStreaming: false,
+      completedRevealStartTime: completedMessage?.completedRevealStartTime,
+      messageId: 'answer-1',
+    })
+  })
+
+  it('uses the local completion time for a legacy final without a timestamp', () => {
+    const pending = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '旧协议最终正文',
+      turnId: 'legacy-final',
+    })
+    const beforeComplete = Date.now()
+    const completed = handleTextComplete(pending, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '旧协议最终正文。',
+      isIntermediate: false,
+      turnId: 'legacy-final',
+      messageId: 'legacy-answer',
+    })
+    const turn = assistantTurn(completed)
+
+    expect(turn.response?.completedRevealStartTime).toBeGreaterThanOrEqual(beforeComplete)
+  })
+
+  it('keeps a streamed final body correlated when commentary completes first', () => {
+    const finalStreaming = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '最终结论。',
+      phase: 'final',
+      turnId: 'final-segment',
+    })
+    const commentaryComplete = handleTextComplete(finalStreaming, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '我先检查了文件。',
+      isIntermediate: true,
+      turnId: 'commentary-segment',
+      messageId: 'commentary-1',
+    })
+    const beforeFinalComplete = assistantTurn(commentaryComplete)
+    expect(beforeFinalComplete.activities).toMatchObject([{
+      type: 'intermediate',
+      content: '我先检查了文件。',
+    }])
+    expect(beforeFinalComplete.response).toMatchObject({ text: '最终结论。', isStreaming: true })
+    expect(commentaryComplete.streaming).toMatchObject({
+      content: '最终结论。',
+      phase: 'final',
+      turnId: 'final-segment',
+    })
+
+    const completed = handleTextComplete(commentaryComplete, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '最终结论。',
+      isIntermediate: false,
+      turnId: 'final-segment',
+      messageId: 'answer-1',
+    })
+    const completedTurn = assistantTurn(completed)
+    expect(completedTurn.activities[0]?.content).toBe('我先检查了文件。')
+    expect(completedTurn.response).toMatchObject({
+      text: '最终结论。',
+      isStreaming: false,
+      messageId: 'answer-1',
+    })
+  })
+
+  it('keeps partial text as commentary when the turn is interrupted or fails', () => {
+    const partial = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '正在读取文件。',
+      phase: 'intermediate',
+      turnId: 'message-1',
+    })
+    const interrupted = handleInterrupted(partial, {
+      type: 'interrupted',
+      sessionId: 'session-1',
+      message: { id: 'stop', role: 'info', content: '已停止', timestamp: Number.MAX_SAFE_INTEGER },
+    }).state
+    const interruptedTurn = assistantTurn(interrupted, false)
+    expect(interruptedTurn.response).toBeUndefined()
+    expect(interruptedTurn.activities[0]?.content).toBe('正在读取文件。')
+
+    const failed = handleError(partial, {
+      type: 'error',
+      sessionId: 'session-1',
+      error: '读取失败',
+      timestamp: Number.MAX_SAFE_INTEGER,
+    }).state
+    const failedTurn = assistantTurn(failed, false)
+    expect(failedTurn.response).toBeUndefined()
+    expect(failedTurn.activities[0]?.content).toBe('正在读取文件。')
+  })
+
+  it('promotes a lone intermediate body once without duplicating it', () => {
+    const pending = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '这是本轮唯一可交付内容。',
+      phase: 'unclassified',
+      turnId: 'message-1',
+    })
+    const completed = handleComplete(pending, {
+      type: 'complete',
+      sessionId: 'session-1',
+    }).state
+    const turn = assistantTurn(completed, false)
+
+    expect(turn.response?.text).toBe('这是本轮唯一可交付内容。')
+    expect(turn.activities).toEqual([])
+  })
+})
+
+
+it('原生正文在完成事件之前逐段可见，尚未收到的尾部不参与布局', () => {
+  let current = state()
+  current = handleTextDelta(current, { type: 'text_delta', sessionId: 'session-1', turnId: 'native', phase: 'unclassified', delta: '第一段。\n\n第二' })
+  const first = assistantTurn(current).response!
+  expect(completedParagraphs(first.text, first.isStreaming)).toBe('第一段。\n\n')
+  current = handleTextDelta(current, { type: 'text_delta', sessionId: 'session-1', turnId: 'native', phase: 'unclassified', delta: '段。\n\n第三' })
+  const second = assistantTurn(current).response!
+  expect(completedParagraphs(second.text, second.isStreaming)).toBe('第一段。\n\n第二段。\n\n')
+  expect(second.isStreaming).toBe(true)
+})
+
+it('does not force explicit-v1 live tokens into an intermediate phase', () => {
+  const pending = handleTextDelta(state(), {
+    type: 'text_delta',
+    sessionId: 'session-1',
+    delta: '知道了',
+    answerProtocol: 'explicit-v1',
+    answerRunId: 'run-1',
+    turnId: 'explicit-1',
+  })
+  expect(pending.session.messages.find(message => message.role === 'assistant')).toMatchObject({
+    isIntermediate: false,
+    isStreaming: true,
+    answerProtocol: 'explicit-v1',
+    phase: 'unclassified',
+  })
+  expect(assistantTurn(pending).response).toMatchObject({ text: '知道了', isStreaming: true })
+})
+
+it('keeps native unclassified live tokens on the card when presentationProtocol is set', () => {
+  const pending = handleTextDelta(state(), {
+    type: 'text_delta',
+    sessionId: 'session-1',
+    delta: 'Ponytail 是',
+    presentationProtocol: 'native',
+    phase: 'unclassified',
+    turnId: 'native-1',
+  })
+  expect(pending.session.messages.find(message => message.role === 'assistant')).toMatchObject({
+    isIntermediate: false,
+    phase: 'unclassified',
+    isStreaming: true,
+  })
+  expect(assistantTurn(pending).response).toMatchObject({ text: 'Ponytail 是', isStreaming: true })
+})
+
+it('marker-v1 keeps unclassified text out of the response and does not promote an empty final', () => {
+  const current = handleTextDelta(state(), { type: 'text_delta', sessionId: 'session-1', turnId: 'process',
+    presentationProtocol: 'marker-v1', phase: 'unclassified', delta: '查询完成，但尚未产生最终答案。' })
+  expect(assistantTurn(current).response).toBeUndefined()
+  const finished = handleTextComplete(current, { type: 'text_complete', sessionId: 'session-1', turnId: 'process',
+    presentationProtocol: 'marker-v1', phase: 'intermediate', isIntermediate: true, text: '查询完成，但尚未产生最终答案。' })
+  expect(assistantTurn(finished, false).response).toBeUndefined()
+})
+
+
+it('closes whitespace commentary before final streaming and leaves no stale thinking row', () => {
+  let id = 0
+  const decoder = new AnswerBoundary(() => `fragment-${++id}`)
+  let current = state()
+  const apply = (events: ReturnType<AnswerBoundary['push']>) => {
+    for (const event of events) {
+      if (event.type === 'text_delta') {
+        current = handleTextDelta(current, { ...event, sessionId: 'session-1', delta: event.text })
+      } else if (event.type === 'text_complete') {
+        current = handleTextComplete(current, { ...event, sessionId: 'session-1' })
+      }
+    }
+  }
+  apply(decoder.push('\n\r\n'))
+  expect(assistantTurn(current).activities.some(a => a.status === 'running')).toBe(true)
+  apply(decoder.push('<<<FINAL_ANSWER>>>\n第一段正文。\n\n'))
+  const live = assistantTurn(current)
+  expect(live.activities).toEqual([])
+  expect(live.response).toMatchObject({ text: '第一段正文。\n\n', isStreaming: true })
+  apply(decoder.finish(true))
+  expect(assistantTurn(current, false).activities).toEqual([])
+  expect(current.session.messages.some(m => m.isPending)).toBe(false)
+})
+
+
+it('folds a deepseek thinking plus toolCall stream while it is live and after it completes', () => {
+  const protocol = { answerProtocol: 'explicit-v1' as const, answerRunId: 'run-deepseek', answerRoutingVersion: 1 as const }
+  let current = state()
+  current.session.messages[0] = { ...current.session.messages[0], ...protocol }
+  const rounds = [
+    { text: 'Now I can read the template.', turnId: 'pi-turn-0__think0', tool: 'call-1' },
+    { text: 'The numbers do not add up.', turnId: 'pi-turn-0__think2', tool: 'call-2' },
+  ]
+  for (const round of rounds) {
+    for (const piece of [round.text.slice(0, 8), round.text.slice(8)]) {
+      current = handleTextDelta(current, {
+        type: 'text_delta', sessionId: 'session-1', delta: piece, turnId: round.turnId,
+        phase: 'intermediate', presentationProtocol: 'legacy', streamKind: 'thinking',
+      })
+    }
+    const live = assistantTurn(current)
+    expect(live.response).toBeUndefined()
+    expect(live.activities.filter(activity => activity.type === 'thinking').at(-1)).toMatchObject({
+      content: round.text,
+      status: 'running',
+    })
+    current = handleTextComplete(current, {
+      type: 'text_complete', sessionId: 'session-1', text: round.text, turnId: round.turnId,
+      phase: 'intermediate', presentationProtocol: 'legacy', streamKind: 'thinking',
+      isIntermediate: true, messageId: round.turnId, ...protocol,
+    })
+    current = handleToolStart(current, {
+      type: 'tool_start', sessionId: 'session-1', toolUseId: round.tool, toolName: 'Read',
+      toolInput: { path: 'template.html' }, toolPurpose: 'work', turnId: round.tool, ...protocol,
+    })
+  }
+  const beforeAnswer = assistantTurn(current)
+  expect(beforeAnswer.response).toBeUndefined()
+  expect(beforeAnswer.activities.map(activity => activity.type)).toEqual(['thinking', 'tool', 'thinking', 'tool'])
+
+  current = handleTextDelta(current, {
+    type: 'text_delta', sessionId: 'session-1', delta: '结论在这里。', turnId: 'pi-turn-0__m4',
+    phase: 'final', presentationProtocol: 'legacy',
+  })
+  expect(assistantTurn(current).response).toMatchObject({ text: '结论在这里。', isStreaming: true })
+  expect(assistantTurn(current).activities.filter(activity => activity.type === 'thinking')).toHaveLength(2)
+
+  current = handleTextComplete(current, {
+    type: 'text_complete', sessionId: 'session-1', text: '结论在这里。', turnId: 'pi-turn-0__m4',
+    phase: 'final', presentationProtocol: 'legacy', isIntermediate: false, answerCommitted: true,
+    messageId: 'answer', ...protocol,
+  })
+  const done = assistantTurn(current, false)
+  expect(done.response).toMatchObject({ text: '结论在这里。', isStreaming: false, messageId: 'answer' })
+  expect(done.response?.text).not.toContain('Now I can read')
+  expect(done.activities.filter(activity => activity.type === 'thinking').map(activity => activity.status)).toEqual(['completed', 'completed'])
+})
+
+it('does not promote a legacy thinking delta with no phase into the reply', () => {
+  const pending = handleTextDelta(state(), {
+    type: 'text_delta', sessionId: 'session-1', delta: 'Now I can read',
+    presentationProtocol: 'legacy', turnId: 'pi-turn-0__think0',
+  })
+  expect(pending.session.messages.at(-1)).toMatchObject({
+    isIntermediate: true,
+    phase: 'intermediate',
+    streamKind: 'thinking',
+  })
+  expect(assistantTurn(pending).response).toBeUndefined()
+  expect(assistantTurn(pending).activities[0]).toMatchObject({ type: 'thinking', content: 'Now I can read' })
+})
+
+it('message completion does not complete the work header while the agent is processing', () => {
+  const current = handleTextComplete(state(), {
+    type: 'text_complete', sessionId: 'session-1', text: '已有内容',
+    turnId: 'answer', isIntermediate: false,
+  })
+  expect(deriveTurnPhase(assistantTurn(current, true))).toBe('pending')
+  expect(deriveTurnPhase(assistantTurn(current, false))).toBe('complete')
+})

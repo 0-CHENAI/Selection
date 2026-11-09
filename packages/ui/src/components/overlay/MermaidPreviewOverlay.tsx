@@ -36,6 +36,7 @@ export function MermaidPreviewOverlay({
   const containerRef = useRef<HTMLDivElement>(null)
 
   const {
+    attachContainerRef,
     scale,
     translate,
     isDragging,
@@ -86,7 +87,7 @@ export function MermaidPreviewOverlay({
       headerActions={headerActions}
     >
       <div
-        ref={containerRef}
+        ref={attachContainerRef}
         className="flex items-center justify-center select-none"
         onMouseDown={onMouseDown}
         onDoubleClick={onDoubleClick}

@@ -1,0 +1,30 @@
+{
+  "scope": "Playground-only X6 three-node fork/join preview; formal observer and execution backend unchanged",
+  "dependencies": { "@antv/x6": "3.1.8", "@antv/x6-react-shape": "3.0.1", "placement": "devDependencies" },
+  "validation": { "electronTypecheck": "pass", "previewEslint": "pass", "rendererBuild": "pass", "diffCheck": "pass", "detectorFindings": [] },
+  "browser": {
+    "viewports": ["1440x900 light", "1440x900 dark", "440x900 dark"],
+    "nodes": 3,
+    "edges": 2,
+    "panningChangesCamera": true,
+    "phaseUpdatePreservesCamera": true,
+    "completedNodes": 3,
+    "nodeDragChangesPosition": false,
+    "enterOpensSelectedDetails": true,
+    "axNodes": "3 named buttons, ignored=false",
+    "escapeReturnsFocusToTrigger": true,
+    "narrowDetails": "canvas inert, close receives focus, closing restores node focus",
+    "reducedMotion": "connection animations disabled",
+    "captionSafeArea": "browser-emulated Windows branch; native-caption=true, narrow dialog y=72; not native Windows OS acceptance"
+  },
+  "review": {
+    "method": "fresh independent reviewer using degraded contract; named reviewer definition unavailable",
+    "initialDisposition": "fix",
+    "materialFixes": { "detailsViewportClipping": "resolved", "secondaryTextContrast": "resolved" },
+    "fixEvidence": { "canvasWidth": 998, "x6HostWidth": 998, "selectedX": [603, 1017], "canvasX": [35, 1033], "zoom": "144% preserved", "lightTextContrast": "6.81:1", "inactivePhaseContrast": "6.25:1" },
+    "verdictDisposition": "ship",
+    "verdictScope": "the two reviewed material fixes only"
+  },
+  "screenshots": ["x6-preview-light.png", "x6-preview-dark.png", "x6-preview-narrow.png", "x6-preview-light-details.png", "x6-preview-narrow-details.png"],
+  "delivery": { "formalIntegration": false, "committed": false, "pushed": false }
+}

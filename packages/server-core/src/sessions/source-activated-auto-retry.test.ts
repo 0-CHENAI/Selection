@@ -72,7 +72,10 @@ describe('source_activated auto-retry', () => {
     sm = new SessionManager()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const id of (sm as unknown as { sessions: Map<string, unknown> }).sessions.keys()) {
+      await sm.flushSession(id)
+    }
     rmSync(tmpRoot, { recursive: true, force: true })
   })
 
@@ -128,6 +131,31 @@ describe('source_activated auto-retry', () => {
     expect(calls).toEqual(['list my repos\n\n[github activated]'])
   })
 
+  it('marks the automatic continuation hidden so it cannot render as a duplicate user turn', async () => {
+    const sessionId = 'hidden-resend'
+    buildSession(sessionId)
+    const calls: Array<{ message: string; hidden?: boolean }> = []
+    ;(sm as unknown as {
+      sendMessage: (
+        id: string,
+        message: string,
+        attachments?: unknown,
+        storedAttachments?: unknown,
+        options?: { hidden?: boolean },
+      ) => Promise<void>
+    }).sendMessage = async (_id, message, _attachments, _storedAttachments, options) => {
+      calls.push({ message, hidden: options?.hidden })
+    }
+
+    await fireSourceActivated(sessionId, 'bid-playbook', 'retry connection test')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(calls).toEqual([{
+      message: 'retry connection test\n\n[bid-playbook activated]',
+      hidden: true,
+    }])
+  })
+
   it('chained activations — produces two retries with different suffixes', async () => {
     const sessionId = 'chained'
     buildSession(sessionId)
@@ -144,9 +172,7 @@ describe('source_activated auto-retry', () => {
     ])
   })
 
-  it('empty originalMessage and no prior user message — skips (nothing to resend)', async () => {
-    // With no user message in history there is genuinely nothing to fall back to,
-    // so the auto-retry is skipped rather than re-sending a bogus empty message.
+  it('empty originalMessage — forwards event but does not schedule a bogus retry', async () => {
     const sessionId = 'empty-original'
     const managed = buildSession(sessionId)
     const calls = spyOnSendMessage(sessionId)
@@ -159,27 +185,59 @@ describe('source_activated auto-retry', () => {
     expect(managed.autoRetryTimer).toBeUndefined()
   })
 
-  it('empty originalMessage with a prior user message — falls back to the last user message', async () => {
-    // Regression for bugfix/session-continuation: when the per-turn capture comes
-    // back empty (empty/attachment-only turn, or a capture that raced turn teardown)
-    // but the user's message is already in history, the activation must still continue
-    // by resending the last user message — not silently strand the session.
-    const sessionId = 'empty-with-history'
+  it('attachment-only turn — resends last attachments when originalMessage is empty', async () => {
+    const sessionId = 'attachment-only'
     const managed = buildSession(sessionId)
-    const calls = spyOnSendMessage(sessionId)
+    const attachments = [{ name: 'photo.jpg', type: 'image', path: '/tmp/photo.jpg', mimeType: 'image/jpeg', size: 12 }]
+    managed.lastSentAttachments = attachments as never
+    const calls: Array<{ message: string; attachments?: unknown; hidden?: boolean }> = []
+    ;(sm as unknown as {
+      sendMessage: (
+        id: string,
+        message: string,
+        attachments?: unknown,
+        storedAttachments?: unknown,
+        options?: { hidden?: boolean },
+      ) => Promise<void>
+    }).sendMessage = async (_id, message, sentAttachments, _stored, options) => {
+      calls.push({ message, attachments: sentAttachments, hidden: options?.hidden })
+    }
 
-    // The current turn's user message is pushed to history at turn start.
-    managed.messages.push({
-      id: 'u1',
-      role: 'user',
-      content: 'summarize my latest doc',
-      timestamp: Date.now(),
-    } as never)
-
-    await fireSourceActivated(sessionId, 'craft-my-space', '')
+    await fireSourceActivated(sessionId, 'github', '')
     await new Promise(r => setTimeout(r, 150))
 
-    expect(calls).toEqual(['summarize my latest doc\n\n[craft-my-space activated]'])
+    expect(calls).toEqual([{
+      message: '[github activated]',
+      attachments,
+      hidden: true,
+    }])
+  })
+
+  it('does not resend lastSentAttachments when the original message had text', async () => {
+    const sessionId = 'text-plus-attachments'
+    const managed = buildSession(sessionId)
+    managed.lastSentAttachments = [{ name: 'photo.jpg', type: 'image', path: '/tmp/photo.jpg', mimeType: 'image/jpeg', size: 12 }] as never
+    const calls: Array<{ message: string; attachments?: unknown; hidden?: boolean }> = []
+    ;(sm as unknown as {
+      sendMessage: (
+        id: string,
+        message: string,
+        attachments?: unknown,
+        storedAttachments?: unknown,
+        options?: { hidden?: boolean },
+      ) => Promise<void>
+    }).sendMessage = async (_id, message, sentAttachments, _stored, options) => {
+      calls.push({ message, attachments: sentAttachments, hidden: options?.hidden })
+    }
+
+    await fireSourceActivated(sessionId, 'github', 'look at this')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(calls).toEqual([{
+      message: 'look at this\n\n[github activated]',
+      attachments: undefined,
+      hidden: true,
+    }])
   })
 
   it('legitimate user message preempts retry — skipped when follow-up arrived', async () => {
@@ -282,5 +340,199 @@ describe('source_activated auto-retry', () => {
     await new Promise(r => setTimeout(r, 200))
 
     expect(calls).toEqual([])
+  })
+
+  it('timer-first retry reserves one queue slot and preserves continuation identity on replay', async () => {
+    const sessionId = 'timer-first-queued-replay'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(managed.messageQueue[0]?.isSourceContinuation).toBe(true)
+    expect(managed.autoRetryPending?.committed).toBe(true)
+
+    const replayMarkers: boolean[] = []
+    ;(sm as unknown as {
+      sendMessage: (...args: unknown[]) => Promise<void>
+    }).sendMessage = async (...args) => {
+      replayMarkers.push(args[9] === true)
+    }
+    managed.isProcessing = false
+    await (sm as unknown as {
+      processNextQueuedMessage: (id: string) => Promise<void>
+    }).processNextQueuedMessage(sessionId)
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(replayMarkers).toEqual([true])
+  })
+
+  it('explicit Stop before the retry timer prevents finish-first resurrection', async () => {
+    const sessionId = 'stop-before-timer'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    managed.processingGeneration = 1
+    managed.activeTurnUsage = {
+      inputTokens: 1_000,
+      outputTokens: 200,
+      totalTokens: 1_200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    managed.agent = { forceAbort: () => {}, dispose: async () => {} } as never
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await sm.cancelProcessing(sessionId, true)
+    const replayed: string[] = []
+    ;(sm as unknown as { sendMessage: (_id: string, message: string) => Promise<void> }).sendMessage = async (_id, message) => {
+      replayed.push(message)
+    }
+    await (sm as unknown as {
+      onProcessingStopped: (id: string, reason: 'interrupted', generation: number) => Promise<void>
+    }).onProcessingStopped(sessionId, 'interrupted', 1)
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(replayed).toEqual([])
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.autoRetryTimer).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+    expect(managed.tokenUsage?.lastTurn?.totalTokens).toBe(1_200)
+  })
+
+  it('explicit Stop removes a timer-first queued continuation without replaying it', async () => {
+    const sessionId = 'stop-after-timer'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    managed.processingGeneration = 1
+    managed.agent = { forceAbort: () => {}, dispose: async () => {} } as never
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await new Promise(r => setTimeout(r, 150))
+    expect(managed.messageQueue[0]?.isSourceContinuation).toBe(true)
+
+    await sm.cancelProcessing(sessionId, true)
+    const replayed: string[] = []
+    ;(sm as unknown as { sendMessage: (_id: string, message: string) => Promise<void> }).sendMessage = async (_id, message) => {
+      replayed.push(message)
+    }
+    await (sm as unknown as {
+      onProcessingStopped: (id: string, reason: 'interrupted', generation: number) => Promise<void>
+    }).onProcessingStopped(sessionId, 'interrupted', 1)
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(replayed).toEqual([])
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.messages.some(message => message.hidden && message.content.includes('[github activated]'))).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+  })
+
+  it('terminal Swarm state rejects a continuation popped immediately before Stop', async () => {
+    const sessionId = 'stopped-during-replay-gap'
+    const managed = buildSession(sessionId)
+    const continuation = 'continue the task\n\n[github activated]'
+    const continuationId = 'popped-source-continuation'
+    managed.orchestrationId = 'orch-stopped'
+    managed.orchestrationStatus = 'stopped'
+    managed.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+    managed.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    managed.messages.push({
+      id: continuationId,
+      role: 'user',
+      content: continuation,
+      timestamp: Date.now(),
+      hidden: true,
+    })
+
+    await sm.sendMessage(
+      sessionId,
+      continuation,
+      undefined,
+      undefined,
+      { hidden: true },
+      continuationId,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(message => message.id === continuationId)).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+  })
+
+  it('Stop during replay persistence prevents the final model start', async () => {
+    const sessionId = 'stopped-during-replay-flush'
+    const managed = buildSession(sessionId)
+    const continuation = 'continue the task\n\n[github activated]'
+    managed.orchestrationId = 'orch-stopped-during-flush'
+    managed.orchestrationRootSessionId = sessionId
+    managed.orchestrationDepth = 0
+    managed.orchestrationLifecycle = 'managed'
+    managed.orchestrationStatus = 'running'
+    managed.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+
+    let markFlushEntered!: () => void
+    let releaseFlush!: () => void
+    const flushEntered = new Promise<void>(resolve => { markFlushEntered = resolve })
+    const flushReleased = new Promise<void>(resolve => { releaseFlush = resolve })
+    const flushSession = sm.flushSession.bind(sm)
+    sm.flushSession = async id => {
+      await flushSession(id)
+      markFlushEntered()
+      await flushReleased
+    }
+
+    const replay = sm.sendMessage(
+      sessionId,
+      continuation,
+      undefined,
+      undefined,
+      { hidden: true },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+    await flushEntered
+    await (sm as unknown as {
+      stopSwarm: (id: string) => Promise<unknown>
+    }).stopSwarm(sessionId)
+    releaseFlush()
+    await replay
+
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(message => message.content === continuation)).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+    expect((sm as unknown as {
+      sessions: Map<string, { orchestrationStatus?: string }>
+    }).sessions.get(sessionId)?.orchestrationStatus).toBe('stopped')
   })
 })

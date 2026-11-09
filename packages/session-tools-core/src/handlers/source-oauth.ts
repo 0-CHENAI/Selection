@@ -8,7 +8,6 @@
 import type { SessionToolContext } from '../context.ts';
 import type {
   ToolResult,
-  SourceConfig,
   McpOAuthAuthRequest,
   GoogleOAuthAuthRequest,
   SlackOAuthAuthRequest,
@@ -20,38 +19,6 @@ import type {
 import { successResponse, errorResponse } from '../response.ts';
 import { generateRequestId } from '../source-helpers.ts';
 import { basename } from 'node:path';
-
-/** The LoadedSource shape the credential manager needs for a source config. */
-function toLoadedSource(ctx: SessionToolContext, config: SourceConfig) {
-  return {
-    config,
-    guide: null,
-    folderPath: '',
-    workspaceRootPath: ctx.workspacePath,
-    workspaceId: basename(ctx.workspacePath) || '',
-  };
-}
-
-/**
- * For an authenticated source, report a usable token without asking the user to sign in:
- * the stored token if it is still valid, else a refreshed one. Returns null when only a
- * new sign-in will do.
- */
-async function reuseOrRefreshToken(ctx: SessionToolContext, config: SourceConfig): Promise<ToolResult | null> {
-  if (!config.isAuthenticated || !ctx.credentialManager) return null;
-  const loadedSource = toLoadedSource(ctx, config);
-  if (await ctx.credentialManager.getToken(loadedSource)) {
-    return successResponse(`Source '${config.slug}' is already authenticated.`);
-  }
-  if (await ctx.credentialManager.refresh(loadedSource)) {
-    return successResponse(refreshedMessage(config.slug));
-  }
-  return null;
-}
-
-function refreshedMessage(sourceSlug: string): string {
-  return `Token for source '${sourceSlug}' has been refreshed successfully. The source is ready — proceed with using its tools directly.`;
-}
 
 // ============================================================
 // MCP OAuth Trigger
@@ -91,9 +58,20 @@ export async function handleSourceOAuthTrigger(
   // If connectionStatus is 'needs_auth' or isAuthenticated is false,
   // skip refresh and go straight to browser authorization flow.
   if (source.isAuthenticated && ctx.credentialManager) {
-    const refreshedToken = await ctx.credentialManager.refresh(toLoadedSource(ctx, source));
+    const workspaceId = basename(ctx.workspacePath) || '';
+    const loadedSource = {
+      config: source,
+      guide: null,
+      folderPath: '',
+      workspaceRootPath: ctx.workspacePath,
+      workspaceId,
+    };
+
+    const refreshedToken = await ctx.credentialManager.refresh(loadedSource);
     if (refreshedToken) {
-      return successResponse(refreshedMessage(sourceSlug));
+      return successResponse(
+        `Token for source '${sourceSlug}' has been refreshed successfully. The source is ready — proceed with using its tools directly.`
+      );
     }
   }
 
@@ -177,9 +155,22 @@ export GOOGLE_OAUTH_CLIENT_SECRET="YOUR_CLIENT_SECRET"
     }
   }
 
-  // A valid or refreshable token needs no sign-in card
-  const ready = await reuseOrRefreshToken(ctx, source);
-  if (ready) return ready;
+  // Check if already authenticated (with valid token)
+  if (source.isAuthenticated && ctx.credentialManager) {
+    // Create LoadedSource for credential check
+    const workspaceId = basename(ctx.workspacePath) || '';
+    const loadedSource = {
+      config: source,
+      guide: null,
+      folderPath: '',
+      workspaceRootPath: ctx.workspacePath,
+      workspaceId,
+    };
+    const hasValidToken = await ctx.credentialManager.getToken(loadedSource);
+    if (hasValidToken) {
+      return successResponse(`Source '${sourceSlug}' is already authenticated.`);
+    }
+  }
 
   // Determine service from config
   let service: GoogleService | undefined;
@@ -252,9 +243,21 @@ export async function handleSlackOAuthTrigger(
     );
   }
 
-  // A valid or refreshable token needs no sign-in card
-  const ready = await reuseOrRefreshToken(ctx, source);
-  if (ready) return ready;
+  // Check if already authenticated (with valid token)
+  if (source.isAuthenticated && ctx.credentialManager) {
+    const workspaceId = basename(ctx.workspacePath) || '';
+    const loadedSource = {
+      config: source,
+      guide: null,
+      folderPath: '',
+      workspaceRootPath: ctx.workspacePath,
+      workspaceId,
+    };
+    const hasValidToken = await ctx.credentialManager.getToken(loadedSource);
+    if (hasValidToken) {
+      return successResponse(`Source '${sourceSlug}' is already authenticated.`);
+    }
+  }
 
   // Determine service from config
   let service: SlackService | undefined;
@@ -318,9 +321,21 @@ export async function handleMicrosoftOAuthTrigger(
     );
   }
 
-  // A valid or refreshable token needs no sign-in card
-  const ready = await reuseOrRefreshToken(ctx, source);
-  if (ready) return ready;
+  // Check if already authenticated (with valid token)
+  if (source.isAuthenticated && ctx.credentialManager) {
+    const workspaceId = basename(ctx.workspacePath) || '';
+    const loadedSource = {
+      config: source,
+      guide: null,
+      folderPath: '',
+      workspaceRootPath: ctx.workspacePath,
+      workspaceId,
+    };
+    const hasValidToken = await ctx.credentialManager.getToken(loadedSource);
+    if (hasValidToken) {
+      return successResponse(`Source '${sourceSlug}' is already authenticated.`);
+    }
+  }
 
   // Determine service from config
   let service: MicrosoftService | undefined;

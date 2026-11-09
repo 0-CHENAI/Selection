@@ -6,12 +6,12 @@
  * - toolMetadataStore (file-based cross-process sharing)
  * - LastApiError (error capture for error handler)
  * - Logging utilities
- * - Config reading (richToolDescriptions, extendedPromptCache settings)
+ * - Config reading (richToolDescriptions)
  */
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, appendFileSync, mkdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 // ============================================================================
 // CONSTANTS
@@ -26,14 +26,8 @@ export const INTERCEPTOR_LOGGING_ENABLED = !IS_PACKAGED;
 export const DEBUG = INTERCEPTOR_LOGGING_ENABLED &&
   (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1');
 
-/**
- * Config directory. Re-derived from the environment rather than imported from
- * config/paths.ts because this module is preloaded standalone into the Pi
- * subprocess; keep the rule in sync with `resolveConfigDir()`.
- */
-const CONFIG_DIR = process.env.CRAFT_CONFIG_DIR?.trim() || join(homedir(), '.craft-agent');
-
 /** Config file path for reading settings in the SDK subprocess */
+import { CONFIG_DIR } from './config/paths.ts';
 export const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 /** Session directory — set by env var (subprocess) or setSessionDir() (main process) */
@@ -46,113 +40,33 @@ let _sessionDir: string | null = process.env.CRAFT_SESSION_DIR || null;
 export const LOG_DIR = join(CONFIG_DIR, 'logs');
 export const LOG_FILE = join(LOG_DIR, 'interceptor.log');
 
-/** Rotate the active log once it reaches this size. */
-export const MAX_LOG_FILE_BYTES = 32 * 1024 * 1024;
+// Ensure log directory exists at module load
+try {
+  if (!existsSync(LOG_DIR)) {
+    mkdirSync(LOG_DIR, { recursive: true });
+  }
+} catch {
+  // Ignore - logging will silently fail if dir can't be created
+}
 
-/** Also rotate a log that has not been written to for this long. */
+// Rotate log file if older than 1 day
 const MAX_LOG_AGE_MS = 24 * 60 * 60 * 1000;
-
-/** Hard cap on a single entry, so one oversized entry can't dominate the file. */
-export const MAX_LOG_ENTRY_CHARS = 4 * 1024 * 1024;
-
-/** Cap applied to request bodies on the `CRAFT_DEBUG_FULL_BODIES` opt-in path. */
-export const MAX_LOGGED_BODY_CHARS = 2 * 1024 * 1024;
-
-/**
- * When `CRAFT_DEBUG_FULL_BODIES=1`, request bodies are written to interceptor.log
- * instead of being replaced by a size placeholder. Opt-in only — bodies carry user
- * prompts, tool arguments and base64 image payloads (OSS #1033).
- */
-export const DEBUG_FULL_BODIES = process.env.CRAFT_DEBUG_FULL_BODIES === '1';
-
-interface LogLimits {
-  maxBytes: number;
-  maxAgeMs: number;
-  checkIntervalMs: number;
-  checkChars: number;
-}
-
-const DEFAULT_LOG_LIMITS: LogLimits = {
-  maxBytes: MAX_LOG_FILE_BYTES,
-  maxAgeMs: MAX_LOG_AGE_MS,
-  // Rotation is checked at most once per interval, unless enough characters
-  // accumulated in the meantime — a statSync per log line would be its own I/O problem.
-  checkIntervalMs: 1000,
-  checkChars: 1024 * 1024,
-};
-
-const _limits: LogLimits = { ...DEFAULT_LOG_LIMITS };
-
-/** Mutable so tests can redirect writes away from the real user log. */
-let _logFile = LOG_FILE;
-let _charsSinceCheck = 0;
-let _lastRotateCheck = 0;
-
-/** Rename the active log to `<log>.prev`, replacing any previous rotation. */
-function rotateLogFile(filePath: string): void {
-  const prev = filePath + '.prev';
-  try {
-    // renameSync refuses to clobber an existing target on Windows.
-    unlinkSync(prev);
-  } catch {
-    // No previous rotation to replace.
-  }
-  renameSync(filePath, prev);
-}
-
-/**
- * Rotate `filePath` when it exceeds the size or age limit. Consults the real file
- * rather than a per-process byte counter, so concurrent subprocess writers that
- * share this log degrade gracefully — overshoot is bounded by one check interval.
- */
-function rotateLogIfNeeded(filePath: string): void {
-  const now = Date.now();
-  if (now - _lastRotateCheck < _limits.checkIntervalMs && _charsSinceCheck < _limits.checkChars) return;
-  _lastRotateCheck = now;
-  _charsSinceCheck = 0;
-
-  try {
-    const stat = statSync(filePath);
-    if (stat.size >= _limits.maxBytes || now - stat.mtimeMs > _limits.maxAgeMs) {
-      rotateLogFile(filePath);
+try {
+  if (existsSync(LOG_FILE)) {
+    const stat = statSync(LOG_FILE);
+    if (Date.now() - stat.mtimeMs > MAX_LOG_AGE_MS) {
+      const prevLog = LOG_FILE + '.prev';
+      renameSync(LOG_FILE, prevLog);
     }
-  } catch {
-    // ENOENT — nothing to rotate.
   }
+} catch {
+  // Ignore — rotation is best-effort
 }
 
-/**
- * Create the log directory and prepare the log file: reclaim an oversized log,
- * otherwise rotate a stale one. Best-effort — never throws.
- */
-export function initLogFile(filePath: string): void {
-  try {
-    mkdirSync(dirname(filePath), { recursive: true });
-  } catch {
-    // Ignore - logging will silently fail if dir can't be created
-  }
-
-  try {
-    const stat = statSync(filePath);
-    if (stat.size >= _limits.maxBytes) {
-      // A debug log is disposable: truncating reclaims the space immediately,
-      // where rotating a multi-gigabyte file would keep it around as `.prev`.
-      writeFileSync(filePath, '');
-    } else if (Date.now() - stat.mtimeMs > _limits.maxAgeMs) {
-      rotateLogFile(filePath);
-    }
-  } catch {
-    // ENOENT, or the rotation failed — best-effort either way.
-  }
-}
-
-// Gated on DEBUG: the file is only ever written when debug logging is on, and the
-// prep below truncates an oversized log — not something an unrelated import should do.
-if (DEBUG) initLogFile(LOG_FILE);
-
-/** Serialize debug args into one log line (without timestamp). */
-function formatLogEntry(args: unknown[]): string {
-  return args.map((a) => {
+export function debugLog(...args: unknown[]) {
+  if (!DEBUG) return;
+  const timestamp = new Date().toISOString();
+  const message = `${timestamp} [interceptor] ${args.map((a) => {
     if (typeof a === 'object') {
       try {
         return JSON.stringify(a);
@@ -162,48 +76,12 @@ function formatLogEntry(args: unknown[]): string {
       }
     }
     return String(a);
-  }).join(' ');
-}
-
-/** Append one timestamped, size-bounded entry. Never throws. */
-export function appendLogEntry(message: string): void {
-  const clipped = message.length > MAX_LOG_ENTRY_CHARS
-    ? `${message.slice(0, MAX_LOG_ENTRY_CHARS)}... [ENTRY TRUNCATED at ${MAX_LOG_ENTRY_CHARS} chars]`
-    : message;
-  // Truncate before stamping so the timestamp is never clipped.
-  const line = `${new Date().toISOString()} [interceptor] ${clipped}\n`;
+  }).join(' ')}`;
   try {
-    rotateLogIfNeeded(_logFile);
-    appendFileSync(_logFile, line);
-    _charsSinceCheck += line.length;
+    appendFileSync(LOG_FILE, message + '\n');
   } catch {
     // Silently fail if can't write to log file
   }
-}
-
-export function debugLog(...args: unknown[]) {
-  if (!DEBUG) return;
-  appendLogEntry(formatLogEntry(args));
-}
-
-/** Redirect log writes and reset rotation state. Tests only. */
-export function _setLogFileForTesting(filePath: string): void {
-  _logFile = filePath;
-  _charsSinceCheck = 0;
-  _lastRotateCheck = 0;
-}
-
-/** Override rotation limits. Tests only. */
-export function _setLogLimitsForTesting(limits: Partial<LogLimits>): void {
-  Object.assign(_limits, limits);
-}
-
-/** Restore the default log path and limits, clearing rotation state. Tests only. */
-export function _resetLogStateForTesting(): void {
-  _logFile = LOG_FILE;
-  Object.assign(_limits, DEFAULT_LOG_LIMITS);
-  _charsSinceCheck = 0;
-  _lastRotateCheck = 0;
 }
 
 // ============================================================================
@@ -252,25 +130,13 @@ export function isRichToolDescriptionsEnabled(): boolean {
 }
 
 /**
- * Check if extended prompt cache (1h TTL) is enabled.
- * When enabled, the interceptor upgrades all cache_control blocks from 5m to 1h TTL.
- * Defaults to false if config is unreadable or field is not set.
+ * MiniMax-M3 intermittently serializes required UI metadata and real tool
+ * arguments as one XML-like string. Keep its schemas focused on executable
+ * arguments; Selection can still render the canonical tool name as a label.
  */
-export function isExtendedPromptCacheEnabled(): boolean {
-  const config = getInterceptorConfig();
-  return config?.extendedPromptCache === true;
-}
-
-/**
- * Check if 1M context window is enabled.
- * When disabled, the interceptor strips the context-1m beta header.
- * Defaults to false — the 1M beta requires Anthropic Tier 4+, so it's opt-in
- * to avoid 400 "Invalid Request" on lower-tier API keys (issue #567).
- * Must stay in sync with getEnable1MContext() in config/storage.ts.
- */
-export function is1MContextEnabled(): boolean {
-  const config = getInterceptorConfig();
-  return config?.enable1MContext === true;
+export function supportsRichToolMetadataForModel(modelId: string | undefined): boolean {
+  if (!modelId) return true;
+  return !/(?:^|[\/_-])minimax[-_\/]?m3(?:$|[\/_-])/i.test(modelId.trim());
 }
 
 // ============================================================================

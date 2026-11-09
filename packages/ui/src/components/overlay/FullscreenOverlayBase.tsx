@@ -62,6 +62,7 @@ export interface FullscreenOverlayBaseProps {
   className?: string
   /** Accessible title for the overlay (visually hidden) */
   accessibleTitle?: string
+  autoFocus?: boolean
 
   // --- Structured header props (optional) ---
   // When any of these are provided, a FullscreenOverlayBaseHeader is rendered above children.
@@ -97,6 +98,7 @@ export function FullscreenOverlayBase({
   children,
   className,
   accessibleTitle = 'Overlay',
+  autoFocus = false,
   typeBadge,
   filePath,
   title,
@@ -150,7 +152,7 @@ export function FullscreenOverlayBase({
             className
           )}
           style={{ zIndex: Z_FULLSCREEN }}
-          onOpenAutoFocus={(e) => e.preventDefault()}
+          onOpenAutoFocus={autoFocus ? undefined : (e) => e.preventDefault()}
           onEscapeKeyDown={(event) => {
             const handled = handleFullscreenEscapeWithStack()
             if (!handled) return

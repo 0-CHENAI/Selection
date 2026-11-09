@@ -106,7 +106,7 @@ export const labelBadgeComponents: ComponentEntry[] = [
     id: 'label-badge-row-standalone',
     name: 'LabelBadgeRow (Standalone)',
     category: 'Chat Inputs',
-    description: 'Standalone label badge row primitive. Session label chips in the chat header use ChatHeaderLabels (whole chips + "+N").',
+    description: 'Standalone label badge row primitive. Note: this is not the stacked ActiveOptionBadges label rendering used by ChatInputZone.',
     component: LabelBadgeRowPlayground,
     props: [
       {

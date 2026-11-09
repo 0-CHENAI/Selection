@@ -22,7 +22,6 @@ import {
   statSync,
   unlinkSync,
 } from 'fs';
-import { readdir, unlink } from 'fs/promises';
 import { join, basename } from 'path';
 import { getWorkspaceSessionsPath } from '../workspaces/storage.ts';
 import { generateUniqueSessionId } from './slug-generator.ts';
@@ -41,8 +40,7 @@ import type { Plan } from '../agent/plan-types.ts';
 import { validateSessionStatus } from '../statuses/validation.ts';
 import { debug } from '../utils/debug.ts';
 import { getStatusCategory } from '../statuses/storage.ts';
-import { readSessionHeader, readSessionHeaderAsync, readSessionJsonl } from './jsonl.ts';
-import { mapWithConcurrency } from '../utils/async.ts';
+import { readSessionHeader, readSessionJsonl } from './jsonl.ts';
 import { sessionPersistenceQueue } from './persistence-queue.ts';
 
 // Re-export types for convenience
@@ -179,9 +177,18 @@ export function generateSessionId(workspaceRootPath: string): string {
 export async function createSession(
   workspaceRootPath: string,
   options?: {
+    /** Reserved by the host's durable handover receipt, never supplied by RPC options. */
+    reservedSessionId?: string;
+    handover?: SessionConfig['handover'];
+    workMode?: SessionConfig['workMode'];
+    ppt?: SessionConfig['ppt'];
+    office?: SessionConfig['office'];
+    executionRootSessionId?: string;
     name?: string;
     workingDirectory?: string;
     permissionMode?: SessionConfig['permissionMode'];
+    thinkingLevel?: SessionConfig['thinkingLevel'];
+    fastMode?: boolean;
     enabledSourceSlugs?: string[];
     model?: string;
     llmConnection?: string;
@@ -190,17 +197,36 @@ export async function createSession(
     labels?: string[];
     isFlagged?: boolean;
     projectId?: string;
+    sharedProjectMemoryEnabled?: boolean;
     parentSessionId?: string;
     taskSlug?: string;
     taskRunId?: string;
     taskNodeId?: string;
+    taskAttempt?: number;
+    taskRevision?: number;
+    taskActor?: { id: string; persona?: string };
+    taskWorkerId?: string;
+
     taskDraft?: boolean;
+    swarmEnabled?: boolean;
+    orchestrationId?: string;
+    orchestrationRootSessionId?: string;
+    orchestrationDepth?: number;
+    orchestrationRole?: 'coordinator' | 'worker' | 'reviewer';
+    orchestrationLifecycle?: 'managed' | 'detached';
+    orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
+    orchestrationBlocker?: string;
+    orchestrationTokensUsed?: number;
+    orchestrationTokenBudget?: number;
+    orchestrationAggregation?: SessionConfig['orchestrationAggregation'];
   }
 ): Promise<SessionConfig> {
   ensureSessionsDir(workspaceRootPath);
 
   const now = Date.now();
-  const sessionId = generateSessionId(workspaceRootPath);
+  const sessionId = options?.reservedSessionId ?? generateSessionId(workspaceRootPath);
+  if (sanitizeSessionId(sessionId) !== sessionId || !sessionId) throw new Error('Invalid reserved session identity');
+  if (options?.reservedSessionId && existsSync(getSessionFilePath(workspaceRootPath, sessionId))) throw new Error('Reserved session already exists');
 
   // Create session directory with all subdirectories (plans, attachments)
   ensureSessionDir(workspaceRootPath, sessionId);
@@ -212,6 +238,12 @@ export async function createSession(
 
   const session: SessionConfig = {
     id: sessionId,
+    handover: options?.handover,
+    ppt: options?.ppt,
+    office: options?.office,
+    workMode: options?.ppt ? 'PRO' : options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
+    workModeNeedsReview: false,
+    executionRootSessionId: options?.executionRootSessionId ?? sessionId,
     workspaceRootPath,
     name: options?.name,
     createdAt: now,
@@ -219,6 +251,8 @@ export async function createSession(
     workingDirectory: options?.workingDirectory,
     sdkCwd,
     permissionMode: options?.permissionMode,
+    thinkingLevel: options?.thinkingLevel,
+    fastMode: options?.fastMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
     model: options?.model,
     llmConnection: options?.llmConnection,
@@ -227,11 +261,27 @@ export async function createSession(
     labels: options?.labels,
     isFlagged: options?.isFlagged,
     projectId: options?.projectId,
+    sharedProjectMemoryEnabled: options?.sharedProjectMemoryEnabled ?? false,
     parentSessionId: options?.parentSessionId,
     taskSlug: options?.taskSlug,
     taskRunId: options?.taskRunId,
     taskNodeId: options?.taskNodeId,
+    taskAttempt: options?.taskAttempt,
+    taskRevision: options?.taskRevision,
+    taskActor: options?.taskActor,
+    taskWorkerId: options?.taskWorkerId,
     taskDraft: options?.taskDraft,
+    swarmEnabled: options?.swarmEnabled ?? false,
+    orchestrationId: options?.orchestrationId,
+    orchestrationRootSessionId: options?.orchestrationRootSessionId,
+    orchestrationDepth: options?.orchestrationDepth,
+    orchestrationRole: options?.orchestrationRole,
+    orchestrationLifecycle: options?.orchestrationLifecycle,
+    orchestrationStatus: options?.orchestrationStatus,
+    orchestrationBlocker: options?.orchestrationBlocker,
+    orchestrationTokensUsed: options?.orchestrationTokensUsed,
+    orchestrationTokenBudget: options?.orchestrationTokenBudget,
+    orchestrationAggregation: options?.orchestrationAggregation,
   };
 
   // Save empty session
@@ -270,6 +320,7 @@ export async function getOrCreateSessionById(
       lastUsedAt: existing.lastUsedAt,
       sdkCwd: existing.sdkCwd,
       workingDirectory: existing.workingDirectory,
+      sharedProjectMemoryEnabled: existing.sharedProjectMemoryEnabled,
     };
   }
 
@@ -289,6 +340,7 @@ export async function getOrCreateSessionById(
     sdkCwd,
     createdAt: now,
     lastUsedAt: now,
+    sharedProjectMemoryEnabled: false,
   };
 
   const storedSession: StoredSession = {
@@ -398,63 +450,6 @@ export function listSessions(workspaceRootPath: string): SessionMetadata[] {
 }
 
 /**
- * Async, resilient version of listSessions for startup discovery (#1113).
- *
- * Reads each session header on the libuv threadpool (off the main thread) with
- * bounded concurrency. Headers that come back `null` — missing, corrupt,
- * cloud-evicted, or slower than `perFileTimeoutMs` — are skipped and counted,
- * never thrown, so one unreadable session can't drop the whole list or block
- * startup. Parity with listSessions for healthy sessions.
- */
-export async function listSessionsAsync(
-  workspaceRootPath: string,
-  opts?: { perFileTimeoutMs?: number; concurrency?: number },
-): Promise<SessionMetadata[]> {
-  const span = perf.span('session.listSessionsAsync');
-  const sessionsDir = getWorkspaceSessionsPath(workspaceRootPath);
-  if (!existsSync(sessionsDir)) {
-    span.end();
-    return [];
-  }
-
-  const concurrency = opts?.concurrency ?? 16;
-  const timeoutOpts = opts?.perFileTimeoutMs != null ? { timeoutMs: opts.perFileTimeoutMs } : undefined;
-
-  const entries = await readdir(sessionsDir, { withFileTypes: true });
-  span.mark('readdir');
-  const sessionIds = entries.filter(e => e.isDirectory()).map(e => e.name);
-
-  let skipped = 0;
-  const metadata = await mapWithConcurrency(sessionIds, concurrency, async (sessionId): Promise<SessionMetadata | null> => {
-    const sessionDir = join(sessionsDir, sessionId);
-    const jsonlFile = join(sessionDir, 'session.jsonl');
-
-    // Clean up orphaned .tmp files from crashed atomic writes (best-effort).
-    await unlink(jsonlFile + '.tmp').catch(() => { /* usually absent */ });
-
-    // existsSync is metadata-only (no hydration); a dir without a jsonl is an
-    // empty session folder, not a skip. The read itself handles eviction/errors.
-    if (!existsSync(jsonlFile)) return null;
-
-    const header = await readSessionHeaderAsync(jsonlFile, timeoutOpts);
-    if (!header) { skipped++; return null; }
-    return headerToMetadata(header, workspaceRootPath);
-  });
-  span.mark('parsed');
-
-  const sessions = metadata.filter((m): m is SessionMetadata => m != null);
-  span.setMetadata('count', sessions.length);
-  if (skipped > 0) {
-    debug(`[sessions] listSessionsAsync skipped ${skipped} unreadable/evicted session(s) in ${workspaceRootPath}`);
-  }
-
-  // Sort by lastUsedAt descending (most recent first)
-  const sorted = sessions.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
-  span.end();
-  return sorted;
-}
-
-/**
  * Convert SessionHeader to SessionMetadata
  * Used for fast session list loading from JSONL format.
  */
@@ -538,7 +533,9 @@ export async function clearSessionMessages(workspaceRootPath: string, sessionId:
  * Get or create the latest session for a workspace
  * Uses listActiveSessions to exclude archived sessions
  */
-export async function getOrCreateLatestSession(workspaceRootPath: string): Promise<SessionConfig> {
+export async function getOrCreateLatestSession(
+  workspaceRootPath: string,
+): Promise<SessionConfig> {
   const sessions = listActiveSessions(workspaceRootPath);
   if (sessions.length > 0 && sessions[0]) {
     const latest = sessions[0];
@@ -549,9 +546,10 @@ export async function getOrCreateLatestSession(workspaceRootPath: string): Promi
       name: latest.name,
       createdAt: latest.createdAt,
       lastUsedAt: latest.lastUsedAt,
+      sharedProjectMemoryEnabled: latest.sharedProjectMemoryEnabled,
     };
   }
-  return createSession(workspaceRootPath);
+  return createSession(workspaceRootPath, { sharedProjectMemoryEnabled: false });
 }
 
 // ============================================================
@@ -630,7 +628,7 @@ export async function updateSessionMetadata(
   if ('hasUnread' in updates) session.hasUnread = updates.hasUnread;
   if ('sharedUrl' in updates) session.sharedUrl = updates.sharedUrl;
   if ('sharedId' in updates) session.sharedId = updates.sharedId;
-  if (updates.model !== undefined) session.model = updates.model;
+  if ('model' in updates) session.model = updates.model;
   if (updates.llmConnection !== undefined) session.llmConnection = updates.llmConnection;
   if (updates.isArchived !== undefined) session.isArchived = updates.isArchived;
   if ('archivedAt' in updates) session.archivedAt = updates.archivedAt;
@@ -691,7 +689,7 @@ export async function setSessionProjectId(
 
 /**
  * Unbind every session that referenced a given projectId.
- * Called when a project is deleted — sessions are preserved, just unlinked.
+ * Preserves sessions while removing their project association.
  * Returns the number of sessions touched.
  */
 export async function unbindProjectFromSessions(
@@ -782,16 +780,12 @@ export async function markCompactionComplete(
 export async function markPendingPlanExecutionDispatched(
   workspaceRootPath: string,
   sessionId: string
-): Promise<boolean> {
+): Promise<void> {
   const session = loadSession(workspaceRootPath, sessionId);
-  const pending = session?.pendingPlanExecution;
-  if (!session || !pending || pending.awaitingCompaction || pending.executionDispatched) {
-    return false;
-  }
+  if (!session?.pendingPlanExecution) return;
 
-  pending.executionDispatched = true;
+  session.pendingPlanExecution.executionDispatched = true;
   await saveSession(session);
-  return true;
 }
 
 /**
@@ -804,9 +798,7 @@ export async function clearPendingPlanExecution(
   sessionId: string
 ): Promise<void> {
   const session = loadSession(workspaceRootPath, sessionId);
-  // Nothing pending (the common case: this runs on every user message): no rewrite. Rewriting the
-  // whole file here raced concurrent sends on the shared .tmp path and could revert newer writes.
-  if (!session?.pendingPlanExecution) return;
+  if (!session) return;
 
   delete session.pendingPlanExecution;
   await saveSession(session);

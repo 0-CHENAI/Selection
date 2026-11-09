@@ -96,46 +96,6 @@ export function extractLabelId(entry: string): string {
 }
 
 /**
- * Session label entries compared by meaning rather than spelling — the dedupe rule for labels the
- * app writes (auto-label rules, canonicalizeSessionLabels):
- * - a plain entry (`bug`, or `bug::` with an empty value) is present when the session carries the
- *   label in any form, so the `bug::bug` / `bug::Bug` values older auto-labelling stored on plain
- *   labels count as `bug`;
- * - a valued entry is present when the label carries the same value. Values compare exactly unless
- *   `foldsCase(labelId)` says otherwise — `foldsValueCase(labels)` folds `string` values (issue keys,
- *   emails, names: `CRA-1` is `cra-1`) and keeps links, numbers and dates exact.
- */
-export class LabelEntrySet {
-  private readonly ids = new Set<string>();
-  private readonly values = new Set<string>();
-
-  constructor(
-    entries: readonly string[] | ReadonlySet<string> = [],
-    private readonly foldsCase: (labelId: string) => boolean = () => false,
-  ) {
-    for (const entry of entries) this.add(entry);
-  }
-
-  add(entry: string): void {
-    const id = extractLabelId(entry);
-    const value = entryValue(entry);
-    this.ids.add(id);
-    if (value) this.values.add(this.valueKey(id, value));
-  }
-
-  has(entry: string): boolean {
-    const id = extractLabelId(entry);
-    const value = entryValue(entry);
-    return value ? this.values.has(this.valueKey(id, value)) : this.ids.has(id);
-  }
-
-  /** Identity of a label value (an id never contains the separator, so the pair is unambiguous). */
-  private valueKey(id: string, value: string): string {
-    return `${id}${VALUE_SEPARATOR}${this.foldsCase(id) ? value.toLowerCase() : value}`;
-  }
-}
-
-/**
  * Toggle a label in a session-labels list. Returns a new array.
  *
  * - If any entry has this base ID (boolean or valued), all matching
@@ -218,12 +178,6 @@ export function formatDisplayValue(rawValue: string, valueType?: 'string' | 'num
 // ============================================================
 // Internal Helpers
 // ============================================================
-
-/** The raw value of an entry ('' for a plain entry). */
-function entryValue(entry: string): string {
-  const separatorIndex = entry.indexOf(VALUE_SEPARATOR);
-  return separatorIndex === -1 ? '' : entry.substring(separatorIndex + VALUE_SEPARATOR.length);
-}
 
 /**
  * Infer the typed value from a raw string.

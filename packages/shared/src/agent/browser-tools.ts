@@ -10,10 +10,9 @@
  * (getOrCreateForSession pattern), so commands don't need instance IDs.
  */
 
-import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import type { ImageSendPolicy } from '../utils/image-send-size.ts';
 import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
-import type { BrowserSecurityChallenge } from '../protocol/dto.ts';
 
 // Tool result type - matches MCP CallToolResult content blocks
 type ToolResult = {
@@ -57,19 +56,16 @@ export interface BrowserScreenshotArgs {
   annotate?: boolean
   format?: 'png' | 'jpeg'
   jpegQuality?: number
-}
-
-/** How a click reached the element: trusted mouse input, or DOM events (`note` says why). */
-export interface BrowserClickResult {
-  via: 'mouse' | 'script'
-  note?: string
-  /** A popup the click opened, or a sign-in window refused because another browser window has one open. */
-  popup?: string
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserScreenshotResult {
   imageBuffer: Buffer
   imageFormat: 'png' | 'jpeg'
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
   metadata?: Record<string, unknown>
 }
 
@@ -88,6 +84,7 @@ export interface BrowserScreenshotRegionArgs {
   padding?: number
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserWindowResizeArgs {
@@ -133,7 +130,7 @@ export interface BrowserPaneFns {
   openPanel: (options?: { background?: boolean }) => Promise<{ instanceId: string }>;
   navigate: (url: string) => Promise<{ url: string; title: string }>;
   snapshot: () => Promise<{ url: string; title: string; nodes: Array<{ ref: string; role: string; name: string; value?: string; description?: string; focused?: boolean; checked?: boolean; disabled?: boolean }> }>;
-  click: (ref: string, options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }) => Promise<BrowserClickResult | void>;
+  click: (ref: string, options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }) => Promise<void>;
   clickAt: (x: number, y: number) => Promise<void>;
   drag: (x1: number, y1: number, x2: number, y2: number) => Promise<void>;
   fill: (ref: string, value: string) => Promise<void>;
@@ -168,7 +165,7 @@ export interface BrowserPaneFns {
     boundSessionId: string | null;
     agentControlActive?: boolean;
   }>>;
-  detectChallenge: () => Promise<BrowserSecurityChallenge>;
+  detectChallenge: () => Promise<{ detected: boolean; provider: string; signals: string[] }>;
 }
 
 // ============================================================================
@@ -249,17 +246,16 @@ export function createBrowserTools(options: BrowserToolsOptions) {
   }
 
   return [
-    // Single CLI-like tool for all browser actions
-    tool(
-      'browser_tool',
-      BROWSER_TOOL_DESCRIPTION,
-      {
+    {
+      name: 'browser_tool',
+      description: BROWSER_TOOL_DESCRIPTION,
+      schema: {
         command: z.union([
           z.string(),
           z.array(z.string()),
         ]).describe('Browser command as a string (e.g., "click @e1") or array (e.g., ["evaluate", "var x = 1; x + 2"]). Array mode preserves semicolons and whitespace in arguments.'),
       },
-      async (args) => {
+      handler: async (args: { command: string | string[] }) => {
         try {
           const result = await executeBrowserToolCommand({
             command: args.command,
@@ -285,6 +281,6 @@ export function createBrowserTools(options: BrowserToolsOptions) {
           return errorResponse(error instanceof Error ? error.message : String(error));
         }
       },
-    ),
+    },
   ];
 }

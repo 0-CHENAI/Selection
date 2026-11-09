@@ -52,13 +52,10 @@ export function describeCron(cron: string): string {
 
 /**
  * Compute the next N run times for a cron expression using croner.
- * Pass the automation's IANA timezone: the scheduler evaluates the cron in that zone
- * (`matchesCron` in @craft-agent/shared/automations), so a 9:00 New York job must not be
- * computed as 9:00 in the viewer's zone. Omitted = the system zone, like the scheduler.
  */
-export function computeNextRuns(cron: string, count: number = 3, timezone?: string): Date[] {
+export function computeNextRuns(cron: string, count: number = 3): Date[] {
   try {
-    const job = new Cron(cron, timezone ? { timezone } : {})
+    const job = new Cron(cron)
     return job.nextRuns(count)
   } catch {
     return []

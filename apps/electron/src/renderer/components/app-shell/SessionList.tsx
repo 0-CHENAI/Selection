@@ -1,9 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react"
-import { Button } from "@/components/ui/button"
 import { useTranslation } from "react-i18next"
 import { useSetAtom } from "jotai"
-import { isToday, isYesterday, format, startOfDay } from "date-fns"
-import { getDateLocale } from "@craft-agent/shared/i18n"
+import { startOfDay } from "date-fns"
 import { useAction } from "@/actions"
 import { Inbox, Archive } from "lucide-react"
 
@@ -32,17 +30,19 @@ import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
-import { ancestorIds, flatRow, type SessionListRow } from "@/utils/session-tree"
-import { FlipOnChange, SPRING } from "@craft-agent/ui/motion"
-import { useListReorderFlip } from "@/hooks/useListReorderFlip"
+import { formatSessionDateGroupLabel } from "@/utils/session-date"
+import { resolveSessionListNewSessionParams } from "./inherited-filter-params"
 
-export type { SessionListRow }
+export interface SessionListRow {
+  item: SessionMeta
+}
 
 /** Grouping mode for chat list */
 export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'project'
 
 interface SessionListProps {
   items: SessionMeta[]
+  childrenByRoot?: Map<string, SessionMeta[]>
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onFlag?: (sessionId: string) => void
   onUnflag?: (sessionId: string) => void
@@ -89,6 +89,8 @@ interface SessionListProps {
   statusFilter?: Map<string, FilterMode>
   /** Secondary label filter (label chips) - for search result grouping */
   labelFilterMap?: Map<string, FilterMode>
+  /** Secondary project filter (project chips) - used by empty-state creation inheritance */
+  projectFilter?: Map<string, FilterMode>
   /** Override which session is highlighted (for multi-panel focused panel tracking) */
   focusedSessionId?: string | null
   /** Override navigation target (for multi-panel: focuses existing panel or navigates focused panel) */
@@ -102,21 +104,6 @@ interface SessionListProps {
 // Re-export SessionStatusId for use by parent components
 export type { SessionStatusId }
 
-// Note: uses date-fns format for non-today/yesterday dates; Today/Yesterday translated at render time
-function formatDateGroupLabel(date: Date, t: (key: string) => string, lang: string): string {
-  if (isToday(date)) return t('common.today')
-  if (isYesterday(date)) return t('common.yesterday')
-  return format(date, 'MMM d', { locale: getDateLocale(lang) })
-}
-
-/** Collapsed families saved per workspace, the most recent kept, so ids of deleted sessions don't pile up */
-const MAX_SAVED_COLLAPSED_FAMILIES = 500
-
-function readCollapsedFamilies(scope: string): Set<string> {
-  const saved = storage.get<unknown>(KEYS.collapsedSessionFamilies, [], scope)
-  return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : [])
-}
-
 /**
  * SessionList - Scrollable list of session cards with keyboard navigation
  *
@@ -128,6 +115,7 @@ function readCollapsedFamilies(scope: string): Set<string> {
  */
 export function SessionList({
   items,
+  childrenByRoot,
   onDelete,
   onFlag,
   onUnflag,
@@ -153,12 +141,14 @@ export function SessionList({
   workspaceId,
   statusFilter,
   labelFilterMap,
+  projectFilter,
   focusedSessionId,
   onNavigateToSession,
   hasPendingPrompt,
   activeChatMatchInfo,
 }: SessionListProps) {
   const { t, i18n } = useTranslation()
+  const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const setSendToWorkspace = useSetAtom(sendToWorkspaceAtom)
 
   // --- Selection (atom-backed, shared with ChatDisplay + BatchActionPanel) ---
@@ -181,6 +171,18 @@ export function SessionList({
   // Get current filter from navigation state (for preserving context in tab routes)
   const currentFilter = isSessionsNavigation(navState) ? navState.filter : undefined
 
+  // Preserve an unambiguous project scope for the empty-state action. The
+  // regular list deliberately has no project-specific creation bar (#215).
+  const inheritedNewSessionParams = resolveSessionListNewSessionParams(
+    currentFilter,
+    statusFilter ?? new Map(),
+    labelFilterMap ?? new Map(),
+    projectFilter ?? new Map()
+  )
+  const handleCreateSession = () => {
+    navigate(routes.action.newSession(inheritedNewSessionParams ?? undefined))
+  }
+
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null)
   const [renameName, setRenameName] = useState("")
@@ -194,14 +196,7 @@ export function SessionList({
       currentFilter,
       groupingMode,
     })
-  }, [
-    workspaceId,
-    groupingMode,
-    currentFilter?.kind,
-    currentFilter && 'stateId' in currentFilter ? currentFilter.stateId : undefined,
-    currentFilter && 'labelId' in currentFilter ? currentFilter.labelId : undefined,
-    currentFilter && 'viewId' in currentFilter ? currentFilter.viewId : undefined,
-  ])
+  }, [workspaceId, currentFilter, groupingMode])
 
   const readCollapsedGroupsForScope = useCallback((scopeSuffix: string): Set<string> => {
     const scopedRaw = storage.getRaw(KEYS.collapsedSessionGroups, scopeSuffix)
@@ -244,24 +239,6 @@ export function SessionList({
     })
   }, [])
 
-  // Sessions whose sub-sessions are hidden. Families start expanded; the collapsed ones are saved per
-  // workspace, most recently collapsed last.
-  const familyScope = `ws=${workspaceId ? encodeURIComponent(workspaceId) : 'global'}`
-  const [familyState, setFamilyState] = useState(() => ({ scope: familyScope, collapsed: readCollapsedFamilies(familyScope) }))
-  if (familyState.scope !== familyScope) {
-    // Another workspace: switch to its saved set while rendering, so no frame shows the previous one
-    setFamilyState({ scope: familyScope, collapsed: readCollapsedFamilies(familyScope) })
-  }
-  const collapsedFamilies = familyState.collapsed
-  const updateCollapsedFamilies = useCallback((update: (collapsed: Set<string>) => Set<string>) => {
-    setFamilyState(prev => ({ scope: prev.scope, collapsed: update(prev.collapsed) }))
-  }, [])
-
-  useEffect(() => {
-    const saved = Array.from(familyState.collapsed).slice(-MAX_SAVED_COLLAPSED_FAMILIES)
-    storage.set(KEYS.collapsedSessionFamilies, saved, familyState.scope)
-  }, [familyState])
-
   // --- Data pipeline (search, filtering, pagination, grouping) ---
   const scrollViewportRef = useRef<HTMLDivElement>(null)
 
@@ -274,8 +251,7 @@ export function SessionList({
     matchingFilterItems,
     otherResultItems,
     exceededSearchLimit,
-    rows: visibleRows,
-    families,
+    flatItems,
     hasMore,
     collapsedGroupsMeta,
     searchInputRef,
@@ -290,15 +266,14 @@ export function SessionList({
     labelFilterMap,
     labelConfigs: labels,
     collapsedGroups,
-    collapsedFamilies,
     groupingMode,
     scrollViewportRef,
   })
 
   const rowData = useMemo(() => {
     if (isSearchMode) {
-      const matchingRows: SessionListRow[] = matchingFilterItems.map(flatRow)
-      const otherRows: SessionListRow[] = otherResultItems.map(flatRow)
+      const matchingRows: SessionListRow[] = matchingFilterItems.map(item => ({ item }))
+      const otherRows: SessionListRow[] = otherResultItems.map(item => ({ item }))
 
       const groups: EntityListGroup<SessionListRow>[] = []
       if (matchingRows.length > 0) {
@@ -314,12 +289,10 @@ export function SessionList({
       }
     }
 
-    // visibleRows only contains visible (expanded + paginated) rows.
+    // flatItems only contains visible (expanded + paginated) items.
     // collapsedGroupsMeta provides key + count for collapsed groups so we
     // can insert header-only placeholder groups in the correct position.
-    // Every row is grouped and sorted by its family's view (`groupItem`), which
-    // all rows of a family share, so the stable sorts keep a family together.
-    const rows = visibleRows
+    const rows: SessionListRow[] = flatItems.map(item => ({ item }))
 
     if (groupingMode === 'unread') {
       // Two fixed buckets: unread on top, read below. Within each, items keep
@@ -330,24 +303,19 @@ export function SessionList({
       const unreadRows: SessionListRow[] = []
       const readRows: SessionListRow[] = []
       for (const row of rows) {
-        if (row.groupItem.hasUnread) unreadRows.push(row)
+        if (row.item.hasUnread) unreadRows.push(row)
         else readRows.push(row)
       }
-      unreadRows.sort((a, b) => (b.groupItem.lastMessageAt || 0) - (a.groupItem.lastMessageAt || 0))
-      readRows.sort((a, b) => (b.groupItem.lastMessageAt || 0) - (a.groupItem.lastMessageAt || 0))
+      unreadRows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
+      readRows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
 
       const collapsedUnread = collapsedGroupsMeta.find(m => m.key === 'unread-yes')
       const collapsedRead = collapsedGroupsMeta.find(m => m.key === 'unread-no')
 
-      // Unread counts the unread sessions, Read every session in its group: a family with an unread
-      // session sits in Unread with its read ones. Both count the whole list, so neither the loaded page
-      // nor a collapsed group or family changes them.
-      let unreadCount = 0
-      let readCount = 0
-      for (const { members, view } of families) {
-        if (view.hasUnread) unreadCount += members.filter(member => member.item.hasUnread).length
-        else readCount += members.length
-      }
+      // For collapsed groups prefer the persisted count (matches how the
+      // date/status branches surface the size of a collapsed bucket).
+      const unreadCount = collapsedUnread ? collapsedUnread.count : unreadRows.length
+      const readCount = collapsedRead ? collapsedRead.count : readRows.length
 
       const orderedGroups: EntityListGroup<SessionListRow>[] = [
         {
@@ -356,14 +324,14 @@ export function SessionList({
           items: unreadRows,
           // Empty groups have nothing to collapse into; suppress the caret.
           collapsible: unreadRows.length > 0 || !!collapsedUnread,
-          ...(collapsedUnread ? { collapsedCount: unreadCount } : {}),
+          ...(collapsedUnread ? { collapsedCount: collapsedUnread.count } : {}),
         },
         {
           key: 'unread-no',
           label: t('session.readGroup', { count: readCount }),
           items: readRows,
           collapsible: readRows.length > 0 || !!collapsedRead,
-          ...(collapsedRead ? { collapsedCount: readCount } : {}),
+          ...(collapsedRead ? { collapsedCount: collapsedRead.count } : {}),
         },
       ]
 
@@ -380,7 +348,7 @@ export function SessionList({
       // Build groups from visible items
       const groupsByKey = new Map<string, { rows: SessionListRow[], statusId: string }>()
       for (const row of rows) {
-        const statusId = getSessionStatus(row.groupItem)
+        const statusId = getSessionStatus(row.item)
         const key = `status-${statusId}`
         if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], statusId })
         groupsByKey.get(key)!.rows.push(row)
@@ -398,7 +366,7 @@ export function SessionList({
       for (const [key, { rows: groupRows, statusId }] of groupsByKey) {
         const state = sessionStatuses.find(s => s.id === statusId)
         if (!state) continue
-        groupRows.sort((a, b) => (b.groupItem.lastMessageAt || 0) - (a.groupItem.lastMessageAt || 0))
+        groupRows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
         const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
         orderedGroups.push({
           key,
@@ -436,7 +404,7 @@ export function SessionList({
 
       const groupsByKey = new Map<string, { rows: SessionListRow[], projectId: string | null }>()
       for (const row of rows) {
-        const rawProjectId = row.groupItem.projectId
+        const rawProjectId = (row.item as { projectId?: string }).projectId
         const resolvedProjectId = rawProjectId && projectNameById.has(rawProjectId) ? rawProjectId : null
         const key = resolvedProjectId ? `project-${resolvedProjectId}` : 'project-__none__'
         if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], projectId: resolvedProjectId })
@@ -454,7 +422,7 @@ export function SessionList({
 
       const orderedGroups: EntityListGroup<SessionListRow>[] = []
       for (const [key, { rows: groupRows, projectId }] of groupsByKey) {
-        groupRows.sort((a, b) => (b.groupItem.lastMessageAt || 0) - (a.groupItem.lastMessageAt || 0))
+        groupRows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
         const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
         const label = projectId
           ? (projectNameById.get(projectId) ?? t('sidebar.unknownProject', { defaultValue: 'Unknown project' }))
@@ -491,13 +459,13 @@ export function SessionList({
     const groupDates = new Map<string, Date>()
 
     for (const row of rows) {
-      const day = startOfDay(new Date(row.groupItem.lastMessageAt || 0))
+      const day = startOfDay(new Date(row.item.lastMessageAt || 0))
       const groupKey = day.toISOString()
 
       if (!groupsByKey.has(groupKey)) {
         groupsByKey.set(groupKey, {
           key: groupKey,
-          label: formatDateGroupLabel(day, t, i18n.resolvedLanguage ?? 'en'),
+          label: formatSessionDateGroupLabel(day, t, language),
           items: [],
           collapsible: true,
         })
@@ -512,7 +480,7 @@ export function SessionList({
         const date = new Date(meta.key)
         groupsByKey.set(meta.key, {
           key: meta.key,
-          label: formatDateGroupLabel(date, t, i18n.resolvedLanguage ?? 'en'),
+          label: formatSessionDateGroupLabel(date, t, language),
           items: [],
           collapsible: true,
           collapsedCount: meta.count,
@@ -537,7 +505,7 @@ export function SessionList({
       rows,
       groups: orderedGroups,
     }
-  }, [isSearchMode, matchingFilterItems, otherResultItems, visibleRows, groupingMode, sessionStatuses, projects, collapsedGroupsMeta, families, t, i18n.resolvedLanguage])
+  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, projects, collapsedGroupsMeta, t, language])
 
   const flatRows = rowData.rows
 
@@ -620,57 +588,6 @@ export function SessionList({
       interactions.keyboard.setActiveIndex(newIndex)
     }
   }, [selectionStore.state.selected, flatRows, interactions.keyboard])
-
-  // --- Sub-session families ---
-  const highlightedSessionId = focusedSessionId !== undefined ? focusedSessionId : selectionStore.state.selected
-
-  // Collapsing moves the keyboard position from the rows it hides to the parent, without opening the
-  // parent (the chat keeps its session), and drops them from a multi-selection, so batch actions never
-  // reach rows you can't see.
-  const toggleFamily = useCallback((row: SessionListRow) => {
-    const id = row.item.id
-    if (row.collapsed) {
-      updateCollapsedFamilies(prev => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-      return
-    }
-    const index = rowIndexMap.get(id) ?? -1
-    const hidden = new Set<string>()
-    for (let i = index + 1; i < flatRows.length && flatRows[i].depth > row.depth; i++) hidden.add(flatRows[i].item.id)
-    updateCollapsedFamilies(prev => {
-      const next = new Set(prev)
-      next.delete(id) // re-added last: the saved set keeps the most recent
-      next.add(id)
-      return next
-    })
-    if (hidden.has(flatRows[interactions.keyboard.activeIndex]?.item.id ?? '')) {
-      interactions.keyboard.setActiveIndex(index)
-    }
-    selectionStore.setState(prev => {
-      if (!MultiSelect.isMultiSelectActive(prev)) return prev
-      const dropped = [...prev.selectedIds].filter(selectedId => hidden.has(selectedId))
-      return dropped.length > 0 ? MultiSelect.removeFromSelection(prev, dropped) : prev
-    })
-  }, [rowIndexMap, flatRows, interactions.keyboard, selectionStore, updateCollapsedFamilies])
-
-  // Reveal the highlighted session when it lands in a collapsed family (a deep link, a notification, a
-  // new branch). Once per session, so collapsing the family of the session you're on keeps it closed.
-  const revealedSessionRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!highlightedSessionId || revealedSessionRef.current === highlightedSessionId) return
-    const ancestors = ancestorIds(families, highlightedSessionId)
-    if (!ancestors) return // not in the list (yet)
-    revealedSessionRef.current = highlightedSessionId
-    if (!ancestors.some(id => collapsedFamilies.has(id))) return
-    updateCollapsedFamilies(prev => {
-      const next = new Set(prev)
-      for (const id of ancestors) next.delete(id)
-      return next
-    })
-  }, [highlightedSessionId, families, collapsedFamilies, updateCollapsedFamilies])
 
   // Focus active item when zone gains keyboard focus
   useEffect(() => {
@@ -797,7 +714,7 @@ export function SessionList({
     flatLabels,
     labels,
     searchQuery: resolvedSearchQuery,
-    selectedSessionId: highlightedSessionId,
+    selectedSessionId: focusedSessionId !== undefined ? focusedSessionId : selectionStore.state.selected,
     isMultiSelectActive,
     sessionOptions,
     contentSearchResults,
@@ -811,21 +728,9 @@ export function SessionList({
     projects, onSetProjectId,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
-    highlightedSessionId, isMultiSelectActive,
+    focusedSessionId, selectionStore.state.selected, isMultiSelectActive,
     sessionOptions, contentSearchResults, activeChatMatchInfo, hasPendingPrompt,
   ])
-
-  // Rows glide to their new place when activity reorders the list (a pure reorder only)
-  const reorderGroups = useMemo(
-    () => rowData.groups.map(group => ({ key: group.key, ids: group.items.map(row => row.item.id) })),
-    [rowData.groups]
-  )
-  const reorderFlip = useListReorderFlip({
-    groups: reorderGroups,
-    container: zoneRef,
-    viewport: scrollViewportRef,
-    rowKeyAttribute: 'data-session-id',
-  })
 
   // --- Empty state (non-search) — render before EntityList ---
   // Don't show empty state when there are collapsed groups with content
@@ -848,17 +753,13 @@ export function SessionList({
         description={t("session.noSessionsYetDesc")}
         className="h-full"
       >
-        <Button
-          variant="secondary"
-          onClick={() => {
-            const params: { status?: string; label?: string } = {}
-            if (currentFilter?.kind === 'state') params.status = currentFilter.stateId
-            else if (currentFilter?.kind === 'label') params.label = currentFilter.labelId
-            navigate(routes.action.newSession(Object.keys(params).length > 0 ? params : undefined))
-          }}
+        <button
+          type="button"
+          onClick={handleCreateSession}
+          className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
         >
           {t("session.newSession")}
-        </Button>
+        </button>
       </EntityListEmptyScreen>
     )
   }
@@ -867,30 +768,26 @@ export function SessionList({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <SessionListProvider value={listContext}>
-      <FlipOnChange value={reorderFlip.value} enabled={reorderFlip.enabled} getTargets={reorderFlip.getTargets} keyOf={reorderFlip.keyOf} spring={SPRING.base} axis="y">
       <EntityList<SessionListRow>
         groups={rowData.groups}
         getKey={(row) => row.item.id}
         renderItem={(row, _indexInGroup, isFirstInGroup) => {
           const flatIndex = rowIndexMap.get(row.item.id) ?? 0
           const rowProps = interactions.getRowProps(row, flatIndex)
+          // Child deep links still highlight their owning root, without adding sidebar rows.
+          const executionChildren = childrenByRoot?.get(row.item.id) ?? []
+          const selectedId = focusedSessionId !== undefined ? focusedSessionId : selectionStore.state.selected
           return (
             <SessionItem
               item={row.item}
               index={flatIndex}
               itemProps={rowProps.buttonProps as Record<string, unknown>}
-              isSelected={rowProps.isSelected}
+              isSelected={rowProps.isSelected || executionChildren.some(child => child.id === selectedId)}
               isFirstInGroup={isFirstInGroup}
               isInMultiSelect={rowProps.isInMultiSelect ?? false}
               onSelect={() => handleSelectSession(row, flatIndex)}
               onToggleSelect={() => handleToggleSelect(row, flatIndex)}
               onRangeSelect={() => handleRangeSelect(flatIndex)}
-              depth={row.depth}
-              guides={row.guides}
-              inheritedLabels={row.parent?.labels}
-              subSessions={row.descendantCount > 0
-                ? { count: row.descendantCount, collapsed: row.collapsed, onToggle: () => toggleFamily(row) }
-                : undefined}
             />
           )
         }}
@@ -912,7 +809,7 @@ export function SessionList({
               />
             )}
             {isSearchMode && matchingFilterItems.length === 0 && otherResultItems.length > 0 && (
-              <div className="px-4 py-3 text-label text-tertiary">
+              <div className="px-4 py-3 text-sm text-muted-foreground">
                 {t("session.noResultsInFilter")}
               </div>
             )}
@@ -920,24 +817,25 @@ export function SessionList({
         }
         emptyState={
           isSearchMode && !isSearchingContent ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-              <p className="text-label text-secondary">{t("session.noSessionsFound")}</p>
-              <p className="text-label-sm text-tertiary mt-0.5">
+            <div className="flex flex-col items-center justify-center py-12 px-4">
+              <p className="text-sm text-muted-foreground">{t("session.noSessionsFound")}</p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">
                 {t("session.noSessionsFoundDesc")}
               </p>
-              <Button variant="ghost" size="sm" className="mt-2" onClick={() => onSearchChange?.('')}>
+              <button
+                onClick={() => onSearchChange?.('')}
+                className="text-xs text-foreground hover:underline mt-2"
+              >
                 {t("session.clearSearch")}
-              </Button>
+              </button>
             </div>
           ) : undefined
         }
-        footer={
-          hasMore ? (
-            <div className="flex justify-center py-4">
-              <Spinner className="text-tertiary" />
-            </div>
-          ) : undefined
-        }
+        footer={hasMore ? (
+          <div className="flex justify-center py-4">
+            <Spinner className="text-muted-foreground" />
+          </div>
+        ) : undefined}
         viewportRef={scrollViewportRef}
         containerRef={zoneRef}
         containerProps={{
@@ -946,13 +844,12 @@ export function SessionList({
           role: 'listbox',
           'aria-label': 'Sessions',
         }}
-        scrollAreaClassName="select-none"
+        scrollAreaClassName="select-none mask-fade-top-short"
         collapsedGroups={collapsedGroups}
         onToggleCollapse={toggleGroupCollapse}
         onCollapseAll={collapseAllGroups}
         onExpandAll={expandAllGroups}
       />
-      </FlipOnChange>
       </SessionListProvider>
 
       {/* Rename Dialog */}

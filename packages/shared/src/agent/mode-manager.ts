@@ -8,7 +8,6 @@
  * - 'safe': Read-only exploration mode (blocks writes, never prompts)
  * - 'ask': Ask for permission on dangerous operations (default interactive behavior)
  * - 'allow-all': Skip all permission checks (everything allowed)
- * - 'guarded': Like 'allow-all', plus the decision model's risk check (core/guarded-mode.ts)
  */
 
 /// <reference path="../types/incr-regex-package.d.ts" />
@@ -16,11 +15,14 @@
 import { homedir } from 'os';
 import { existsSync, realpathSync } from 'fs';
 import { debug } from '../utils/debug.ts';
-import { isReadOnlyMcpToolName } from './mcp-tool-names.ts';
 import { dirname, isAbsolute, relative, resolve } from 'path';
-import { getSessionSafeAllowedToolNames } from '@craft-agent/session-tools-core';
+import {
+  getSessionSafeAllowedToolNames,
+  SESSION_TOOL_NAMES,
+} from '@craft-agent/session-tools-core';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { isBrowserToolNameOrAlias } from './browser-tool-names.ts';
+import { isReadOnlyMcpToolName } from './mcp-tool-names.ts';
 import type { PermissionsContext, MergedPermissionsConfig } from './permissions-config.ts';
 import {
   validateBashCommand,
@@ -36,7 +38,6 @@ import {
   type PowerShellValidationResult,
   type PowerShellValidationReason,
 } from './powershell-validator.ts';
-import { sanitizePromptLine } from '../prompts/prompt-sanitize.ts';
 import {
   type PermissionMode,
   type ModeConfig,
@@ -45,12 +46,6 @@ import {
   type CompiledBlockedCommandHint,
   type MismatchAnalysis,
   PERMISSION_MODE_ORDER,
-  DEFAULT_PERMISSION_MODES,
-  availablePermissionModes,
-  isAutonomousPermissionMode,
-  isPermissionMode,
-  planExecutionMode,
-  clampPermissionMode,
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
   type PermissionModeCanonical,
@@ -72,12 +67,6 @@ export {
   type CompiledBlockedCommandHint,
   type MismatchAnalysis,
   PERMISSION_MODE_ORDER,
-  DEFAULT_PERMISSION_MODES,
-  availablePermissionModes,
-  isAutonomousPermissionMode,
-  isPermissionMode,
-  planExecutionMode,
-  clampPermissionMode,
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
   toCanonicalPermissionMode,
@@ -142,12 +131,8 @@ function expandHome(path: string): string {
  * Supports: ** (recursive), * (single segment), ? (single char)
  */
 function globToRegex(pattern: string): RegExp {
-  // Expand ~ then apply the same case/separator normalization used on paths so
-  // that patterns match on Windows (backslash separators, case-insensitive FS).
-  const expanded = expandHome(pattern);
-  const expandedPattern = process.platform === 'win32'
-    ? expanded.replace(/\\/g, '/').toLowerCase()
-    : expanded;
+  // Expand ~ in pattern
+  const expandedPattern = expandHome(pattern);
 
   // Escape special regex chars except glob wildcards
   let regex = expandedPattern
@@ -161,13 +146,9 @@ function globToRegex(pattern: string): RegExp {
 }
 
 /**
- * Whether a file path matches any of the workspace's `allowedWritePaths` globs.
- *
- * Exported so Ask mode (`core/pre-tool-use.ts:shouldPromptInAskMode`) suppresses
- * the write prompt for exactly the paths Explore mode auto-allows: one matcher,
- * one allowlist semantics.
+ * Check if a path matches any of the allowed write path patterns
  */
-export function matchesAllowedWritePath(filePath: string, allowedPaths: string[]): boolean {
+function matchesAllowedWritePath(filePath: string, allowedPaths: string[]): boolean {
   // Normalize path (expand ~, resolve, and use forward slashes)
   const normalizedPath = normalizeForComparison(expandHome(filePath));
 
@@ -428,40 +409,10 @@ export function consumeUserModeSignal(sessionId: string): void {
   modeManager.consumeUserModeSignal(sessionId);
 }
 
-// ============================================================
-// Guarded mode availability
-// ============================================================
-
-/**
- * Whether Guarded mode's risk check can run (decision layer on + `guardedMode` feature).
- * The host installs it (`SessionManager.initialize`); until then Guarded is treated as Ask.
- */
-let guardedModeActiveResolver: () => boolean = () => false;
-
-/** Install (or reset with `null`) how Guarded mode learns whether its check can run. */
-export function setGuardedModeActiveResolver(resolver: (() => boolean) | null): void {
-  guardedModeActiveResolver = resolver ?? (() => false);
-}
-
-/**
- * The mode permission checks apply. Guarded promises "risky actions ask first"; when its
- * check cannot run at all (feature or decision layer off), it keeps that promise by
- * behaving as Ask instead of silently running as Execute. A one-off missing answer while
- * the check is on still runs the call (the model only ever adds prompts).
- */
-export function resolveEffectivePermissionMode(mode: PermissionMode): PermissionMode {
-  if (mode !== 'guarded') return mode;
-  try {
-    return guardedModeActiveResolver() ? 'guarded' : 'ask';
-  } catch {
-    return 'ask';
-  }
-}
-
 /**
  * Cycle to the next permission mode (for SHIFT+TAB)
  * @param sessionId - The session to cycle mode for
- * @param enabledModes - Optional list of enabled modes to cycle through (defaults to Explore, Ask, Execute)
+ * @param enabledModes - Optional list of enabled modes to cycle through (defaults to all 3)
  * Returns the new mode
  */
 export function cyclePermissionMode(
@@ -469,8 +420,8 @@ export function cyclePermissionMode(
   enabledModes?: PermissionMode[]
 ): PermissionMode {
   const currentMode = getPermissionMode(sessionId);
-  // Use provided modes or default to the three base modes (Guarded only when listed)
-  const modes = enabledModes && enabledModes.length >= 2 ? enabledModes : DEFAULT_PERMISSION_MODES;
+  // Use provided modes or default to all modes
+  const modes = enabledModes && enabledModes.length >= 2 ? enabledModes : PERMISSION_MODE_ORDER;
   const currentIndex = modes.indexOf(currentMode);
 
   // If current mode not in enabled list, jump to first enabled mode
@@ -1754,12 +1705,12 @@ export function getPathHint(targetPath: string, plansFolderPath: string, dataFol
   }
 
   // Case: Writing to workspace root instead of session
-  if (normalizedTarget.includes('/.craft-agent/workspaces/') && !normalizedTarget.includes('/sessions/')) {
+  if ((normalizedTarget.includes('/.selection/workspaces/') || normalizedTarget.includes('/.craft-agent/workspaces/')) && !normalizedTarget.includes('/sessions/')) {
     return 'Hint: Write to the session plans or data folder, not the workspace root.';
   }
 
   // Case: Writing outside .craft-agent entirely
-  if (!normalizedTarget.includes('/.craft-agent/')) {
+  if (!normalizedTarget.includes('/.selection/') && !normalizedTarget.includes('/.craft-agent/')) {
     return 'Hint: Files must be written to the session plans or data folder. Use plansFolderPath or dataFolderPath from <session_state>.';
   }
 
@@ -1824,23 +1775,20 @@ export function isApiEndpointAllowed(
 }
 
 /**
- * Tools Explore mode runs as they are: they read, or touch only the session's own state (its task
- * list, its background tasks). Explore blocks every tool shouldAllowToolInMode does not handle, so
- * one Craft does not know (Claude Code adds tools with its releases: EnterWorktree creates git
- * worktrees, CronCreate schedules prompts) does not run there just because nothing checked it.
- * Left out on purpose: SendMessage (it reaches other Claude sessions on the machine, whose calls
- * Explore does not check) and Workflow (its agents can run in git worktrees).
+ * Tools that are always allowed in any mode (read-only by nature)
  */
 const ALWAYS_ALLOWED_TOOLS = new Set([
-  'Read', 'Glob', 'Grep', 'LSP',                  // File reading
-  'Find', 'Ls',                                   // Pi's file listing
-  'WebFetch', 'WebSearch',                        // Web research
-  'ToolSearch',                                   // Loads the definitions of deferred tools
-  'ListMcpResourcesTool', 'ReadMcpResourceTool',  // MCP resources
-  'ListAgents', 'TaskStop',                       // The session's agents and background tasks
-  'TodoWrite', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'CronList',  // Task tracking
-  'ReportFindings', 'StructuredOutput',           // Answers in a set shape
-  'SubmitPlan',                                   // Plan submission
+  'Read', 'Glob', 'Grep',           // File reading
+  'Find', 'Ls',                     // Pi file listing (only passed via default-allow before)
+  'Task', 'TaskOutput',             // Agent orchestration
+  'WebFetch', 'WebSearch',          // Web research
+  'TodoWrite',                      // Task tracking
+  'document_index', 'document_read', // Native original navigation, read-only
+  'session_history',               // Read active-session source messages
+  'task_context',                  // Session-local task notes, like TodoWrite
+  'SubmitPlan',                     // Plan submission
+  'clarify',                        // User clarification card
+  'LSP',                            // Language server (read-only)
   // Browser automation tool (canonical wrapper)
   'browser_tool',
 ]);
@@ -1863,7 +1811,7 @@ export type ToolCheckResult =
  * Returns different results based on the permission mode:
  * - 'safe': Block writes entirely (no prompting)
  * - 'ask': Allow but may require permission for dangerous operations
- * - 'guarded' / 'allow-all': Allow everything
+ * - 'allow-all': Allow everything
  */
 export function shouldAllowToolInMode(
   toolName: string,
@@ -1886,9 +1834,8 @@ export function shouldAllowToolInMode(
     config = SAFE_MODE_CONFIG;
   }
 
-  // In 'allow-all' and 'guarded' mode, all tools are allowed (no restrictions;
-  // Guarded's risk check runs after the pre-tool-use pipeline, see core/guarded-mode.ts)
-  if (isAutonomousPermissionMode(mode)) {
+  // In 'allow-all' mode, all tools are allowed (no restrictions)
+  if (mode === 'allow-all') {
     return { allowed: true };
   }
 
@@ -1905,7 +1852,7 @@ export function shouldAllowToolInMode(
   }
 
   // MCP variants of an always-allowed tool (mcp__plan__SubmitPlan). Not every always-allowed name:
-  // a source's own `SendMessage` or `TaskCreate` is a mutation.
+  // a source's own `Read` or `Task` is a mutation of that source, not Craft's file Read.
   if (ALWAYS_ALLOWED_MCP_VARIANTS.some(allowedTool => toolName.endsWith(`__${allowedTool}`))) {
     return { allowed: true };
   }
@@ -1914,24 +1861,6 @@ export function shouldAllowToolInMode(
   // are normalized centrally to avoid drift across permission checks.
   if (isBrowserToolNameOrAlias(toolName)) {
     return { allowed: true };
-  }
-
-  // A subagent's own calls get these checks too, but not in a git worktree (a write to the repository)
-  // or a cloud environment (whose calls Craft never sees)
-  if (toolName === 'Agent' || toolName === 'Task') {
-    const isolation = (toolInput as Record<string, unknown> | null)?.isolation;
-    if (!isolation) return { allowed: true };
-    return {
-      allowed: false,
-      reason: `${toolName} with \`isolation: ${String(isolation)}\` is blocked in ${config.displayName}: it sets up another copy of the repository. Run the agent without \`isolation\`, or switch to Ask or Allow All mode (${config.shortcutHint}).`,
-    };
-  }
-
-  // Monitor runs its `command` in a shell as Bash does (each output line becomes an event), so the
-  // command gets the Bash check; a Monitor watching a WebSocket (`ws`) instead only reads.
-  if (toolName === 'Monitor') {
-    const command = (toolInput as Record<string, unknown> | null)?.command;
-    return command === undefined ? { allowed: true } : shouldAllowToolInMode('Bash', { command }, mode, options);
   }
 
   // Handle Bash - check if command is read-only
@@ -2085,16 +2014,36 @@ export function shouldAllowToolInMode(
     };
   }
 
+  // Pi exposes selected session tools under their canonical names instead of
+  // MCP-prefixed aliases. Apply the same metadata-driven policy so canonical
+  // mutations cannot bypass safe mode while read-only tools remain allowed.
+  if (SESSION_TOOL_NAMES.has(toolName)) {
+    const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
+      includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
+    });
+
+    if (safeAllowedSessionTools.has(toolName)) {
+      return { allowed: true };
+    }
+
+    return {
+      allowed: false,
+      reason: `Session tool "${toolName}" can modify state and is blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to continue.`,
+    };
+  }
+
   // Handle MCP tools - allow read-only, block write operations
   if (toolName.startsWith('mcp__')) {
+    // Always allow documentation tools (read-only, always available)
+    if (toolName.startsWith('mcp__craft-agents-docs__')) {
+      return { allowed: true };
+    }
+
     // Handle session-scoped tools - derive safe-mode behavior from canonical session-tools-core metadata
     if (toolName.startsWith('mcp__session__')) {
       const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
         prefix: 'mcp__session__',
         includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
-        // Classification, not visibility: `decide` is read-only and Explore-safe
-        // whenever the backend advertised it.
-        includeDecide: true,
       });
 
       if (safeAllowedSessionTools.has(toolName)) {
@@ -2172,12 +2121,6 @@ function getBlockReasonWithConfig(toolName: string, config: ToolCheckConfig): st
   if (toolName.startsWith('api_')) {
     return `API mutations are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
   }
-  if (toolName === 'SendMessage') {
-    return `SendMessage is blocked in ${displayName}: it can reach other Claude sessions on this machine. To continue an agent's work, start a new agent with what it found, or switch to Ask or Allow All mode (${shortcut}).`;
-  }
-  if (toolName === 'Workflow') {
-    return `Workflow is blocked in ${displayName}: its agents can run in git worktrees. Use Agent instead, or switch to Ask or Allow All mode (${shortcut}).`;
-  }
   return `${toolName} is blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to use this tool.`;
 }
 
@@ -2225,14 +2168,19 @@ export function getSessionState(sessionId: string): { permissionMode: Permission
  */
 export function formatSessionState(
   sessionId: string,
-  options?: { plansFolderPath?: string; dataFolderPath?: string; consumeModeChangeUserSignal?: boolean }
+  options?: {
+    plansFolderPath?: string
+    dataFolderPath?: string
+    consumeModeChangeUserSignal?: boolean
+    /** Current model image capability. Omitted when the caller has not resolved it. */
+    imageInput?: boolean
+  }
 ): string {
   const diagnostics = getPermissionModeDiagnostics(sessionId);
 
   // Use canonical user-facing mode tokens to avoid terminology drift.
   const modeName = toCanonicalPermissionMode(diagnostics.permissionMode);
-  const sessionStateTags = ['session_state'] as const;
-  let result = `<session_state>\nsessionId: ${sanitizePromptLine(sessionId, sessionStateTags)}\npermissionMode: ${modeName}`;
+  let result = `<session_state>\nsessionId: ${sessionId}\npermissionMode: ${modeName}`;
 
   if (diagnostics.transitionDisplay) {
     result += `\nmodeTransition: ${diagnostics.transitionDisplay}`;
@@ -2254,12 +2202,21 @@ export function formatSessionState(
 
   // Always include plans folder path so agent knows where plans are stored
   if (options?.plansFolderPath) {
-    result += `\nplansFolderPath: ${sanitizePromptLine(options.plansFolderPath, sessionStateTags)}`;
+    result += `\nplansFolderPath: ${options.plansFolderPath}`;
   }
 
   // Include data folder path so agent knows where transform_data output goes
   if (options?.dataFolderPath) {
-    result += `\ndataFolderPath: ${sanitizePromptLine(options.dataFolderPath, sessionStateTags)}`;
+    result += `\ndataFolderPath: ${options.dataFolderPath}`;
+  }
+
+  // This turn's model. Slide visual QA follows the line instead of assuming vision or OCR.
+  if (options?.imageInput === true) {
+    result += '\nimageInput: enabled';
+    result += '\nslideVisualQa: Read each slide image, or pass it in call_llm attachments. Do not OCR.';
+  } else if (options?.imageInput === false) {
+    result += '\nimageInput: unavailable';
+    result += '\nslideVisualQa: report image_capability_mismatch and leave G4 blocked. Do not OCR.';
   }
 
   result += '\n</session_state>';

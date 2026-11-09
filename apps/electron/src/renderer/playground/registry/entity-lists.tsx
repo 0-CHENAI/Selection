@@ -12,6 +12,7 @@ import { Spinner, Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/u
 import { cn } from '@/lib/utils'
 import { EntityRow } from '@/components/ui/entity-row'
 import { EntityList } from '@/components/ui/entity-list'
+import { FadingText } from '@/components/ui/fading-text'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { useEntityListInteractions } from '@/hooks/useEntityListInteractions'
@@ -188,7 +189,6 @@ function MockMenuItems() {
   const { MenuItem, Separator } = useMenuComponents()
   return (
     <>
-      <MenuItem onClick={() => console.log('[Playground] Open in New Window')}>Open in New Window</MenuItem>
       <MenuItem onClick={() => console.log('[Playground] Show in Finder')}>Show in Finder</MenuItem>
       <Separator />
       <MenuItem variant="destructive" onClick={() => console.log('[Playground] Delete')}>Delete</MenuItem>
@@ -299,8 +299,8 @@ function SessionEntityListPreview({
                         key={i}
                         className="shrink-0 h-[18px] max-w-[120px] px-1.5 text-[10px] font-medium rounded flex items-center whitespace-nowrap"
                         style={{
-                          backgroundColor: 'color-mix(in srgb, var(--fg-base) 5%, transparent)',
-                          color: 'color-mix(in srgb, var(--fg-base) 80%, transparent)',
+                          backgroundColor: 'rgba(var(--foreground-rgb), 0.05)',
+                          color: 'rgba(var(--foreground-rgb), 0.8)',
                         }}
                       >
                         {label}
@@ -422,7 +422,19 @@ function SkillEntityListPreview({
               )
             }
             title={skill.name}
-            badges={<span className="truncate">{skill.description}</span>}
+            badgesEdgeFade={false}
+            badges={(
+              <span className="flex flex-1 min-w-0 overflow-hidden">
+                <FadingText
+                  className="block min-w-0 flex-1 pr-3"
+                  fadeWidth={16}
+                  trailingGap={12}
+                  overflowTitle={skill.description}
+                >
+                  {skill.description}
+                </FadingText>
+              </span>
+            )}
             isSelected={index === selectedIndex}
             showSeparator={!isFirst}
             menuContent={<MockMenuItems />}
@@ -439,8 +451,6 @@ function SkillEntityListPreview({
 
 interface MixedEntityListPreviewProps {
   showGroups?: boolean
-  /** Groups collapse from their header, like the session list's date groups */
-  collapsible?: boolean
   selectedIndex?: number
   showEmpty?: boolean
 }
@@ -452,12 +462,9 @@ type MixedEntity =
 
 function MixedEntityListPreview({
   showGroups = true,
-  collapsible = false,
   selectedIndex = -1,
   showEmpty = false,
 }: MixedEntityListPreviewProps) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
-
   if (showEmpty) {
     return (
       <div className="w-[320px] h-[480px] flex flex-col border border-border rounded-lg overflow-hidden bg-background">
@@ -555,7 +562,19 @@ function MixedEntityListPreview({
               )
             }
             title={skill.name}
-            badges={<span className="truncate">{skill.description}</span>}
+            badgesEdgeFade={false}
+            badges={(
+              <span className="flex flex-1 min-w-0 overflow-hidden">
+                <FadingText
+                  className="block min-w-0 flex-1 pr-3"
+                  fadeWidth={16}
+                  trailingGap={12}
+                  overflowTitle={skill.description}
+                >
+                  {skill.description}
+                </FadingText>
+              </span>
+            )}
             isSelected={currentFlatIndex === selectedIndex}
             showSeparator={!isFirst}
             menuContent={<MockMenuItems />}
@@ -570,9 +589,7 @@ function MixedEntityListPreview({
       { key: 'sessions', label: 'Sessions', items: allItems.filter(i => i.kind === 'session') },
       { key: 'sources', label: 'Sources', items: allItems.filter(i => i.kind === 'source') },
       { key: 'skills', label: 'Skills', items: allItems.filter(i => i.kind === 'skill') },
-    ].map(group => !collapsible ? group : collapsed.has(group.key)
-      ? { ...group, collapsible: true, items: [], collapsedCount: group.items.length }
-      : { ...group, collapsible: true })
+    ]
 
     // Reset flatIndex for grouped rendering
     flatIndex = -1
@@ -583,14 +600,6 @@ function MixedEntityListPreview({
           groups={groups}
           getKey={getKey}
           renderItem={renderItem}
-          collapsedGroups={collapsed}
-          onToggleCollapse={(key) => setCollapsed(prev => {
-            const next = new Set(prev)
-            if (!next.delete(key)) next.add(key)
-            return next
-          })}
-          onCollapseAll={() => setCollapsed(new Set(groups.map(group => group.key)))}
-          onExpandAll={() => setCollapsed(new Set())}
         />
       </div>
     )
@@ -772,7 +781,7 @@ function InteractiveEntityListPreview({
         {activatedItem && (
           <>
             <span className="text-foreground/20">|</span>
-            <span className="text-success">Activated: {activatedItem}</span>
+            <span className="text-success animate-in fade-in">Activated: {activatedItem}</span>
           </>
         )}
       </div>
@@ -991,11 +1000,6 @@ export const entityListComponents: ComponentEntry[] = [
         name: 'Grouped',
         description: 'Items grouped by Sessions, Sources, Skills',
         props: { showGroups: true },
-      },
-      {
-        name: 'Grouped, collapsible',
-        description: 'Group headers collapse their group (hover fill + chevron), like the session list',
-        props: { showGroups: true, collapsible: true },
       },
       {
         name: 'Flat List',

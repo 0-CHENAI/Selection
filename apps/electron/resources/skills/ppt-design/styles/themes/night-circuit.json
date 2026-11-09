@@ -1,0 +1,49 @@
+{
+  "id": "night-circuit",
+  "name": "夜航电路",
+  "margin": 48,
+  "colors": {
+    "signal": "#FF8A3D",
+    "good": "#7DCEA0",
+    "watch": "#E0B15A",
+    "bad": "#F0A8A4",
+    "ink": "#E6EDF3",
+    "paper": "#0B1220",
+    "muted": "#9BA9BC",
+    "accent": "#4CC9F0",
+    "surface": "#131C2E",
+    "inverse": "#0B1220",
+    "line": "#243349"
+  },
+  "fonts": {
+    "cjk": {
+      "mac": "PingFang SC",
+      "win": "Microsoft YaHei",
+      "linux": "Noto Sans CJK SC"
+    },
+    "latin": {
+      "mac": "Arial",
+      "win": "Arial",
+      "linux": "Arial"
+    }
+  },
+  "type": {
+    "display": {
+      "min": 32,
+      "max": 72
+    },
+    "title": {
+      "min": 22,
+      "max": 40
+    },
+    "body": {
+      "min": 14,
+      "max": 22
+    },
+    "caption": {
+      "min": 10,
+      "max": 14
+    }
+  },
+  "source": "受夜间产品演示的深色界面和一处冷光启发。不使用该示例的名称、标志或路径图形。"
+}

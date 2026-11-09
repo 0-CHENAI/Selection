@@ -5,13 +5,10 @@
  * See OAuthFlowStore in @craft-agent/shared/auth for the canonical impl.
  */
 
-import type { PendingOAuthFlow, OAuthFlowWaiter, OAuthFlowOutcome, OAuthFlowStatus } from '@craft-agent/shared/auth'
+import type { PendingOAuthFlow } from '@craft-agent/shared/auth'
 
 export interface IOAuthFlowStore {
   store(flow: PendingOAuthFlow): void
   getByState(state: string): PendingOAuthFlow | null
-  getLiveForSource(workspaceId: string, sourceSlug: string): PendingOAuthFlow | null
-  join(state: string, waiter: OAuthFlowWaiter): PendingOAuthFlow | null
-  remove(state: string, outcome?: OAuthFlowOutcome): PendingOAuthFlow | null
-  getStatus(flowId: string, workspaceId: string): OAuthFlowStatus
+  remove(state: string): void
 }

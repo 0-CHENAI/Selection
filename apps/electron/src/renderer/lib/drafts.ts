@@ -25,6 +25,7 @@ export function isAbsolutePath(p: string): boolean {
   if (!p) return false
   if (p.startsWith('/')) return true
   if (/^[A-Za-z]:[\\/]/.test(p)) return true
+  if (p.startsWith('\\\\')) return true
   return false
 }
 

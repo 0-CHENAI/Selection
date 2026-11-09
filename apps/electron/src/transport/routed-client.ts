@@ -38,6 +38,11 @@ export type WorkspaceClientFactory = (remoteServer: RemoteServerConfig) => WsRpc
 // ---------------------------------------------------------------------------
 
 export class RoutedClient implements RpcClient {
+  /** Limit advertised by the workspace server, or the conservative default. */
+  getMaxMessageBytes(): number {
+    return this.workspaceClient.getMaxMessageBytes()
+  }
+
   private workspaceClient: WsRpcClient
 
   /** REMOTE_ELIGIBLE listener registry — survives workspace switches. */

@@ -91,11 +91,9 @@ export const onboardingComponents: ComponentEntry[] = [
           type: 'select',
           options: [
             { label: 'None', value: '' },
-            { label: 'Claude OAuth', value: 'claude_oauth' },
-            { label: 'Anthropic API Key', value: 'anthropic_api_key' },
-            { label: 'CAB ChatGPT OAuth', value: 'pi_chatgpt_oauth' },
-            { label: 'CAB Copilot OAuth', value: 'pi_copilot_oauth' },
-            { label: 'CAB API Key', value: 'pi_api_key' },
+            { label: 'ChatGPT OAuth', value: 'pi_chatgpt_oauth' },
+            { label: 'Copilot OAuth', value: 'pi_copilot_oauth' },
+            { label: 'API Key', value: 'pi_api_key' },
           ],
         },
         defaultValue: '',
@@ -106,22 +104,18 @@ export const onboardingComponents: ComponentEntry[] = [
         control: {
           type: 'select',
           options: [
-            { label: 'Anthropic', value: 'anthropic' },
             { label: 'OpenAI', value: 'openai' },
             { label: 'GitHub Copilot', value: 'copilot' },
           ],
         },
-        defaultValue: 'anthropic',
+        defaultValue: 'openai',
       },
     ],
     variants: [
-      { name: 'Anthropic Segment', props: { selectedMethod: null, initialSegment: 'anthropic' } },
-      { name: 'Anthropic - Claude OAuth Selected', props: { selectedMethod: 'claude_oauth', initialSegment: 'anthropic' } },
-      { name: 'Anthropic - API Key Selected', props: { selectedMethod: 'anthropic_api_key', initialSegment: 'anthropic' } },
-      { name: 'CAB Segment', props: { selectedMethod: null, initialSegment: 'pi' } },
-      { name: 'CAB - ChatGPT OAuth Selected', props: { selectedMethod: 'pi_chatgpt_oauth', initialSegment: 'pi' } },
-      { name: 'CAB - Copilot OAuth Selected', props: { selectedMethod: 'pi_copilot_oauth', initialSegment: 'pi' } },
-      { name: 'CAB - API Key Selected', props: { selectedMethod: 'pi_api_key', initialSegment: 'pi' } },
+      { name: 'No method selected', props: { selectedMethod: null } },
+      { name: 'ChatGPT OAuth Selected', props: { selectedMethod: 'pi_chatgpt_oauth' } },
+      { name: 'Copilot OAuth Selected', props: { selectedMethod: 'pi_copilot_oauth' } },
+      { name: 'API Key Selected', props: { selectedMethod: 'pi_api_key' } },
     ],
     mockData: () => ({
       onSelect: (method: string) => console.log('[Playground] Selected method:', method),
@@ -168,6 +162,8 @@ export const onboardingComponents: ComponentEntry[] = [
       onSubmit: (data: { apiKey: string; baseUrl?: string; connectionDefaultModel?: string; models?: string[] }) => console.log('[Playground] Submitted:', data),
       onStartOAuth: noopHandler,
       onBack: noopHandler,
+      allowOAuthSwitch: true,
+      onSelectApiSetupMethod: (method: string) => console.log('[Playground] Switch to method:', method),
     }),
   },
   {
@@ -205,16 +201,16 @@ export const onboardingComponents: ComponentEntry[] = [
       },
     ],
     variants: [
-      { name: 'Idle', props: { apiSetupMethod: 'claude_oauth', status: 'idle' } },
-      { name: 'Waiting for Code', props: { apiSetupMethod: 'claude_oauth', status: 'idle', isWaitingForCode: true } },
-      { name: 'Waiting for Code - Validating', props: { apiSetupMethod: 'claude_oauth', status: 'validating', isWaitingForCode: true } },
-      { name: 'Waiting for Code - Error', props: { apiSetupMethod: 'claude_oauth', status: 'error', isWaitingForCode: true, errorMessage: 'Invalid authorization code.' } },
-      { name: 'Validating', props: { apiSetupMethod: 'claude_oauth', status: 'validating' } },
-      { name: 'Success', props: { apiSetupMethod: 'claude_oauth', status: 'success' } },
-      { name: 'Error', props: { apiSetupMethod: 'claude_oauth', status: 'error', errorMessage: 'Authentication failed. Please try again.' } },
+      { name: 'Idle', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'idle' } },
+      { name: 'Waiting for Code', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'idle', isWaitingForCode: true } },
+      { name: 'Waiting for Code - Validating', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'validating', isWaitingForCode: true } },
+      { name: 'Waiting for Code - Error', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'error', isWaitingForCode: true, errorMessage: 'Invalid authorization code.' } },
+      { name: 'Validating', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'validating' } },
+      { name: 'Success', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'success' } },
+      { name: 'Error', props: { apiSetupMethod: 'pi_chatgpt_oauth', status: 'error', errorMessage: 'Authentication failed. Please try again.' } },
     ],
     mockData: () => ({
-      apiSetupMethod: 'claude_oauth',
+      apiSetupMethod: 'pi_chatgpt_oauth',
       onSubmit: (data: { apiKey: string }) => console.log('[Playground] Submitted:', data),
       onStartOAuth: noopHandler,
       onBack: noopHandler,
@@ -257,7 +253,7 @@ export const onboardingComponents: ComponentEntry[] = [
         props: {
           apiSetupMethod: 'pi_copilot_oauth',
           status: 'validating',
-          copilotDeviceCode: { userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device' },
+          oauthDeviceCode: { userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device' },
         },
       },
       { name: 'Validating', props: { apiSetupMethod: 'pi_copilot_oauth', status: 'validating' } },
@@ -273,6 +269,58 @@ export const onboardingComponents: ComponentEntry[] = [
     ],
     mockData: () => ({
       apiSetupMethod: 'pi_copilot_oauth',
+      onSubmit: noopHandler,
+      onStartOAuth: noopHandler,
+      onBack: noopHandler,
+    }),
+  },
+  {
+    id: 'credentials-step-kimi',
+    name: 'Credentials - Kimi Code',
+    category: 'Onboarding',
+    description: 'Kimi Code OAuth device flow authentication',
+    component: CredentialsStep,
+    props: [],
+    variants: [
+      { name: 'Initial', props: { apiSetupMethod: 'pi_kimi_oauth', status: 'idle' } },
+      {
+        name: 'Device Code Shown',
+        props: {
+          apiSetupMethod: 'pi_kimi_oauth',
+          status: 'validating',
+          oauthDeviceCode: { userCode: 'WXYZ-5678', verificationUri: 'https://www.kimi.com/code/authorize_device?user_code=WXYZ-5678' },
+        },
+      },
+      { name: 'Success', props: { apiSetupMethod: 'pi_kimi_oauth', status: 'success' } },
+    ],
+    mockData: () => ({
+      apiSetupMethod: 'pi_kimi_oauth',
+      onSubmit: noopHandler,
+      onStartOAuth: noopHandler,
+      onBack: noopHandler,
+    }),
+  },
+  {
+    id: 'credentials-step-xai',
+    name: 'Credentials - SuperGrok / X Premium',
+    category: 'Onboarding',
+    description: 'xAI OAuth device flow authentication',
+    component: CredentialsStep,
+    props: [],
+    variants: [
+      { name: 'Initial', props: { apiSetupMethod: 'pi_xai_oauth', status: 'idle' } },
+      {
+        name: 'Device Code Shown',
+        props: {
+          apiSetupMethod: 'pi_xai_oauth',
+          status: 'validating',
+          oauthDeviceCode: { userCode: 'GROK-1234', verificationUri: 'https://auth.x.ai/device' },
+        },
+      },
+      { name: 'Success', props: { apiSetupMethod: 'pi_xai_oauth', status: 'success' } },
+    ],
+    mockData: () => ({
+      apiSetupMethod: 'pi_xai_oauth',
       onSubmit: noopHandler,
       onStartOAuth: noopHandler,
       onBack: noopHandler,
@@ -395,13 +443,13 @@ export const onboardingComponents: ComponentEntry[] = [
       {
         name: 'Credentials - API Key',
         props: {
-          state: createOnboardingState({ step: 'credentials', apiSetupMethod: 'anthropic_api_key' }),
+          state: createOnboardingState({ step: 'credentials', apiSetupMethod: 'pi_api_key' }),
         },
       },
       {
         name: 'Credentials - OAuth',
         props: {
-          state: createOnboardingState({ step: 'credentials', apiSetupMethod: 'claude_oauth' }),
+          state: createOnboardingState({ step: 'credentials', apiSetupMethod: 'pi_chatgpt_oauth' }),
         },
       },
       {

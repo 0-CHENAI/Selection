@@ -20,6 +20,22 @@ import { debug } from '../utils/debug.ts';
  * Callbacks that can be registered per-session
  */
 export interface SessionScopedToolCallbacks {
+  updateTaskListFn?: (items: import('@craft-agent/session-tools-core').TaskListItem[]) => Promise<void>;
+  artifactVersionsFn?: (request: {
+    action: 'list' | 'restore'; path?: string; artifactId?: string;
+    versionId?: string; expectedVersion?: string;
+  }) => Promise<unknown>;
+  /** Host-side Word / Excel template tools (#711). */
+  officeToolsFn?: (name: import('@craft-agent/session-tools-core').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
+  /** Personal PPT template projects and slot images (#714, #715). */
+  pptToolsFn?: (name: import('@craft-agent/session-tools-core').PptToolName, args: Record<string, unknown>) => Promise<unknown>;
+  /** In-process office calculations. Set by SessionManager. */
+  officeBusinessFn?: (args: import('@craft-agent/session-tools-core').OfficeBusinessArgs) => Promise<unknown>;
+  /** Render Office pages for office_render. Set by SessionManager in desktop builds that have a capture host. */
+  officeRenderFn?: (
+    request: import('@craft-agent/session-tools-core').OfficeRenderArgs,
+    signal?: AbortSignal,
+  ) => Promise<import('@craft-agent/session-tools-core').OfficeRenderOutcome>;
   /**
    * Called when a plan is submitted via SubmitPlan tool.
    * Receives the path to the plan markdown file.
@@ -60,6 +76,7 @@ export interface SessionScopedToolCallbacks {
   /** Get detailed info about a session (defaults to current). */
   getSessionInfoFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
+  projectHistoryFn?: (input: import('@craft-agent/session-tools-core').ProjectHistoryInput) => unknown | Promise<unknown>;
   listSessionsFn?: (options?: import('@craft-agent/session-tools-core').ListSessionsOptions) => import('@craft-agent/session-tools-core').ListSessionsResult;
   /** List background tasks (running + terminal) for a session from the main-process registry. */
   listBackgroundTasksFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').BackgroundTaskInfo[];
@@ -83,37 +100,39 @@ export interface SessionScopedToolCallbacks {
   getMessagingBindingsFn?: (sessionId: string) => Array<{ platform: string; channelId: string; threadId?: number; channelName?: string; enabled: boolean }>;
   /** Unbind messaging channels from a session. Returns count of removed bindings. */
   unbindMessagingChannelFn?: (sessionId: string, platform?: string) => number;
-  /** Create a Craft Agents Task (board card + task.yaml + orchestrator session) without running it. */
+  /** Create a Selection Task (board card + task.yaml + orchestrator session) without running it. */
   createTaskFn?: (
     input: import('@craft-agent/session-tools-core').CreateTaskInput
   ) => Promise<import('@craft-agent/session-tools-core').CreateTaskResult>;
-  /** Append a dated note to the session's project MEMORY.md (project_memory_append). */
-  appendProjectMemoryFn?: (
-    input: import('@craft-agent/session-tools-core').ProjectMemoryAppendInput
-  ) => Promise<import('@craft-agent/session-tools-core').ProjectMemoryAppendResult>;
-  /**
-   * Pages tools (list/get/create/update/write data/delete) — grouped in one
-   * object because the six operations always ship together. Wired by
-   * SessionManager to the invoking session's workspace.
-   */
-  pages?: import('@craft-agent/session-tools-core').PagesToolCallbacks;
-  /**
-   * MCP source resources & prompts tools (source_list_resources/read_resource/
-   * list_prompts/get_prompt). Wired by SessionManager to the session's MCP pool,
-   * read at call time; only the session's enabled, connected sources are reachable.
-   */
-  mcpSources?: import('@craft-agent/session-tools-core').McpSourceToolCallbacks;
-  /**
-   * Decision-layer callback for the `decide` tool (Jev / System One). Wired by
-   * SessionManager from `@craft-agent/shared/decisions`; gating (Settings switch,
-   * feature toggle, key) happens inside the callback at call time.
-   */
-  decide?: import('@craft-agent/session-tools-core').DecisionToolCallbacks;
-  /**
-   * PR watcher tools (pr_status / pr_bind / pr_unbind / pr_set_auto_merge) for Coding mode. Wired by
-   * SessionManager bound to the invoking session; the server-side watcher holds the credentials.
-   */
-  prWatch?: import('@craft-agent/session-tools-core').PrWatchToolCallbacks;
+  runTaskFn?: (
+    input: import('@craft-agent/session-tools-core').RunTaskInput
+  ) => Promise<import('@craft-agent/session-tools-core').RunTaskResult>;
+  getTaskResultsFn?: (
+    slug: string,
+    runId?: string
+  ) => Promise<import('@craft-agent/session-tools-core').TaskResultsPayload>;
+  submitTaskOutputFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskOutputInput
+  ) => Promise<{ ok: boolean; error?: string }>;
+  submitTaskVerdictFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskVerdictInput
+  ) => Promise<{ status: string }>;
+  submitOrchestrationPatchFn?: (
+    input: import('@craft-agent/session-tools-core').OrchestrationPatchInput
+  ) => Promise<{ status: string; revision?: number }>;
+  submitOrchestrationDecisionFn?: (
+    input: import('@craft-agent/session-tools-core').OrchestrationDecisionInput
+  ) => Promise<{ status: string; revision?: number; alreadyApplied?: boolean; coordinatorGate?: { checkpointId: string } }>;
+  submitTaskNodeVerdictFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskNodeVerdictInput
+  ) => Promise<{ ok: boolean; error?: string }>;
+  taskHelpFn?: (input: import('@craft-agent/session-tools-core').TaskHelpInput) => Promise<unknown>;
+  submitTaskDefinitionFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskDefinitionInput
+  ) => Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
+  controlTaskRunFn?: (
+    input: import('@craft-agent/session-tools-core').ControlTaskRunInput
+  ) => Promise<{ status: string; conflict?: string }>;
 }
 
 // Registry of callbacks keyed by sessionId

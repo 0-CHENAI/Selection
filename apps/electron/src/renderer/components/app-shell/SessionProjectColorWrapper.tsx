@@ -12,16 +12,12 @@ interface SessionProjectColorWrapperProps {
 /**
  * Wraps a SessionItem row with a project-color overlay.
  *
- * - Always renders a 3px colored stripe on the row's leading edge when a color is set.
+ * - Always renders a 3px colored stripe at the row's leading edge when a color is set.
  * - Optionally adds a subtle background tint when treatment === 'stripe-tint'.
  *
- * Rows are full-bleed (mail-style), so the stripe is the row's leading edge at the panel edge, full
- * height, and the tint covers the whole row. z-[1] keeps the stripe above the row's own fill but
- * below the sticky group headers (z-sticky), which it used to paint over.
- *
  * Does NOT touch the SessionItem internals. The stripe/tint render on the wrapper
- * so the inner `EntityRow` (with its own selected/hover backgrounds) composites
- * cleanly on top — selection always reads correctly.
+ * so the inner `EntityRow` (with its own selection bar + selected/hover backgrounds)
+ * composites cleanly on top — selection always reads correctly.
  */
 export function SessionProjectColorWrapper({
   color,
@@ -33,16 +29,12 @@ export function SessionProjectColorWrapper({
   const showTint = treatment === 'stripe-tint'
 
   return (
-    <div className="relative">
-      {showTint && (
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{ backgroundColor: `color-mix(in srgb, ${color} 6%, transparent)` }}
-          aria-hidden
-        />
-      )}
+    <div
+      className="relative"
+      style={showTint ? { backgroundColor: `color-mix(in srgb, ${color} 6%, transparent)` } : undefined}
+    >
       <div
-        className="pointer-events-none absolute left-0 inset-y-0 z-[1] w-[3px]"
+        className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-sm z-10 pointer-events-none"
         style={{ backgroundColor: color }}
         aria-hidden
       />

@@ -44,10 +44,10 @@ function setupWorkspaceConfigDir() {
       defaults: {
         notificationsEnabled: true,
         colorTheme: 'default',
-        autoCapitalisation: true,
         sendMessageKey: 'enter',
         spellCheck: false,
         keepAwakeWhileRunning: false,
+        sharedProjectMemoryEnabled: false,
         richToolDescriptions: true,
       },
       workspaceDefaults: {
@@ -67,7 +67,7 @@ function runEval(configDir: string, code: string): string {
   const run = Bun.spawnSync([
     process.execPath,
     '--eval',
-    `import { getDefaultThinkingLevel, setDefaultThinkingLevel } from '${STORAGE_MODULE_PATH}'; ${code}`,
+    `import { getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled, getDagOrchestrationEnabled, setDagOrchestrationEnabled, getSwarmAgentsEnabled, setSwarmAgentsEnabled } from '${STORAGE_MODULE_PATH}'; ${code}`,
   ], {
     env: { ...process.env, CRAFT_CONFIG_DIR: configDir },
     stdout: 'pipe',
@@ -106,20 +106,13 @@ describe('default thinking level storage', () => {
 
   it('supports every thinking level', () => {
     const { configDir } = setupWorkspaceConfigDir()
-    // ONE subprocess sets + reads every level through the real disk path. A
-    // spawn per level cold-loads the whole storage module graph (~0.5s each ×
-    // 2 spawns × every level) and blew past bun's 5s default on CI runners —
-    // cross-process persistence itself is pinned by the round-trip test above.
-    const script = THINKING_LEVEL_IDS
-      .map((level) => `setDefaultThinkingLevel('${level}'); console.log(String(getDefaultThinkingLevel()));`)
-      .join(' ')
-    const output = runEval(configDir, script)
-    expect(output.split('\n')).toEqual([...THINKING_LEVEL_IDS])
-
-    // And the LAST write survives to a fresh process (disk, not module state).
-    const last = THINKING_LEVEL_IDS[THINKING_LEVEL_IDS.length - 1]!
-    expect(runEval(configDir, "console.log(String(getDefaultThinkingLevel()))")).toBe(last)
-  }, 15_000)
+    for (const level of THINKING_LEVEL_IDS) {
+      runEval(configDir, `setDefaultThinkingLevel('${level}')`)
+      const output = runEval(configDir, "console.log(String(getDefaultThinkingLevel()))")
+      expect(output).toBe(level)
+    }
+    // Each level boots two processes. The default 5s budget is tight on a busy runner.
+  }, 20_000)
 
   it('migrates legacy "think" value to "medium"', () => {
     const { configDir, configPath } = setupWorkspaceConfigDir()
@@ -130,5 +123,53 @@ describe('default thinking level storage', () => {
 
     const output = runEval(configDir, "console.log(String(getDefaultThinkingLevel()))")
     expect(output).toBe('medium')
+  })
+})
+
+describe('shared project memory storage', () => {
+  it('defaults to disabled when the stored config has no field', () => {
+    const { configDir } = setupWorkspaceConfigDir()
+    const output = runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')
+    expect(output).toBe('false')
+  })
+
+  it('persists and round-trips the app setting', () => {
+    const { configDir, configPath } = setupWorkspaceConfigDir()
+    runEval(configDir, 'setSharedProjectMemoryEnabled(true)')
+
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(persisted.sharedProjectMemoryEnabled).toBe(true)
+    expect(runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')).toBe('true')
+  })
+
+  it('stays disabled when an older defaults file has no memory field', () => {
+    const { configDir } = setupWorkspaceConfigDir()
+    const defaultsPath = join(configDir, 'config-defaults.json')
+    const defaults = JSON.parse(readFileSync(defaultsPath, 'utf-8'))
+    delete defaults.defaults.sharedProjectMemoryEnabled
+    writeFileSync(defaultsPath, JSON.stringify(defaults, null, 2), 'utf-8')
+
+    expect(runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')).toBe('false')
+  })
+})
+
+describe('advanced capability settings', () => {
+  it('provides PRO capabilities for legacy configs', () => {
+    const { configDir } = setupWorkspaceConfigDir()
+    const output = runEval(configDir, `
+      console.log([getDagOrchestrationEnabled(), getSwarmAgentsEnabled()].join(','))
+    `)
+    expect(output).toBe('true,true')
+  })
+
+  it('keeps legacy fields compatible without a duplicate capability switch', () => {
+    const { configDir, configPath } = setupWorkspaceConfigDir()
+    runEval(configDir, 'setDagOrchestrationEnabled(true); setSwarmAgentsEnabled(false)')
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(persisted.dagOrchestrationEnabled).toBe(true)
+    expect(persisted.swarmAgentsEnabled).toBe(false)
+    expect(runEval(configDir, `
+      console.log([getDagOrchestrationEnabled(), getSwarmAgentsEnabled()].join(','))
+    `)).toBe('true,true')
   })
 })

@@ -3,19 +3,16 @@
  *
  * Compound page layout component for Info pages.
  * Handles loading, error, and empty states with consistent styling.
- *
- * Detail pages share the settings column (design spec §7.11/§7.12): a 680px centred column with a
- * hero (36px mark tile, 20/28 title, a meta line) followed by groups of raised cards.
  */
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Pencil } from 'lucide-react'
 import { PanelHeader, type PanelHeaderProps } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
-import { DETAIL_COLUMN_CLASS } from '@/components/settings/SettingsPage'
+import { CHAT_LAYOUT } from '@/config/layout'
 
 export interface Info_PageProps {
   children: React.ReactNode
@@ -33,16 +30,14 @@ export interface Info_PageHeaderProps extends Omit<PanelHeaderProps, 'className'
 }
 
 export interface Info_PageHeroProps {
-  /** Avatar element (rendered in a 36px tile with a hairline ring) */
+  /** Avatar element */
   avatar: React.ReactNode
   /** Title displayed next to avatar */
   title?: string
   /** Tagline/description text below title */
   tagline?: string | null
-  /** Optional leading items on the meta line (e.g. a state pill), before the tagline */
-  meta?: React.ReactNode
-  /** Optional actions on the right (e.g. Edit) */
-  actions?: React.ReactNode
+  /** Makes the title a rename control */
+  onTitleClick?: () => void
   className?: string
 }
 
@@ -77,7 +72,7 @@ function Info_PageRoot({
       <div className={cn('h-full flex flex-col', className)}>
         {header}
         <div className="flex-1 flex items-center justify-center">
-          <Spinner className="text-lg text-tertiary" />
+          <Spinner className="text-lg text-muted-foreground" />
         </div>
       </div>
     )
@@ -88,10 +83,10 @@ function Info_PageRoot({
     return (
       <div className={cn('h-full flex flex-col', className)}>
         {header}
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 p-4 text-center">
-          <AlertCircle className="size-6 text-destructive" aria-hidden />
-          <p className="text-label font-medium text-foreground">{t('common.errorLoadingContent')}</p>
-          <p className="max-w-md text-label-sm text-tertiary">{error}</p>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground p-4">
+          <AlertCircle className="h-10 w-10 text-destructive" />
+          <p className="text-sm font-medium">{t('common.errorLoadingContent')}</p>
+          <p className="text-xs text-center max-w-md">{error}</p>
         </div>
       </div>
     )
@@ -102,8 +97,8 @@ function Info_PageRoot({
     return (
       <div className={cn('h-full flex flex-col', className)}>
         {header}
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-label text-tertiary">{empty}</p>
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <p className="text-sm">{empty}</p>
         </div>
       </div>
     )
@@ -122,28 +117,39 @@ function Info_PageHeader({ className, ...props }: Info_PageHeaderProps) {
   return <PanelHeader className={className} {...props} />
 }
 
-function Info_PageHero({ avatar, title, tagline, meta, actions, className }: Info_PageHeroProps) {
+function Info_PageHero({ avatar, title, tagline, onTitleClick, className }: Info_PageHeroProps) {
+  const { t } = useTranslation()
   return (
-    <div className={cn('mt-2 flex items-center gap-3.5', className)}>
-      {/* Brand tile: the hairline keeps dark marks (GitHub) visible on dark surfaces */}
-      <div className="size-9 shrink-0 overflow-hidden rounded-md ring-1 ring-[var(--border-strong)]">
+    <div className={cn('flex items-start gap-3', className)}>
+      <div className="h-[32px] w-[32px] shrink-0 mt-[2px] rounded-[4px] ring-1 ring-border/30 overflow-hidden">
         {avatar}
       </div>
       <div className="flex-1 min-w-0">
         {title && (
-          // Wraps rather than truncating: on detail pages this is the only place the full name appears
-          <h2 className="text-title text-foreground [overflow-wrap:anywhere]">
-            {title}
-          </h2>
+          onTitleClick ? (
+            <button
+              type="button"
+              onClick={onTitleClick}
+              aria-label={t('common.rename')}
+              className="group flex items-center gap-1.5 max-w-full text-left"
+            >
+              <span className="text-base font-semibold text-foreground leading-tight truncate">
+                {title}
+              </span>
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" />
+            </button>
+          ) : (
+            <h2 className="text-base font-semibold text-foreground leading-tight">
+              {title}
+            </h2>
+          )
         )}
-        {(meta || tagline) && (
-          <div className={cn('flex flex-wrap items-center gap-x-2 gap-y-1 text-label-sm text-secondary', title && 'mt-0.5')}>
-            {meta}
-            {tagline && <span className="min-w-0 line-clamp-2">{tagline}</span>}
-          </div>
+        {tagline && (
+          <p className={cn('text-sm text-foreground/60 leading-snug line-clamp-1', title ? 'mt-0.5' : 'mt-0')}>
+            {tagline}
+          </p>
         )}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
   )
 }
@@ -151,12 +157,20 @@ function Info_PageHero({ avatar, title, tagline, meta, actions, className }: Inf
 function Info_PageContent({ children, className }: Info_PageContentProps) {
   return (
     <div className="relative flex-1 min-h-0">
-      {/* No edge mask: the hero sits 16px under the header and a fade would dim it. */}
-      <ScrollArea className="h-full">
-        <div className={DETAIL_COLUMN_CLASS}>
-          <div className={cn('space-y-6', className)}>{children}</div>
-        </div>
-      </ScrollArea>
+      {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
+      <div
+        className="h-full"
+        style={{
+          maskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)'
+        }}
+      >
+        <ScrollArea className="h-full">
+          <div className={cn(CHAT_LAYOUT.maxWidth, 'mx-auto px-5 pt-6 pb-10')}>
+            <div className={cn('space-y-6', className)}>{children}</div>
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 /**
  * Tests for the `call_llm` display-model override in PiEventAdapter.
  *
- * The adapter fills `args.model` with the connection's miniModel ONLY when the
+ * The adapter fills `args.model` with the current session model ONLY when the
  * caller didn't specify one. Regression guard for issue #596 — prior behavior
  * unconditionally overwrote the agent's explicit model choice.
  */
@@ -21,7 +21,7 @@ describe('PiEventAdapter — call_llm model badge', () => {
   });
 
   it('preserves an explicit args.model unchanged', () => {
-    adapter.setMiniModel('pi/gpt-5-mini');
+    adapter.setCallLlmDefaultModel('pi/gpt-5-mini');
 
     const events = collect(adapter.adaptEvent({
       type: 'tool_execution_start',
@@ -34,8 +34,8 @@ describe('PiEventAdapter — call_llm model badge', () => {
     expect((events[0] as any).input.model).toBe('pi/gpt-5-pro');
   });
 
-  it('fills args.model with miniModel when absent', () => {
-    adapter.setMiniModel('pi/gpt-5-mini');
+  it('fills args.model with the current session model when absent', () => {
+    adapter.setCallLlmDefaultModel('pi/gpt-5-pro');
 
     const events = collect(adapter.adaptEvent({
       type: 'tool_execution_start',
@@ -45,11 +45,11 @@ describe('PiEventAdapter — call_llm model badge', () => {
     } as any));
 
     expect(events).toHaveLength(1);
-    expect((events[0] as any).input.model).toBe('pi/gpt-5-mini');
+    expect((events[0] as any).input.model).toBe('pi/gpt-5-pro');
   });
 
-  it('leaves args.model undefined when miniModel is also unset', () => {
-    // No setMiniModel call — simulates a connection without a configured mini model.
+  it('leaves args.model undefined when the session default is also unset', () => {
+    // No setCallLlmDefaultModel call — simulates a session without a resolved model.
 
     const events = collect(adapter.adaptEvent({
       type: 'tool_execution_start',
@@ -62,8 +62,8 @@ describe('PiEventAdapter — call_llm model badge', () => {
     expect((events[0] as any).input.model).toBeUndefined();
   });
 
-  it('preserves explicit args.model even when miniModel is set to a different value', () => {
-    adapter.setMiniModel('pi/gpt-5-mini');
+  it('preserves explicit args.model even when the session default is a different value', () => {
+    adapter.setCallLlmDefaultModel('pi/gpt-5-mini');
 
     const events = collect(adapter.adaptEvent({
       type: 'tool_execution_start',

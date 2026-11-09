@@ -7,6 +7,7 @@
 
 import {
   PROTOCOL_VERSION,
+  requestTimeoutMsForChannel,
   type MessageEnvelope,
 } from '@craft-agent/shared/protocol'
 import {
@@ -21,7 +22,7 @@ import {
 interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout>
+  timeout?: ReturnType<typeof setTimeout>
 }
 
 export interface CliClientOptions {
@@ -136,10 +137,15 @@ export class CliRpcClient {
 
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID()
-      const timeout = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`Request timeout: ${channel} (${this.requestTimeout}ms)`))
-      }, this.requestTimeout)
+      const timeoutMs = requestTimeoutMsForChannel(channel) === null
+        ? null
+        : this.requestTimeout
+      const timeout = timeoutMs == null
+        ? undefined
+        : setTimeout(() => {
+          this.pending.delete(id)
+          reject(new Error(`Request timeout: ${channel} (${timeoutMs}ms)`))
+        }, timeoutMs)
 
       this.pending.set(id, { resolve, reject, timeout })
 

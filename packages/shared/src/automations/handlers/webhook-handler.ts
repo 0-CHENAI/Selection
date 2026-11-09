@@ -115,7 +115,10 @@ export class WebhookHandler implements AutomationHandler {
   constructor(options: WebhookHandlerOptions, configProvider: AutomationsConfigProvider) {
     this.options = options;
     this.configProvider = configProvider;
-    this.retryScheduler = new RetryScheduler({ workspaceRootPath: options.workspaceRootPath });
+    this.retryScheduler = new RetryScheduler({
+      workspaceRootPath: options.workspaceRootPath,
+      isMatcherActive: id => APP_EVENTS.some(event => this.configProvider.getMatchersForEvent(event).some(m => m.id === id && m.enabled !== false)),
+    });
   }
 
   /**
@@ -156,13 +159,17 @@ export class WebhookHandler implements AutomationHandler {
 
     if (webhookTasks.length === 0) return;
 
+    const env = buildWebhookEnv(event, payload);
+    await this.executeWebhookTasks(event, env, webhookTasks);
+  }
+
+  private async executeWebhookTasks(
+    event: AutomationEvent,
+    env: Record<string, string>,
+    webhookTasks: WebhookTask[],
+  ): Promise<WebhookActionResult[]> {
     log.debug(`[WebhookHandler] Processing ${webhookTasks.length} webhooks for ${event}`);
 
-    // Build environment variables for URL/body expansion (webhook-safe: no process.env leak)
-    const env = buildWebhookEnv(event, payload);
-
-    // Apply per-endpoint rate limiting before execution.
-    // Resolve URLs first (expand env vars) so rate limiting works on actual endpoints.
     const results: WebhookActionResult[] = new Array(webhookTasks.length);
     const toExecute: Array<{ index: number; task: WebhookTask }> = [];
 
@@ -186,7 +193,6 @@ export class WebhookHandler implements AutomationHandler {
       }
     }
 
-    // Execute allowed webhook requests in parallel with retry for transient failures
     if (toExecute.length > 0) {
       const webhookOpts = { env, retry: { maxAttempts: 2 } };
       const outcomes = await Promise.allSettled(
@@ -211,7 +217,6 @@ export class WebhookHandler implements AutomationHandler {
       }
     }
 
-    // Log failures and write history entries
     for (let i = 0; i < results.length; i++) {
       const result = results[i]!;
       const task = webhookTasks[i]!;
@@ -220,8 +225,6 @@ export class WebhookHandler implements AutomationHandler {
         log.debug(`[WebhookHandler] ${result.url} → ${result.error}`);
       }
 
-      // Write history entry for each webhook execution.
-      // Await for durability, but keep failures non-fatal.
       const entry = createWebhookHistoryEntry({
         matcherId: task.matcherId,
         ok: result.success,
@@ -232,6 +235,8 @@ export class WebhookHandler implements AutomationHandler {
         attempts: result.attempts,
         error: result.error,
         responseBody: result.responseBody,
+        status: result.success ? 'succeeded' : (result.error?.startsWith('Rate-limited') ? 'rate-limited' : 'failed'),
+        event,
       });
       try {
         await appendAutomationHistoryEntry(this.options.workspaceRootPath, entry);
@@ -239,9 +244,6 @@ export class WebhookHandler implements AutomationHandler {
         log.debug(`[WebhookHandler] Failed to write history: ${e}`);
       }
 
-      // Enqueue for deferred retry if it's a transient failure (5xx / timeout)
-      // and immediate retries were exhausted (attempts > 1 means retries ran).
-      // Pre-expand the action so retries don't need the original event env.
       if (isTransientFailure(result)) {
         if (result.attempts && result.attempts > 1) {
           const expandedAction = expandWebhookAction(task.action, env);
@@ -251,11 +253,12 @@ export class WebhookHandler implements AutomationHandler {
       }
     }
 
-    // Deliver results via callback
     if (results.length > 0 && this.options.onWebhookResults) {
       log.debug(`[WebhookHandler] Delivering ${results.length} webhook results`);
       this.options.onWebhookResults(results);
     }
+
+    return results;
   }
 
   /**

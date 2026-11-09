@@ -1,14 +1,66 @@
+import { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
+import { ResponseSources } from './ResponseSources'
+import { extractResponseSources, type ResponseSource } from './response-sources'
+import { taskAssignmentSummary } from './task-message-presentation'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
+import i18n from 'i18next'
+import { formatUserMessageTime } from './UserMessageBubble'
+import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
+import {
+  ClarificationChainRow,
+  clarificationBriefTitle,
+  clarificationOutcomeCounts,
+  clarificationSummaryLabel,
+  clarificationSummaryStatus,
+} from './ClarificationCard'
+import { ArtifactSupplementShelf, ResponseArtifacts } from './ResponseArtifacts'
+import { mergeArtifactSupplements, useArtifactSupplements } from './artifact-supplements'
+import { extractDeliveredResponseArtifacts } from './response-artifacts'
+import { ResponseBodyGrowth } from './ResponseBodyGrowth'
+import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
-import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
+import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
+import type { Message } from '@craft-agent/core/types'
+import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { motion, AnimatePresence } from 'motion/react'
-import { ListTodo } from 'lucide-react'
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
+import { thinkingLabelSizer, useThinkingCompletionSwap } from './thinking-step-motion'
+import {
+  PROCESS_CHAIN_EXPAND_MS,
+  PROCESS_CHAIN_ROW_PX,
+  initialProcessChainWindow,
+  shouldWindowProcessChain,
+  useProcessChainWindow,
+  type ProcessChainWindow,
+} from './process-chain-window'
+import {
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  Circle,
+  MessageCircleDashed,
+  FileText,
+  ArrowUpRight,
+  CornerDownRight,
+  UsersRound,
+  Copy,
+  Check,
+  ListTodo,
+  Pencil,
+  FilePenLine,
+  FoldVertical,
+  GitBranch,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { useCopyToClipboard } from '../../lib/use-copy-to-clipboard'
-import { TWEEN } from '../../motion/presets'
-import { Markdown, RunCommandProvider, useRunCommand } from '../markdown'
+import { TodoList } from './TodoList'
+import { TaskTurnSummary } from './TaskProgressCard'
+import type { TodoRailMode } from './task-progress'
+import { MemoizedMarkdown } from '../markdown'
+import { Spinner } from '../ui/LoadingIndicator'
+import { markdownToPlainText } from './markdown-to-plain-text'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
@@ -16,12 +68,44 @@ import {
   buildAnnotationChipEntryTransition,
   buildSelectionEntryTransition,
 } from '../annotations/island-motion'
+import { Tooltip, TooltipTrigger, ErrorTooltipContent } from '../tooltip'
+import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
+import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
-import { computeLastChildSet, groupActivitiesByParent, deriveTurnPhase, shouldShowThinkingIndicator, type AssistantTurn } from './turn-utils'
+import { ResponseActionRow, TurnActionButton, TurnRetryButton, TURN_ACTION_ICON_CLASS } from './TurnActionRow'
+import {
+  computeLastChildSet,
+  getRenderedActivityRows,
+  groupActivitiesByParent,
+  interleaveSettledClarifications,
+  isActivityGroup,
+  formatDuration,
+  formatOrchestrationToolSummary,
+  formatTokens,
+  normalizeCraftSessionToolName,
+  taskListSeed,
+  deriveTurnPhase,
+  getActiveTurnPreview,
+  countWorkRecords,
+  isProcessPlaceholder,
+  isVisibleCommentaryCard,
+  isTaskStartAcknowledgment,
+  isMirroredCommentaryActivity,
+  shouldShowGenericThinkingIndicator,
+  shouldShowThinkingIndicator,
+  type ActivityGroup,
+  type AssistantTurn,
+  type ProcessChainEntry,
+  type TurnPhase,
+} from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
+  asRecord,
   formatAnnotationFollowUpTooltipText,
   getAnnotationNoteText,
+  getAnnotationFeedbackStatus,
+  isAnnotationFollowUpProcessing,
+  isTrackedFollowUp,
 } from '../annotations/follow-up-state'
 import {
   ANNOTATION_PREFIX_SUFFIX_WINDOW,
@@ -30,6 +114,7 @@ import {
   hasExistingTextRangeAnnotation,
   createSelectionPreviewAnnotation,
   createTextSelectionAnnotation,
+  hashAnnotationSource,
   collectTextSegments,
   getCanonicalText,
   resolveNodeOffset,
@@ -59,26 +144,180 @@ import { useAnnotationInteractionController } from '../annotations/use-annotatio
 import { useAnnotationIslandPresentation } from '../annotations/use-annotation-island-presentation'
 import { useAnnotationIslandEvents } from '../annotations/use-annotation-island-events'
 import { useAnnotationCancelRestore } from '../annotations/use-annotation-cancel-restore'
-import { DocumentFormattedMarkdownOverlay } from '../overlay'
 import { AcceptPlanDropdown } from './AcceptPlanDropdown'
 import { CompactAcceptPlanDrawer } from './CompactAcceptPlanDrawer'
-import { ResponseFooter } from './turn/ResponseFooter'
-import { ThinkingRow } from './turn/ThinkingRow'
-import { WorkLog } from './turn/WorkLog'
-import { ANSWER_BLOCK_IN, ANSWER_PROSE, SIZE_CONFIG } from './turn/turn-classes'
-import { countFailedActivities, getWorkLogPreview } from './turn/work-log-summary'
+import { parseSkillUsedMarkers } from './skill-used-markers'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  StyledDropdownMenuContent,
+  StyledDropdownMenuItem,
+} from '../ui/StyledDropdown'
 
-// Presentational pieces live in ./turn/ (work log, tool rows, footer); re-exported here so the
-// public surface of TurnCard stays the same.
-export { SIZE_CONFIG } from './turn/turn-classes'
-export { ActivityStatusIcon } from './turn/ActivityIcons'
+// ============================================================================
+// Utilities
+// ============================================================================
+
+/**
+ * Simple markdown stripping for preview text.
+ * Removes markdown syntax to show plain text preview.
+ * Code block content is preserved as plain text.
+ */
+function stripMarkdown(text: string): string {
+  return text
+    // Extract content from fenced code blocks (remove ``` and optional language)
+    .replace(/```(?:\w+)?\n?([\s\S]*?)```/g, '$1')
+    // Extract content from inline code
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove headers
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove bold/italic
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // Remove links
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Remove images
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+    // Remove blockquotes
+    .replace(/^>\s+/gm, '')
+    // Remove horizontal rules
+    .replace(/^---+$/gm, '')
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Compute diff stats for Edit/Write tool inputs.
+ * Uses @pierre/diffs for accurate line-by-line diff calculation.
+ *
+ * Supports both:
+ * - Claude Code format: { file_path, old_string, new_string }
+ * - Codex format: { changes: Array<{ path, kind, diff }> }
+ *
+ * @param toolName - 'Edit' or 'Write'
+ * @param toolInput - The tool input containing old_string/new_string (Edit) or content (Write)
+ * @returns { additions, deletions } or null if not applicable
+ */
+function computeEditWriteDiffStats(
+  toolName: string | undefined,
+  toolInput: Record<string, unknown> | undefined
+): { additions: number; deletions: number } | null {
+  if (!toolInput) return null
+
+  if (toolName === 'Edit') {
+    // Check for Codex format: { changes: Array<{ path, kind, diff }> }
+    if (toolInput.changes && Array.isArray(toolInput.changes)) {
+      let totalAdditions = 0
+      let totalDeletions = 0
+      for (const change of toolInput.changes as Array<{ path?: string; diff?: string }>) {
+        if (change.diff) {
+          const stats = getUnifiedDiffStats(change.diff, change.path || 'file')
+          if (stats) {
+            totalAdditions += stats.additions
+            totalDeletions += stats.deletions
+          }
+        }
+      }
+      if (totalAdditions === 0 && totalDeletions === 0) return null
+      return { additions: totalAdditions, deletions: totalDeletions }
+    }
+
+    // Claude Code format: { file_path, old_string, new_string }
+    const oldString = (toolInput.old_string as string) ?? ''
+    const newString = (toolInput.new_string as string) ?? ''
+    if (!oldString && !newString) return null
+
+    const oldFile: FileContents = { name: 'file', contents: oldString, lang: 'text' }
+    const newFile: FileContents = { name: 'file', contents: newString, lang: 'text' }
+    const fileDiff = parseDiffFromFile(oldFile, newFile)
+    return getDiffStats(fileDiff)
+  }
+
+  if (toolName === 'Write') {
+    const content = (toolInput.content as string) ?? ''
+    if (!content) return null
+
+    // For Write, everything is an addition (new file content)
+    const oldFile: FileContents = { name: 'file', contents: '', lang: 'text' }
+    const newFile: FileContents = { name: 'file', contents: content, lang: 'text' }
+    const fileDiff = parseDiffFromFile(oldFile, newFile)
+    return getDiffStats(fileDiff)
+  }
+
+  return null
+}
+
+// ============================================================================
+// Size Configuration
+// ============================================================================
+
+/**
+ * Global size configuration for TurnCard components.
+ * Adjust these values to scale the entire component uniformly.
+ */
+/** Shared size configuration for activity UI - exported for reuse in inline execution */
+export const SIZE_CONFIG = {
+  /** Base font size class for all text */
+  fontSize: 'text-[13px]',
+  /** Icon size class (width and height) */
+  iconSize: 'w-3 h-3',
+  /** Spinner text size class */
+  spinnerSize: 'text-[10px]',
+  /** Small spinner for header */
+  spinnerSizeSmall: 'text-[8px]',
+  /** Activity row height in pixels (approx for calculation) */
+  activityRowHeight: 24,
+  /** Max visible activities before scrolling (show ~15 items) */
+  maxVisibleActivities: 15,
+  /** Number of items before which we apply staggered animation */
+  staggeredAnimationLimit: 10,
+} as const
+
+/** Product-standard label paired with the 3x3 grid activity indicator. */
+const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
+/** Completed deep-thinking row. Short process notes keep their own summary. */
+const thoughtDeeplyLabel = () => i18n.t('turnCard.thoughtDeeply')
+/** In-progress deep-thinking row. The transcript stays off this line until it settles. */
+const thinkingDeeplyLabel = () => i18n.t('turnCard.thinkingDeeply')
+const PROCESS_SUMMARY_LIMIT = 72
+
+/**
+ * A short one-line process note stays as the step summary. A paragraph uses
+ * the deep-thinking label and opens from the same details popup as other steps.
+ * Settled thinking rows do not use this — they keep their own label plus a one-line preview.
+ */
+function collapsedProcessLabel(activity: { content?: string }): string {
+  const thought = thoughtDeeplyLabel()
+  const raw = activity.content ?? ''
+  const plain = stripMarkdown(raw)
+  if (!plain) return thought
+  if (/[\r\n]/.test(raw.trim()) || plain.length > PROCESS_SUMMARY_LIMIT) return thought
+  return plain
+}
+
+/**
+ * One settled line of thinking text. CSS ellipsis cuts the end the same way
+ * other step summaries do. A live row does not call this — the transcript
+ * stays out of the line until the step completes, so tokens cannot jump it.
+ */
+function thinkingStepPreview(content: string | undefined): string {
+  const lines = (content ?? '')
+    .split(/\r?\n/)
+    .map(line => stripMarkdown(line))
+    .filter(Boolean)
+  if (lines.length === 0) return ''
+  return lines.join(' ')
+}
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
-export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan'
+export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan' | 'task-context'
 export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 
 // ============================================================================
@@ -88,6 +327,7 @@ export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'interrupted'
 
 export interface TodoItem {
+  id?: string
   /** Task content/description */
   content: string
   /** Current status */
@@ -101,9 +341,19 @@ export interface ActivityItem {
   type: ActivityType
   status: ActivityStatus
   toolName?: string
+  toolPurpose?: 'work' | 'answer-delivery'
+  answerRoutingVersion?: 1
   toolUseId?: string  // For matching parent-child relationships
   toolInput?: Record<string, unknown>
   content?: string
+  /** Readable internal task step; its protocol stays out of the response body. */
+  taskContext?: import('@craft-agent/core').Message['taskContext']
+  /** Child execution identity, kept separate from the coordinator's own tools. */
+  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string }
+  attachments?: import('@craft-agent/core').Message['attachments']
+  /** Live-only execution progress, updated in the existing work row. */
+  toolProgress?: import('@craft-agent/core').Message['toolProgress']
+  toolResultContent?: AgentToolResultContent[]
   intent?: string
   /** Optional backing message id (used by plan activities for branching/annotations) */
   messageId?: string
@@ -126,15 +376,33 @@ export interface ActivityItem {
 }
 
 export interface ResponseContent {
+  artifactVersions?: import('@craft-agent/core').Message['artifactVersions']
+  answerSalvaged?: boolean
+  isAnswerPreview?: boolean
   text: string
   isStreaming: boolean
+  /** Original message time for retaining chronology if demoted into the work chain. */
+  timestamp?: number
   streamStartTime?: number
+  /** Completion clock for the one-shot local reveal; old responses render immediately. */
+  completedRevealStartTime?: number
   /** Whether this response is a plan (renders with plan variant) */
   isPlan?: boolean
   /** ID of the underlying message (for branching + annotations) */
   messageId?: string
   /** Persisted annotations attached to the response message */
   annotations?: AnnotationV1[]
+  /**
+   * Tool-bound commentary occupying the response card until a real final
+   * reply arrives. Keeps the streamed body readable when the next tool starts.
+   */
+  isCommentary?: boolean
+  /**
+   * Identity of the underlying text stream (its sub-turn id). Stable when a
+   * live note is promoted into the answer or committed with a server id, so
+   * the same block morphs instead of remounting.
+   */
+  streamKey?: string
 }
 
 // ============================================================================
@@ -157,6 +425,8 @@ export interface TurnCardProps {
   turnId: string
   /** All activities in this turn (tools, thinking, intermediate text) */
   activities: ActivityItem[]
+  /** Sources retrieved by workers belonging to this execution. */
+  researchSources?: ResponseSource[]
   /** Final response content (may be streaming) */
   response?: ResponseContent
   /** Primary intent/goal for this turn (shown in collapsed preview) */
@@ -165,6 +435,15 @@ export interface TurnCardProps {
   isStreaming: boolean
   /** Whether this turn is fully complete */
   isComplete: boolean
+  /** Parent owns the turn's loading status; omit generic thinking placeholders. */
+  hasExternalWorkStatus?: boolean
+  /** This header is the single status bar while a clarification card is waiting. */
+  awaitingClarification?: boolean
+  /**
+   * Answered or skipped clarifications for this process fold.
+   * The header brief title keeps the status; opening the fold shows the details.
+   */
+  clarifications?: readonly Message[]
   /** Start in expanded state */
   defaultExpanded?: boolean
   /** Controlled expansion state (overrides internal state) */
@@ -177,6 +456,8 @@ export interface TurnCardProps {
   onExpandedActivityGroupsChange?: (groups: Set<string>) => void
   /** Callback when file path is clicked */
   onOpenFile?: (path: string) => void
+  /** Resolve and open a generated artifact with the requested action. */
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   /** Callback when URL is clicked */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -185,12 +466,24 @@ export interface TurnCardProps {
   onOpenDetails?: () => void
   /** Callback to open individual activity details in Monaco */
   onOpenActivityDetails?: (activity: ActivityItem) => void
+  /** Contextual execution actions, visible only inside the expanded work chain. */
+  workControls?: React.ReactNode
   /** Callback to open all edits/writes in multi-file diff view */
   onOpenMultiFileDiff?: () => void
   /** Whether this turn has any Edit or Write activities */
   hasEditOrWriteActivities?: boolean
   /** TodoWrite tool state - shown at bottom of turn */
   todos?: TodoItem[]
+  /**
+   * Stable rail seed shared with the floating card. Omitted callers derive it
+   * from the turn's first task-list tool call, then the turn id, then the session.
+   */
+  listSeed?: string
+  /**
+   * `full` keeps the inline rail. `summary` is a one-line review for older
+   * turns. `hidden` drops the rail when the latest list is docked above the input.
+   */
+  todoRail?: TodoRailMode
   /** Optional render prop for actions menu (Electron provides dropdown) */
   renderActionsMenu?: () => React.ReactNode
   /** Callback when user accepts the plan (plan responses only) */
@@ -209,8 +502,14 @@ export interface TurnCardProps {
    *  auto-compact / WebUI mobile. Hides Copy / Markdown / Branch actions; keeps the
    *  Accept Plan dropdown when a plan is the last response. */
   compactMode?: boolean
+  /** Read-only task preview with a quieter assignment and labeled output. */
+  taskPreview?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
+  /** Callback to regenerate the last assistant response */
+  onRegenerate?: () => void
+  /** Retry a failed or interrupted turn. Rendered in the same action row as regenerate. */
+  onRetry?: () => void
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove a persisted annotation from a response message */
@@ -227,156 +526,1477 @@ export interface TurnCardProps {
   openAnnotationRequest?: OpenAnnotationRequest | null
   /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
   annotationInteractionMode?: AnnotationInteractionMode
+  /** Resolve a persisted revision only when its delivered message is available. */
+  resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
 }
 
 // ============================================================================
 // Buffering Constants & Utilities
 // ============================================================================
 
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/** Get display name for a tool (strip MCP prefixes, apply friendly names) */
+function getToolDisplayName(name: string): string {
+  const stripped = normalizeCraftSessionToolName(name).replace(/^mcp__[^_]+__/, '')
+
+  // Friendly display names for specific tools
+  const displayNames: Record<string, string> = {
+    'skill_inspect': i18n.t('tools.skillInspect'),
+    'skill_install': i18n.t('tools.skillInstall'),
+    'TodoWrite': 'Todo List Updated',
+    'set_session_labels': 'Set Session Labels',
+    'set_session_status': 'Set Session Status',
+    'get_session_info': 'Get Session Info',
+    'list_sessions': 'List Sessions',
+    'archive_session': 'Archive Session',
+    'create_task': 'Create Task',
+    'run_task': 'Run Task',
+    'get_task_results': 'Get Task Results',
+    'submit_task_output': 'Submit Task Output',
+    'submit_task_verdict': 'Submit Task Verdict',
+    'submit_task_node_verdict': 'Submit Node Verdict',
+    'submit_orchestration_decision': 'Submit Orchestration Decision',
+    'list_background_tasks': 'List Background Tasks',
+    'send_agent_message': 'Send Agent Message',
+    'spawn_session': 'Spawn Session',
+  }
+
+  return localizedToolLabel(stripped) || displayNames[stripped] || stripped
+}
+
 /**
- * Aggressive buffering configuration.
- * Waits until content is suspected to be meaningful "commentary" before showing.
+ * Strip session/workspace folder paths from file paths for cleaner display.
+ * Only strips paths that match the current session folder path.
+ * Example: /path/to/sessions/260121-foo/plans/file.md → plans/file.md
  */
-const BUFFER_CONFIG = {
-  MIN_WORDS_STANDARD: 40,      // Base threshold for showing content
-  MIN_WORDS_CODE: 15,          // Code blocks show faster
-  MIN_WORDS_LIST: 20,          // Lists show faster
-  MIN_WORDS_QUESTION: 8,       // Questions from AI show faster
-  MIN_WORDS_HEADER: 12,        // Headers indicate structure
-  MIN_BUFFER_MS: 500,          // Always wait at least 500ms
-  MAX_BUFFER_MS: 2500,         // Never buffer longer than 2.5s
-  TIMEOUT_MIN_WORDS: 5,        // Show on timeout if at least this many words
-  HIGH_WORD_COUNT: 60,         // Show regardless of structure at this count
-  CONTENT_THROTTLE_MS: 300,    // Throttle content updates during streaming (perf optimization)
-} as const
+function stripSessionFolderPath(filePath: string, sessionFolderPath?: string): string {
+  if (!sessionFolderPath) return filePath
 
-type BufferReason =
-  | 'complete'
-  | 'min_time'
-  | 'timeout'
-  | 'code_block'
-  | 'list'
-  | 'header'
-  | 'question'
-  | 'threshold_met'
-  | 'high_word_count'
-  | 'buffering'
+  // Get workspace path (parent of sessions folder)
+  // sessionFolderPath: /path/workspaces/{uuid}/sessions/{sessionId}
+  const workspacePath = normalizePath(sessionFolderPath).replace(/\/sessions\/[^/]+$/, '')
 
-/** Count words in text */
-function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(w => w.length > 0).length
+  // Try session folder first (more specific)
+  if (pathStartsWith(filePath, sessionFolderPath)) {
+    return stripPathPrefix(filePath, sessionFolderPath)
+  }
+
+  // Then try workspace folder
+  if (pathStartsWith(filePath, workspacePath)) {
+    return stripPathPrefix(filePath, workspacePath)
+  }
+
+  return filePath
 }
 
-/** Detect code blocks (fenced) */
-function hasCodeBlock(text: string): boolean {
-  return /```/.test(text)
-}
+/** Format tool input as a concise summary - CSS truncate handles overflow */
+function formatToolInput(
+  input?: Record<string, unknown>,
+  toolName?: string,
+  sessionFolderPath?: string
+): string {
+  if (!input || Object.keys(input).length === 0) return ''
 
-/** Detect markdown lists (bullet or numbered) */
-function hasList(text: string): boolean {
-  return /^\s*[-*•]\s/m.test(text) || /^\s*\d+\.\s/m.test(text)
-}
+  // For call_llm: model shown as badge, prompt duplicates intent
+  if (toolName === 'mcp__session__call_llm') return ''
 
-/** Detect markdown headers */
-function hasHeader(text: string): boolean {
-  return /^#{1,4}\s/m.test(text)
-}
+  // Task protocol payloads are machine inputs. The row already shows the action
+  // and intent; keep full values in the existing tool inspector, not inline.
+  if (['submit_task_output', 'submit_task_verdict', 'submit_task_node_verdict',
+    'submit_orchestration_decision', 'submit_orchestration_patch', 'get_task_results']
+    .includes(normalizeCraftSessionToolName(toolName ?? ''))) return ''
 
-/** Detect structural content (sentences, paragraphs, etc) */
-function hasStructure(text: string): boolean {
-  // Sentence ending (period, exclamation, question mark, colon)
-  if (/[.!?:]\s*$/.test(text.trimEnd())) return true
-  // Paragraph breaks
-  if (/\n\s*\n/.test(text)) return true
-  // Headers anywhere
-  if (/\n\s*#{1,4}\s/.test(text)) return true
-  // Code blocks
-  if (hasCodeBlock(text)) return true
-  return false
-}
+  const parts: string[] = []
 
-/** Detect if text ends with a question (AI asking for clarification) */
-function isQuestion(text: string): boolean {
-  return /\?\s*$/.test(text.trim())
+  // For Edit/Write tools, only show file_path (skip old_string, new_string, replace_all, content)
+  const isEditOrWrite = toolName === 'Edit' || toolName === 'Write'
+
+  // Handle Codex format: { changes: Array<{ path, kind, diff }> }
+  // Extract path from first change if present
+  if (isEditOrWrite && input.changes && Array.isArray(input.changes)) {
+    const firstChange = input.changes[0] as { path?: string } | undefined
+    if (firstChange?.path) {
+      const pathStr = stripSessionFolderPath(firstChange.path, sessionFolderPath)
+      parts.push(pathStr)
+    }
+    return parts.join(' ')
+  }
+
+  for (const [key, value] of Object.entries(input)) {
+    // Skip meta fields and description (shown separately)
+    if (key === '_intent' || key === 'description' || value === undefined || value === null) continue
+
+    // For Edit/Write tools, only include file_path
+    if (isEditOrWrite && key !== 'file_path') continue
+
+    let valStr = typeof value === 'string'
+      ? value.replace(/\s+/g, ' ').trim()
+      : JSON.stringify(value)
+
+    // Strip session/workspace paths from file_path for Edit/Write tools
+    if (isEditOrWrite && key === 'file_path' && typeof value === 'string') {
+      valStr = stripSessionFolderPath(valStr, sessionFolderPath)
+    }
+
+    parts.push(valStr)
+    if (parts.length >= 2) break // Max 2 values
+  }
+  return parts.join(' ')
 }
 
 /**
- * Determine if buffered content should be shown.
- * This is the core buffering decision function.
+ * Extract the action portion from an LLM-provided displayName by stripping
+ * a matching icon/tool prefix.
  *
- * @param text - The accumulated response text
- * @param isStreaming - Whether the response is still streaming
- * @param streamStartTime - When streaming started (for timeout calculation)
- * @returns Decision with reason for debugging
+ * Examples:
+ *   extractActionFromDisplayName("Git", "Git Status")  → "Status"
+ *   extractActionFromDisplayName("npm", "Install Deps") → "Install Deps"
+ *   extractActionFromDisplayName("Git", "Check Branch")  → "Check Branch"
  */
-function shouldShowContent(
-  text: string,
-  isStreaming: boolean,
-  streamStartTime?: number
-): { shouldShow: boolean; reason: BufferReason; wordCount: number } {
-  const wordCount = countWords(text)
-
-  // Always show complete content immediately
-  if (!isStreaming) {
-    return { shouldShow: true, reason: 'complete', wordCount }
+function extractActionFromDisplayName(iconName: string, llmName: string): string {
+  // If LLM name starts with the icon name, strip the prefix to get the action
+  // "Git Status" with icon "Git" → "Status"
+  if (llmName.toLowerCase().startsWith(iconName.toLowerCase() + ' ')) {
+    return llmName.slice(iconName.length + 1).trim()
   }
-
-  const elapsed = streamStartTime ? Date.now() - streamStartTime : 0
-
-  // Minimum buffer time - always wait at least 500ms
-  if (elapsed < BUFFER_CONFIG.MIN_BUFFER_MS) {
-    return { shouldShow: false, reason: 'min_time', wordCount }
-  }
-
-  // Maximum buffer time - force show after 2.5s if we have some content
-  if (elapsed > BUFFER_CONFIG.MAX_BUFFER_MS && wordCount >= BUFFER_CONFIG.TIMEOUT_MIN_WORDS) {
-    return { shouldShow: true, reason: 'timeout', wordCount }
-  }
-
-  // High-confidence patterns get expedited treatment
-
-  // Code blocks - developers want to see code early
-  if (hasCodeBlock(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_CODE) {
-    return { shouldShow: true, reason: 'code_block', wordCount }
-  }
-
-  // Headers indicate structured content
-  if (hasHeader(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_HEADER) {
-    return { shouldShow: true, reason: 'header', wordCount }
-  }
-
-  // Lists indicate structured content
-  if (hasList(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_LIST) {
-    return { shouldShow: true, reason: 'list', wordCount }
-  }
-
-  // Questions from AI (clarification) - show quickly
-  if (isQuestion(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_QUESTION) {
-    return { shouldShow: true, reason: 'question', wordCount }
-  }
-
-  // Standard threshold - 40 words with some structure
-  if (wordCount >= BUFFER_CONFIG.MIN_WORDS_STANDARD && hasStructure(text)) {
-    return { shouldShow: true, reason: 'threshold_met', wordCount }
-  }
-
-  // High word count - show regardless of structure
-  if (wordCount >= BUFFER_CONFIG.HIGH_WORD_COUNT) {
-    return { shouldShow: true, reason: 'high_word_count', wordCount }
-  }
-
-  return { shouldShow: false, reason: 'buffering', wordCount }
+  // Otherwise use the full LLM name as the action
+  // "Install Dependencies" with icon "npm" → "Install Dependencies"
+  return llmName
 }
 
 /**
- * Check if a response is currently in buffering state
- * Used by TurnCard to show subtle indicator instead of big card
+ * Format tool display using embedded toolDisplayMeta.
+ * toolDisplayMeta is set at storage time in the main process and includes:
+ * - displayName: Human-readable name
+ * - iconDataUrl: Base64-encoded icon (for skills/sources)
+ * - description: Brief description
+ * - category: 'skill' | 'source' | 'native' | 'mcp'
  */
-function isResponseBuffering(response: ResponseContent | undefined): boolean {
-  if (!response) return false
-  if (!response.isStreaming) return false
-  const decision = shouldShowContent(response.text, response.isStreaming, response.streamStartTime)
-  return !decision.shouldShow
+function formatToolDisplay(
+  activity: ActivityItem
+): { name: string; icon?: string; description?: string } {
+  const { toolName, displayName, toolInput, toolDisplayMeta } = activity
+
+  // Primary: Use embedded toolDisplayMeta (works in both Electron and viewer)
+  if (toolDisplayMeta) {
+    // For MCP tools, append the tool slug to the source name
+    if (toolName?.startsWith('mcp__') && toolDisplayMeta.category === 'source') {
+      const parts = toolName.match(/^mcp__([^_]+)__(.+)$/)
+      if (parts) {
+        const toolSlug = parts[2]
+        return {
+          name: `${toolDisplayMeta.displayName}: ${toolSlug}`,
+          icon: toolDisplayMeta.iconDataUrl,
+          description: toolDisplayMeta.description,
+        }
+      }
+    }
+
+    // For Bash commands with LLM-provided displayName: merge icon name + action
+    // e.g., icon "Git" + LLM "Git Status" → "Git: Status"
+    // e.g., icon "npm" + LLM "Install Dependencies" → "npm: Install Dependencies"
+    // Special case: for generic "Terminal", show only the action
+    // e.g., icon "Terminal" + LLM "Install Dependencies" → "Install Dependencies"
+    if (toolName === 'Bash' && displayName) {
+      const iconName = toolDisplayMeta.displayName
+      const action = extractActionFromDisplayName(iconName, displayName)
+      return {
+        name: iconName.toLowerCase() === 'terminal' ? action : `${iconName}: ${action}`,
+        icon: toolDisplayMeta.iconDataUrl,
+        description: toolDisplayMeta.description,
+      }
+    }
+
+    // For native tools with LLM-provided displayName: use the LLM's name
+    // This gives semantic names like "Read Config" instead of generic "Read"
+    if (displayName && toolDisplayMeta.category === 'native') {
+      return {
+        name: displayName,
+        icon: toolDisplayMeta.iconDataUrl,
+        description: toolDisplayMeta.description,
+      }
+    }
+
+    return {
+      name: (toolDisplayMeta.category === 'native' ? localizedToolLabel(toolName) : undefined) || toolDisplayMeta.displayName,
+      icon: toolDisplayMeta.iconDataUrl,
+      description: toolDisplayMeta.description,
+    }
+  }
+
+  // Fallback for Skill tool without toolDisplayMeta (legacy sessions)
+  if (toolName === 'Skill' && toolInput?.skill) {
+    const skillId = String(toolInput.skill)
+    // Extract slug from qualified name (workspaceId:slug) for display
+    const colonIdx = skillId.indexOf(':')
+    const slug = colonIdx > 0 ? skillId.slice(colonIdx + 1) : skillId
+    return { name: slug }
+  }
+
+  // Final fallback: Use LLM-generated displayName or tool name
+  const name = displayName || (toolName ? getToolDisplayName(toolName) : i18n.t('turnCard.processing'))
+  return { name }
+}
+
+/** Get the primary preview text for collapsed state */
+export function getPreviewText(
+  activities: ActivityItem[],
+  intent: string | undefined,
+  turnPhase: TurnPhase,
+  options?: { awaitingClarification?: boolean },
+): string {
+  if (options?.awaitingClarification) return i18n.t('chat.clarificationPending')
+  if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
+
+  // During an active turn, prefer the newest thinking/tool intent over the
+  // turn-level intent captured when the turn was first created. The latter is
+  // intentionally stable and otherwise leaves the title stuck on step one.
+  // This check runs before the pending/awaiting fallback so the header follows
+  // the latest step while the model works between steps (#402).
+  const latestActivePreview = getActiveTurnPreview(activities, turnPhase)
+  if (latestActivePreview) return latestActivePreview
+
+  // No step provides a label yet — describe the live phase.
+  if (turnPhase === 'pending' || turnPhase === 'awaiting') return thinkingStatusLabel()
+
+  // If we have an explicit intent, use it
+  if (intent) return intent
+
+  // Find the most relevant activity intent
+  const activityWithIntent = activities.find(a => a.intent && !isAnswerDeliveryTool(a))
+  if (activityWithIntent?.intent) return activityWithIntent.intent
+
+  // Find running Task tools and show their description
+  const runningTask = activities.find(a => isParentTaskTool(a.toolName ?? '') && a.status === 'running')
+  if (runningTask?.toolInput?.description) {
+    return runningTask.toolInput.description as string
+  }
+
+  // Get running tools (not intermediate messages)
+  const runningTools = activities.filter(a => a.status === 'running' && a.toolName && !isAnswerDeliveryTool(a))
+
+  // Show running tool names
+  if (runningTools.length > 0) {
+    const toolNames = runningTools
+      .map(a => getToolDisplayName(a.toolName!))
+      .slice(0, 3) // Max 3 names
+    return `${toolNames.join(', ')}...`
+  }
+
+  // When complete, show first Task's description if available
+  const firstTask = activities.find(a => isParentTaskTool(a.toolName ?? ''))
+  if (firstTask?.toolInput?.description) {
+    return firstTask.toolInput.description as string
+  }
+
+  // When complete, show summary (badge already shows count)
+  if (turnPhase === 'complete') {
+    return i18n.t('turnCard.stepsCompleted')
+  }
+
+  return i18n.t('turnCard.starting')
+}
+
+function isClarificationToolActivity(activity: Pick<ActivityItem, 'type' | 'toolName'>): boolean {
+  return activity.type === 'tool' && /(^|__)clarify$/i.test(activity.toolName ?? '')
+}
+
+
+// ============================================================================
+// Sub-Components
+// ============================================================================
+
+/**
+ * Status icon for an activity - exported for reuse in inline execution.
+ * Supports custom icons from skill/source metadata when completed.
+ * Edit/Write tools show tool-specific icons; others show checkmark or custom icon.
+ */
+export function ActivityStatusIcon({
+  status,
+  toolName,
+  customIcon
+}: {
+  status: ActivityStatus
+  toolName?: string
+  /** Custom icon from tool metadata - emoji or data URL (base64) */
+  customIcon?: string
+}) {
+  // Terminal icons stay static. A Motion wrapper here never crossfaded the
+  // running spinner (that path returns above) and only added a node per row.
+  if (status === 'running' || status === 'backgrounded') {
+    return <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
+      <Spinner className={cn(SIZE_CONFIG.spinnerSize, status === 'backgrounded' && 'text-accent')} />
+    </span>
+  }
+
+  if (status === 'completed' && customIcon) {
+    const isLikelyEmoji = customIcon.length <= 8 && !/^(https?:\/\/|data:)/.test(customIcon)
+    if (isLikelyEmoji) {
+      return (
+        <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[10px] leading-none")}>
+          {customIcon}
+        </span>
+      )
+    }
+    return (
+      <img
+        src={customIcon}
+        alt=""
+        className={cn(SIZE_CONFIG.iconSize, "shrink-0 rounded-sm object-contain")}
+      />
+    )
+  }
+
+  switch (status) {
+    case 'pending':
+      return <Circle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
+    case 'completed':
+      if (toolName === 'Edit') {
+        return <Pencil className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
+      }
+      if (toolName === 'Write') {
+        return <FilePenLine className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
+      }
+      return <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-success")} />
+    case 'error':
+      return <XCircle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-destructive")} />
+    default:
+      return null
+  }
+}
+
+interface ActivityRowProps {
+  activity: ActivityItem
+  /** Callback to open activity details in Monaco */
+  onOpenDetails?: () => void
+  /** Whether this is the last child at its depth level (for └ corner in tree view) */
+  isLastChild?: boolean
+  /** Session folder path for stripping from file paths in tool display */
+  sessionFolderPath?: string
+  /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
+  displayMode?: 'informative' | 'detailed'
+}
+
+/**
+ * Tween height only while the panel is opening or closing.
+ * A persistent `1fr` transition interpolates the used pixel height, so a
+ * burst of parallel tools retargets the same 250ms ease and the list jitters.
+ */
+function ExpandableHeightPanel({
+  open,
+  reduceMotion,
+  children,
+}: {
+  open: boolean
+  reduceMotion: boolean | null
+  children: React.ReactNode
+}) {
+  const wasOpen = useRef(open)
+  const toggling = wasOpen.current !== open
+  const [renderChildren, setRenderChildren] = useState(open)
+  useEffect(() => {
+    wasOpen.current = open
+  }, [open])
+  useEffect(() => {
+    if (open) {
+      setRenderChildren(true)
+      return
+    }
+    if (reduceMotion) {
+      setRenderChildren(false)
+      return
+    }
+    const timer = window.setTimeout(() => setRenderChildren(false), PROCESS_CHAIN_EXPAND_MS)
+    return () => window.clearTimeout(timer)
+  }, [open, reduceMotion])
+
+  return (
+    <div
+      className={cn('grid min-w-0 grid-cols-[minmax(0,1fr)]', !open && 'pointer-events-none')}
+      style={{
+        gridTemplateRows: open ? '1fr' : '0fr',
+        opacity: open ? 1 : 0,
+        transition: reduceMotion || !toggling
+          ? undefined
+          : `grid-template-rows ${PROCESS_CHAIN_EXPAND_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity 150ms ease`,
+      }}
+      aria-hidden={!open}
+    >
+      <div className={cn('min-h-0 min-w-0', (toggling || !open) && 'overflow-hidden')}>
+        {(open || renderChildren) ? children : null}
+      </div>
+    </div>
+  )
+}
+
+const WORK_CHAIN_EASE = [0.22, 1, 0.36, 1] as const
+
+function processChainRowsAreUniform(entries: readonly ProcessChainEntry[]): boolean {
+  return entries.every(entry => {
+    if (entry.kind === 'clarification') return true
+    return !isActivityGroup(entry.row) && !entry.row.taskContext?.briefing
+  })
+}
+
+function processChainWindowStyle(window: ProcessChainWindow | null): string | undefined {
+  if (!window) return undefined
+  return `${window.start}:${window.end}/${window.count}`
+}
+
+function ThinkingSlotRow({ visible }: { visible: boolean }) {
+  return (
+    <div
+      data-thinking-slot=""
+      aria-hidden={!visible || undefined}
+      style={{ visibility: visible ? 'visible' : 'hidden' }}
+      className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
+    >
+      <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+        <Spinner className={SIZE_CONFIG.spinnerSize} />
+      </div>
+      <span>{visible ? thinkingStatusLabel() : null}</span>
+    </div>
+  )
+}
+
+function ProcessChainEntryRow({
+  entry,
+  index,
+  isExpanded,
+  reduceMotion,
+  stagger,
+  animate,
+  lastChildSet,
+  expandedActivityGroups,
+  onExpandedActivityGroupsChange,
+  onOpenActivityDetails,
+  sessionFolderPath,
+  displayMode,
+}: {
+  entry: ProcessChainEntry
+  index: number
+  isExpanded: boolean
+  reduceMotion: boolean | null
+  stagger: boolean
+  animate: boolean
+  lastChildSet: Set<string>
+  expandedActivityGroups: Set<string>
+  onExpandedActivityGroupsChange: (groups: Set<string>) => void
+  onOpenActivityDetails?: (activity: ActivityItem) => void
+  sessionFolderPath?: string
+  displayMode: 'informative' | 'detailed'
+}) {
+  if (entry.kind === 'clarification') {
+    if (!isExpanded) return null
+    return (
+      <WorkChainRow
+        reduceMotion={reduceMotion}
+        stagger={stagger}
+        staggerIndex={index}
+        animate={animate}
+      >
+        <ClarificationChainRow message={entry.message} />
+      </WorkChainRow>
+    )
+  }
+  const item = entry.row
+  return isActivityGroup(item) ? (
+    <WorkChainRow
+      reduceMotion={reduceMotion}
+      stagger={stagger}
+      staggerIndex={index}
+      animate={animate}
+    >
+      <ActivityGroupRow
+        group={item}
+        expandedGroups={expandedActivityGroups}
+        onExpandedGroupsChange={onExpandedActivityGroupsChange}
+        onOpenActivityDetails={onOpenActivityDetails}
+        animationIndex={index}
+        animateEntrance={false}
+        sessionFolderPath={sessionFolderPath}
+        displayMode={displayMode}
+      />
+    </WorkChainRow>
+  ) : (
+    <WorkChainRow
+      reduceMotion={reduceMotion}
+      stagger={stagger}
+      staggerIndex={index}
+      animate={animate}
+    >
+      <ActivityRow
+        activity={item}
+        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
+        isLastChild={lastChildSet.has(item.id)}
+        sessionFolderPath={sessionFolderPath}
+        displayMode={displayMode}
+      />
+    </WorkChainRow>
+  )
+}
+
+/** Spinner and chevron share one 12px slot so thinking → work does not shift the title. */
+function WorkHeaderIcon({
+  mode,
+  expanded,
+  reduceMotion,
+}: {
+  mode: 'spinner' | 'chevron' | 'ellipsis'
+  expanded: boolean
+  reduceMotion: boolean | null
+}) {
+  const instant = !!reduceMotion
+  // Three brand dots, centered in the same 12px slot as the chevron.
+  // They mean the turn is waiting, not that work is still running.
+  if (mode === 'ellipsis') {
+    return (
+      <span
+        data-clarification-ellipsis=""
+        aria-hidden="true"
+        className={cn(SIZE_CONFIG.iconSize, 'flex flex-row items-center justify-center gap-px shrink-0')}
+      >
+        <span className="size-[3px] rounded-full bg-accent" />
+        <span className="size-[3px] rounded-full bg-accent" />
+        <span className="size-[3px] rounded-full bg-accent" />
+      </span>
+    )
+  }
+  // Same in-flow chevron as origin/main. An absolutely positioned 12px slot
+  // clips the stroke against any rounded overflow ancestor.
+  if (mode === 'chevron') {
+    return (
+      <motion.span
+        initial={false}
+        animate={{ rotate: expanded ? 90 : 0 }}
+        transition={{ duration: instant ? 0 : 0.15, ease: 'easeOut' }}
+        className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}
+      >
+        <ChevronRight className={SIZE_CONFIG.iconSize} />
+      </motion.span>
+    )
+  }
+  return (
+    <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
+      <Spinner className={SIZE_CONFIG.spinnerSize} />
+    </span>
+  )
+}
+
+/**
+ * Same badge as origin/main. When it joins an already-visible “思考中” header it
+ * slides open from 0 width (plus the flex gap it introduces) so the title glides
+ * right instead of jumping. Width is measured by motion, not a 0fr grid track.
+ */
+function WorkHeaderStepCount({
+  count,
+  animateIn,
+  reduceMotion,
+}: {
+  count: number
+  animateIn: boolean
+  reduceMotion: boolean | null
+}) {
+  if (count <= 0) return null
+  const instant = !!reduceMotion || !animateIn
+  const ref = useRef<HTMLSpanElement>(null)
+  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
+  const unclip = () => { if (ref.current) ref.current.style.overflow = '' }
+  return (
+    <motion.span
+      ref={ref}
+      initial={instant ? false : { width: 0, opacity: 0, marginRight: '-0.5rem' }}
+      animate={{ width: 'auto', opacity: 1, marginRight: '0rem' }}
+      transition={{
+        duration: instant ? 0 : 0.24,
+        ease: WORK_CHAIN_EASE,
+        opacity: { duration: instant ? 0 : 0.18, delay: instant ? 0 : 0.06 },
+      }}
+      onAnimationStart={instant ? undefined : clip}
+      onAnimationComplete={unclip}
+      className="-ml-0.5 inline-flex shrink-0"
+    >
+      <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+        {count}
+      </span>
+    </motion.span>
+  )
+}
+
+/**
+ * Height/opacity presence for a block that joins or leaves a live turn: the
+ * work header, the response card, and the chat's processing row all use it so
+ * a card demoted into the chain collapses at the same pace the chain grows.
+ * Clips only while the tween runs so shadows and focus rings are not cut later.
+ */
+export function HeightPresence({
+  containerRef,
+  animateIn,
+  reduceMotion,
+  exitMode,
+  className,
+  children,
+  ...rest
+}: {
+  containerRef?: React.RefObject<HTMLDivElement>
+  animateIn: boolean
+  reduceMotion: boolean | null
+  /**
+   * `merge-into-chain`: text that turned out to be process commentary lifts
+   * toward the work header, blurs out, then releases its height.
+   */
+  exitMode?: 'merge-into-chain'
+  className?: string
+  children: React.ReactNode
+} & Record<`data-${string}`, string>) {
+  const ownRef = useRef<HTMLDivElement>(null)
+  const ref = containerRef ?? ownRef
+  const instant = !!reduceMotion
+  const tween = { duration: instant ? 0 : 0.28, ease: WORK_CHAIN_EASE }
+  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
+  const unclip = () => {
+    if (!ref.current) return
+    ref.current.style.overflow = ''
+    ref.current.style.height = ''
+  }
+  const exit = instant ? undefined : exitMode === 'merge-into-chain'
+    // Height uses the work header's exact tween, so when the header mounts with
+    // this merge the turn's total height shrinks monotonically (never bounces).
+    ? { height: 0, opacity: 0, y: -10, scale: 0.985, filter: 'blur(2px)', transition: {
+        opacity: { duration: 0.18, ease: WORK_CHAIN_EASE },
+        y: tween,
+        scale: tween,
+        filter: { duration: 0.18, ease: WORK_CHAIN_EASE },
+        height: tween,
+      } }
+    : { height: 0, opacity: 0 }
+  return (
+    <motion.div
+      ref={ref}
+      initial={instant || !animateIn ? false : { height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={exit}
+      transition={{ height: tween, opacity: { duration: instant ? 0 : 0.2, ease: WORK_CHAIN_EASE } }}
+      // Exits always clip: collapsing text must not paint over the next block.
+      onAnimationStart={instant || (!animateIn && !exitMode) ? undefined : clip}
+      style={exitMode === 'merge-into-chain' ? { transformOrigin: 'top left' } : undefined}
+      onAnimationComplete={unclip}
+      className={className}
+      {...rest}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+/** The work header block. */
+function WorkChrome(props: {
+  containerRef: React.RefObject<HTMLDivElement>
+  animateIn: boolean
+  reduceMotion: boolean | null
+  children: React.ReactNode
+}) {
+  return <HeightPresence {...props} className="group select-none" data-search-exclude="true" />
+}
+
+/** Per-row enter/exit so “思考中” can collapse into the next tool without a hard cut. */
+function WorkChainRow({
+  reduceMotion,
+  stagger,
+  staggerIndex = 0,
+  animate = false,
+  children,
+}: {
+  reduceMotion: boolean | null
+  stagger: boolean
+  staggerIndex?: number
+  /** Live rows that join or leave the chain. History and windowed slices stay static. */
+  animate?: boolean
+  children: React.ReactNode
+}) {
+  const instant = !!reduceMotion
+  const useMotion = !instant && (stagger || animate)
+  const delay = useMotion && stagger
+    ? (staggerIndex < SIZE_CONFIG.staggeredAnimationLimit
+      ? staggerIndex * 0.03
+      : SIZE_CONFIG.staggeredAnimationLimit * 0.03)
+    : 0
+  const heightTween = { duration: instant ? 0 : 0.28, ease: WORK_CHAIN_EASE }
+  const fadeIn = { duration: instant ? 0 : 0.22, ease: WORK_CHAIN_EASE, delay: instant ? 0 : 0.06 }
+  const fadeOut = { duration: instant ? 0 : 0.16, ease: WORK_CHAIN_EASE }
+
+  if (!useMotion) {
+    return (
+      <div
+        data-process-chain-row=""
+        className="overflow-hidden"
+        style={{ contentVisibility: 'auto', containIntrinsicSize: `auto ${PROCESS_CHAIN_ROW_PX}px` }}
+      >
+        <div className="py-px">{children}</div>
+      </div>
+    )
+  }
+
+  return (
+    <motion.div
+      data-process-chain-row=""
+      initial={stagger ? { opacity: 0, x: -8 } : { opacity: 0, height: 0, y: 3 }}
+      animate={{
+        opacity: 1,
+        x: 0,
+        y: 0,
+        height: 'auto',
+        transition: {
+          delay,
+          height: heightTween,
+          opacity: stagger ? { duration: 0.2, delay } : fadeIn,
+          x: { duration: stagger ? 0.22 : 0, ease: WORK_CHAIN_EASE, delay },
+          y: heightTween,
+        },
+      }}
+      exit={{
+        opacity: 0,
+        height: 0,
+        y: -2,
+        transition: { height: heightTween, opacity: fadeOut, y: heightTween },
+      }}
+      className="overflow-hidden"
+    >
+      {/* Row spacing lives inside the tween. A container space-y margin stays
+          at full size while the height collapses, then pops 2px on unmount. */}
+      <div className="py-px">{children}</div>
+    </motion.div>
+  )
+}
+
+function ActivityErrorBadge({ error, label }: { error: string; label: string }) {
+  return (
+    <Tooltip disableHoverableContent={false}>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          data-slot="activity-error-badge"
+          className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
+          style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
+        >
+          {label}
+        </span>
+      </TooltipTrigger>
+      <ErrorTooltipContent side="top">{error}</ErrorTooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * TreeViewConnector is no longer used - the vertical line from the expanded section
+ * already provides visual hierarchy. Keeping this as a no-op for now in case
+ * we need depth indentation in the future.
+ */
+function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) {
+  if (depth === 0) return null
+
+  // Just add indentation based on depth, no connectors
+  return (
+    <div className="flex self-stretch">
+      {Array.from({ length: depth }).map((_, i) => (
+        <div key={i} className="w-4 shrink-0" />
+      ))}
+    </div>
+  )
+}
+
+/** Keep the response slot in flow so received blocks grow the card without a height tween. */
+function GrowingResponse({ children }: { children: React.ReactNode }) {
+  return <div className="flow-root">{children}</div>
+}
+
+/**
+ * Deep-thinking step. While it is running the label shimmers and the
+ * transcript stays hidden. The completion swap (label, then the gray
+ * summary) plays only for the instance that saw the running state.
+ */
+function ThinkingActivityRow({
+  activity,
+  onOpenDetails,
+  isLastChild,
+}: {
+  activity: ActivityItem
+  onOpenDetails?: () => void
+  isLastChild?: boolean
+}) {
+  const depth = activity.depth || 0
+  const isRunning = activity.status === 'running'
+  const preview = isRunning ? '' : thinkingStepPreview(activity.content)
+  const canOpen = !isRunning && !!preview && !!onOpenDetails
+  const liveLabel = thinkingDeeplyLabel()
+  const doneLabel = thoughtDeeplyLabel()
+  const swap = useThinkingCompletionSwap(isRunning)
+  const sizer = thinkingLabelSizer(liveLabel, doneLabel, swap.holdLiveWidth)
+
+  return (
+    <div
+      className="flex items-stretch"
+      data-process-step=""
+      data-thinking-step=""
+    >
+      <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+      <div
+        data-thinking-live={isRunning ? '' : undefined}
+        data-thinking-preview={preview ? 'done' : undefined}
+        data-thinking-swap={swap.phase === 'swapping' ? '' : undefined}
+        className={cn(
+          "group/row flex items-center gap-2 py-0.5 text-muted-foreground flex-1 min-w-0",
+          SIZE_CONFIG.fontSize
+        )}
+        onClick={canOpen ? onOpenDetails : undefined}
+      >
+        {isRunning ? (
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <Spinner className={SIZE_CONFIG.spinnerSize} />
+          </div>
+        ) : (
+          // MessageCircleDashed is the completed thinking glyph. Pending tools use
+          // an open circle via ActivityStatusIcon; a finished thought is not that state.
+          <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
+        )}
+        {swap.holdLiveWidth ? (
+          <span className="thinking-label-swap shrink-0">
+            <span className="invisible block whitespace-nowrap" aria-hidden="true">{sizer}</span>
+            {(swap.phase === 'streaming' || swap.phase === 'swapping') && (
+              <span
+                key="live"
+                className={cn(
+                  "thinking-swap-text thinking-text-shimmer",
+                  swap.phase === 'swapping' && "is-exit",
+                )}
+                data-text={liveLabel}
+                aria-hidden={swap.phase === 'swapping' ? true : undefined}
+              >
+                {liveLabel}
+              </span>
+            )}
+            {swap.phase !== 'streaming' && (
+              <span
+                key="done"
+                ref={swap.liveRef}
+                className={cn(
+                  "thinking-swap-text",
+                  swap.entering && "is-enter-start",
+                  canOpen && "group-hover/row:underline",
+                )}
+              >
+                {doneLabel}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className={cn("shrink-0 whitespace-nowrap", canOpen && "group-hover/row:underline")}>{doneLabel}</span>
+        )}
+        {preview && (
+          <span className={cn(
+            "truncate flex-1 min-w-0",
+            swap.phase === 'swapping' && "thinking-preview-enter",
+            swap.entering && "is-enter-start",
+            canOpen && "group-hover/row:underline",
+          )}>
+            <span className="opacity-60"> · </span>
+            <span>{preview}</span>
+          </span>
+        )}
+        {canOpen && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenDetails()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation()
+                onOpenDetails()
+              }
+            }}
+            className={cn(
+              "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+              "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            )}
+          >
+            <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Single activity row in expanded view */
+function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+  const depth = activity.depth || 0
+
+  if (activity.taskNode) {
+    const node = activity.taskNode
+    const content = <>
+      <UsersRound className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-accent')} aria-hidden="true" />
+      <span className="min-w-0 truncate text-foreground/75 group-focus-visible/child:text-foreground group-focus-visible/child:underline group-focus-visible/child:underline-offset-4">{node.title}</span>
+      <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
+        {activity.status === 'completed'
+          ? <Check className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-success')} aria-hidden="true" />
+          : <ActivityStatusIcon status={activity.status} />}
+        {node.stateLabel}
+      </span>
+      {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'ml-auto shrink-0 text-muted-foreground')} aria-hidden="true" />}
+    </>
+    const className = cn('flex w-full min-w-0 items-center gap-2 rounded-md py-0.5 text-left', SIZE_CONFIG.fontSize)
+    return <div className="flex items-stretch">
+      <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+      {node.sessionId && onOpenDetails
+        ? <button type="button" className={cn(className, 'group/child transition-colors hover:bg-foreground/5 focus-visible:outline-none')} onClick={onOpenDetails}>{content}</button>
+        : <div className={className}>{content}</div>}
+    </div>
+  }
+
+  if (activity.type === 'task-context' && activity.taskContext) {
+    const context = activity.taskContext
+    if (context.briefing) {
+      return <div className="flex min-w-0 items-stretch">
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <details className={cn('group/task min-w-0 flex-1 text-muted-foreground', SIZE_CONFIG.fontSize)}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-success')} aria-hidden="true" />
+            <span className="min-w-0 flex-1 break-words">{i18n.t('chat.taskContext.assignment.title')}{context.title && ` · ${context.title}`}</span>
+            <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'shrink-0 transition-transform group-open/task:rotate-90 motion-reduce:transition-none')} aria-hidden="true" />
+          </summary>
+          <div className="space-y-3 py-2 pl-6 text-foreground/75 [overflow-wrap:anywhere]">
+            {context.description && <div><p className="mb-1 font-medium text-foreground">{i18n.t('tasks.goal')}</p><p className="whitespace-pre-wrap">{context.description}</p></div>}
+            {([
+              ['tasks.research.scope.requirements', context.briefing.requirements],
+              ['tasks.research.sources', context.briefing.sources],
+              ['tasks.research.limits', context.briefing.limits],
+            ] as const).filter(([, items]) => items.length).map(([label, items]) => <div key={label}>
+              <p className="mb-1 font-medium text-foreground">{i18n.t(label)}</p>
+              <ul className="list-disc space-y-1 pl-4">{items.map((item, index) => <li key={index} className="whitespace-pre-wrap">{item}</li>)}</ul>
+            </div>)}
+          </div>
+        </details>
+      </div>
+    }
+    activity = {
+      ...activity,
+      type: 'status',
+      content: [i18n.t(`chat.taskContext.${context.kind}.title`), context.title,
+        context.description || i18n.t(`chat.taskContext.${context.kind}.description`)]
+        .filter(Boolean).join(' · '),
+    }
+  }
+
+  // Commentary and model reasoning stay in the chain as steps.
+  // The same details popup as any other step holds the full text.
+  // No separate thinking panel.
+  if (activity.type === 'thinking') {
+    return (
+      <ThinkingActivityRow
+        activity={activity}
+        onOpenDetails={onOpenDetails}
+        isLastChild={isLastChild}
+      />
+    )
+  }
+
+  if (activity.type === 'intermediate') {
+    const isRunning = activity.status === 'running'
+    const liveText = isRunning && hasRenderableAssistantText(activity.content)
+    const displayContent = liveText
+      ? ''
+      : (isRunning ? thinkingStatusLabel() : collapsedProcessLabel(activity))
+    const isComplete = activity.status === 'completed'
+    return (
+      <div
+        className="flex items-stretch"
+        data-process-step=""
+      >
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <div
+          className={cn(
+            "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            liveText ? "items-start" : "items-center",
+            SIZE_CONFIG.fontSize
+          )}
+          onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
+        >
+          {isRunning ? (
+            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0", liveText && "mt-0.5")}>
+              <Spinner className={SIZE_CONFIG.spinnerSize} />
+            </div>
+          ) : (
+            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
+          )}
+          <span className={cn(
+            "min-w-0 flex-1",
+            liveText ? "line-clamp-2 break-words [overflow-wrap:anywhere]" : "truncate",
+            onOpenDetails && isComplete && "group-hover/row:underline",
+          )}>{liveText ? activity.content : displayContent}</span>
+          {onOpenDetails && isComplete && (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenDetails()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation()
+                  onOpenDetails()
+                }
+              }}
+              className={cn(
+                "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+                "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              )}
+            >
+              <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Compaction stays in the chain as a quiet time note, not another completed step.
+  if (activity.type === 'status' && activity.statusType === 'compaction_complete') {
+    return (
+      <div className="flex items-stretch">
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <div className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70 flex-1 min-w-0", SIZE_CONFIG.fontSize)}>
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <FoldVertical className={cn(SIZE_CONFIG.iconSize, "shrink-0")} aria-hidden="true" />
+          </div>
+          <span className="truncate">{i18n.t('chat.contextCompactedAt', { time: formatUserMessageTime(activity.timestamp, i18n.language) })}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Status activities (e.g., compacting) - system-level with distinct styling
+  if (activity.type === 'status') {
+    const isRunning = activity.status === 'running'
+    return (
+      <div className="flex items-stretch">
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <div
+          className={cn(
+            "flex items-center gap-2 py-0.5 text-muted-foreground flex-1 min-w-0",
+            SIZE_CONFIG.fontSize
+          )}
+        >
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <ActivityStatusIcon status={activity.status} />
+          </div>
+          <span className={activity.taskContext ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'truncate'}>{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Tool activities - show with status icon
+  // Format: "[DisplayName] · [Intent/Description] [Params]"
+  // - DisplayName: From toolDisplayMeta (embedded in message) or LLM-generated or fallback
+  // - Intent: For MCP tools (activity.intent), for Bash (toolInput.description)
+  // - Params: Remaining tool input summary
+  const toolDisplay = formatToolDisplay(activity)
+  const normalizedToolName = normalizeCraftSessionToolName(activity.toolName ?? '')
+  const fullDisplayName = normalizedToolName === 'skill_inspect' ? i18n.t('tools.skillInspect')
+    : normalizedToolName === 'skill_install' ? i18n.t('tools.skillInstall')
+    : toolDisplay.name || 'Processing'
+
+  // Detect MCP/API tools (toolName starts with "mcp__")
+  const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
+
+  // For MCP/API tools, extract source name and tool slug
+  // e.g., "ClickUp: clickup_search" -> sourceName="ClickUp", toolSlug="clickup_search"
+  let sourceName = fullDisplayName
+  let toolSlug: string | undefined = undefined
+  if (isMcpOrApiTool) {
+    const colonIndex = fullDisplayName.indexOf(':')
+    if (colonIndex > 0) {
+      sourceName = fullDisplayName.substring(0, colonIndex).trim()
+      toolSlug = fullDisplayName.substring(colonIndex + 1).trim()
+    }
+  }
+
+  // For non-MCP tools or informative mode, use the appropriate display name
+  const displayedName: string = isMcpOrApiTool ? sourceName : fullDisplayName
+
+  // Intent for MCP tools, description for Bash commands
+  const intentOrDescription = activity.intent || (activity.toolInput?.description as string | undefined)
+  const inputSummary = formatToolInput(activity.toolInput, activity.toolName, sessionFolderPath)
+  const diffStats = computeEditWriteDiffStats(activity.toolName, activity.toolInput)
+  const isComplete = activity.status === 'completed' || activity.status === 'error'
+  const isBackgrounded = activity.status === 'backgrounded'
+  const orchestrationSummary = formatOrchestrationToolSummary(activity.toolName, activity.content)
+
+  // For backgrounded tasks, show task/shell ID and elapsed time
+  const backgroundInfo = isBackgrounded
+    ? activity.taskId
+      ? `Task ID: ${activity.taskId}${activity.elapsedSeconds ? `, ${formatDuration(activity.elapsedSeconds * 1000)} elapsed` : ''}`
+      : activity.shellId
+        ? `Shell ID: ${activity.shellId}${activity.elapsedSeconds ? `, ${formatDuration(activity.elapsedSeconds * 1000)} elapsed` : ''}`
+        : null
+    : null
+
+  return (
+    <div className="flex items-stretch">
+      <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+      <div
+        className={cn(
+          "group/row flex items-center gap-2 py-0.5 text-muted-foreground flex-1 min-w-0",
+          SIZE_CONFIG.fontSize
+        )}
+        onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
+      >
+        <ActivityStatusIcon status={activity.status} toolName={activity.toolName} customIcon={toolDisplay.icon} />
+        {/* MCP/API tools: Source name (shrink-0) then error badge (if any) then compound label (flex-1) */}
+        {isMcpOrApiTool && !isBackgrounded && (
+          <>
+            <span className="shrink-0">{sourceName}</span>
+            {/* Error badge for MCP/API tools */}
+            {activity.status === 'error' && activity.error && (
+              <ActivityErrorBadge error={activity.error} label={i18n.t('common.error')} />
+            )}
+            {/* Model badge for LLM Query */}
+            {activity.toolName === 'mcp__session__call_llm' && activity.toolInput?.model && (
+              <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[10px] text-foreground/60 shrink-0">
+                {String(activity.toolInput.model)}
+              </span>
+            )}
+            {(intentOrDescription || (displayMode === 'detailed' && (toolSlug || inputSummary))) && (
+              <span className={cn("truncate flex-1 min-w-0", onOpenDetails && isComplete && "group-hover/row:underline")}>
+                {intentOrDescription && (
+                  <>
+                    <span className="opacity-60"> · </span>
+                    <span>{intentOrDescription}</span>
+                  </>
+                )}
+                {displayMode === 'detailed' && toolSlug && (
+                  <>
+                    <span className="opacity-60"> · </span>
+                    <span className="opacity-70">{toolSlug}</span>
+                  </>
+                )}
+                {displayMode === 'detailed' && inputSummary && (
+                  <>
+                    <span className="opacity-60"> · </span>
+                    <span className="opacity-50">{inputSummary}</span>
+                  </>
+                )}
+              </span>
+            )}
+            {orchestrationSummary && (
+              <span className="truncate min-w-0 max-w-[420px]">
+                <span className="opacity-60"> · </span>
+                <span>{orchestrationSummary}</span>
+              </span>
+            )}
+          </>
+        )}
+        {/* Native tools: Tool name (shrink-0) */}
+        {!isMcpOrApiTool && (
+          <span className={cn("shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayedName}</span>
+        )}
+        {activity.status === 'running' && activity.toolProgress && (
+          <span className="truncate text-muted-foreground" data-tool-phase={activity.toolProgress.phase}>
+            {i18n.t(activity.toolProgress.phase === 'processing_result' ? 'turnCard.toolProcessingResult' : activity.toolProgress.outputBytes ? 'turnCard.toolOutputReceived' : 'turnCard.toolRunning')}
+          </span>
+        )}
+        {/* Diff stats and filename badges - after tool name */}
+        {!isMcpOrApiTool && !isBackgrounded && diffStats && (
+          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
+            {diffStats.deletions > 0 && (
+              <span
+                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_5%,var(--background))] shadow-tinted rounded-[4px] text-destructive"
+                style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
+              >{diffStats.deletions}</span>
+            )}
+            {diffStats.additions > 0 && (
+              <span
+                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--success)_5%,var(--background))] shadow-tinted rounded-[4px] text-success"
+                style={{ '--shadow-color': 'var(--success-rgb)' } as React.CSSProperties}
+              >{diffStats.additions}</span>
+            )}
+            {/* Filename badge - supports both Claude Code and Codex formats */}
+            {(() => {
+              // Claude Code format: file_path
+              if (typeof activity.toolInput?.file_path === 'string') {
+                return (
+                  <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+                    {normalizePath(activity.toolInput.file_path).split('/').pop()}
+                  </span>
+                )
+              }
+              // Codex format: changes[0].path
+              if (Array.isArray(activity.toolInput?.changes)) {
+                const firstChange = activity.toolInput.changes[0] as { path?: string } | undefined
+                if (firstChange?.path) {
+                  return (
+                    <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+                      {normalizePath(firstChange.path).split('/').pop()}
+                    </span>
+                  )
+                }
+              }
+              return null
+            })()}
+          </span>
+        )}
+        {/* Filename badge for Read tool (no diff stats) */}
+        {!isMcpOrApiTool && !isBackgrounded && !diffStats && activity.toolName === 'Read' && typeof activity.toolInput?.file_path === 'string' && (
+          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
+            <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+              {normalizePath(activity.toolInput.file_path).split('/').pop()}
+            </span>
+          </span>
+        )}
+        {/* Error badge for native tools */}
+        {!isMcpOrApiTool && activity.status === 'error' && activity.error && (
+          <ActivityErrorBadge error={activity.error} label="Error" />
+        )}
+        {/* Native tools: Compound label with description + params (flex-1) */}
+        {/* In informative mode, hide inputSummary (command details) - only show description */}
+        {!isMcpOrApiTool && !isBackgrounded && (intentOrDescription || (displayMode === 'detailed' && inputSummary)) && (
+          <span className={cn("truncate flex-1 min-w-0", onOpenDetails && isComplete && "group-hover/row:underline")}>
+            {intentOrDescription && (
+              <>
+                <span className="opacity-60"> · </span>
+                <span>{intentOrDescription}</span>
+              </>
+            )}
+            {displayMode === 'detailed' && inputSummary && (
+              <>
+                <span className="opacity-60"> · </span>
+                <span className="opacity-50">{inputSummary}</span>
+              </>
+            )}
+          </span>
+        )}
+        {!isMcpOrApiTool && orchestrationSummary && (
+          <span className="truncate min-w-0 max-w-[420px]">
+            <span className="opacity-60"> · </span>
+            <span>{orchestrationSummary}</span>
+          </span>
+        )}
+        {/* Background task info (task/shell ID + elapsed time) */}
+        {backgroundInfo && (
+          <>
+            <span className="opacity-60 shrink-0">·</span>
+            <span className="truncate min-w-0 max-w-[300px] text-accent">{backgroundInfo}</span>
+          </>
+        )}
+        {/* No spacer needed - both MCP/API and native tools now have flex-1 on their compound spans */}
+        {/* Open details button */}
+        {onOpenDetails && isComplete && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenDetails()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation()
+                onOpenDetails()
+              }
+            }}
+            className={cn(
+              "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+              "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            )}
+          >
+            <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Activity Group Component (for Task subagents)
+// ============================================================================
+
+interface ActivityGroupRowProps {
+  group: ActivityGroup
+  /** Controlled expansion state for activity groups */
+  expandedGroups?: Set<string>
+  /** Callback when expansion changes */
+  onExpandedGroupsChange?: (groups: Set<string>) => void
+  /** Callback to open activity details in Monaco */
+  onOpenActivityDetails?: (activity: ActivityItem) => void
+  /** Animation index for staggered animation */
+  animationIndex?: number
+  /** Only slide/stagger on the expand click, not when new children arrive */
+  animateEntrance?: boolean
+  /** Session folder path for stripping from file paths in tool display */
+  sessionFolderPath?: string
+  /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
+  displayMode?: 'informative' | 'detailed'
+}
+
+/**
+ * Renders a Task subagent with its child activities grouped together.
+ * Provides visual containment and collapsible children.
+ */
+function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+  const reduceMotion = useReducedMotion()
+  // Use local state if no controlled state provided
+  const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
+  const expandedGroups = externalExpandedGroups ?? localExpandedGroups
+  const setExpandedGroups = onExpandedGroupsChange ?? setLocalExpandedGroups
+
+  const groupId = group.parent.id
+  const isExpanded = expandedGroups.has(groupId)
+  const wasGroupExpandedRef = useRef(isExpanded)
+  const staggerChildren = isExpanded && !wasGroupExpandedRef.current
+  useEffect(() => {
+    wasGroupExpandedRef.current = isExpanded
+  }, [isExpanded])
+
+  const toggleExpanded = useCallback(() => {
+    const next = new Set(expandedGroups)
+    if (next.has(groupId)) {
+      next.delete(groupId)
+    } else {
+      next.add(groupId)
+    }
+    setExpandedGroups(next)
+  }, [groupId, expandedGroups, setExpandedGroups])
+
+  const description = group.parent.toolInput?.description as string | undefined
+  const subagentType = group.parent.toolInput?.subagent_type as string | undefined
+  const isComplete = group.parent.status === 'completed' || group.parent.status === 'error'
+  const hasError = group.parent.status === 'error'
+
+  return (
+    <motion.div
+      initial={reduceMotion || !animateEntrance ? false : { opacity: 0, x: -8 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{
+        delay: reduceMotion || !animateEntrance
+          ? 0
+          : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
+        duration: reduceMotion ? 0 : undefined,
+      }}
+      className="space-y-0.5"
+    >
+      {/* Task header row - no left padding, chevron aligned with activity row icons */}
+      <div
+        className={cn(
+          "group/row flex items-center gap-2 py-0.5 rounded-md cursor-pointer text-muted-foreground",
+          "hover:text-foreground transition-colors",
+          SIZE_CONFIG.fontSize
+        )}
+        onClick={toggleExpanded}
+      >
+        {/* Chevron for expand/collapse - aligned with activity row icons */}
+        <motion.div
+          initial={false}
+          animate={{ rotate: isExpanded ? 90 : 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
+          className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
+        >
+          <ChevronRight className={SIZE_CONFIG.iconSize} />
+        </motion.div>
+
+        {/* Status icon - aligned with tool call icons */}
+        <ActivityStatusIcon status={group.parent.status} toolName={group.parent.toolName} />
+
+        {/* Subagent type badge */}
+        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium">
+          {subagentType || 'Task'}
+        </span>
+
+        {/* Task description or fallback */}
+        <span className={cn(
+          "truncate",
+          hasError && "text-destructive"
+        )}>
+          {description || 'Task'}
+        </span>
+
+        {/* Duration and token stats from TaskOutput (only when complete) */}
+        {isComplete && group.taskOutputData && (
+          <span className="shrink-0 text-muted-foreground/60 tabular-nums">
+            {group.taskOutputData.durationMs !== undefined && (
+              <span>{formatDuration(group.taskOutputData.durationMs)}</span>
+            )}
+            {group.taskOutputData.durationMs !== undefined &&
+              (group.taskOutputData.inputTokens !== undefined || group.taskOutputData.outputTokens !== undefined) && (
+              <span className="mx-1">·</span>
+            )}
+            {(group.taskOutputData.inputTokens !== undefined || group.taskOutputData.outputTokens !== undefined) && (
+              <span>
+                {formatTokens((group.taskOutputData.inputTokens || 0) + (group.taskOutputData.outputTokens || 0))} tokens
+              </span>
+            )}
+          </span>
+        )}
+
+        {/* Spacer to push details button to right */}
+        <span className="flex-1" />
+
+        {/* Open details button for the Task itself */}
+        {onOpenActivityDetails && isComplete && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenActivityDetails(group.parent)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation()
+                onOpenActivityDetails(group.parent)
+              }
+            }}
+            className={cn(
+              "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+              "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            )}
+          >
+            <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+          </div>
+        )}
+      </div>
+
+      {/* Children with indentation */}
+      <ExpandableHeightPanel open={isExpanded && group.children.length > 0} reduceMotion={reduceMotion}>
+        <div className="pl-0 space-y-0.5 border-l-2 border-muted ml-[5px]">
+          {group.children.map((child, idx) => (
+            <motion.div
+              key={child.id}
+              initial={reduceMotion || !staggerChildren ? false : { opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: reduceMotion || !staggerChildren ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
+              className="ml-[-4px]"
+            >
+              <ActivityRow
+                activity={child}
+                onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
+                isLastChild={idx === group.children.length - 1}
+                sessionFolderPath={sessionFolderPath}
+                displayMode={displayMode}
+              />
+            </motion.div>
+          ))}
+        </div>
+      </ExpandableHeightPanel>
+    </motion.div>
+  )
 }
 
 // ============================================================================
@@ -384,14 +2004,24 @@ function isResponseBuffering(response: ResponseContent | undefined): boolean {
 // ============================================================================
 
 export interface ResponseCardProps {
+  artifactVersions?: ResponseContent['artifactVersions']
+  researchActivities?: ActivityItem[]
+  researchSources?: ResponseSource[]
+  isAnswerPreview?: boolean
   /** The content to display (markdown) */
   text: string
   /** Whether the content is still streaming */
   isStreaming: boolean
+  /** Whether the owning turn is complete; independent from token streaming. */
+  isTurnComplete?: boolean
   /** When streaming started - used for buffering timeout calculation */
   streamStartTime?: number
+  /** When the complete response arrived, used for the bounded local reveal. */
+  completedRevealStartTime?: number
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
+  /** Resolve and open a generated artifact with the requested action. */
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -401,6 +2031,7 @@ export interface ResponseCardProps {
   /** Parent session ID (used to reset local annotation/island UI state on session switches) */
   sessionId?: string
   /** Underlying message ID for annotation actions */
+  revealIdentity?: string
   messageId?: string
   /** Persisted annotations for this response */
   annotations?: AnnotationV1[]
@@ -417,6 +2048,10 @@ export interface ResponseCardProps {
   compactMode?: boolean
   /** Callback to branch the session from this response */
   onBranch?: (options?: { newPanel?: boolean }) => void
+  /** Callback to regenerate this response from the last user prompt */
+  onRegenerate?: () => void
+  /** Retry a failed or interrupted turn from the same action row as regenerate. */
+  onRetry?: () => void
   /** Callback to add annotation from selected text */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove persisted annotation */
@@ -433,6 +2068,84 @@ export interface ResponseCardProps {
   openAnnotationRequest?: OpenAnnotationRequest | null
   /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
   annotationInteractionMode?: AnnotationInteractionMode
+  /** Resolve a persisted revision only when its delivered message is available. */
+  resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
+  /** Tool-bound commentary — keep the body readable, hide final-reply actions */
+  isCommentary?: boolean
+  /** An asynchronous task-start update, presented as a note rather than a final reply. */
+  isTaskProgress?: boolean
+  /** Render child output directly on the preview surface instead of nesting a reply card. */
+  taskPreview?: boolean
+}
+
+interface BranchDropdownProps {
+  onBranch: (options?: { newPanel?: boolean }) => void
+}
+
+function BranchDropdown({ onBranch }: BranchDropdownProps) {
+  const { t } = useTranslation()
+  const handleBranchClick = () => {
+    onBranch({ newPanel: true })
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={t('chat.branchOptions')}
+          title={t('chat.branch')}
+          className={cn(
+            "p-1 rounded-[4px] transition-colors select-none",
+            "text-muted-foreground hover:text-foreground hover:bg-foreground/5",
+            "data-[state=open]:text-foreground data-[state=open]:bg-foreground/5",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          )}
+        >
+          <GitBranch className={SIZE_CONFIG.iconSize} />
+        </button>
+      </DropdownMenuTrigger>
+
+      <StyledDropdownMenuContent align="end" minWidth="min-w-64" sideOffset={6}>
+        <StyledDropdownMenuItem onClick={handleBranchClick} className="items-start py-2">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[13px] leading-tight">{t('chat.branchFromThisMessage')}</span>
+            <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
+              {t('chat.branchFromThisMessageDescription')}
+            </span>
+          </div>
+        </StyledDropdownMenuItem>
+      </StyledDropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// Response cards expand with content and scroll with the outer chat list only.
+// Nested max-height + overflow-y-auto caused painful dual-scroll; do not reintroduce.
+
+function SkillUsedIndicator({ skills }: { skills: string[] }) {
+  const { t } = useTranslation()
+
+  if (skills.length === 0) return null
+
+  return (
+    <div
+      data-testid="skill-used-indicator"
+      className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground select-none"
+    >
+      <span>{t('turnCard.used')}</span>
+      {skills.map(skill => (
+        <span
+          key={skill}
+          className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[6px] border border-border/60 bg-muted/40 px-2 py-1 shadow-minimal"
+        >
+          <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+          <span className="truncate">{skill}</span>
+        </span>
+      ))}
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
+    </div>
+  )
 }
 
 function clearAnnotationMarks(root: HTMLElement): void {
@@ -474,7 +2187,7 @@ function createAnnotationIndexBadge(index: number): HTMLSpanElement {
   chip.style.lineHeight = '15px'
   chip.style.textAlign = 'center'
   chip.classList.add('shadow-tinted')
-  chip.style.setProperty('--shadow-color', 'var(--info)')
+  chip.style.setProperty('--shadow-color', 'var(--info-rgb)')
   chip.style.pointerEvents = 'none'
   chip.style.userSelect = 'none'
   return chip
@@ -589,35 +2302,33 @@ function applyTextHighlightRange(
 }
 
 /**
- * ResponseCard - Unified component for AI responses and plans
+ * ResponseCard - Unified card component for AI responses and plans
  *
  * Variants:
- * - 'response': the answer as plain copy on the transcript (spec §7.4 "Answer") with a quiet
- *   footer of icon actions revealed on hover/focus
- * - 'plan': raised card with a header and the Accept Plan action
+ * - 'response': Progressively displayed Markdown
+ * - 'plan': Plan message with header and Accept Plan button
  *
- * Response variant implements smart buffering:
- * - Waits for 40+ words with structure OR
- * - High-confidence patterns (code blocks, headers, lists) with lower threshold OR
- * - Timeout after 2.5 seconds
+ * Received text advances in small runs, including bursts that arrive at completion.
  *
- * Performance optimization: Uses throttled static snapshots instead of re-rendering
- * on every character. Content updates every 300ms during streaming, avoiding
- * expensive markdown parsing on every delta.
- *
- * Streaming and completed states render the same tree, so the markdown stays mounted when the
- * stream ends; blocks inserted while streaming fade in once (CSS @starting-style).
+ * Presentation updates are frame-paced; copy/export retain the authoritative source.
  */
 export function ResponseCard({
+  artifactVersions,
+  researchActivities,
+  researchSources,
   text,
+  isAnswerPreview = false,
+  completedRevealStartTime,
   isStreaming,
-  streamStartTime,
+  isTurnComplete,
   onOpenFile,
+  onOpenArtifact,
   onOpenUrl,
   onPopOut,
   variant = 'response',
   sessionId,
   messageId,
+  revealIdentity,
   annotations,
   onAccept,
   onAcceptWithCompact,
@@ -625,6 +2336,8 @@ export function ResponseCard({
   showAcceptPlan = true,
   compactMode = false,
   onBranch,
+  onRegenerate,
+  onRetry,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -633,20 +2346,58 @@ export function ResponseCard({
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
+  resolveAnnotationResult,
+  isCommentary = false,
+  isTaskProgress = false,
+  taskPreview = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
-  // Blocks fade in only once the card is on screen: a card that mounts mid-stream (session
-  // switch, reload) shows its existing blocks at once (session switch is instant, spec §6.3).
-  const hasMountedRef = useRef(false)
-  useEffect(() => { hasMountedRef.current = true }, [])
-  // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
-  const [displayedText, setDisplayedText] = useState(text)
-  const lastUpdateRef = useRef(Date.now())
-  const { copied, copy } = useCopyToClipboard()
-  // Fullscreen state
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const reduceArtifactMotion = useReducedMotion()
+  const isProgress = variant === 'response' && isTaskProgress
+  const parsedSkillUsage = useMemo(
+    () => parseSkillUsedMarkers(text, isStreaming),
+    [text, isStreaming],
+  )
+  const canCollectSources = variant === 'response' && !isProgress && !isCommentary && !isAnswerPreview
+  const showArtifacts = canCollectSources
+    && !isStreaming && (isTurnComplete ?? true)
+  const turnSources = useMemo(() => {
+    const merged = new Map((researchSources ?? []).map(source => [sourceUrlKey(source.url), source]))
+    for (const source of collectTurnResearchSources(researchActivities ?? [])) merged.set(sourceUrlKey(source.url), source)
+    return [...merged.values()]
+  }, [researchActivities, researchSources])
+  const sourceEvidence = useMemo(() => new Set(turnSources.map(source => sourceUrlKey(source.url))), [turnSources])
+  const sourceSummary = useMemo(
+    () => canCollectSources ? extractResponseSources(parsedSkillUsage.content, sourceEvidence, isStreaming) : { content: parsedSkillUsage.content, sources: [] },
+    [canCollectSources, parsedSkillUsage.content, sourceEvidence, isStreaming],
+  )
+  const displayedSources = useMemo(() => {
+    const merged = new Map(turnSources.map(source => [sourceUrlKey(source.url), source]))
+    for (const source of sourceSummary.sources) {
+      const key = sourceUrlKey(source.url)
+      merged.set(key, { ...merged.get(key), ...source })
+    }
+    return [...merged.values()]
+  }, [turnSources, sourceSummary.sources])
+  // Keep the model's answer verbatim. Source-section detection may enrich the
+  // source panel, but it must never erase text from the visible reply.
+  const responseText = parsedSkillUsage.content
+  const deliveredArtifacts = useMemo(
+    () => extractDeliveredResponseArtifacts(artifactVersions),
+    [artifactVersions],
+  )
+  const artifactSupplements = useArtifactSupplements()
+  const artifactAnchors = [messageId, revealIdentity].filter((value): value is string => !!value)
+  const presentationStreaming = isStreaming
+  const artifactShelfSettled = showArtifacts && !presentationStreaming
+  const artifactRows = canCollectSources
+    ? mergeArtifactSupplements(deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled ? 'settled' : 'pending')
+    : []
+  const showArtifactShelf = artifactRows.length > 0 && (artifactShelfSettled || artifactRows.some(row => row.supplement))
+  // Copy to clipboard state
+  const [copied, setCopied] = useState(false)
   // Pending text selection waiting for explicit follow-up action
-  const interaction = useAnnotationInteractionController()
+  const interaction = useAnnotationInteractionController(JSON.stringify([sessionId, messageId]))
   const {
     state: interactionState,
     setDraft: setFollowUpDraft,
@@ -656,6 +2407,7 @@ export function ResponseCard({
     requestEdit,
     cancelFollowUp,
     closeAll,
+    discardDraft,
     markSubmitSuccess,
     markDeleteSuccess,
     consumeExternalOpenRequest,
@@ -665,7 +2417,15 @@ export function ResponseCard({
   const selectionMenuView = interactionState.selectionMenuView
   const followUpDraft = interactionState.followUpDraft
   const followUpMode = interactionState.followUpMode
+  const [followUpError, setFollowUpError] = useState<string>()
+  const retainedFollowUpDraft = useRef<string | undefined>(undefined)
+  const retainedFollowUpAnnotationId = useRef<string | undefined>(undefined)
+  useEffect(() => { setFollowUpError(undefined) }, [interactionState.pendingSelection, interactionState.activeAnnotationDetail])
   const activeAnnotationDetail = interactionState.activeAnnotationDetail
+  useEffect(() => {
+    retainedFollowUpDraft.current = undefined
+    retainedFollowUpAnnotationId.current = undefined
+  }, [sessionId, messageId])
 
   const [selectionMenuShowNonce, setSelectionMenuShowNonce] = useState(0)
   const [selectionMenuTransitionConfig, setSelectionMenuTransitionConfig] = useState<IslandTransitionConfig>(
@@ -673,6 +2433,11 @@ export function ResponseCard({
   )
   const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
+  const actionsVisible = useCompletionActions(
+    !isProgress && (((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan'),
+    contentRef,
+    responseText,
+  )
   const contentLayerRef = useRef<HTMLDivElement>(null)
   const lastPointerRef = useRef<PointerSnapshot | null>(null)
   const dragStartPointerRef = useRef<PointerSnapshot | null>(null)
@@ -684,6 +2449,17 @@ export function ResponseCard({
     isStreaming,
   })
   const allowAnnotationIsland = annotationInteractionMode === 'interactive'
+  const [hashedAnnotationSource, setHashedAnnotationSource] = useState<{ content: string; hash: string }>()
+  const shouldHashAnnotationSource = !isStreaming && !!onAddAnnotation
+  useEffect(() => {
+    if (!shouldHashAnnotationSource) return
+    let cancelled = false
+    void hashAnnotationSource(text).then(hash => {
+      if (!cancelled) setHashedAnnotationSource({ content: text, hash })
+    }).catch(() => { /* Saving reports the failure in the follow-up editor. */ })
+    return () => { cancelled = true }
+  }, [text, shouldHashAnnotationSource])
+  const annotationSourceHash = hashedAnnotationSource?.content === text ? hashedAnnotationSource.hash : undefined
 
   const closeSelectionMenu = useCallback(() => {
     closeAll()
@@ -721,7 +2497,16 @@ export function ResponseCard({
     sourceKey: selectionMenuSourceKey,
   })
 
-  const handleCopy = useCallback(() => copy(text), [copy, text])
+  const handleCopy = useCallback(async () => {
+    try {
+      // Copy plain text — not markdown source (user expects what they see)
+      await navigator.clipboard.writeText(markdownToPlainText(parsedSkillUsage.content))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }, [parsedSkillUsage.content])
 
   const renderedAnnotations = useMemo(() => {
     const persisted = annotations ?? []
@@ -730,7 +2515,7 @@ export function ResponseCard({
       return persisted
     }
 
-    if (hasExistingTextRangeAnnotation(persisted, pendingSelection.start, pendingSelection.end)) {
+    if (hasExistingTextRangeAnnotation(persisted, pendingSelection.start, pendingSelection.end, annotationSourceHash)) {
       return persisted
     }
 
@@ -738,12 +2523,16 @@ export function ResponseCard({
       ...persisted,
       createSelectionPreviewAnnotation(messageId, pendingSelection, sessionId ?? ''),
     ]
-  }, [annotations, pendingSelection, selectionMenuView, messageId])
+  }, [annotations, pendingSelection, selectionMenuView, messageId, annotationSourceHash])
 
   const activeAnnotation = useMemo(() => {
     if (!activeAnnotationDetail) return null
     return (annotations ?? []).find(annotation => annotation.id === activeAnnotationDetail.annotationId) ?? null
   }, [annotations, activeAnnotationDetail])
+
+  const activeFollowUp = asRecord(activeAnnotation?.meta?.followUp)
+  const activeResultMessageId = typeof activeFollowUp?.resultMessageId === 'string'
+    ? activeFollowUp.resultMessageId : undefined
 
   useEffect(() => {
     if (!activeAnnotationDetail) return
@@ -755,7 +2544,7 @@ export function ResponseCard({
   useEffect(() => {
     const root = contentLayerRef.current
     if (!root) {
-      setAnnotationOverlay({ rects: [], chips: [] })
+      setAnnotationOverlay(previous => previous.rects.length || previous.chips.length ? { rects: [], chips: [] } : previous)
       return
     }
 
@@ -782,7 +2571,7 @@ export function ResponseCard({
       clearBlockAnnotationMarkers(root)
 
       if (!renderedAnnotations.length) {
-        setAnnotationOverlay({ rects: [], chips: [] })
+        setAnnotationOverlay(previous => previous.rects.length || previous.chips.length ? { rects: [], chips: [] } : previous)
         return
       }
 
@@ -809,6 +2598,7 @@ export function ResponseCard({
     }
 
     recomputeOverlay()
+    if (!renderedAnnotations.length) return
     window.addEventListener('resize', scheduleCoordsRecompute)
     // Capture-phase: scroll events don't bubble, but capture-phase listeners on
     // ancestors fire for descendant scrolls — so this catches the overflow-auto
@@ -819,7 +2609,7 @@ export function ResponseCard({
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
     }
-  }, [annotations, renderedAnnotations, text, displayedText, isStreaming])
+  }, [annotations, renderedAnnotations, responseText, isStreaming])
 
   useEffect(() => {
     if (!canAnnotate) {
@@ -889,20 +2679,30 @@ export function ResponseCard({
   }, [pendingSelection, openFollowUpFromSelection])
 
   const handleRequestFollowUpEdit = useCallback(() => {
+    // A sent follow-up stays display-only, including while it is processing.
+    if (isTrackedFollowUp(activeAnnotation)) return
     requestEdit()
-  }, [requestEdit])
+  }, [requestEdit, activeAnnotation])
 
+  const savingFollowUp = useRef(false)
   const saveFollowUp = useCallback(async (note: string): Promise<{
     messageId: string
     annotationId: string
     note: string
     selectedText: string
   } | null> => {
+    if (savingFollowUp.current) return null
+    if (activeAnnotationDetail && isTrackedFollowUp(activeAnnotation)) return null
+    savingFollowUp.current = true
+    try {
     const normalizedNote = note.trim()
+    setFollowUpError(undefined)
+    retainedFollowUpDraft.current = note
 
     if (!messageId) return null
 
     if (activeAnnotationDetail) {
+      retainedFollowUpAnnotationId.current = activeAnnotationDetail.annotationId
       if (!onUpdateAnnotation || !activeAnnotation) {
         closeSelectionMenu()
         return null
@@ -933,10 +2733,14 @@ export function ResponseCard({
               }
             : (Object.keys(nextMeta).length > 0 ? nextMeta : undefined),
         }))
-      } catch {
+      } catch (error) {
+        setFollowUpError(t(error instanceof Error && error.message === 'Annotation source changed; select the text again'
+          ? 'chat.annotationSourceChanged' : 'chat.annotationSaveFailed'))
         return null
       }
 
+      retainedFollowUpDraft.current = undefined
+      retainedFollowUpAnnotationId.current = undefined
       markSubmitSuccess()
 
       if (normalizedNote.length === 0) return null
@@ -945,25 +2749,46 @@ export function ResponseCard({
         messageId,
         annotationId: activeAnnotationDetail.annotationId,
         note: normalizedNote,
-        selectedText: extractAnnotationSelectedText(activeAnnotation, text),
+        selectedText: extractAnnotationSelectedText(activeAnnotation, responseText),
       }
     }
 
     if (!onAddAnnotation || !pendingSelection) return null
 
-    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end)) {
+    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end, annotationSourceHash)) {
       closeSelectionMenu()
       return null
     }
 
     const annotation = createTextSelectionAnnotation(messageId, pendingSelection, normalizedNote, sessionId ?? '')
+    const previousAnnotation = annotations?.find(item => item.id === retainedFollowUpAnnotationId.current)
 
     try {
-      await Promise.resolve(onAddAnnotation(messageId, annotation))
-    } catch {
+      if (pendingSelection.sourceContent !== undefined && pendingSelection.sourceContent !== text) {
+        setFollowUpError(t('chat.annotationSourceChanged'))
+        return null
+      }
+      const sourceContentHash = await hashAnnotationSource(pendingSelection.sourceContent ?? text)
+      annotation.meta = { ...annotation.meta, sourceContentHash }
+      if (previousAnnotation) {
+        if (!onUpdateAnnotation) throw new Error('Annotation update is unavailable')
+        const previousMeta = { ...previousAnnotation.meta }
+        delete previousMeta.followUp
+        await Promise.resolve(onUpdateAnnotation(messageId, previousAnnotation.id, {
+          target: annotation.target, body: annotation.body, intent: annotation.intent,
+          meta: { ...previousMeta, ...annotation.meta },
+        }))
+      } else {
+        await Promise.resolve(onAddAnnotation(messageId, annotation))
+      }
+    } catch (error) {
+      setFollowUpError(t(error instanceof Error && error.message === 'Annotation source changed; select the text again'
+        ? 'chat.annotationSourceChanged' : 'chat.annotationSaveFailed'))
       return null
     }
 
+    retainedFollowUpDraft.current = undefined
+    retainedFollowUpAnnotationId.current = undefined
     markSubmitSuccess()
     clearDomSelection()
 
@@ -971,10 +2796,11 @@ export function ResponseCard({
 
     return {
       messageId,
-      annotationId: annotation.id,
+      annotationId: previousAnnotation?.id ?? annotation.id,
       note: normalizedNote,
       selectedText: pendingSelection.selectedText,
     }
+    } finally { savingFollowUp.current = false }
   }, [
     messageId,
     activeAnnotationDetail,
@@ -983,10 +2809,13 @@ export function ResponseCard({
     onAddAnnotation,
     pendingSelection,
     annotations,
+    annotationSourceHash,
     closeSelectionMenu,
     sessionId,
     markSubmitSuccess,
+    responseText,
     text,
+    t,
   ])
 
   const handleSubmitFollowUp = useCallback((note: string) => {
@@ -1016,12 +2845,13 @@ export function ResponseCard({
 
     const annotation = (annotations ?? []).find(item => item.id === annotationId)
     const noteText = annotation ? getAnnotationNoteText(annotation) : ''
+    const openMode: AnnotationIslandMode = isTrackedFollowUp(annotation) ? 'view' : mode
 
     const transition = buildAnnotationChipEntryTransition()
 
     setSelectionMenuTransitionConfig(transition)
     triggerSelectionMenuEntryReplay()
-    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode)
+    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, openMode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
   }, [allowAnnotationIsland, annotations, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
   useEffect(() => {
@@ -1055,10 +2885,11 @@ export function ResponseCard({
 
   const handleDeleteActiveAnnotation = useCallback(() => {
     if (!onRemoveAnnotation || !messageId || !activeAnnotationDetail) return
+    if (isAnnotationFollowUpProcessing(activeAnnotation)) return
 
     onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
     markDeleteSuccess()
-  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, markDeleteSuccess])
+  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, activeAnnotation, markDeleteSuccess])
 
   const handleSelectionPointerDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     selectionStartedInContentRef.current = true
@@ -1102,7 +2933,7 @@ export function ResponseCard({
         return
       }
 
-      if (hasExistingTextRangeAnnotation(annotations, start, end)) {
+      if (hasExistingTextRangeAnnotation(annotations, start, end, annotationSourceHash)) {
         closeSelectionMenu()
         return
       }
@@ -1178,12 +3009,14 @@ export function ResponseCard({
         selectedText,
         prefix,
         suffix,
+        sourceContent: text,
         anchorX,
         anchorY,
       })
+      if (retainedFollowUpDraft.current !== undefined) setFollowUpDraft(retainedFollowUpDraft.current)
       dragStartPointerRef.current = null
     })
-  }, [annotations, closeSelectionMenu, triggerSelectionMenuEntryReplay, openFromSelection])
+  }, [annotations, annotationSourceHash, closeSelectionMenu, triggerSelectionMenuEntryReplay, openFromSelection, setFollowUpDraft, text])
 
   const handleTextSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!canAnnotate || !onAddAnnotation || !messageId) return
@@ -1317,14 +3150,30 @@ export function ResponseCard({
       activeView={selectionMenuView}
       mode={followUpMode}
       draft={followUpDraft}
-      onDraftChange={setFollowUpDraft}
+      draftSaveError={interaction.draftError}
+      error={followUpError}
+      onDraftChange={value => {
+        setFollowUpDraft(value)
+        if (retainedFollowUpDraft.current !== undefined) retainedFollowUpDraft.current = value
+      }}
       onOpenFollowUp={handleOpenFollowUpView}
       onCancel={handleCancelFollowUp}
+      onDiscardDraft={discardDraft}
       onRequestBack={handleSelectionMenuRequestBack}
       onRequestEdit={handleRequestFollowUpEdit}
       onSubmit={handleSubmitFollowUp}
       onSubmitAndSend={handleSubmitAndSendFollowUp}
       onDelete={activeAnnotationDetail ? handleDeleteActiveAnnotation : undefined}
+      onOpenResult={activeResultMessageId
+        ? resolveAnnotationResult?.(activeResultMessageId, messageId, activeAnnotation?.id)
+        : undefined}
+      resultSalvaged={activeFollowUp?.resultSalvaged === true}
+      feedbackStatus={getAnnotationFeedbackStatus(activeAnnotation)}
+      feedbackResolved={activeFollowUp?.userResolved === true}
+      onResolveFeedback={onUpdateAnnotation && messageId && activeAnnotation && activeFollowUp?.status === 'delivered'
+        ? () => Promise.resolve(onUpdateAnnotation(messageId, activeAnnotation.id, {
+            meta: { ...activeAnnotation.meta, followUp: { ...activeFollowUp, userResolved: true } },
+          })) : undefined}
       sendMessageKey={sendMessageKey}
       transitionConfig={selectionMenuTransitionConfig}
       onExitComplete={handleSelectionMenuExitComplete}
@@ -1345,165 +3194,212 @@ export function ResponseCard({
     />
   )
 
-  // Throttle content updates during streaming for performance
-  // Updates immediately when streaming ends to show final content
-  useEffect(() => {
-    if (!isStreaming) {
-      // Streaming ended - show final content immediately
-      setDisplayedText(text)
-      return
-    }
+  const isCompleted = isTurnComplete ?? !isStreaming
+  // Render every received delta immediately; reveal effects never queue text.
+  const bodyText = responseText
+  // Commentary must not gain final-reply actions the moment tools start.
+  // Both card branches retain the keyed body when final responses complete.
+  const showCompletedChrome = !isProgress && ((isCompleted && !isCommentary)
+    || variant === 'plan')
+  // Hold the action-row height while the body is still arriving so the card
+  // bottom does not jump when regenerate / copy / Markdown mount.
+  const reserveDesktopFooter = !isProgress && !compactMode && !isCommentary
+    && (showCompletedChrome || (isStreaming && variant === 'response'))
 
-    const now = Date.now()
-    const elapsed = now - lastUpdateRef.current
+  // Keep one content tree throughout streaming and completion. Only chrome
+  // changes after classification; Markdown and embedded diagrams stay mounted.
+  {
+    const isPlan = variant === 'plan'
 
-    if (elapsed >= BUFFER_CONFIG.CONTENT_THROTTLE_MS) {
-      // Enough time passed - update immediately
-      setDisplayedText(text)
-      lastUpdateRef.current = now
-    } else {
-      // Schedule update for remaining time
-      const timeout = setTimeout(() => {
-        setDisplayedText(text)
-        lastUpdateRef.current = Date.now()
-      }, BUFFER_CONFIG.CONTENT_THROTTLE_MS - elapsed)
-      return () => clearTimeout(timeout)
-    }
-  }, [text, isStreaming])
+    return (
+      <>
+        <div
+          role={isProgress ? 'note' : undefined}
+          data-response-kind={isProgress ? 'progress' : variant}
+          className={cn("relative group transition-colors duration-200",
+            // Replies are frameless: whether streamed text is the answer or
+            // process commentary is unknown until the model stops, so both
+            // look the same. Plans keep their framed header card.
+            isProgress ? "ml-[9px]" : isPlan ? "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5" : "")}
+        >
+          {/* Center the marker in the first line after the body padding and paragraph margin. */}
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-[calc(1rem+0.5lh-0.375rem)] size-3 text-[13px] leading-relaxed text-muted-foreground" />}
 
-  // Calculate buffering decision based on current text (not displayed text)
-  const bufferDecision = useMemo(() => {
-    return shouldShowContent(text, isStreaming, streamStartTime)
-  }, [text, isStreaming, streamStartTime])
+          {/* Plan header - only shown for plan variant */}
+          {isPlan && (
+            <div
+              className={cn(
+                "px-4 py-2 border-b border-border/30 flex items-center gap-2 bg-success/5 select-none",
+                SIZE_CONFIG.fontSize
+              )}
+            >
+              <ListTodo className={cn(SIZE_CONFIG.iconSize, "text-success")} />
+              <span className="font-medium text-success">Plan</span>
+            </div>
+          )}
 
-  const isCompleted = !isStreaming
-  const runCommand = useRunCommand()
-  const isBuffering = isStreaming && !bufferDecision.shouldShow
+          {/* Received blocks grow in flow; the outer viewport stays pinned. */}
+          <ResponseBodyGrowth>
+          <div
+            key="response-content"
+            ref={contentRef}
+            data-search-root="response"
+            onMouseDown={handleSelectionPointerDown}
+            onMouseUp={handleTextSelection}
+            className={cn(isProgress ? "pl-[22px] pr-4 py-2 text-[13px] text-foreground/70" : taskPreview && !isPlan ? "px-4 py-1 text-sm"
+              : isPlan ? "pl-[22px] pr-4 py-3 text-sm" : "px-2.5 py-1 text-sm")}
+          >
+            <SkillUsedIndicator skills={parsedSkillUsage.skills} />
+            <div ref={contentLayerRef} className="relative">
+              <MemoizedMarkdown
+                id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
+                isStreaming={presentationStreaming && variant === 'response'}
+                revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
+                mode="minimal"
+                onUrlClick={onOpenUrl}
+                onFileClick={onOpenFile}
+              >
+                {bodyText}
+              </MemoizedMarkdown>
+              {annotationOverlayLayer}
+            </div>
+          </div>
 
-  // While buffering, return null - TurnCard will show a subtle indicator instead
-  if (isBuffering) {
-    return null
+          </ResponseBodyGrowth>
+
+          <AnimatePresence mode="wait" initial={false}>
+            {showArtifactShelf ? (
+              <motion.div key="changed-artifacts" initial={reduceArtifactMotion ? false : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceArtifactMotion ? 0 : 0.18, ease: 'easeOut' }}>
+                <ResponseArtifacts
+                  key={messageId ?? revealIdentity}
+                  artifacts={deliveredArtifacts}
+                  versions={artifactVersions}
+                  onOpenFile={onOpenFile}
+                  onOpenArtifact={onOpenArtifact}
+                  anchors={artifactAnchors}
+                  mode={artifactShelfSettled ? 'settled' : 'pending'}
+                />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+
+          {/* Reserve known research sources while text streams. Completion only
+              reveals the shelf, rather than growing the card under sticky scroll. */}
+          {canCollectSources && (
+            <ResponseSources key={`sources-${messageId ?? revealIdentity}`} sources={displayedSources}
+              pending={!showArtifacts || presentationStreaming} />
+          )}
+
+          {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).
+              Compact mode falls through to the slim Accept-Plan-only footer below.
+              Streaming reserves the same row so completion only reveals actions. */}
+          {reserveDesktopFooter && (
+            <ResponseActionRow plan={isPlan} visible={actionsVisible} completed={showCompletedChrome}>
+              {/* Left side - Retry, Regenerate, Copy, View as Markdown */}
+              <div className={cn("flex shrink-0 items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
+                {onRetry && !isCommentary && !isProgress && (
+                  <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
+                )}
+                {onRegenerate && !isCommentary && (
+                  <TurnActionButton
+                    data-action="regenerate"
+                    onClick={onRegenerate}
+                    icon={<RefreshCw className={TURN_ACTION_ICON_CLASS} />}
+                  >
+                    <span>{t("chat.regenerate")}</span>
+                  </TurnActionButton>
+                )}
+                <TurnActionButton onClick={handleCopy} active={copied}>
+                  {copied ? (
+                    <>
+                      <Check className={SIZE_CONFIG.iconSize} />
+                      <span>{t("common.copied")}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className={SIZE_CONFIG.iconSize} />
+                      <span>{t("common.copy")}</span>
+                    </>
+                  )}
+                </TurnActionButton>
+                {onPopOut && (
+                  <TurnActionButton
+                    onClick={onPopOut}
+                    icon={<FileText className={SIZE_CONFIG.iconSize} />}
+                  >
+                    <span>Markdown</span>
+                  </TurnActionButton>
+                )}
+              </div>
+
+              {/* Right side */}
+              <div className={cn("flex shrink-0 items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
+                {/* Accept Plan dropdown (plan variant only, last response) */}
+                {isPlan && showAcceptPlan && onAccept && onAcceptWithCompact && (
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 transition-all duration-200",
+                      isLastResponse
+                        ? "opacity-100 translate-x-0"
+                        : "opacity-0 translate-x-2 pointer-events-none"
+                    )}
+                  >
+                    <AcceptPlanDropdown
+                      onAccept={onAccept}
+                      onAcceptWithCompact={onAcceptWithCompact}
+                      acceptLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.acceptPlan')}
+                      acceptOptionLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.accept')}
+                    />
+                  </div>
+                )}
+                {onBranch && !isCommentary && <BranchDropdown onBranch={onBranch} />}
+              </div>
+            </ResponseActionRow>
+          )}
+
+          {/* Compact footer — Accept Plan only (mobile / auto-compact / popover).
+              Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
+              / CompactModelSelector pattern. Guarded by isLastResponse so older
+              plans don't render an empty strip with a hidden-but-focusable button. */}
+          {showCompletedChrome && compactMode && (onRegenerate || onRetry) && !isStreaming && !isCommentary && !isProgress && (
+            <ResponseActionRow compact>
+              {onRetry && (
+                <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
+              )}
+              {onRegenerate && (
+                <TurnActionButton
+                  data-action="regenerate"
+                  onClick={onRegenerate}
+                  icon={<RefreshCw className={TURN_ACTION_ICON_CLASS} />}
+                >
+                  <span>{t("chat.regenerate")}</span>
+                </TurnActionButton>
+              )}
+            </ResponseActionRow>
+          )}
+          {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
+            <div
+              className={cn(
+                "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center justify-end bg-muted/20",
+                SIZE_CONFIG.fontSize
+              )}
+            >
+              <CompactAcceptPlanDrawer
+                onAccept={onAccept}
+                onAcceptWithCompact={onAcceptWithCompact}
+                acceptLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.acceptPlan')}
+                acceptOptionLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.accept')}
+              />
+            </div>
+          )}
+        </div>
+
+        {selectionMenu}
+      </>
+    )
   }
 
-  const isPlan = variant === 'plan'
-  // Completed responses and plans get the full text, the footer actions and the fullscreen
-  // reader; a streaming response shows the throttled text only.
-  const isSettled = isCompleted || isPlan
-  const acceptLabel = hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.acceptPlan')
-  const acceptOptionLabel = hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.accept')
-  const canAcceptPlan = isPlan && showAcceptPlan && !!onAccept && !!onAcceptWithCompact
-
-  // Answer body: plain copy on the transcript (no card, no inner scroll cap). The fullscreen
-  // action moved into the footer, so the first mermaid block keeps its own expand button.
-  const body = (
-    <div
-      ref={contentRef}
-      data-search-root="response"
-      onMouseDown={handleSelectionPointerDown}
-      onMouseUp={handleTextSelection}
-      className={cn(ANSWER_PROSE, isPlan && 'px-4 py-3', !isSettled && hasMountedRef.current && ANSWER_BLOCK_IN)}
-    >
-      <div ref={contentLayerRef} className="relative">
-        <Markdown
-          mode="minimal"
-          onUrlClick={onOpenUrl}
-          onFileClick={onOpenFile}
-          hideFirstMermaidExpand={false}
-        >
-          {isSettled ? text : displayedText}
-        </Markdown>
-        {annotationOverlayLayer}
-      </div>
-    </div>
-  )
-
-  // Desktop footer (Copy / Markdown / Fullscreen / Branch, + Accept Plan on plans).
-  // Compact mode keeps message chrome minimal: only the Accept-Plan drawer below.
-  const footer = isSettled && !compactMode ? (
-    <ResponseFooter
-      variant={isPlan ? 'plan' : 'answer'}
-      copied={copied}
-      onCopy={handleCopy}
-      onPopOut={onPopOut}
-      onViewFullscreen={() => setIsFullscreen(true)}
-      onBranch={onBranch}
-      trailing={canAcceptPlan ? (
-        <div
-          className={cn(
-            'transition-[opacity,visibility] duration-fast ease-out',
-            isLastResponse ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'
-          )}
-        >
-          <AcceptPlanDropdown
-            onAccept={onAccept!}
-            onAcceptWithCompact={onAcceptWithCompact!}
-            acceptLabel={acceptLabel}
-            acceptOptionLabel={acceptOptionLabel}
-          />
-        </div>
-      ) : undefined}
-    />
-  ) : null
-
-  // Compact footer — Accept Plan only (mobile / auto-compact / popover).
-  // Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
-  // / CompactModelSelector pattern. Guarded by isLastResponse so older
-  // plans don't render an empty strip with a hidden-but-focusable button.
-  const compactFooter = isSettled && compactMode && canAcceptPlan && isLastResponse ? (
-    <div className="flex items-center justify-end border-t border-subtle px-2 py-1.5">
-      <CompactAcceptPlanDrawer
-        onAccept={onAccept!}
-        onAcceptWithCompact={onAcceptWithCompact!}
-        acceptLabel={acceptLabel}
-        acceptOptionLabel={acceptOptionLabel}
-      />
-    </div>
-  ) : null
-
-  return (
-    // A streaming answer's code blocks offer no "Run in background": half a command must never run
-    <RunCommandProvider value={isStreaming ? null : runCommand}>
-      {isPlan ? (
-        // Plan: raised card with a header; the footer holds the primary Accept action
-        <div className="group/answer overflow-hidden rounded-lg bg-raised shadow-elev-1">
-          <div className="flex h-9 select-none items-center gap-2 border-b border-subtle px-4 text-label">
-            <ListTodo aria-hidden className={cn(SIZE_CONFIG.iconSize, 'text-secondary')} />
-            <span className="font-medium text-foreground">{t('turnCard.plan')}</span>
-          </div>
-          {body}
-          {footer}
-          {compactFooter}
-        </div>
-      ) : (
-        <div className="group/answer flex min-w-0 flex-col gap-2">
-          {body}
-          {footer}
-        </div>
-      )}
-
-      {/* Fullscreen overlay for reading/annotating response and plan content. */}
-      {isSettled && (
-        <DocumentFormattedMarkdownOverlay
-          content={text}
-          isOpen={isFullscreen}
-          onClose={() => setIsFullscreen(false)}
-          variant={isPlan ? 'plan' : undefined}
-          onOpenUrl={onOpenUrl}
-          onOpenFile={onOpenFile}
-          sessionId={sessionId}
-          messageId={messageId}
-          annotations={annotations}
-          onAddAnnotation={onAddAnnotation}
-          onRemoveAnnotation={onRemoveAnnotation}
-          onUpdateAnnotation={onUpdateAnnotation}
-          sendMessageKey={sendMessageKey}
-          openAnnotationRequest={openAnnotationRequest}
-          isStreaming={isStreaming}
-        />
-      )}
-      {selectionMenu}
-    </RunCommandProvider>
-  )
 }
 
 // ============================================================================
@@ -1519,27 +3415,44 @@ export function ResponseCard({
  * Memoized to prevent re-renders of completed turns during session switches.
  * Only complete, non-streaming turns are memoized - active turns always re-render.
  */
-export const TurnCard = React.memo(function TurnCard({
+function turnSupplementAnchors(sessionId: string | undefined, turnId: string, response: ResponseContent | undefined): string[] {
+  return [
+    response?.messageId,
+    turnId,
+    sessionId && turnId ? `${sessionId}:${turnId}` : undefined,
+    sessionId && turnId ? `${sessionId}:${turnId}:${response?.streamKey ?? 'response'}` : undefined,
+    sessionId && turnId ? `${sessionId}:${turnId}:response` : undefined,
+  ].filter((value): value is string => !!value)
+}
+
+function TurnCardContent({
   sessionId,
   turnId,
   activities,
+  researchSources,
   response,
   intent,
-  isStreaming,
   isComplete,
+  hasExternalWorkStatus = false,
+  awaitingClarification = false,
+  clarifications,
   defaultExpanded = false,
   isExpanded: externalIsExpanded,
   onExpandedChange,
   expandedActivityGroups: externalExpandedActivityGroups,
   onExpandedActivityGroupsChange,
   onOpenFile,
+  onOpenArtifact,
   onOpenUrl,
   onPopOut,
   onOpenDetails,
   onOpenActivityDetails,
+  workControls,
   onOpenMultiFileDiff,
   hasEditOrWriteActivities,
   todos,
+  listSeed,
+  todoRail = 'full',
   renderActionsMenu,
   onAcceptPlan,
   onAcceptPlanWithCompact,
@@ -1548,7 +3461,10 @@ export const TurnCard = React.memo(function TurnCard({
   displayMode = 'detailed',
   animateResponse = false,
   compactMode = false,
+  taskPreview = false,
   onBranch,
+  onRegenerate,
+  onRetry,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -1557,8 +3473,19 @@ export const TurnCard = React.memo(function TurnCard({
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
+  resolveAnnotationResult,
 }: TurnCardProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
+  const railSeed = listSeed ?? taskListSeed({ activities, turnId, sessionId })
+  const hasRunningTools = activities.some(activity => activity.type === 'tool' && activity.status === 'running')
+  const showCommentary = isVisibleCommentaryCard(
+    response,
+    isComplete,
+    hasRunningTools,
+  )
+  const isTaskProgress = !response?.isPlan && isTaskStartAcknowledgment(activities)
+
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
   // replacing the old ad-hoc boolean combinations.
@@ -1578,16 +3505,31 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Track if user has toggled expansion (skip animation on initial mount)
   const hasUserToggled = useRef(false)
+  const wasExpandedRef = useRef(isExpanded)
+  const staggerOnThisExpand = isExpanded && !wasExpandedRef.current && hasUserToggled.current
+  useEffect(() => {
+    wasExpandedRef.current = isExpanded
+  }, [isExpanded])
 
   // Ref for scrollable activities container (to scroll to bottom on expand)
   const activitiesContainerRef = useRef<HTMLDivElement>(null)
 
-  // Track if component has mounted (enable fade-in for new activities after mount)
-  const hasMounted = useRef(false)
+  // Was the work header already in the DOM after the last commit? Read during
+  // render so a badge arriving later slides in, while a header that mounts
+  // together with its badge animates once as a whole.
+  const chromeRef = useRef<HTMLDivElement>(null)
+  const chromeMountedRef = useRef(false)
   useEffect(() => {
-    hasMounted.current = true
-  }, [])
+    chromeMountedRef.current = chromeRef.current !== null
+  })
+  // Latched once this card has rendered a live turn, so the committed final
+  // answer still slides in while a turn loaded from history renders at rest.
+  const wasLiveRef = useRef(false)
+  useEffect(() => {
+    if (!isComplete) wasLiveRef.current = true
+  }, [isComplete])
 
+  // Process updates never change expansion; only the header's user action does.
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
     const newExpanded = !isExpanded
@@ -1610,7 +3552,7 @@ export const TurnCard = React.memo(function TurnCard({
   // This shows the most recent step instead of the oldest
   useEffect(() => {
     if (isExpanded && hasUserToggled.current && activitiesContainerRef.current) {
-      // Let the row reveal settle before scrolling
+      // Wait for expansion animation to complete (250ms) before scrolling
       const timer = setTimeout(() => {
         activitiesContainerRef.current?.scrollTo({
           top: activitiesContainerRef.current.scrollHeight,
@@ -1626,20 +3568,38 @@ export const TurnCard = React.memo(function TurnCard({
   const expandedActivityGroups = externalExpandedActivityGroups ?? localExpandedActivityGroups
   const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
-  // Check if response is in buffering state
-  // No polling needed - parent updates trigger re-evaluation naturally
-  const isBuffering = useMemo(
-    () => isResponseBuffering(response),
-    [response]
-  )
+  // Visible prose, not elapsed time, opens the response and ends buffering.
+  const isBuffering = !!response?.isStreaming && !response.text.trim()
 
 
-  // Summary of the collapsed work log (text swaps in place — no per-update animation)
-  const workLogPreview = useMemo(
-    () => getWorkLogPreview(activities, intent, isStreaming, !!response, isComplete),
-    [activities, intent, isStreaming, response, isComplete]
+  const settledClarifications = useMemo(
+    () => (clarifications ?? []).filter(message => {
+      const status = message.clarification?.status
+      return status === 'answered' || status === 'skipped'
+    }),
+    [clarifications],
   )
-  const failedCount = useMemo(() => countFailedActivities(activities), [activities])
+  const hasClarifications = settledClarifications.length > 0 && !awaitingClarification
+  const clarificationCounts = clarificationOutcomeCounts(settledClarifications)
+  const clarificationLabel = hasClarifications ? clarificationSummaryLabel(clarificationCounts, t) : undefined
+  const clarificationStatus = hasClarifications ? clarificationSummaryStatus(clarificationCounts) : undefined
+
+  // Compute preview text with cross-fade animation.
+  // A settled clarification keeps its status as the brief title; a real step
+  // label stays beside it, and a generic phase label does not.
+  const previewText = useMemo(
+    () => getPreviewText(activities, intent, turnPhase, { awaitingClarification }),
+    [activities, intent, turnPhase, awaitingClarification],
+  )
+  const briefTitle = clarificationBriefTitle(previewText, clarificationLabel, [
+    t('turnCard.stepsCompleted'),
+    t('turnCard.starting'),
+    t('turnCard.responding'),
+    t('chat.processing.thinking'),
+  ])
+  const stepPreview = clarificationLabel
+    ? (briefTitle.startsWith(`${clarificationLabel} · `) ? briefTitle.slice(clarificationLabel.length + 3) : '')
+    : previewText
 
   // Sort activities by timestamp for correct chronological order
   // This handles the live streaming case (turn-utils sorts on flush for completed turns)
@@ -1659,30 +3619,102 @@ export const TurnCard = React.memo(function TurnCard({
     [allSortedActivities]
   )
 
-  // Group when the turn has subagent work: a Task/Agent call, or rows of a subagent launched in an
-  // earlier turn (they would otherwise interleave with this turn's rows)
+  // The live commentary card already shows this body. Hiding the mirrored
+  // row keeps the work chain from inserting a duplicate line (or appearing
+  // at all) until a tool or older commentary actually needs a row.
+  // Reasoning stays in this list: it is a step, not a disclosure under the chain.
+  const visibleActivities = useMemo(
+    () => sortedActivities.filter(
+      activity => !isAnswerDeliveryTool(activity)
+        // Aggregate status is a fallback, not a work record or the latest step.
+        && activity.statusType !== 'task_progress'
+        // Empty SDK thinking messages are status placeholders, not work rows.
+        // A finished block with no readable text stays as a non-expandable label.
+        && !isProcessPlaceholder(activity)
+        && !isMirroredCommentaryActivity(activity, response, isComplete)
+        // The settled row replaces this tool line. It only said "waiting".
+        && !(hasClarifications && isClarificationToolActivity(activity)),
+    ),
+    [sortedActivities, response, isComplete, hasClarifications],
+  )
+
+  // PRO workers share one chronological chain with coordinator operations.
+  // Keep the existing SDK Task tree only for turns without orchestration rows.
   const hasTaskSubagents = useMemo(
-    () => sortedActivities.some(a => isParentTaskTool(a.toolName ?? '') || a.parentId),
-    [sortedActivities]
+    () => !visibleActivities.some(a => a.taskNode) && visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
+    [visibleActivities]
   )
 
   // Group activities by parent Task for better visualization
   // Only group if there are Task subagents, otherwise keep flat for simpler view
   const groupedActivities = useMemo(
-    () => hasTaskSubagents ? groupActivitiesByParent(sortedActivities) : null,
-    [sortedActivities, hasTaskSubagents]
+    () => hasTaskSubagents ? groupActivitiesByParent(visibleActivities) : null,
+    [visibleActivities, hasTaskSubagents]
+  )
+
+  const renderedActivityRows = useMemo(
+    () => getRenderedActivityRows(
+      groupedActivities ?? visibleActivities,
+      expandedActivityGroups,
+    ),
+    [expandedActivityGroups, groupedActivities, visibleActivities],
   )
 
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
-    () => !hasTaskSubagents ? computeLastChildSet(sortedActivities) : new Set<string>(),
-    [sortedActivities, hasTaskSubagents]
+    () => !hasTaskSubagents ? computeLastChildSet(visibleActivities) : new Set<string>(),
+    [visibleActivities, hasTaskSubagents]
   )
 
+  const chainEntries = useMemo(
+    () => interleaveSettledClarifications(
+      groupedActivities ?? visibleActivities,
+      hasClarifications ? settledClarifications : [],
+    ),
+    [groupedActivities, visibleActivities, hasClarifications, settledClarifications],
+  )
+  const chainIsUniform = useMemo(() => processChainRowsAreUniform(chainEntries), [chainEntries])
+  const windowProcessChain = shouldWindowProcessChain(chainEntries.length, chainIsUniform)
+  const measuredChainWindow = useProcessChainWindow(
+    activitiesContainerRef,
+    chainEntries.length,
+    windowProcessChain && isExpanded,
+  )
+
+  const hasVisibleResponse = !!response && (
+    hasRenderableAssistantText(response.text)
+  )
+  const supplementAnchors = turnSupplementAnchors(sessionId, turnId, response)
+  // Commentary, plans and progress notes never mount the deliverable shelf.
+  // A live file row still has to land somewhere on this turn.
+  const responseHostsArtifactShelf = !!(
+    response && hasVisibleResponse && !showCommentary && !isTaskProgress && !response.isPlan && !response.isAnswerPreview
+  )
+  const supplementShelf = responseHostsArtifactShelf ? null : (
+    <ArtifactSupplementShelf
+      anchors={supplementAnchors}
+      versions={response?.artifactVersions}
+      onOpenFile={onOpenFile}
+      onOpenArtifact={onOpenArtifact}
+    />
+  )
+
+  // Interrupted turns with nothing to show still keep retry under the status line,
+  // in the same action row regenerate uses under a completed reply.
+  const standaloneRetryRow = onRetry ? (
+    <ResponseActionRow compact={compactMode}>
+      <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
+    </ResponseActionRow>
+  ) : null
+  // A visible reply or a plan card already hosts retry in its action row.
+  // Progress notes hide that row, and a tool-only interruption has no card.
+  const retryAlreadyInCard = (hasVisibleResponse && !isTaskProgress)
+    || (!hasVisibleResponse && planActivities.length > 0)
+
   // Don't render if nothing to show and turn is complete
-  if (activities.length === 0 && !response && isComplete) {
-    return null
+  if (activities.length === 0 && !hasVisibleResponse && isComplete && !hasClarifications) {
+    return <>{supplementShelf}{standaloneRetryRow}</>
   }
 
   // Don't render turns that were interrupted before any meaningful work happened.
@@ -1692,100 +3724,280 @@ export const TurnCard = React.memo(function TurnCard({
   // - No response text to show
   // - No plan activities
   // The "Response interrupted" info banner alone is sufficient feedback.
-  const hasNoMeaningfulWork = activities.length > 0
+  const hasNoMeaningfulWork = isComplete
+    && activities.length > 0
     && activities.every(a => {
+      if (a.taskNode) return false
+      // Delivery is the card body, not a work record that should keep an empty turn.
+      if (isAnswerDeliveryTool(a)) return true
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
-      // Intermediate activities must have no meaningful content
-      if (a.type === 'intermediate') return !a.content?.trim()
+      // Intermediate activities must have no meaningful content.
+      // A finished reasoning block is the record of that wait, not an empty turn.
+      if (a.type === 'intermediate' || a.type === 'thinking') return isProcessPlaceholder(a)
       // Plan activities are meaningful work
       if (a.type === 'plan') return false
       // Other activity types - consider as no meaningful work
       return true
     })
-    && !response
+    && !hasVisibleResponse
+    && !hasClarifications
   if (hasNoMeaningfulWork) {
-    return null
+    return <>{supplementShelf}{standaloneRetryRow}</>
   }
 
-  // Only count non-plan activities for the collapsible section
-  const hasActivities = sortedActivities.length > 0
+  // Only count rows the user will actually see in the collapsible section
+  const stepCount = countWorkRecords(visibleActivities)
+  const compactionTimes = visibleActivities
+    .filter(activity => activity.statusType === 'compaction_complete')
+    .map(activity => activity.timestamp)
+  const hasWorkRecords = stepCount > 0
 
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
-  const isThinking = shouldShowThinkingIndicator(turnPhase, isBuffering)
-  const thinkingLabel = isThinking && !animateResponse
-    ? (isBuffering ? t('turnCard.preparingResponse') : t('chat.processing.thinking'))
-    : undefined
-
-  const renderResponse = (resp: ResponseContent) => (
-    <ResponseCard
-      text={resp.text}
-      isStreaming={resp.isStreaming}
-      streamStartTime={resp.streamStartTime}
-      sessionId={sessionId}
-      onOpenFile={onOpenFile}
-      onOpenUrl={onOpenUrl}
-      onPopOut={onPopOut ? () => onPopOut(resp.text) : undefined}
-      variant={resp.isPlan ? 'plan' : 'response'}
-      messageId={resp.messageId}
-      annotations={resp.annotations}
-      onAddAnnotation={onAddAnnotation}
-      onRemoveAnnotation={onRemoveAnnotation}
-      onUpdateAnnotation={onUpdateAnnotation}
-      onSaveAndSendFollowUp={onSaveAndSendFollowUp}
-      onAccept={onAcceptPlan}
-      onAcceptWithCompact={onAcceptPlanWithCompact}
-      isLastResponse={isLastResponse}
-      compactMode={compactMode}
-      onBranch={onBranch && resp.messageId ? (options?: { newPanel?: boolean }) => onBranch(resp.messageId!, options) : undefined}
-      sendMessageKey={sendMessageKey}
-      hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
-      openAnnotationRequest={openAnnotationRequest}
-      annotationInteractionMode={annotationInteractionMode}
-    />
+  const showGenericThinkingIndicator = !hasExternalWorkStatus
+    && previewText !== thinkingStatusLabel() && shouldShowGenericThinkingIndicator(
+    turnPhase,
+    isBuffering && !(response && hasVisibleResponse),
+    renderedActivityRows,
   )
+  // Header chrome stays for every turn with real work records (live or complete).
+  // Before the first record it doubles as the thinking row only when the
+  // parent does not already render a work status (e.g. standalone viewers).
+  const showLiveThinkingHeader = !animateResponse
+    && !hasExternalWorkStatus
+    && !isComplete
+    && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
+  const canToggleFold = hasWorkRecords || hasClarifications
+  const showWorkChrome = canToggleFold || showLiveThinkingHeader || awaitingClarification
+  const assignmentSummary = taskAssignmentSummary(activities.find(activity => activity.taskContext?.kind === 'assignment')?.taskContext)
+  // Standalone viewers keep one status slot across tool -> awaiting -> tool transitions. Toggling
+  // its visibility must not repeatedly expand and collapse the work chain.
+  const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
+    && !hasExternalWorkStatus
+    && !(response && hasVisibleResponse)
+  // True once the header has been on screen for a committed render, so a badge
+  // that arrives later slides in while a header that mounts with its badge does not.
+  const chromeWasMounted = chromeMountedRef.current
+  const animateLiveBlocks = !isComplete || wasLiveRef.current
+  const chainWindow = windowProcessChain
+    ? (measuredChainWindow ?? initialProcessChainWindow(chainEntries.length))
+    : null
+  const visibleChainEntries = chainWindow
+    ? chainEntries.slice(chainWindow.start, chainWindow.end)
+    : chainEntries
+  const liveRowMotion = animateLiveBlocks && !isComplete && !chainWindow
+  const staggerRows = !!staggerOnThisExpand && !chainWindow
 
-  // A turn is a quiet work log + the answer, 10px apart (spec §7.4, mockup `.turn`)
+  // No space-y on the root: a sibling margin sits outside the height tweens and
+  // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
-    <div className="flex min-w-0 flex-col gap-2.5">
-      {/* Activity Section - excluded from search highlighting (matches ripgrep behavior) */}
-      {hasActivities && (
-        <WorkLog
-          activityCount={activities.length}
-          preview={workLogPreview}
-          failedCount={failedCount}
-          isExpanded={isExpanded}
-          onToggle={toggleExpanded}
-          actionsMenu={renderActionsMenu ? renderActionsMenu() : (
-            <TurnCardActionsMenu
-              onOpenDetails={onOpenDetails}
-              onOpenMultiFileDiff={onOpenMultiFileDiff}
-              hasEditOrWriteActivities={hasEditOrWriteActivities}
+    <div data-clarification-folded={hasClarifications ? '' : undefined}>
+      {assignmentSummary && (taskPreview ? <section className="mb-4 rounded-lg bg-foreground/[0.035] p-4 text-sm leading-relaxed [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <h3 className="flex items-center gap-2 text-xs font-medium text-foreground/70">
+          <CornerDownRight className="size-4 shrink-0 text-accent" aria-hidden="true" />
+          {i18n.t('chat.taskContext.assignment.fromParent')}
+        </h3>
+        <p className="mt-2 text-foreground/80">{assignmentSummary}</p>
+      </section> : <p className="mb-3 flex items-start gap-3 rounded-xl bg-foreground/[0.035] px-4 py-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <CornerDownRight className="mt-1 size-4 shrink-0 text-accent" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium text-foreground">{i18n.t('chat.taskContext.assignment.fromParent')} </span>{assignmentSummary}
+        </span>
+      </p>)}
+      {/* One header chrome for thinking and numbered work — no standalone swap. */}
+      <AnimatePresence>
+      {showWorkChrome && (
+        <WorkChrome
+          key="work-chrome"
+          containerRef={chromeRef}
+          animateIn={!isComplete}
+          reduceMotion={reduceMotion}
+        >
+          {/* Collapsed Header / Toggle */}
+          <button
+            type="button"
+            onClick={canToggleFold ? toggleExpanded : undefined}
+            aria-expanded={canToggleFold ? isExpanded : undefined}
+            aria-disabled={!canToggleFold}
+            tabIndex={canToggleFold ? 0 : -1}
+            data-work-status={awaitingClarification ? 'awaiting-clarification' : undefined}
+            data-clarification-open={clarificationLabel ? (isExpanded ? 'true' : 'false') : undefined}
+            className={cn(
+              "flex items-center gap-2 w-full pl-2.5 pr-1.5 py-1.5 rounded-[8px] text-left",
+              SIZE_CONFIG.fontSize,
+              "text-muted-foreground",
+              canToggleFold && "hover:bg-muted/50 transition-colors",
+              !canToggleFold && "pointer-events-none",
+              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            )}
+          >
+            <WorkHeaderIcon
+              mode={awaitingClarification ? 'ellipsis' : canToggleFold ? 'chevron' : 'spinner'}
+              expanded={isExpanded}
+              reduceMotion={reduceMotion}
             />
-          )}
-          activities={sortedActivities}
-          groupedActivities={groupedActivities}
-          lastChildSet={lastChildSet}
-          expandedActivityGroups={expandedActivityGroups}
-          onExpandedActivityGroupsChange={handleExpandedActivityGroupsChange}
-          onOpenActivityDetails={onOpenActivityDetails}
-          sessionFolderPath={sessionFolderPath}
-          displayMode={displayMode}
-          thinkingLabel={thinkingLabel}
-          todos={todos}
-          animateInserts={hasMounted.current}
-          listRef={activitiesContainerRef}
-        />
-      )}
+            {!awaitingClarification && (
+              <WorkHeaderStepCount
+                count={stepCount}
+                animateIn={chromeWasMounted && !isComplete}
+                reduceMotion={reduceMotion}
+              />
+            )}
 
-      {/* Standalone thinking indicator - when no activities but still working */}
-      {!hasActivities && thinkingLabel && <ThinkingRow label={thinkingLabel} />}
+            {/* Status stays in the brief title. A real step label follows it. */}
+            <span className="relative flex min-w-0 flex-1 items-center gap-1.5 h-5">
+              {clarificationLabel && (
+                <span
+                  data-clarification-brief=""
+                  data-clarification-status={clarificationStatus}
+                  className="shrink-0 font-medium text-foreground"
+                >
+                  {clarificationLabel}
+                </span>
+              )}
+              {stepPreview && (
+                <span className="relative min-w-0 flex-1 h-5">
+                  <AnimatePresence initial={false}>
+                    <motion.span
+                      key={stepPreview}
+                      initial={reduceMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      // Do not retain a fading thinking label when its status row takes over.
+                      exit={reduceMotion ? undefined : { opacity: 0, transition: stepPreview === thinkingStatusLabel() ? { duration: 0 } : undefined }}
+                      transition={{ duration: reduceMotion ? 0 : 0.22, ease: WORK_CHAIN_EASE }}
+                      className="absolute inset-0 truncate"
+                    >
+                      {stepPreview}
+                    </motion.span>
+                  </AnimatePresence>
+                </span>
+              )}
+            </span>
+
+            {!isExpanded && compactionTimes.length > 0 && (
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
+                {compactionTimes.map(time => i18n.t('chat.contextCompactedAt', { time: formatUserMessageTime(time, i18n.language) })).join(' · ')}
+              </span>
+            )}
+
+            {hasWorkRecords && (renderActionsMenu ? renderActionsMenu() : (
+              <TurnCardActionsMenu
+                onOpenDetails={onOpenDetails}
+                onOpenMultiFileDiff={onOpenMultiFileDiff}
+                hasEditOrWriteActivities={hasEditOrWriteActivities}
+              />
+            ))}
+          </button>
+
+          {/* Expanded Activity List — work rows, or a settled clarification on its own */}
+          {canToggleFold && (
+          <ExpandableHeightPanel open={isExpanded} reduceMotion={reduceMotion}>
+                {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
+                {/* ml-[15px] positions the border-l under the chevron */}
+                <div
+                  ref={activitiesContainerRef}
+                  data-process-chain=""
+                  data-process-chain-window={processChainWindowStyle(chainWindow)}
+                  className="pl-4 pr-2 py-0 border-l-2 border-muted ml-[13px]"
+                >
+                  {chainWindow && chainWindow.padTop > 0 && (
+                    <div
+                      data-process-chain-spacer="top"
+                      aria-hidden="true"
+                      style={{ height: chainWindow.padTop }}
+                    />
+                  )}
+                  {/* Rows joining a header that is already on screen slide in;
+                      history, windowed slices, and a header mounting with its rows do not. */}
+                  {liveRowMotion ? (
+                  <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
+                  {visibleChainEntries.map((entry, index) => (
+                    <ProcessChainEntryRow
+                      key={entry.kind === 'clarification' ? entry.message.id : isActivityGroup(entry.row) ? entry.row.parent.id : entry.row.id}
+                      entry={entry}
+                      index={index}
+                      isExpanded={isExpanded}
+                      reduceMotion={reduceMotion}
+                      stagger={staggerRows}
+                      animate={liveRowMotion}
+                      lastChildSet={lastChildSet}
+                      expandedActivityGroups={expandedActivityGroups}
+                      onExpandedActivityGroupsChange={handleExpandedActivityGroupsChange}
+                      onOpenActivityDetails={onOpenActivityDetails}
+                      sessionFolderPath={sessionFolderPath}
+                      displayMode={displayMode}
+                    />
+                  ))}
+                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false} animate={liveRowMotion}>{workControls}</WorkChainRow>}
+                  {reserveThinkingSlot && (
+                    <WorkChainRow
+                      key="thinking"
+                      reduceMotion={reduceMotion}
+                      stagger={staggerRows}
+                      staggerIndex={visibleActivities.length}
+                      animate={liveRowMotion}
+                    >
+                      <ThinkingSlotRow visible={showGenericThinkingIndicator} />
+                    </WorkChainRow>
+                  )}
+                  </AnimatePresence>
+                  ) : (
+                  <>
+                  {visibleChainEntries.map((entry, index) => (
+                    <ProcessChainEntryRow
+                      key={entry.kind === 'clarification' ? entry.message.id : isActivityGroup(entry.row) ? entry.row.parent.id : entry.row.id}
+                      entry={entry}
+                      index={index}
+                      isExpanded={isExpanded}
+                      reduceMotion={reduceMotion}
+                      stagger={staggerRows}
+                      animate={false}
+                      lastChildSet={lastChildSet}
+                      expandedActivityGroups={expandedActivityGroups}
+                      onExpandedActivityGroupsChange={handleExpandedActivityGroupsChange}
+                      onOpenActivityDetails={onOpenActivityDetails}
+                      sessionFolderPath={sessionFolderPath}
+                      displayMode={displayMode}
+                    />
+                  ))}
+                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
+                  {reserveThinkingSlot && (
+                    <WorkChainRow
+                      key="thinking"
+                      reduceMotion={reduceMotion}
+                      stagger={false}
+                      staggerIndex={visibleActivities.length}
+                    >
+                      <ThinkingSlotRow visible={showGenericThinkingIndicator} />
+                    </WorkChainRow>
+                  )}
+                  </>
+                  )}
+                  {chainWindow && chainWindow.padBottom > 0 && (
+                    <div
+                      data-process-chain-spacer="bottom"
+                      aria-hidden="true"
+                      style={{ height: chainWindow.padBottom }}
+                    />
+                  )}
+                </div>
+          </ExpandableHeightPanel>
+          )}
+        </WorkChrome>
+      )}
+      </AnimatePresence>
+
+      {todos && todos.length > 0 && todoRail !== 'hidden' && (
+        todoRail === 'summary'
+          ? <TaskTurnSummary todos={todos} listSeed={railSeed} settled={isComplete} />
+          : <TodoList todos={todos} listSeed={railSeed} />
+      )}
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (
-        <div key={planActivity.id} className="select-text">
+        <div key={planActivity.id} className={cn("select-text", (showWorkChrome || index > 0) && "mt-3")}>
           <ResponseCard
             text={planActivity.content || ''}
             isStreaming={false}
@@ -1805,36 +4017,155 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse && index === planActivities.length - 1}
             compactMode={compactMode}
             onBranch={onBranch ? (options?: { newPanel?: boolean }) => onBranch(planActivity.messageId ?? planActivity.id, options) : undefined}
+            onRegenerate={onRegenerate}
+            onRetry={!hasVisibleResponse && index === planActivities.length - 1 ? onRetry : undefined}
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
             annotationInteractionMode={annotationInteractionMode}
+            resolveAnnotationResult={resolveAnnotationResult}
           />
         </div>
       ))}
 
-      {/* Response Section - only shown when not buffering */}
+      <GrowingResponse>
+      {/* Response Section — keep the white frame mounted once a final stream exists */}
       {/* Animated version for playground demos */}
       {animateResponse && (
         <AnimatePresence>
-          {response && !isBuffering && (
+          {response && hasVisibleResponse && (
             <motion.div
-              initial={{ opacity: 0, y: 4 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={TWEEN.base}
-              className="select-text"
+              transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
+              className={cn("select-text", showWorkChrome && "mt-3")}
             >
-              {renderResponse(response)}
+              {taskPreview && <h3 className="mb-2 mt-4 flex items-center gap-2 px-4 text-sm font-medium text-foreground/80" data-task-output-heading>
+                <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
+              </h3>}
+              <ResponseCard
+                text={response.text}
+            artifactVersions={response.artifactVersions}
+                researchActivities={activities}
+                researchSources={researchSources}
+                isStreaming={response.isStreaming}
+                isAnswerPreview={response.isAnswerPreview}
+                isTurnComplete={isComplete}
+                streamStartTime={response.streamStartTime}
+                completedRevealStartTime={response.completedRevealStartTime}
+                sessionId={sessionId}
+                onOpenFile={onOpenFile}
+                onOpenArtifact={onOpenArtifact}
+                onOpenUrl={onOpenUrl}
+                onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
+                variant={response.isPlan ? 'plan' : 'response'}
+                revealIdentity={`${sessionId}:${turnId}:response`}
+                messageId={response.messageId}
+                annotations={response.annotations}
+                onAddAnnotation={onAddAnnotation}
+                onRemoveAnnotation={onRemoveAnnotation}
+                onUpdateAnnotation={onUpdateAnnotation}
+                onSaveAndSendFollowUp={onSaveAndSendFollowUp}
+                onAccept={onAcceptPlan}
+                onAcceptWithCompact={onAcceptPlanWithCompact}
+                isLastResponse={isLastResponse}
+                compactMode={compactMode}
+                isCommentary={showCommentary}
+                isTaskProgress={isTaskProgress}
+                taskPreview={taskPreview}
+                onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
+                onRegenerate={onRegenerate}
+                onRetry={isTaskProgress ? undefined : onRetry}
+                sendMessageKey={sendMessageKey}
+                hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
+                openAnnotationRequest={openAnnotationRequest}
+                annotationInteractionMode={annotationInteractionMode}
+                resolveAnnotationResult={resolveAnnotationResult}
+              />
             </motion.div>
           )}
         </AnimatePresence>
       )}
-      {/* Non-animated version for regular app use */}
-      {!animateResponse && response && !isBuffering && (
-        <div className="select-text">{renderResponse(response)}</div>
+      {/* Regular app path: the card slides in with its first visible token and
+          collapses when commentary is demoted into the chain, instead of popping. */}
+      {!animateResponse && (
+      <AnimatePresence>
+      {response && hasVisibleResponse && (
+        <HeightPresence
+          // A progress note and the answer are different blocks: the note fades
+          // and folds while the answer card grows, instead of one card morphing.
+          // One block per text stream: a note promoted to the answer (or committed
+          // with its server id) keeps this key and morphs in place.
+          key={`stream-${response.streamKey ?? response.messageId ?? 'response'}`}
+          animateIn={animateLiveBlocks}
+          reduceMotion={reduceMotion}
+          // Every streamed text block may still turn out to be commentary; if it
+          // does, it merges into the work chain instead of just vanishing.
+          exitMode={response.isPlan ? undefined : 'merge-into-chain'}
+          className="select-text"
+        >
+          {/* Gap lives inside the tween; border-box padding on the tweened
+              element would floor the collapsed height at the padding. */}
+          <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
+          {taskPreview && <h3 className="mb-2 mt-4 flex items-center gap-2 px-4 text-sm font-medium text-foreground/80" data-task-output-heading>
+            <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
+          </h3>}
+          <ResponseCard
+            text={response.text}
+            artifactVersions={response.artifactVersions}
+            researchActivities={activities}
+            researchSources={researchSources}
+            isStreaming={response.isStreaming}
+                isAnswerPreview={response.isAnswerPreview}
+            isTurnComplete={isComplete}
+            streamStartTime={response.streamStartTime}
+            completedRevealStartTime={response.completedRevealStartTime}
+            sessionId={sessionId}
+            onOpenFile={onOpenFile}
+            onOpenArtifact={onOpenArtifact}
+            onOpenUrl={onOpenUrl}
+            onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
+            variant={response.isPlan ? 'plan' : 'response'}
+            revealIdentity={`${sessionId}:${turnId}:${response.streamKey ?? 'response'}`}
+            messageId={response.messageId}
+            annotations={response.annotations}
+            onAddAnnotation={onAddAnnotation}
+            onRemoveAnnotation={onRemoveAnnotation}
+            onUpdateAnnotation={onUpdateAnnotation}
+            onSaveAndSendFollowUp={onSaveAndSendFollowUp}
+            onAccept={onAcceptPlan}
+            onAcceptWithCompact={onAcceptPlanWithCompact}
+            isLastResponse={isLastResponse}
+            compactMode={compactMode}
+            isCommentary={showCommentary}
+            isTaskProgress={isTaskProgress}
+            taskPreview={taskPreview}
+            onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
+            onRegenerate={onRegenerate}
+            onRetry={isTaskProgress ? undefined : onRetry}
+            sendMessageKey={sendMessageKey}
+            hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
+            openAnnotationRequest={openAnnotationRequest}
+            annotationInteractionMode={annotationInteractionMode}
+            resolveAnnotationResult={resolveAnnotationResult}
+          />
+          </div>
+        </HeightPresence>
       )}
+      </AnimatePresence>
+      )}
+      </GrowingResponse>
+      {supplementShelf}
+      {retryAlreadyInCard ? null : standaloneRetryRow}
     </div>
   )
+}
+
+export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
+  // Context updates skip memo, so a later restyle of a finished pptx still reaches this card.
+  useArtifactSupplements()
+  // A reused component must not carry local folds into another message/session.
+  return <TurnCardContent key={JSON.stringify([props.sessionId, props.turnId])} {...props} />
 }, (prev, next) => {
   // Conservative memoization: only skip re-render for completed, non-streaming turns
   // Active turns (streaming or incomplete) always re-render to show updates
@@ -1857,12 +4188,20 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if compactMode changed (affects ResponseCard footer rendering)
   if (prev.compactMode !== next.compactMode) return false
+  if (prev.onRegenerate !== next.onRegenerate) return false
+  if (prev.onRetry !== next.onRetry) return false
+  if (prev.taskPreview !== next.taskPreview) return false
 
   // Re-render if annotation interaction mode changed (interactive vs tooltip-only)
   if (prev.annotationInteractionMode !== next.annotationInteractionMode) return false
+  if (prev.resolveAnnotationResult !== next.resolveAnnotationResult) return false
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false
+  if (prev.clarifications !== next.clarifications) return false
+  if (prev.awaitingClarification !== next.awaitingClarification) return false
+  if (prev.researchSources !== next.researchSources) return false
+  if (prev.workControls !== next.workControls) return false
 
   // Re-render when response object changes (e.g., annotation updates)
   if (prev.response !== next.response) return false

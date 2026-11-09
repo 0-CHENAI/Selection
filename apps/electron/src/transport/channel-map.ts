@@ -26,23 +26,38 @@ export const CHANNEL_MAP = {
   deleteSession: invoke(RPC_CHANNELS.sessions.DELETE),
   sendMessage: invoke(RPC_CHANNELS.sessions.SEND_MESSAGE),
   cancelProcessing: invoke(RPC_CHANNELS.sessions.CANCEL),
-  getBackgroundTaskOutput: invoke(RPC_CHANNELS.sessions.GET_BACKGROUND_TASK_OUTPUT),
-  stopBackgroundTask: invoke(RPC_CHANNELS.sessions.STOP_BACKGROUND_TASK),
+  killShell: invoke(RPC_CHANNELS.sessions.KILL_SHELL),
+  getTaskOutput: invoke(RPC_CHANNELS.tasks.GET_OUTPUT),
 
   // Tasks (Conductor)
   validateTask: invoke(RPC_CHANNELS.tasks.VALIDATE),
   createTask: invoke(RPC_CHANNELS.tasks.CREATE),
+  saveTask: invoke(RPC_CHANNELS.tasks.SAVE),
   generateTask: invoke(RPC_CHANNELS.tasks.GENERATE),
   runTask: invoke(RPC_CHANNELS.tasks.RUN),
   pauseTask: invoke(RPC_CHANNELS.tasks.PAUSE),
   resumeTask: invoke(RPC_CHANNELS.tasks.RESUME),
   stopTask: invoke(RPC_CHANNELS.tasks.STOP),
+  continueTask: invoke(RPC_CHANNELS.tasks.CONTINUE),
+  respondTaskApproval: invoke(RPC_CHANNELS.tasks.RESPOND_APPROVAL),
+  updateTaskRunLimits: invoke(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS),
   getTask: invoke(RPC_CHANNELS.tasks.GET),
   listTasks: invoke(RPC_CHANNELS.tasks.LIST),
+  listTaskTemplates: invoke(RPC_CHANNELS.tasks.LIST_TEMPLATES),
+  getTaskTemplate: invoke(RPC_CHANNELS.tasks.GET_TEMPLATE),
+  saveTaskTemplate: invoke(RPC_CHANNELS.tasks.SAVE_TEMPLATE),
+  deleteTaskTemplate: invoke(RPC_CHANNELS.tasks.DELETE_TEMPLATE),
+  createTaskFromTemplate: invoke(RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE),
+  listTaskRuns: invoke(RPC_CHANNELS.tasks.LIST_RUNS),
+  patchTaskRun: invoke(RPC_CHANNELS.tasks.PATCH_RUN),
+  applyTaskRunRevision: invoke(RPC_CHANNELS.tasks.APPLY_RUN_REVISION),
+  inspectTaskRun: invoke(RPC_CHANNELS.tasks.INSPECT_RUN),
   getTaskResults: invoke(RPC_CHANNELS.tasks.GET_RESULTS),
   onTaskGenerated: listener(RPC_CHANNELS.tasks.GENERATED),
+  onTaskRunChanged: listener(RPC_CHANNELS.tasks.RUN_CHANGED),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
+  respondToClarification: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CLARIFICATION),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),
   exportSession: invoke(RPC_CHANNELS.sessions.EXPORT),
   importSession: invoke(RPC_CHANNELS.sessions.IMPORT),
@@ -158,6 +173,16 @@ export const CHANNEL_MAP = {
   copilotLogout: invoke(RPC_CHANNELS.copilot.LOGOUT),
   onCopilotDeviceCode: listener(RPC_CHANNELS.copilot.DEVICE_CODE),
 
+  // Kimi Code OAuth (device flow)
+  startKimiOAuth: invoke(RPC_CHANNELS.kimi.START_OAUTH),
+  cancelKimiOAuth: invoke(RPC_CHANNELS.kimi.CANCEL_OAUTH),
+  onKimiDeviceCode: listener(RPC_CHANNELS.kimi.DEVICE_CODE),
+
+  // xAI OAuth (SuperGrok / X Premium device flow)
+  startXaiOAuth: invoke(RPC_CHANNELS.xai.START_OAUTH),
+  cancelXaiOAuth: invoke(RPC_CHANNELS.xai.CANCEL_OAUTH),
+  onXaiDeviceCode: listener(RPC_CHANNELS.xai.DEVICE_CODE),
+
   // Server info (REMOTE_ELIGIBLE)
   getServerHomeDir: invoke(RPC_CHANNELS.server.HOME_DIR),
 
@@ -171,10 +196,8 @@ export const CHANNEL_MAP = {
   testLlmConnectionSetup: invoke(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP),
   getDefaultThinkingLevel: invoke(RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL),
   setDefaultThinkingLevel: invoke(RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL),
-  getAutoCompactWindow: invoke(RPC_CHANNELS.settings.GET_AUTO_COMPACT_WINDOW),
-  setAutoCompactWindow: invoke(RPC_CHANNELS.settings.SET_AUTO_COMPACT_WINDOW),
-  getSubagentModel: invoke(RPC_CHANNELS.settings.GET_SUBAGENT_MODEL),
-  setSubagentModel: invoke(RPC_CHANNELS.settings.SET_SUBAGENT_MODEL),
+  getSharedProjectMemoryEnabled: invoke(RPC_CHANNELS.settings.GET_SHARED_PROJECT_MEMORY_ENABLED),
+  setSharedProjectMemoryEnabled: invoke(RPC_CHANNELS.settings.SET_SHARED_PROJECT_MEMORY_ENABLED),
   getNetworkProxySettings: invoke(RPC_CHANNELS.settings.GET_NETWORK_PROXY),
   setNetworkProxySettings: invoke(RPC_CHANNELS.settings.SET_NETWORK_PROXY),
 
@@ -182,10 +205,15 @@ export const CHANNEL_MAP = {
   getPiApiKeyProviders: invoke(RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS),
   getPiProviderBaseUrl: invoke(RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL),
   getPiProviderModels: invoke(RPC_CHANNELS.pi.GET_PROVIDER_MODELS),
+  fetchCustomEndpointModels: invoke(RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS),
 
   // Session-specific model
   getSessionModel: invoke(RPC_CHANNELS.sessions.GET_MODEL),
   setSessionModel: invoke(RPC_CHANNELS.sessions.SET_MODEL),
+  setSessionSwarmEnabled: invoke(RPC_CHANNELS.sessions.SET_SWARM_ENABLED),
+  getSessionSwarmRunDetails: invoke(RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS),
+  updateSessionSwarmBudget: invoke(RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET),
+  stopSessionSwarm: invoke(RPC_CHANNELS.sessions.STOP_SWARM),
 
   // Workspace Settings
   getWorkspaceSettings: invoke(RPC_CHANNELS.workspace.SETTINGS_GET),
@@ -196,6 +224,16 @@ export const CHANNEL_MAP = {
 
   // Filesystem search
   searchFiles: invoke(RPC_CHANNELS.fs.SEARCH),
+  getBodyFeedbackDetails: invoke(RPC_CHANNELS.artifacts.BODY_FEEDBACK),
+  officePreview: invoke(RPC_CHANNELS.artifacts.OFFICE_PREVIEW),
+  getOfficeFiles: invoke(RPC_CHANNELS.artifacts.OFFICE_FILES),
+  artifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK),
+  previewArtifactVersion: invoke(RPC_CHANNELS.artifacts.PREVIEW),
+  cleanupArtifactVersions: invoke(RPC_CHANNELS.artifacts.CLEANUP),
+  getArtifactFeedbackContext: invoke(RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT),
+  listArtifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK_LIST),
+  manageArtifact: invoke(RPC_CHANNELS.artifacts.MANAGE),
+  statPath: invoke(RPC_CHANNELS.fs.STAT_PATH),
 
   // Server filesystem browsing (remote mode)
   listServerDirectory: invoke(RPC_CHANNELS.fs.LIST_DIRECTORY),
@@ -232,6 +270,8 @@ export const CHANNEL_MAP = {
   getDefaultPermissionsConfig: invoke(RPC_CHANNELS.permissions.GET_DEFAULTS),
   onDefaultPermissionsChanged: listener(RPC_CHANNELS.permissions.DEFAULTS_CHANGED),
   getMcpTools: invoke(RPC_CHANNELS.sources.GET_MCP_TOOLS),
+  retryMcpConnection: invoke(RPC_CHANNELS.sources.RETRY_CONNECTION),
+  setSourceDisplayTitle: invoke(RPC_CHANNELS.sources.SET_DISPLAY_TITLE),
 
   // Session content search
   searchSessionContent: invoke(RPC_CHANNELS.sessions.SEARCH_CONTENT),
@@ -244,10 +284,18 @@ export const CHANNEL_MAP = {
 
   // Skills
   getSkills: invoke(RPC_CHANNELS.skills.GET),
+  getPptCatalog: invoke(RPC_CHANNELS.skills.GET_PPT_CATALOG),
+  getPptTemplatePages: invoke(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES),
+  getPptTemplatePreview: invoke(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW),
+  importPptTemplate: invoke(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE),
+  renamePptTemplate: invoke(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE),
+  deletePptTemplate: invoke(RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE),
+  exportPptTemplate: invoke(RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE),
   getSkillFiles: invoke(RPC_CHANNELS.skills.GET_FILES),
   deleteSkill: invoke(RPC_CHANNELS.skills.DELETE),
   openSkillInEditor: invoke(RPC_CHANNELS.skills.OPEN_EDITOR),
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
+  setSkillDisplayTitle: invoke(RPC_CHANNELS.skills.SET_DISPLAY_TITLE),
   onSkillsChanged: listener(RPC_CHANNELS.skills.CHANGED),
 
   // Statuses
@@ -297,8 +345,7 @@ export const CHANNEL_MAP = {
   setNotificationsEnabled: invoke(RPC_CHANNELS.notification.SET_ENABLED),
 
   // Input settings
-  getAutoCapitalisation: invoke(RPC_CHANNELS.input.GET_AUTO_CAPITALISATION),
-  setAutoCapitalisation: invoke(RPC_CHANNELS.input.SET_AUTO_CAPITALISATION),
+
   getSendMessageKey: invoke(RPC_CHANNELS.input.GET_SEND_MESSAGE_KEY),
   setSendMessageKey: invoke(RPC_CHANNELS.input.SET_SEND_MESSAGE_KEY),
   getSpellCheck: invoke(RPC_CHANNELS.input.GET_SPELL_CHECK),
@@ -316,27 +363,13 @@ export const CHANNEL_MAP = {
   getBrowserToolEnabled: invoke(RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED),
   setBrowserToolEnabled: invoke(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED),
 
-  // Prompt caching & context
-  getExtendedPromptCache: invoke(RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE),
-  setExtendedPromptCache: invoke(RPC_CHANNELS.caching.SET_EXTENDED_PROMPT_CACHE),
-  getEnable1MContext: invoke(RPC_CHANNELS.caching.GET_ENABLE_1M_CONTEXT),
-  setEnable1MContext: invoke(RPC_CHANNELS.caching.SET_ENABLE_1M_CONTEXT),
-
-  // RTK token optimization
-  getRtkEnabled: invoke(RPC_CHANNELS.rtk.GET_ENABLED),
-  setRtkEnabled: invoke(RPC_CHANNELS.rtk.SET_ENABLED),
-  getRtkStatus: invoke(RPC_CHANNELS.rtk.GET_STATUS),
-  getRtkGain: invoke(RPC_CHANNELS.rtk.GET_GAIN),
-
-  // Decision model (Jev)
-  getDecisionLayerSettings: invoke(RPC_CHANNELS.decisions.GET_SETTINGS),
-  setDecisionLayerSettings: invoke(RPC_CHANNELS.decisions.SET_SETTINGS),
-  getDecisionLayerStatus: invoke(RPC_CHANNELS.decisions.GET_STATUS),
-  setDecisionApiKey: invoke(RPC_CHANNELS.decisions.SET_API_KEY),
-  deleteDecisionApiKey: invoke(RPC_CHANNELS.decisions.DELETE_API_KEY),
-  testDecisionConnection: invoke(RPC_CHANNELS.decisions.TEST),
-  probeDecisionServer: invoke(RPC_CHANNELS.decisions.PROBE_SERVER),
-  getDecisionUsage: invoke(RPC_CHANNELS.decisions.GET_USAGE),
+  // Advanced capability settings
+  getAdvancedSettings: invoke(RPC_CHANNELS.settings.GET_ADVANCED),
+  setDagOrchestrationEnabled: invoke(RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED),
+  setSwarmAgentsEnabled: invoke(RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED),
+  setAnySearchApiKey: invoke(RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY),
+  setSearchSettings: invoke(RPC_CHANNELS.settings.SET_SEARCH_SETTINGS),
+  setSearchProviderApiKey: invoke(RPC_CHANNELS.settings.SET_SEARCH_PROVIDER_API_KEY),
 
   // Badge
   refreshBadge: invoke(RPC_CHANNELS.badge.REFRESH),
@@ -351,19 +384,6 @@ export const CHANNEL_MAP = {
 
   // Git
   getGitBranch: invoke(RPC_CHANNELS.git.GET_BRANCH),
-  listCodingRepos: invoke(RPC_CHANNELS.git.LIST_REPOS),
-  createCodingWorktree: invoke(RPC_CHANNELS.git.CREATE_WORKTREE),
-
-  // PR watcher (Coding mode chat-header chip)
-  prWatchSubscribe: invoke(RPC_CHANNELS.prWatch.SUBSCRIBE),
-  prWatchUnsubscribe: invoke(RPC_CHANNELS.prWatch.UNSUBSCRIBE),
-  prWatchRefresh: invoke(RPC_CHANNELS.prWatch.REFRESH),
-  prWatchGetDetails: invoke(RPC_CHANNELS.prWatch.GET_DETAILS),
-  prWatchBind: invoke(RPC_CHANNELS.prWatch.BIND),
-  prWatchUnbind: invoke(RPC_CHANNELS.prWatch.UNBIND),
-  prWatchSetAutoMerge: invoke(RPC_CHANNELS.prWatch.SET_AUTO_MERGE),
-  prWatchSetAutoFix: invoke(RPC_CHANNELS.prWatch.SET_AUTO_FIX),
-  onPrWatchChanged: listener(RPC_CHANNELS.prWatch.CHANGED),
   checkGitBash: invoke(RPC_CHANNELS.gitbash.CHECK),
   browseForGitBash: invoke(RPC_CHANNELS.gitbash.BROWSE),
   setGitBashPath: invoke(RPC_CHANNELS.gitbash.SET_PATH),
@@ -386,6 +406,7 @@ export const CHANNEL_MAP = {
 
   // Browser pane management
   'browserPane.create': invoke(RPC_CHANNELS.browserPane.CREATE),
+  'browserPane.openHtmlFile': invoke(RPC_CHANNELS.browserPane.OPEN_HTML_FILE),
   'browserPane.destroy': invoke(RPC_CHANNELS.browserPane.DESTROY),
   'browserPane.list': invoke(RPC_CHANNELS.browserPane.LIST),
   'browserPane.navigate': invoke(RPC_CHANNELS.browserPane.NAVIGATE),
@@ -394,6 +415,7 @@ export const CHANNEL_MAP = {
   'browserPane.reload': invoke(RPC_CHANNELS.browserPane.RELOAD),
   'browserPane.stop': invoke(RPC_CHANNELS.browserPane.STOP),
   'browserPane.focus': invoke(RPC_CHANNELS.browserPane.FOCUS),
+  'browserPane.openInDefaultBrowser': invoke(RPC_CHANNELS.browserPane.OPEN_IN_DEFAULT_BROWSER),
   'browserPane.emptyStateLaunch': invoke(RPC_CHANNELS.browserPane.LAUNCH),
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),
   'browserPane.onRemoved': listener(RPC_CHANNELS.browserPane.REMOVED),
@@ -421,34 +443,9 @@ export const CHANNEL_MAP = {
   deleteProjectAsset: invoke(RPC_CHANNELS.projects.DELETE_ASSET),
   onProjectsChanged: listener(RPC_CHANNELS.projects.CHANGED),
 
-  // Pages
-  getPages: invoke(RPC_CHANNELS.pages.GET),
-  getPage: invoke(RPC_CHANNELS.pages.GET_ONE),
-  createPage: invoke(RPC_CHANNELS.pages.CREATE),
-  updatePage: invoke(RPC_CHANNELS.pages.UPDATE),
-  deletePage: invoke(RPC_CHANNELS.pages.DELETE),
-  getPageContent: invoke(RPC_CHANNELS.pages.GET_CONTENT),
-  setPageContent: invoke(RPC_CHANNELS.pages.SET_CONTENT),
-  getPageData: invoke(RPC_CHANNELS.pages.GET_DATA),
-  listPageGrants: invoke(RPC_CHANNELS.pages.LIST_GRANTS),
-  issuePageGrant: invoke(RPC_CHANNELS.pages.ISSUE_GRANT),
-  revokePageGrant: invoke(RPC_CHANNELS.pages.REVOKE_GRANT),
-  createPageLease: invoke(RPC_CHANNELS.pages.CREATE_LEASE),
-  releasePageLease: invoke(RPC_CHANNELS.pages.RELEASE_LEASE),
-  executePageAction: invoke(RPC_CHANNELS.pages.EXECUTE_ACTION),
-  cancelPageAction: invoke(RPC_CHANNELS.pages.CANCEL_ACTION),
-  getPageShareCapabilities: invoke(RPC_CHANNELS.pages.GET_SHARE_CAPABILITIES),
-  getPageShareDataScan: invoke(RPC_CHANNELS.pages.GET_SHARE_DATA_SCAN),
-  publishPage: invoke(RPC_CHANNELS.pages.PUBLISH),
-  setPagePublicationPassword: invoke(RPC_CHANNELS.pages.SET_PUBLICATION_PASSWORD),
-  unpublishPage: invoke(RPC_CHANNELS.pages.UNPUBLISH),
-  publishPageAsClaudeArtifact: invoke(RPC_CHANNELS.pages.PUBLISH_CLAUDE_ARTIFACT),
-  getPageThumbnail: invoke(RPC_CHANNELS.pages.GET_THUMBNAIL),
-  regeneratePageThumbnail: invoke(RPC_CHANNELS.pages.REGENERATE_THUMBNAIL),
-  onPagesChanged: listener(RPC_CHANNELS.pages.CHANGED),
-
   // Automations
   getAutomations: invoke(RPC_CHANNELS.automations.GET),
+  validateAutomations: invoke(RPC_CHANNELS.automations.VALIDATE),
   testAutomation: invoke(RPC_CHANNELS.automations.TEST),
   setAutomationEnabled: invoke(RPC_CHANNELS.automations.SET_ENABLED),
   duplicateAutomation: invoke(RPC_CHANNELS.automations.DUPLICATE),
@@ -458,32 +455,33 @@ export const CHANNEL_MAP = {
   replayAutomation: invoke(RPC_CHANNELS.automations.REPLAY),
   onAutomationsChanged: listener(RPC_CHANNELS.automations.CHANGED),
 
-  // Resources (cross-workspace export/import)
+  // Resources (cross-workspace export/import/copy)
   exportResources: invoke(RPC_CHANNELS.resources.EXPORT),
+  previewResourceImport: invoke(RPC_CHANNELS.resources.PREVIEW_IMPORT),
   importResources: invoke(RPC_CHANNELS.resources.IMPORT),
+  openResourceBundleFile: invoke(RPC_CHANNELS.resources.OPEN_BUNDLE_FILE),
+  openMcpJsonFile: invoke(RPC_CHANNELS.resources.OPEN_MCP_JSON_FILE),
+  openSkillImportFile: invoke(RPC_CHANNELS.resources.OPEN_SKILL_IMPORT_FILE),
+  previewMcpJsonImport: invoke(RPC_CHANNELS.resources.PREVIEW_MCP_JSON),
+  importMcpJson: invoke(RPC_CHANNELS.resources.IMPORT_MCP_JSON),
+  previewSkillFileImport: invoke(RPC_CHANNELS.resources.PREVIEW_SKILL_FILE),
+  importSkillFile: invoke(RPC_CHANNELS.resources.IMPORT_SKILL_FILE),
+  saveResourceBundleFile: invoke(RPC_CHANNELS.resources.SAVE_BUNDLE_FILE),
+  copyResourcesBetweenWorkspaces: invoke(RPC_CHANNELS.resources.COPY_BETWEEN),
 
   // Messaging gateway
   getMessagingConfig: invoke(RPC_CHANNELS.messaging.GET_CONFIG),
   updateMessagingConfig: invoke(RPC_CHANNELS.messaging.UPDATE_CONFIG),
-  testTelegramToken: invoke(RPC_CHANNELS.messaging.TEST_TELEGRAM),
-  saveTelegramToken: invoke(RPC_CHANNELS.messaging.SAVE_TELEGRAM),
   testLarkCredentials: invoke(RPC_CHANNELS.messaging.TEST_LARK),
   saveLarkCredentials: invoke(RPC_CHANNELS.messaging.SAVE_LARK),
   disconnectMessagingPlatform: invoke(RPC_CHANNELS.messaging.DISCONNECT),
   forgetMessagingPlatform: invoke(RPC_CHANNELS.messaging.FORGET),
   getMessagingBindings: invoke(RPC_CHANNELS.messaging.GET_BINDINGS),
   generateMessagingPairingCode: invoke(RPC_CHANNELS.messaging.GENERATE_CODE),
-  generateMessagingSupergroupCode: invoke(RPC_CHANNELS.messaging.GENERATE_SUPERGROUP_CODE),
-  getMessagingSupergroup: invoke(RPC_CHANNELS.messaging.GET_SUPERGROUP),
-  unbindMessagingSupergroup: invoke(RPC_CHANNELS.messaging.UNBIND_SUPERGROUP),
   unbindMessagingSession: invoke(RPC_CHANNELS.messaging.UNBIND),
   unbindMessagingBinding: invoke(RPC_CHANNELS.messaging.UNBIND_BINDING),
   onMessagingBindingChanged: listener(RPC_CHANNELS.messaging.BINDING_CHANGED),
   onMessagingPlatformStatus: listener(RPC_CHANNELS.messaging.PLATFORM_STATUS),
-  startWhatsAppConnect: invoke(RPC_CHANNELS.messaging.WA_START_CONNECT),
-  submitWhatsAppPhone: invoke(RPC_CHANNELS.messaging.WA_SUBMIT_PHONE),
-  onWhatsAppEvent: listener(RPC_CHANNELS.messaging.WA_UI_EVENT),
-
   // Messaging access control (Phase 3)
   getMessagingPlatformOwners: invoke(RPC_CHANNELS.messaging.GET_PLATFORM_OWNERS),
   setMessagingPlatformOwners: invoke(RPC_CHANNELS.messaging.SET_PLATFORM_OWNERS),

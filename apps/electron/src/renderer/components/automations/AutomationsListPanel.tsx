@@ -12,26 +12,23 @@
 import * as React from 'react'
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAtomValue } from 'jotai'
-import { AlertCircle, Webhook } from 'lucide-react'
-import { automationLoadIssuesAtom } from '@/atoms/automations'
-import { Info_Alert } from '@/components/info/Info_Alert'
-import { Info_Badge } from '@/components/info/Info_Badge'
+import { Loader2, Webhook } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { EntityRow } from '@/components/ui/entity-row'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { automationCreationKey } from './creation-context'
 import { SessionSearchHeader } from '@/components/app-shell/SessionSearchHeader'
 import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
 import { AutomationAvatar } from './AutomationAvatar'
 import { SendResourceToWorkspaceDialog } from '@/components/app-shell/SendResourceToWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import { automationSelection } from '@/hooks/useEntitySelection'
-import { APP_EVENTS, AGENT_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter } from './types'
+import { APP_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter, type TestResult } from './types'
 import { formatShortRelativeTime } from './utils'
 
 const {
@@ -39,12 +36,22 @@ const {
 } = automationSelection
 
 
+/** Tiny inline badge used for event name and action type in automation rows */
+function MicroBadge({ children, colorClass }: { children: React.ReactNode; colorClass: string }) {
+  return (
+    <span className={cn('shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded', colorClass)}>
+      {children}
+    </span>
+  )
+}
+
 // ============================================================================
 // Automation Item
 // ============================================================================
 
 interface AutomationItemProps {
   automation: AutomationListItem
+  testResult?: TestResult
   isSelected: boolean
   isInMultiSelect: boolean
   isMultiSelectActive: boolean
@@ -55,12 +62,15 @@ interface AutomationItemProps {
   onDelete: () => void
   onToggleEnabled: () => void
   onTest: () => void
+  onSimulateMatch?: () => void
   onDuplicate: () => void
   onSendToWorkspace?: () => void
+  onExport?: () => void
 }
 
 function AutomationItem({
   automation,
+  testResult,
   isSelected,
   isInMultiSelect,
   isMultiSelectActive,
@@ -71,10 +81,13 @@ function AutomationItem({
   onDelete,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onSendToWorkspace,
+  onExport,
 }: AutomationItemProps) {
   const { t } = useTranslation()
+  const isTestRunning = testResult?.state === 'running'
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (e.button === 2) {
       // Right-click: auto-add to selection if multi-select active
@@ -96,33 +109,51 @@ function AutomationItem({
 
   return (
     <EntityRow
-      className="automation-item"
-      // Disabled automations read dimmer through the solved tertiary text (AA), not a 50% opacity row
-      titleClassName={!automation.enabled ? 'text-tertiary' : undefined}
+      className={cn('automation-item', !automation.enabled && 'opacity-50')}
       showSeparator={!isFirst}
       separatorClassName="pl-10 pr-4"
       isSelected={isSelected}
       isInMultiSelect={isInMultiSelect}
       onMouseDown={handleClick}
-      icon={<AutomationAvatar event={automation.event} size="sm" className={!automation.enabled ? 'opacity-50' : undefined} />}
+      buttonProps={{
+        onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          onClick()
+        },
+      }}
+      icon={<AutomationAvatar event={automation.event} size="sm" />}
       title={automation.name}
-      // Trigger · actions as one quiet line (it was two pills per row): the same anatomy as the session
-      // and source rows, with the last run as the title line's meta.
-      subtitle={[
-        getEventDisplayName(automation.event),
-        automation.actions.some(a => a.type === 'prompt') ? t('automations.badgePrompt') : null,
-        automation.actions.some(a => a.type === 'webhook') ? t('automations.badgeWebhook') : null,
-        automation.actions.some(a => a.type === 'script') ? t('automations.badgeScript') : null,
-      ].filter(Boolean).join(' · ')}
-      subtitleTrailing={automation.issues ? (
-        // ml-auto: a status, so it sits on the row's right edge (the trailing slot is a left-filled 55% label budget)
-        <Info_Badge color="destructive" className="ml-auto shrink-0">{t('automations.notRunning')}</Info_Badge>
-      ) : undefined}
-      titleTrailing={
-        automation.lastExecutedAt ? (
+      badges={
+        <>
+          <MicroBadge colorClass="bg-foreground/8 text-foreground/60">
+            {getEventDisplayName(automation.event)}
+          </MicroBadge>
+          {automation.actions.some(a => a.type === 'prompt') && (
+            <MicroBadge colorClass="bg-accent/10 text-accent">
+              {t('automations.badgePrompt')}
+            </MicroBadge>
+          )}
+          {automation.actions.some(a => a.type === 'webhook') && (
+            <MicroBadge colorClass="bg-orange-500/10 text-orange-600 dark:text-orange-400">
+              {t('automations.badgeWebhook')}
+            </MicroBadge>
+          )}
+        </>
+      }
+      trailing={
+        isTestRunning ? (
+          <span
+            className="shrink-0 text-muted-foreground"
+            role="status"
+            aria-label={t('automations.testRunning')}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          </span>
+        ) : automation.lastExecutedAt ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="shrink-0 cursor-default whitespace-nowrap text-label-sm text-tertiary tabular-nums">
+              <span className="shrink-0 text-[11px] text-foreground/40 whitespace-nowrap cursor-default">
                 {formatShortRelativeTime(automation.lastExecutedAt)}
               </span>
             </TooltipTrigger>
@@ -137,42 +168,18 @@ function AutomationItem({
           automationId={automation.id}
           automationName={automation.name}
           enabled={automation.enabled}
+          testResult={testResult}
           onToggleEnabled={onToggleEnabled}
           onTest={onTest}
+          onSimulateMatch={onSimulateMatch}
           onDuplicate={onDuplicate}
           onDelete={onDelete}
           onSendToWorkspace={onSendToWorkspace}
+          onExport={onExport}
         />
       }
       contextMenuContent={isMultiSelectActive && isInMultiSelect ? <BatchAutomationMenu /> : undefined}
     />
-  )
-}
-
-// ============================================================================
-// NotRunningBanner
-// ============================================================================
-
-/**
- * Shown when something in automations.json won't run. Rows that won't run carry
- * a "Not running" chip (their detail page says why); problems no row can show —
- * e.g. the file isn't valid JSON — are listed here.
- */
-function NotRunningBanner({ fileIssues, hasRowIssues }: { fileIssues: string[]; hasRowIssues: boolean }) {
-  const { t } = useTranslation()
-  if (fileIssues.length === 0 && !hasRowIssues) return null
-  return (
-    <div className="px-gutter pt-2 pb-1">
-      <Info_Alert variant="error" inline icon={<AlertCircle />}>
-        <Info_Alert.Title>{t('automations.notRunningBannerTitle')}</Info_Alert.Title>
-        <Info_Alert.Description>
-          {fileIssues.map((message, i) => (
-            <span key={i} className="block break-words">{message}</span>
-          ))}
-          <span className="block">{t('automations.notRunningBannerHint')}</span>
-        </Info_Alert.Description>
-      </Info_Alert>
-    </div>
   )
 }
 
@@ -182,11 +189,13 @@ function NotRunningBanner({ fileIssues, hasRowIssues }: { fileIssues: string[]; 
 
 export interface AutomationsListPanelProps {
   automations: AutomationListItem[]
+  automationTestResults?: Record<string, TestResult>
   automationFilter?: AutomationListFilter | null
   onAutomationClick: (automationId: string) => void
   onDeleteAutomation?: (automationId: string) => void
   onToggleAutomation?: (automationId: string) => void
   onTestAutomation?: (automationId: string) => void
+  onSimulateMatchAutomation?: (automationId: string) => void
   onDuplicateAutomation?: (automationId: string) => void
   selectedAutomationId?: string | null
   workspaceRootPath?: string
@@ -195,11 +204,13 @@ export interface AutomationsListPanelProps {
 
 export function AutomationsListPanel({
   automations,
+  automationTestResults,
   automationFilter,
   onAutomationClick,
   onDeleteAutomation,
   onToggleAutomation,
   onTestAutomation,
+  onSimulateMatchAutomation,
   onDuplicateAutomation,
   selectedAutomationId,
   workspaceRootPath,
@@ -215,6 +226,7 @@ export function AutomationsListPanel({
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const [sendResourceId, setSendResourceId] = useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = useState('')
+  const [exportResourceId, setExportResourceId] = useState<string | null>(null)
 
   const {
     select: selectAutomation,
@@ -224,9 +236,6 @@ export function AutomationsListPanel({
     isSelected: isInSelection,
   } = useAutomationSelection()
 
-  const fileIssues = useAtomValue(automationLoadIssuesAtom)
-  const banner = <NotRunningBanner fileIssues={fileIssues} hasRowIssues={automations.some(a => a.issues)} />
-
   const isSearchMode = searchActive && searchQuery.length >= 2
 
   // Filter automations based on sidebar-driven filter (from route)
@@ -235,7 +244,6 @@ export function AutomationsListPanel({
     if (kind === 'all') return automations
     if (kind === 'scheduled') return automations.filter(a => a.event === 'SchedulerTick')
     if (kind === 'app') return automations.filter(a => (APP_EVENTS as string[]).includes(a.event) && a.event !== 'SchedulerTick')
-    if (kind === 'agent') return automations.filter(a => (AGENT_EVENTS as string[]).includes(a.event))
     return automations
   }, [automations, automationFilter?.kind])
 
@@ -278,7 +286,6 @@ export function AutomationsListPanel({
   if (automations.length === 0) {
     return (
       <div className={cn('flex flex-col flex-1 min-h-0', className)}>
-        {banner}
         <EntityListEmptyScreen
           icon={<Webhook />}
           title={t('automations.noAutomationsConfigured')}
@@ -287,13 +294,14 @@ export function AutomationsListPanel({
         >
           {workspaceRootPath && (
             <EditPopover
+              key={`${workspaceRootPath}:${automationCreationKey(automationFilter?.kind)}`}
               align="center"
               trigger={
-                <Button variant="secondary" size="md">
+                <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
                   {t('automations.addAutomation')}
-                </Button>
+                </button>
               }
-              {...getEditConfig('automation-config', workspaceRootPath)}
+              {...getEditConfig(automationCreationKey(automationFilter?.kind), workspaceRootPath)}
             />
           )}
         </EntityListEmptyScreen>
@@ -317,18 +325,16 @@ export function AutomationsListPanel({
         />
       )}
 
-      {banner}
-
       {/* Filtered empty state */}
       {filteredAutomations.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-1">
-          <p className="text-label text-tertiary">
+          <p className="text-sm text-muted-foreground">
             {isSearchMode ? t('automations.noAutomationsFound') : t('automations.noAutomationsConfigured')}
           </p>
           {isSearchMode && (
             <button
               onClick={() => setSearchQuery('')}
-              className="rounded-xs text-label-sm text-accent hover:underline"
+              className="text-xs text-foreground hover:underline"
             >
               {t('automations.clearSearch')}
             </button>
@@ -342,6 +348,7 @@ export function AutomationsListPanel({
                 <AutomationItem
                   key={automation.id}
                   automation={automation}
+                  testResult={automationTestResults?.[automation.id]}
                   isSelected={selectedAutomationId === automation.id}
                   isInMultiSelect={isMultiSelectActive && isInSelection(automation.id)}
                   isMultiSelectActive={isMultiSelectActive}
@@ -352,12 +359,14 @@ export function AutomationsListPanel({
                   onDelete={() => onDeleteAutomation?.(automation.id)}
                   onToggleEnabled={() => onToggleAutomation?.(automation.id)}
                   onTest={() => onTestAutomation?.(automation.id)}
+                  onSimulateMatch={() => onSimulateMatchAutomation?.(automation.id)}
                   onDuplicate={() => onDuplicateAutomation?.(automation.id)}
                   onSendToWorkspace={hasOtherWorkspaces ? () => {
                     setSendResourceId(automation.id)
                     setSendResourceLabel(automation.name)
                     setSendDialogOpen(true)
                   } : undefined}
+                  onExport={() => setExportResourceId(automation.id)}
                 />
               ))}
             </div>
@@ -375,6 +384,15 @@ export function AutomationsListPanel({
           resourceLabel={sendResourceLabel}
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
+        />
+      )}
+      {exportResourceId && activeWorkspaceId && (
+        <ResourceTransferDialog
+          open
+          mode="export"
+          workspaceId={activeWorkspaceId}
+          initialSelection={[{ type: 'automation', id: exportResourceId }]}
+          onOpenChange={(isOpen) => { if (!isOpen) setExportResourceId(null) }}
         />
       )}
     </div>

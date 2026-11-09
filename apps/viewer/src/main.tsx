@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
-import { MotionPreferenceProvider } from '@craft-agent/ui/motion'
 import { App } from './App'
 import { setupI18n } from '@craft-agent/shared/i18n'
 import { initReactI18next } from 'react-i18next'
@@ -14,8 +13,6 @@ if (!container) throw new Error('Root element not found')
 
 createRoot(container).render(
   <React.StrictMode>
-    <MotionPreferenceProvider>
-      <App />
-    </MotionPreferenceProvider>
+    <App />
   </React.StrictMode>
 )

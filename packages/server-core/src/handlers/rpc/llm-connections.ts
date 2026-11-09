@@ -1,5 +1,28 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
+import {
+  addLlmConnection,
+  deleteLlmConnection,
+  deriveBedrockRegionPrefix,
+  fetchCustomEndpointModels,
+  getDefaultLlmConnection,
+  getDefaultModelForConnection,
+  getDefaultModelsForConnection,
+  getLlmConnection,
+  getLlmConnections,
+  isDefaultChatGptOAuthConnectionName,
+  isCompatProvider,
+  isUnsupportedLlmConnection,
+  resolveSetupConnectionName,
+  setDefaultLlmConnection,
+  touchLlmConnection,
+  toBedrockNativeId,
+  UNSUPPORTED_LLM_CONNECTION_MESSAGE,
+  updateLlmConnection,
+  type FetchCustomEndpointModelsInput,
+  type LlmConnection,
+  type LlmConnectionWithStatus,
+} from '@craft-agent/shared/config'
+import { readChatGptPlanDisplayName } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
 import {
@@ -8,7 +31,17 @@ import {
   validateStoredBackendConnection,
 } from '@craft-agent/shared/agent/backend'
 import { getModelRefreshService } from '@craft-agent/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup, resolveSetupTestApiKey, maskApiKey, isMaskedApiKey } from '@craft-agent/server-core/domain'
+import {
+  createBuiltInConnection,
+  parseTestConnectionError,
+  persistableLlmSetupCredential,
+  resolveChatGptOAuthDisplayName,
+  resolveCustomEndpointSetup,
+  setupTestRequiresApiKey,
+  splitModelIdList,
+  validateModelList,
+  validateSetupTestInput,
+} from '@craft-agent/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agent/server-core/handlers'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -17,6 +50,8 @@ import { CLIENT_OPEN_EXTERNAL } from '@craft-agent/server-core/transport'
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
+let kimiOAuthAbort: AbortController | null = null
+let xaiOAuthAbort: AbortController | null = null
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.llmConnections.LIST,
@@ -38,8 +73,13 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.copilot.CANCEL_OAUTH,
   RPC_CHANNELS.copilot.GET_AUTH_STATUS,
   RPC_CHANNELS.copilot.LOGOUT,
+  RPC_CHANNELS.kimi.START_OAUTH,
+  RPC_CHANNELS.kimi.CANCEL_OAUTH,
+  RPC_CHANNELS.xai.START_OAUTH,
+  RPC_CHANNELS.xai.CANCEL_OAUTH,
   RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
   RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
+  RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS,
   RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS,
   RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL,
   RPC_CHANNELS.pi.GET_PROVIDER_MODELS,
@@ -84,27 +124,16 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         isNewConnection = true
       }
 
+      const persistableCredential = persistableLlmSetupCredential(setup.credential)
       const updates: Partial<LlmConnection> = {}
+      let localModelName: string | undefined
       const hasConfiguredBaseUrl = !!setup.baseUrl?.trim()
       if (setup.baseUrl !== undefined) {
         updates.baseUrl = setup.baseUrl?.trim() || undefined
 
-        // Only mutate providerType for API key connections (not OAuth connections)
-        if (isAnthropicProvider(connection.providerType) && connection.authType !== 'oauth') {
-          if (hasConfiguredBaseUrl) {
-            updates.providerType = 'pi_compat'
-            updates.authType = 'api_key_with_endpoint'
-            updates.customEndpoint = { api: 'anthropic-messages' }
-          } else {
-            updates.providerType = 'anthropic'
-            updates.authType = 'api_key'
-            updates.models = getDefaultModelsForConnection('anthropic')
-            updates.defaultModel = getDefaultModelForConnection('anthropic')
-          }
-        }
-
-        // Pi API key flow: store baseUrl on the connection (Pi SDK doesn't use it yet,
-        // but it's persisted for future backend support)
+        // Leftover official Anthropic connections are no longer a writable
+        // product path. Do not recreate anthropic / anthropic-messages here;
+        // SETUP rejects unsupported pending connections below.
 
       }
 
@@ -112,7 +141,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         updates.defaultModel = setup.defaultModel ?? undefined
       }
       if (setup.models !== undefined) {
-        updates.models = setup.models ?? undefined
+        // Setup DTOs store a subset of ModelDefinition (`id`, optional name /
+        // supportsImages / contextWindow). Storage already passthrough-validates
+        // that shape; the connection type still lists ModelDefinition.
+        updates.models = (setup.models ?? undefined) as LlmConnection['models']
       }
       if (setup.modelSelectionMode !== undefined) {
         updates.modelSelectionMode = setup.modelSelectionMode
@@ -125,17 +157,13 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         updates.providerType = 'pi_compat'
         const branch = resolveCustomEndpointSetup({
           baseUrl: setup.baseUrl ?? undefined,
-          credential: setup.credential ?? undefined,
+          credential: persistableCredential ?? undefined,
           customEndpointApi: customEndpoint.api,
+          preserveExistingCredential: !isNewConnection && connection.authType !== 'none',
         })
         updates.authType = branch.authType
-        if (branch.name !== undefined) updates.name = branch.name
         if (branch.piAuthProvider !== undefined) updates.piAuthProvider = branch.piAuthProvider
-
-        // Brand-name override on first setup only (user-renamed connections aren't clobbered on re-save).
-        if (isNewConnection && !updates.name && setup.baseUrl?.toLowerCase().includes('manifest.build')) {
-          updates.name = 'Manifest'
-        }
+        if (branch.name !== undefined) localModelName = branch.name
       } else if (setup.baseUrl !== undefined) {
         // Base URL was explicitly updated without custom protocol config.
         // Treat this as non-custom mode and clear stale custom endpoint metadata.
@@ -152,18 +180,30 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Skip when custom endpoint protocol is driving routing.
       if (setup.piAuthProvider && !isCustomEndpointCompat) {
         updates.piAuthProvider = setup.piAuthProvider
-        // Update connection name to show the actual provider (e.g. "Craft Agents Backend (Google AI Studio)")
-        const providerName = piAuthProviderDisplayName(setup.piAuthProvider)
-        if (providerName) {
-          updates.name = `Craft Agents Backend (${providerName})`
-        }
         // Only set default models when using standard Pi provider AND user didn't pick explicit models
-        if (!hasConfiguredBaseUrl && !setup.models?.length) {
+        const isCopilotOAuth = connection.authType === 'oauth' && setup.piAuthProvider === 'github-copilot'
+        if (!hasConfiguredBaseUrl && !setup.models?.length && !isCopilotOAuth) {
           updates.models = getDefaultModelsForConnection('pi', setup.piAuthProvider)
           updates.defaultModel = getDefaultModelForConnection('pi', setup.piAuthProvider)
           updates.modelSelectionMode ??= 'automaticallySyncedFromProvider'
         }
       }
+
+      // Provider brand, ORDER, Manifest, or custom hostname. A title the user
+      // edited is kept; the generic "Selection Backend (API Key) N" template
+      // is replaced, including when an existing connection is saved again.
+      const nextName = resolveSetupConnectionName({
+        isNewConnection,
+        currentName: connection.name,
+        existingNames: getLlmConnections().map((item) => item.name),
+        piAuthProvider: isCustomEndpointCompat
+          ? (updates.piAuthProvider ?? connection.piAuthProvider)
+          : setup.piAuthProvider,
+        baseUrl: updates.baseUrl ?? setup.baseUrl ?? connection.baseUrl,
+        isCustomEndpoint: isCustomEndpointCompat,
+        localModelName,
+      })
+      if (nextName) updates.name = nextName
 
       // Pi+Bedrock auth method override — set authType for IAM or environment auth.
       // providerType stays 'pi' (Bedrock routes through Pi SDK).
@@ -213,6 +253,23 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         ...updates,
       }
 
+      if (pendingConnection.providerType === 'pi' && pendingConnection.authType === 'oauth') {
+        // The provider owns OAuth availability; setup must not save a subset.
+        pendingConnection.modelSelectionMode = 'automaticallySyncedFromProvider'
+        updates.modelSelectionMode = 'automaticallySyncedFromProvider'
+        if (setup.models !== undefined) {
+          pendingConnection.models = connection.models
+          delete updates.models
+        }
+        if (setup.defaultModel !== undefined) {
+          const modelIds = (pendingConnection.models ?? []).map(model => typeof model === 'string' ? model : model.id)
+          if (!pendingConnection.defaultModel || !modelIds.includes(pendingConnection.defaultModel)) {
+            pendingConnection.defaultModel = connection.defaultModel
+            delete updates.defaultModel
+          }
+        }
+      }
+
       if (pendingConnection.providerType === 'pi') {
         const modelIds = (pendingConnection.models ?? []).map(m => typeof m === 'string' ? m : m.id)
         deps.platform.logger?.info('Pi setup pending connection snapshot', {
@@ -250,13 +307,30 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         return { success: false, error: 'Default model is required for compatible endpoints.' }
       }
 
+      if (isUnsupportedLlmConnection(pendingConnection)) {
+        return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
+      }
+
       if (isNewConnection) {
         const added = addLlmConnection(pendingConnection)
         if (!added) {
-          deps.platform.logger?.error(`Failed to persist LLM connection: ${setup.slug} (config may be inaccessible)`)
-          return { success: false, error: 'Failed to save connection. Check server logs for details.' }
+          // Slug already exists (retry after a previous persist, or existingSlugs
+          // was stale). Treat as an update so ORDER edit/resubmit does not fail.
+          const existing = getLlmConnection(setup.slug)
+          if (existing) {
+            const updated = updateLlmConnection(setup.slug, updates)
+            if (!updated) {
+              deps.platform.logger?.error(`Failed to update existing LLM connection: ${setup.slug}`)
+              return { success: false, error: 'Failed to update connection. Check server logs for details.' }
+            }
+            deps.platform.logger?.info(`Updated existing LLM connection after add collision: ${setup.slug}`)
+          } else {
+            deps.platform.logger?.error(`Failed to persist LLM connection: ${setup.slug} (config may be inaccessible)`)
+            return { success: false, error: 'Failed to save connection. Check server logs for details.' }
+          }
+        } else {
+          deps.platform.logger?.info(`Created LLM connection: ${setup.slug}`)
         }
-        deps.platform.logger?.info(`Created LLM connection: ${setup.slug}`)
       } else if (Object.keys(updates).length > 0) {
         const updated = updateLlmConnection(setup.slug, updates)
         if (!updated) {
@@ -266,23 +340,26 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         deps.platform.logger?.info(`Updated LLM connection settings: ${setup.slug}`)
       }
 
-      // Store credential if provided (skip masked placeholders from GET_API_KEY)
-      const isMasked = isMaskedApiKey(setup.credential)
-      if (setup.credential && !isMasked) {
+      // Store credential if provided. Empty / whitespace / masked GET_API_KEY
+      // placeholders must not overwrite a previously saved key (#6).
+      if (persistableCredential) {
         const authType = pendingConnection.authType
         if (authType === 'oauth') {
-          await manager.setLlmOAuth(setup.slug, { accessToken: setup.credential })
+          await manager.setLlmOAuth(setup.slug, { accessToken: persistableCredential })
           deps.platform.logger?.info('Saved OAuth access token to LLM connection')
         } else {
-          await manager.setLlmApiKey(setup.slug, setup.credential)
+          await manager.setLlmApiKey(setup.slug, persistableCredential)
           deps.platform.logger?.info('Saved API key to LLM connection')
         }
       }
 
       // Pi+Bedrock IAM credentials — stored separately from API keys
-      if (setup.iamCredentials) {
+      const iam = setup.iamCredentials
+      if (iam?.accessKeyId?.trim() && iam.secretAccessKey?.trim()) {
         await manager.setLlmIamCredentials(setup.slug, {
-          ...setup.iamCredentials,
+          ...iam,
+          accessKeyId: iam.accessKeyId.trim(),
+          secretAccessKey: iam.secretAccessKey.trim(),
           region: setup.awsRegion,
         })
         deps.platform.logger?.info('Saved IAM credentials to LLM connection')
@@ -312,8 +389,16 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
       // Reinitialize auth for the connection that was just created/updated,
       // not the global default (which may be a different connection).
-      await sessionManager.reinitializeAuth(setup.slug)
-      deps.platform.logger?.info('Reinitialized auth after LLM connection setup')
+      // Fail-soft: the connection is already on disk. A thrown auth refresh
+      // must not surface as "Failed to save connection" on the next submit.
+      try {
+        await sessionManager.reinitializeAuth(setup.slug)
+        deps.platform.logger?.info('Reinitialized auth after LLM connection setup')
+      } catch (err) {
+        deps.platform.logger?.warn(
+          `Auth reinit after setup failed for ${setup.slug}: ${err instanceof Error ? err.message : err}`,
+        )
+      }
 
       // Clear "Setup later" flag now that user has configured a provider
       setSetupDeferred(false)
@@ -329,22 +414,13 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   // Unified connection test — uses the agent factory to spawn a real agent subprocess
   // and validate credentials via runMiniCompletion(). Same code path as actual chat.
   server.handle(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@craft-agent/shared/protocol').TestLlmConnectionParams): Promise<import('@craft-agent/shared/protocol').TestLlmConnectionResult> => {
-    const { provider, apiKey, baseUrl, model, piAuthProvider, customEndpoint, connectionSlug } = params
+    const { provider, apiKey, baseUrl, model, piAuthProvider, customEndpoint } = params
+    const trimmedKey = apiKey?.trim() ?? ''
     const allowEmptyApiKey = !setupTestRequiresApiKey(baseUrl)
 
-    // The edit form echoes the stored key back as the GET_API_KEY placeholder;
-    // resolve it to the real credential instead of testing the bullets (OSS #1048).
-    const keyResolution = await resolveSetupTestApiKey(
-      { apiKey, connectionSlug, allowEmptyApiKey },
-      (slug) => getCredentialManager().getLlmApiKey(slug),
-    )
-    if (!keyResolution.ok) {
-      return { success: false, error: keyResolution.error }
+    if (!trimmedKey && !allowEmptyApiKey) {
+      return { success: false, error: 'API key is required' }
     }
-    if (keyResolution.source === 'stored') {
-      deps.platform.logger?.info(`[testLlmConnectionSetup] Using the stored API key of ${connectionSlug}`)
-    }
-    const trimmedKey = keyResolution.apiKey
 
     const setupValidation = validateSetupTestInput({ provider, baseUrl, piAuthProvider })
     if (!setupValidation.valid) {
@@ -356,7 +432,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
     const startedAt = Date.now()
     try {
-      const testModel = model || getDefaultModelForConnection(provider, piAuthProvider)
+      const testModel = splitModelIdList(model ?? '')[0]
+        || getDefaultModelForConnection(provider, piAuthProvider)
       deps.platform.logger?.info(`[testLlmConnectionSetup] Resolved model: ${testModel}`)
       const result = await testBackendConnection({
         provider,
@@ -400,23 +477,30 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   })
 
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_MODELS, async (_ctx, provider: string) => {
-    const { getModels } = await import('@earendil-works/pi-ai/compat')
+    const { listPiProviderPickerModels } = await import('@craft-agent/shared/config')
+    return listPiProviderPickerModels(provider)
+  })
+
+  // Custom-endpoint model catalog. The API key is sent on the request and
+  // never included in logs or in the error returned to the renderer.
+  server.handle(RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS, async (_ctx, input: FetchCustomEndpointModelsInput) => {
+    const baseUrl = input && typeof input === 'object' && typeof input.baseUrl === 'string' ? input.baseUrl : ''
+    const apiKey = input && typeof input === 'object' && typeof input.apiKey === 'string' ? input.apiKey : ''
+    const api = input && typeof input === 'object' ? input.api : undefined
+    if (api !== 'openai-completions' && api !== 'anthropic-messages') {
+      return { ok: false as const, error: 'missing_input' as const }
+    }
     try {
-      const models = getModels(provider as Parameters<typeof getModels>[0])
-      const sorted = [...models].sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
-      return {
-        models: sorted.map(m => ({
-          id: m.id.startsWith('pi/') ? m.id : `pi/${m.id}`,
-          name: m.name,
-          costInput: m.cost.input,
-          costOutput: m.cost.output,
-          contextWindow: m.contextWindow,
-          reasoning: m.reasoning,
-        })),
-        totalCount: models.length,
-      }
+      return await fetchCustomEndpointModels({ baseUrl, apiKey, api })
     } catch {
-      return { models: [], totalCount: 0 }
+      let host = 'invalid-url'
+      try {
+        if (baseUrl.trim()) host = new URL(baseUrl).host
+      } catch {
+        host = 'invalid-url'
+      }
+      deps.platform.logger?.warn(`[fetchCustomEndpointModels] failed host=${host}`)
+      return { ok: false as const, error: 'unavailable' as const }
     }
   })
 
@@ -436,10 +520,19 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     const defaultSlug = getDefaultLlmConnection()
 
     return Promise.all(connections.map(async (conn): Promise<LlmConnectionWithStatus> => {
-      // Check if credentials exist for this connection
-      const hasCredentials = await credentialManager.hasLlmCredentials(conn.slug, conn.authType)
+      const shouldResolveChatGptPlan = conn.providerType === 'pi'
+        && conn.authType === 'oauth'
+        && conn.piAuthProvider === 'openai-codex'
+        && isDefaultChatGptOAuthConnectionName(conn.name)
+      const [hasCredentials, oauth] = await Promise.all([
+        credentialManager.hasLlmCredentials(conn.slug, conn.authType),
+        shouldResolveChatGptPlan ? credentialManager.getLlmOAuth(conn.slug) : Promise.resolve(null),
+      ])
+      const plan = readChatGptPlanDisplayName(oauth?.accessToken)
+        ?? readChatGptPlanDisplayName(oauth?.idToken)
       return {
         ...conn,
+        name: resolveChatGptOAuthDisplayName(conn, plan),
         isAuthenticated: conn.authType === 'none' || hasCredentials,
         isDefault: conn.slug === defaultSlug,
       }
@@ -456,28 +549,67 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     const manager = getCredentialManager()
     const key = await manager.getLlmApiKey(slug)
     if (!key) return null
-    // Provider prefix + mask + last four; the test handler resolves this back by slug
-    return maskApiKey(key)
+    return key
   })
 
   // Save (create or update) an LLM connection
   // If connection.slug exists and is found, updates it; otherwise creates new
   server.handle(RPC_CHANNELS.llmConnections.SAVE, async (_ctx, connection: LlmConnection): Promise<{ success: boolean; error?: string }> => {
     try {
+      if (isUnsupportedLlmConnection(connection)) {
+        const existingLeftover = getLlmConnection(connection.slug)
+        // Leftover Anthropic connections stay on disk. Allow a display-name
+        // rename so Settings can still clean them up; reject every other write.
+        if (!existingLeftover || !isUnsupportedLlmConnection(existingLeftover)) {
+          return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
+        }
+        const name = connection.name.trim()
+        if (!name) {
+          return { success: false, error: 'Connection name is required' }
+        }
+        const renamed = updateLlmConnection(connection.slug, { name })
+        if (!renamed) {
+          return { success: false, error: 'Failed to update connection' }
+        }
+        deps.platform.logger?.info(`Leftover LLM connection renamed: ${connection.slug}`)
+        return { success: true }
+      }
       // Check if this is an update or create
       const existing = getLlmConnection(connection.slug)
       if (existing) {
         // Update existing connection (can't change slug)
         const { slug: _slug, ...updates } = connection
+        if (existing.providerType === 'pi' && existing.authType === 'oauth'
+          && connection.providerType === 'pi' && connection.authType === 'oauth') {
+          // Settings saves may carry a stale snapshot while refresh is in flight.
+          delete updates.models
+          updates.modelSelectionMode = 'automaticallySyncedFromProvider'
+          const modelIds = (existing.models ?? []).map(model => typeof model === 'string' ? model : model.id)
+          if (updates.defaultModel !== undefined && !modelIds.includes(updates.defaultModel)
+            && !(modelIds.length === 0 && updates.defaultModel === '')) {
+            delete updates.defaultModel
+          }
+        }
         const success = updateLlmConnection(connection.slug, updates)
         if (!success) {
           return { success: false, error: 'Failed to update connection' }
         }
       } else {
         // Create new connection
-        const success = addLlmConnection(connection)
+        let newConnection = connection
+        if (connection.providerType === 'pi' && connection.authType === 'oauth') {
+          const models = connection.piAuthProvider === 'github-copilot'
+            ? [] : getDefaultModelsForConnection('pi', connection.piAuthProvider)
+          const ids = models.map(model => typeof model === 'string' ? model : model.id)
+          newConnection = { ...connection, models, modelSelectionMode: 'automaticallySyncedFromProvider',
+            defaultModel: connection.defaultModel && ids.includes(connection.defaultModel) ? connection.defaultModel : ids[0] ?? '' }
+        }
+        const success = addLlmConnection(newConnection)
         if (!success) {
           return { success: false, error: 'Connection with this slug already exists' }
+        }
+        if (newConnection.providerType === 'pi' && newConnection.authType === 'oauth') {
+          refreshModelsInBackground(newConnection.slug, 'connection creation')
         }
       }
       deps.platform.logger?.info(`LLM connection saved: ${connection.slug}`)
@@ -560,6 +692,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   // Set global default LLM connection
   server.handle(RPC_CHANNELS.llmConnections.SET_DEFAULT, async (_ctx, slug: string): Promise<{ success: boolean; error?: string }> => {
     try {
+      const connection = getLlmConnection(slug)
+      if (connection && isUnsupportedLlmConnection(connection)) {
+        return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
+      }
       const success = setDefaultLlmConnection(slug)
       if (success) {
         deps.platform.logger?.info(`Global default LLM connection set to: ${slug}`)
@@ -583,6 +719,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         const connection = getLlmConnection(slug)
         if (!connection) {
           return { success: false, error: 'Connection not found' }
+        }
+        if (isUnsupportedLlmConnection(connection)) {
+          return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
         }
       }
 
@@ -782,20 +921,22 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     success: boolean
     error?: string
   }> => {
+    let flowAbort: AbortController | null = null
     try {
-      const { loginGitHubCopilot } = await import('@craft-agent/shared/auth')
+      const { loginGitHubCopilotWithSdk } = await import('@craft-agent/shared/auth/github-copilot-sdk')
       const credentialManager = getCredentialManager()
 
       // Cancel any previous in-flight flow
       copilotOAuthAbort?.abort()
-      copilotOAuthAbort = new AbortController()
+      flowAbort = new AbortController()
+      copilotOAuthAbort = flowAbort
 
       deps.platform.logger?.info(`Starting GitHub Copilot OAuth device flow for connection: ${connectionSlug}`)
 
-      // App-owned login flow (pi-ai 0.81.x no longer exports one) — handles the
-      // device code flow AND the critical Copilot token exchange that determines
-      // the correct API endpoint for the user's subscription tier via proxy-ep.
-      const credentials = await loginGitHubCopilot({
+      // Use Pi SDK's login flow — this handles the device code flow AND
+      // the critical Copilot token exchange that determines the correct
+      // API endpoint for the user's subscription tier (individual/business/enterprise).
+      const credentials = await loginGitHubCopilotWithSdk({
         onDeviceCode: ({ userCode, verificationUri }) => {
           deps.platform.logger?.info(`[GitHub OAuth] Device code: ${userCode}`)
           pushTyped(server, RPC_CHANNELS.copilot.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
@@ -807,12 +948,21 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
             deps.platform.logger?.warn(`Failed to open browser for GitHub OAuth: ${err}`)
           })
         },
+        onPrompt: async () => {
+          // Pi SDK asks for GitHub Enterprise domain — return empty for github.com
+          return ''
+        },
         onProgress: (message) => {
           deps.platform.logger?.info(`[GitHub OAuth] ${message}`)
         },
-        signal: copilotOAuthAbort.signal,
+        signal: flowAbort.signal,
       })
 
+      // Abort is cooperative. Even if the SDK resolves after cancellation,
+      // never persist credentials from a superseded flow.
+      if (flowAbort.signal.aborted || copilotOAuthAbort !== flowAbort) {
+        throw new Error('GitHub Copilot OAuth flow was cancelled or superseded')
+      }
       copilotOAuthAbort = null
 
       // Store the full OAuth credential:
@@ -829,7 +979,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       refreshModelsInBackground(connectionSlug, 'Copilot auth')
       return { success: true }
     } catch (error) {
-      copilotOAuthAbort = null
+      // A newer login may already own the shared cancellation slot. Do not let
+      // this older flow's completion make the newer flow uncancellable.
+      if (flowAbort && copilotOAuthAbort === flowAbort) copilotOAuthAbort = null
       deps.platform.logger?.error('GitHub Copilot OAuth failed:', error)
       return {
         success: false,
@@ -876,5 +1028,145 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       deps.platform.logger?.error('Failed to clear Copilot credentials:', error)
       return { success: false }
     }
+  })
+
+  // ============================================================
+  // Kimi Code OAuth (device flow via Pi SDK)
+  // ============================================================
+
+  server.handle(RPC_CHANNELS.kimi.START_OAUTH, async (ctx, connectionSlug: string): Promise<{
+    success: boolean
+    error?: string
+  }> => {
+    let flowAbort: AbortController | null = null
+    try {
+      const { loginKimiCodingWithSdk } = await import('@craft-agent/shared/auth/kimi-coding-sdk')
+      const credentialManager = getCredentialManager()
+
+      // Cancel any previous in-flight flow
+      kimiOAuthAbort?.abort()
+      flowAbort = new AbortController()
+      kimiOAuthAbort = flowAbort
+
+      deps.platform.logger?.info(`Starting Kimi Code OAuth device flow for connection: ${connectionSlug}`)
+
+      const credentials = await loginKimiCodingWithSdk({
+        onDeviceCode: ({ userCode, verificationUri }) => {
+          deps.platform.logger?.info(`[Kimi OAuth] Device code: ${userCode}`)
+          pushTyped(server, RPC_CHANNELS.kimi.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
+            userCode,
+            verificationUri,
+          })
+          // verificationUri already embeds the user code (verification_uri_complete)
+          server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, verificationUri).catch(err => {
+            deps.platform.logger?.warn(`Failed to open browser for Kimi OAuth: ${err}`)
+          })
+        },
+        onProgress: (message) => {
+          deps.platform.logger?.info(`[Kimi OAuth] ${message}`)
+        },
+        signal: flowAbort.signal,
+      })
+
+      // Never persist credentials from a cancelled or superseded flow.
+      if (flowAbort.signal.aborted || kimiOAuthAbort !== flowAbort) {
+        throw new Error('Kimi Code OAuth flow was cancelled or superseded')
+      }
+      kimiOAuthAbort = null
+
+      await credentialManager.setLlmOAuth(connectionSlug, {
+        accessToken: credentials.access,
+        refreshToken: credentials.refresh,
+        expiresAt: credentials.expires,
+      })
+
+      deps.platform.logger?.info('Kimi Code OAuth completed successfully')
+      refreshModelsInBackground(connectionSlug, 'Kimi Code auth')
+      return { success: true }
+    } catch (error) {
+      if (flowAbort && kimiOAuthAbort === flowAbort) kimiOAuthAbort = null
+      deps.platform.logger?.error('Kimi Code OAuth failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OAuth authentication failed',
+      }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.kimi.CANCEL_OAUTH, async (): Promise<{ success: boolean }> => {
+    if (kimiOAuthAbort) {
+      kimiOAuthAbort.abort()
+      kimiOAuthAbort = null
+      deps.platform.logger?.info('Kimi Code OAuth cancelled')
+    }
+    return { success: true }
+  })
+
+  // ============================================================
+  // xAI OAuth (SuperGrok / X Premium device flow via Pi SDK)
+  // ============================================================
+
+  server.handle(RPC_CHANNELS.xai.START_OAUTH, async (ctx, connectionSlug: string): Promise<{
+    success: boolean
+    error?: string
+  }> => {
+    let flowAbort: AbortController | null = null
+    try {
+      const { loginXaiWithSdk } = await import('@craft-agent/shared/auth/xai-sdk')
+      const credentialManager = getCredentialManager()
+
+      xaiOAuthAbort?.abort()
+      flowAbort = new AbortController()
+      xaiOAuthAbort = flowAbort
+
+      deps.platform.logger?.info(`Starting xAI OAuth device flow for connection: ${connectionSlug}`)
+
+      const credentials = await loginXaiWithSdk({
+        onDeviceCode: ({ userCode, verificationUri }) => {
+          pushTyped(server, RPC_CHANNELS.xai.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
+            userCode,
+            verificationUri,
+          })
+          server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, verificationUri).catch(err => {
+            deps.platform.logger?.warn(`Failed to open browser for xAI OAuth: ${err}`)
+          })
+        },
+        onProgress: message => {
+          deps.platform.logger?.info(`[xAI OAuth] ${message}`)
+        },
+        signal: flowAbort.signal,
+      })
+
+      if (flowAbort.signal.aborted || xaiOAuthAbort !== flowAbort) {
+        throw new Error('xAI OAuth flow was cancelled or superseded')
+      }
+      xaiOAuthAbort = null
+
+      await credentialManager.setLlmOAuth(connectionSlug, {
+        accessToken: credentials.access,
+        refreshToken: credentials.refresh,
+        expiresAt: credentials.expires,
+      })
+
+      deps.platform.logger?.info('xAI OAuth completed successfully')
+      refreshModelsInBackground(connectionSlug, 'xAI auth')
+      return { success: true }
+    } catch (error) {
+      if (flowAbort && xaiOAuthAbort === flowAbort) xaiOAuthAbort = null
+      deps.platform.logger?.error('xAI OAuth failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OAuth authentication failed',
+      }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.xai.CANCEL_OAUTH, async (): Promise<{ success: boolean }> => {
+    if (xaiOAuthAbort) {
+      xaiOAuthAbort.abort()
+      xaiOAuthAbort = null
+      deps.platform.logger?.info('xAI OAuth cancelled')
+    }
+    return { success: true }
   })
 }

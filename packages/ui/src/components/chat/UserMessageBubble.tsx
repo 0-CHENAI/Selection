@@ -1,28 +1,32 @@
 /**
  * UserMessageBubble - Shared user message component
  *
- * Displays user messages with right-aligned styling (spec §7.4 "User bubble"):
- * - bubble fill (5.5% foreground), radius 16, copy 15/24, 9/14px padding
- * - Max width 82% (90% in compact layouts)
+ * Displays user messages with right-aligned styling:
+ * - Subtle background (5% foreground)
+ * - Pill-shaped corners
+ * - Max width 80%
  * - Markdown rendering for links and code
  * - Optional file attachments with thumbnails
  * - Content badges for @mentions (sources, skills)
  * - Pending/queued states (Electron only)
- * - Copy button left of the bubble, revealed on hover/focus like the answer footer (not in compact mode)
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, Clock, Copy } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
+import { ArrowRight, Check, Clock, Copy } from 'lucide-react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
 import { normalizePath } from '@craft-agent/core/utils'
+// Lightweight path — do NOT import @craft-agent/shared/agent (pulls bash-parser into Vite)
+import { sanitizeUserMessageForDisplay } from '@craft-agent/shared/agent/user-message-sanitize'
 import { cn } from '../../lib/utils'
-import { useCopyToClipboard } from '../../lib/use-copy-to-clipboard'
+import { usePlatform } from '../../context/PlatformContext'
 import { Markdown } from '../markdown'
 import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../tooltip'
-import { TurnIconButton } from './turn/TurnIconButton'
-import { HOVER_REVEAL } from './turn/turn-classes'
 import { useTranslation } from 'react-i18next'
+import { getUserMessageCopyText } from './visible-user-message-text'
+import { parseArtifactRestoreDisplay } from './artifact-restore-display'
+import { localizeFollowUpSectionHeading } from './follow-up-display'
 
 // Fallback text icons for badges without iconDataUrl
 // Using simple characters since SVG rendering may not work in all contexts
@@ -30,9 +34,6 @@ const SKILL_ICON_TEXT = '✦'
 const SOURCE_ICON_TEXT = '⊕'
 const CONTEXT_ICON_TEXT = '⚙'
 const COMMAND_ICON_TEXT = '/'
-
-/** Markdown inside the bubble: copy rhythm from the bubble, stronger inline-code fill on the bubble fill. */
-const BUBBLE_MARKDOWN = '[&_p]:whitespace-pre-wrap [&_p]:leading-[inherit] [&_.inline-code]:bg-fill-pressed'
 
 /**
  * Check if a badge is an edit_request badge (identified by XML tag in rawText)
@@ -48,7 +49,7 @@ function isEditRequestBadge(badge: ContentBadge): boolean {
 function EditRequestBadge({ badge }: { badge: ContentBadge }) {
   const displayLabel = badge.collapsedLabel || badge.label
   return (
-    <span className="inline-flex items-center h-control px-2.5 rounded-md bg-raised shadow-elev-1 text-label text-tertiary">
+    <span className="inline-flex items-center h-[28px] px-2.5 rounded-[8px] bg-background shadow-minimal text-[13px] text-muted-foreground">
       {displayLabel}
     </span>
   )
@@ -56,22 +57,22 @@ function EditRequestBadge({ badge }: { badge: ContentBadge }) {
 
 /**
  * InlineBadge - Renders a single content badge inline with text
- * Styled to match the input field badges (raised chip)
+ * Styled to match the input field badges (bg-background with shadow)
  */
 function InlineBadge({ badge }: { badge: ContentBadge }) {
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
       {badge.iconDataUrl ? (
         <img
           src={badge.iconDataUrl}
           alt=""
-          className="size-3 rounded-xs shrink-0"
+          className="h-[12px] w-[12px] rounded-[2px] shrink-0"
         />
       ) : (
-        <span className="size-3 rounded-xs bg-fill-hover flex items-center justify-center text-tertiary shrink-0 text-caption leading-none">
+        <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[8px]">
           {badge.type === 'skill' ? SKILL_ICON_TEXT : badge.type === 'context' ? CONTEXT_ICON_TEXT : SOURCE_ICON_TEXT}
         </span>
       )}
@@ -87,10 +88,10 @@ function InlineBadge({ badge }: { badge: ContentBadge }) {
 function CommandBadge({ badge }: { badge: ContentBadge }) {
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
-      <span className="size-3 rounded-xs bg-fill-hover flex items-center justify-center text-tertiary shrink-0 text-caption leading-none font-medium">
+      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[10px] font-medium">
         {COMMAND_ICON_TEXT}
       </span>
       <span className="truncate max-w-[200px]">{badge.label}</span>
@@ -109,14 +110,14 @@ function ContextBadge({ badge }: { badge: ContentBadge }) {
 
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mr-1 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mr-1 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
       title={t('chat.contextBadge')}
     >
-      <span className="size-3 rounded-xs bg-fill-hover flex items-center justify-center text-tertiary shrink-0 text-caption leading-none">
+      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[8px]">
         {CONTEXT_ICON_TEXT}
       </span>
-      <span className="truncate max-w-[200px] text-tertiary">{displayLabel}</span>
+      <span className="truncate max-w-[200px] text-muted-foreground">{displayLabel}</span>
     </span>
   )
 }
@@ -137,7 +138,7 @@ const CODE_EXTENSIONS = new Set([
 function FileBadgeIcon({ badge }: { badge: ContentBadge }) {
   if (badge.type === 'folder') {
     return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" className="shrink-0 text-tertiary">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" className="shrink-0 text-muted-foreground">
         <path d="M20.5 10C20.5 9.07003 20.5 8.60504 20.3978 8.22354C20.1204 7.18827 19.3117 6.37962 18.2765 6.10222C17.895 6 17.43 6 16.5 6H13.1008C12.4742 6 12.1609 6 11.8739 5.91181C11.6824 5.85298 11.5009 5.76572 11.3353 5.65295C11.0871 5.48389 10.8914 5.23926 10.5 4.75L10.4095 4.63693C10.107 4.25881 9.9558 4.06975 9.7736 3.92674C9.54464 3.74703 9.27921 3.61946 8.99585 3.55294C8.77037 3.5 8.52825 3.5 8.04402 3.5C6.60485 3.5 5.88527 3.5 5.32008 3.74178C4.61056 4.0453 4.0453 4.61056 3.74178 5.32008C3.5 5.88527 3.5 6.60485 3.5 8.04402V10M9.46502 20.5H14.535C16.9102 20.5 18.0978 20.5 18.9301 19.8113C19.7624 19.1226 19.9846 17.9559 20.429 15.6227L20.8217 13.5613C21.1358 11.9121 21.2929 11.0874 20.843 10.5437C20.393 10 19.5536 10 17.8746 10H6.12537C4.44643 10 3.60696 10 3.15704 10.5437C2.70713 11.0874 2.8642 11.9121 3.17835 13.5613L3.57099 15.6227C4.01541 17.9559 4.23763 19.1226 5.06992 19.8113C5.90221 20.5 7.08981 20.5 9.46502 20.5Z"/>
       </svg>
     )
@@ -150,7 +151,7 @@ function FileBadgeIcon({ badge }: { badge: ContentBadge }) {
   if (isCode) {
     // Code file icon (document with < > brackets)
     return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-tertiary">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground">
         <path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M10.5 12.8799C9.70024 13.2985 9.10807 13.8275 8.64232 14.5478C8.51063 14.7515 8.44479 14.8533 8.44489 15.0011C8.44498 15.1488 8.51099 15.2506 8.643 15.4542C9.1095 16.1736 9.70167 16.7028 10.5 17.1225M13.5 12.8799C14.2998 13.2985 14.8919 13.8275 15.3577 14.5478C15.4894 14.7515 15.5552 14.8533 15.5551 15.0011C15.555 15.1488 15.489 15.2506 15.357 15.4542C14.8905 16.1736 14.2983 16.7028 13.5 17.1225M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/>
       </svg>
     )
@@ -158,7 +159,7 @@ function FileBadgeIcon({ badge }: { badge: ContentBadge }) {
 
   // Generic file icon (document with folded corner)
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-tertiary">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground">
       <path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M9 16H15M9 12H10M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/>
     </svg>
   )
@@ -176,10 +177,11 @@ function InlineFileBadge({
   badge: ContentBadge
   onFileClick?: (path: string) => void
 }) {
-  // Strip .craft-agent workspace/session path prefix for cleaner tooltip display
+  // Strip config-dir workspace/session path prefix for cleaner tooltip display
   // e.g. "/Users/.../workspaces/{id}/sessions/{id}/plans/foo.md" → "plans/foo.md"
+  // Supports ~/.selection (current) and ~/.craft-agent (legacy).
   const rawPath = badge.filePath || badge.label
-  const tooltipPath = normalizePath(rawPath).replace(/^.*\.craft-agent\/workspaces\/[^/]+\/(sessions\/[^/]+\/)?/, '')
+  const tooltipPath = normalizePath(rawPath).replace(/^.*\.(?:selection|craft-agent)\/workspaces\/[^/]+\/(sessions\/[^/]+\/)?/, '')
   const isClickable = !!badge.filePath && !!onFileClick
 
   const badgeContent = (
@@ -187,8 +189,8 @@ function InlineFileBadge({
       role={isClickable ? 'button' : undefined}
       onClick={() => isClickable && onFileClick!(badge.filePath!)}
       className={cn(
-        "inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle",
-        isClickable && "state-overlay cursor-pointer"
+        "inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle",
+        isClickable && "hover:bg-foreground/5 transition-colors cursor-pointer"
       )}
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
@@ -224,21 +226,25 @@ function InlineFileBadge({
  * File badges (type='file') render inline as clickable badges:
  * - Used for plan execution messages where file path appears inline with text
  */
-function renderContentWithBadges(
+export function renderContentWithBadges(
   content: string,
   badges: ContentBadge[],
   onUrlClick?: (url: string) => void,
-  onFileClick?: (path: string) => void
+  onFileClick?: (path: string) => void,
+  followUpHeading?: string,
 ): ReactNode {
+  const renderText = (text: string) => followUpHeading
+    ? localizeFollowUpSectionHeading(text, followUpHeading)
+    : text
   if (badges.length === 0) {
     return (
       <Markdown
         mode="minimal"
         onUrlClick={onUrlClick}
         onFileClick={onFileClick}
-        className={BUBBLE_MARKDOWN}
+        className="text-sm [&_a]:underline [&_code]:bg-foreground/10 [&_p]:whitespace-pre-wrap"
       >
-        {content}
+        {renderText(content)}
       </Markdown>
     )
   }
@@ -252,7 +258,7 @@ function renderContentWithBadges(
   sortedBadges.forEach((badge, i) => {
     // Add text before this badge
     if (badge.start > lastEnd) {
-      const textBefore = content.slice(lastEnd, badge.start)
+      const textBefore = renderText(content.slice(lastEnd, badge.start))
       if (textBefore.trim()) {
         elements.push(
           <Markdown
@@ -260,7 +266,7 @@ function renderContentWithBadges(
             mode="minimal"
             onUrlClick={onUrlClick}
             onFileClick={onFileClick}
-            className={cn(BUBBLE_MARKDOWN, "inline [&_p]:inline")}
+            className="inline text-sm [&_a]:underline [&_code]:bg-foreground/10 [&_p]:whitespace-pre-wrap [&_p]:inline"
           >
             {textBefore}
           </Markdown>
@@ -288,7 +294,7 @@ function renderContentWithBadges(
 
   // Add remaining text after last badge
   if (lastEnd < content.length) {
-    const textAfter = content.slice(lastEnd)
+    const textAfter = renderText(content.slice(lastEnd))
     if (textAfter.trim()) {
       elements.push(
         <Markdown
@@ -296,7 +302,7 @@ function renderContentWithBadges(
           mode="minimal"
           onUrlClick={onUrlClick}
           onFileClick={onFileClick}
-          className={cn(BUBBLE_MARKDOWN, "inline [&_p]:inline")}
+          className="inline text-sm [&_a]:underline [&_code]:bg-foreground/10 [&_p]:whitespace-pre-wrap [&_p]:inline"
         >
           {textAfter}
         </Markdown>
@@ -305,7 +311,7 @@ function renderContentWithBadges(
   }
 
   // Use <p> to match Markdown's block-level line-height behavior
-  return <p>{elements}</p>
+  return <p className="text-sm">{elements}</p>
 }
 
 export interface UserMessageBubbleProps {
@@ -319,6 +325,7 @@ export interface UserMessageBubbleProps {
   onFileClick?: (path: string) => void
   /** Stored attachments (images, documents) */
   attachments?: StoredAttachment[]
+  leadingAttachment?: ReactNode
   /** Content badges for inline display (sources, skills) */
   badges?: ContentBadge[]
   /** Whether the message is awaiting backend confirmation. User bubbles stay visually stable. */
@@ -327,6 +334,18 @@ export interface UserMessageBubbleProps {
   isQueued?: boolean
   /** Compact mode - reduces padding for popover embedding */
   compactMode?: boolean
+  /** Message send time, shown under the bubble as HH:mm */
+  timestamp?: number
+  /** First paint of a message the user just sent. History stays still. */
+  enterFromComposer?: boolean
+}
+
+export function formatUserMessageTime(timestamp: number, locale?: string): string {
+  return new Intl.DateTimeFormat(locale || 'en', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(timestamp))
 }
 
 /** Minimum visible duration of the "Queued" chip. Both backends ack
@@ -341,13 +360,33 @@ export function UserMessageBubble({
   onUrlClick,
   onFileClick,
   attachments,
+  leadingAttachment,
   badges,
   isQueued,
   compactMode,
+  timestamp,
+  enterFromComposer = false,
 }: UserMessageBubbleProps) {
-  const { t } = useTranslation()
-  const { copied, copy } = useCopyToClipboard()
+  const { t, i18n } = useTranslation()
+  const reduceMotion = !!useReducedMotion()
+  const followUpsLabel = t('chat.followUps')
+  const { onCopyToClipboard } = usePlatform()
   const hasAttachments = attachments && attachments.length > 0
+  const restoreDisplay = useMemo(
+    () => !badges?.length ? parseArtifactRestoreDisplay(content) : null,
+    [content, badges],
+  )
+  const copyText = useMemo(
+    () => getUserMessageCopyText(content, badges ?? [], followUpsLabel),
+    [content, badges, followUpsLabel],
+  )
+  const canCopy = copyText.length > 0
+  const timeLabel = timestamp != null && !compactMode
+    ? formatUserMessageTime(timestamp, i18n.language)
+    : ''
+  const showMeta = canCopy || !!timeLabel
+  const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Show the queued chip while `isQueued` is true AND for at least
   // QUEUED_MIN_VISIBLE_MS after it first became true — even if the backend
@@ -360,8 +399,25 @@ export function UserMessageBubble({
   useEffect(() => {
     return () => {
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
     }
   }, [])
+
+  const handleCopy = useCallback(async () => {
+    if (!copyText) return
+    try {
+      if (onCopyToClipboard) await onCopyToClipboard(copyText)
+      else await navigator.clipboard.writeText(copyText)
+      setCopied(true)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = setTimeout(() => {
+        setCopied(false)
+        copiedTimerRef.current = null
+      }, 2000)
+    } catch {
+      // Clipboard can be denied; keep the idle copy icon.
+    }
+  }, [copyText, onCopyToClipboard])
 
   useEffect(() => {
     if (clearTimerRef.current) {
@@ -397,9 +453,6 @@ export function UserMessageBubble({
     }, remaining)
   }, [isQueued])
 
-  // 82% of the column, 90% in compact layouts (popover, compact shell)
-  const maxWidth = compactMode ? 'max-w-[90%]' : 'max-w-[82%]'
-
   // Separate edit_request badges (rendered above bubble) from other badges (rendered inline)
   const editRequestBadges = badges?.filter(isEditRequestBadge) ?? []
   const inlineBadges = badges?.filter(b => !isEditRequestBadge(b)) ?? []
@@ -419,25 +472,30 @@ export function UserMessageBubble({
     displayContent = displayContent.trim()
   }
 
-  return (
-    <div className={cn("flex w-full flex-col items-end gap-2", className)}>
+  // Defense-in-depth: never show model-only system-reminder / activation markers
+  // even if a legacy path stored them in message.content.
+  displayContent = sanitizeUserMessageForDisplay(displayContent)
+
+  const bubble = (
+    <div className={cn("group flex flex-col items-end gap-3 w-full", className)}>
       {/* Attachment preview row - stored attachments with thumbnails */}
-      {hasAttachments && (
-        <div className={cn("flex flex-wrap justify-end gap-2", maxWidth)}>
-          {attachments!.map((att, i) => {
+      {(hasAttachments || leadingAttachment) && (
+        <div className="flex items-end gap-2 justify-end max-w-[80%] flex-wrap">
+          {leadingAttachment}
+          {attachments?.map((att, i) => {
             const isImage = att.type === 'image'
             const hasThumbnail = !!att.thumbnailBase64
 
             return (
               <div
                 key={att.id || i}
-                className="shrink-0 cursor-pointer transition-opacity duration-micro ease-out-subtle hover:opacity-80 hover:duration-instant"
+                className="shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() => att.storedPath && onFileClick?.(att.storedPath)}
                 title={t('chat.clickToOpen', { name: att.name })}
               >
                 {isImage ? (
                   /* IMAGE: Square thumbnail only */
-                  <div className="size-14 overflow-hidden rounded-md bg-raised shadow-elev-1">
+                  <div className="h-14 w-14 rounded-[8px] overflow-hidden bg-background shadow-minimal">
                     {hasThumbnail ? (
                       <img
                         src={`data:image/png;base64,${att.thumbnailBase64}`}
@@ -446,14 +504,14 @@ export function UserMessageBubble({
                       />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center">
-                        <FileTypeIcon type={att.type} mimeType={att.mimeType} className="h-5 w-5" />
+                        <FileTypeIcon type={att.type} mimeType={att.mimeType} fileName={att.name} className="h-5 w-5" />
                       </div>
                     )}
                   </div>
                 ) : (
                   /* DOCUMENT: Bubble with thumbnail/icon + 2-line text */
-                  <div className="flex items-center gap-2.5 rounded-lg bg-user-message-bubble py-1.5 pl-1.5 pr-3">
-                    <div className="flex h-11 w-8 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-raised shadow-elev-1">
+                  <div className="flex items-center gap-2.5 rounded-[8px] bg-user-message-bubble pl-1.5 pr-3 py-1.5">
+                    <div className="h-11 w-8 rounded-[6px] overflow-hidden bg-background shadow-minimal flex items-center justify-center shrink-0">
                       {hasThumbnail ? (
                         <img
                           src={`data:image/png;base64,${att.thumbnailBase64}`}
@@ -461,14 +519,14 @@ export function UserMessageBubble({
                           className="h-full w-full object-cover object-top"
                         />
                       ) : (
-                        <FileTypeIcon type={att.type} mimeType={att.mimeType} className="h-5 w-5" />
+                        <FileTypeIcon type={att.type} mimeType={att.mimeType} fileName={att.name} className="h-5 w-5" />
                       )}
                     </div>
                     <div className="flex flex-col min-w-0 max-w-[120px]">
-                      <span className="line-clamp-2 break-all text-label-sm font-medium" title={att.name}>
+                      <span className="text-xs font-medium line-clamp-2 break-all" title={att.name}>
                         {att.name}
                       </span>
-                      <span className="text-caption font-normal text-tertiary">
+                      <span className="text-[10px] text-muted-foreground">
                         {getFileTypeLabel(att.type, att.mimeType, att.name)}
                       </span>
                     </div>
@@ -482,7 +540,7 @@ export function UserMessageBubble({
 
       {/* Badges row - edit request badges above text bubble */}
       {hasEditRequestBadges && (
-        <div className={cn("flex flex-wrap justify-end gap-2", maxWidth)}>
+        <div className="flex gap-2 justify-end max-w-[80%] flex-wrap">
           {editRequestBadges.map((badge, i) => (
             <EditRequestBadge key={`edit-badge-${i}`} badge={badge} />
           ))}
@@ -493,52 +551,107 @@ export function UserMessageBubble({
           inside the bubble (Clock icon + 'Queued' italic) instead of a
           separate pill below — keeps the chat to one bubble per message
           while the chip and pulsing icon make the waiting state obvious
-          (#616 follow-up). The copy button sits left of the bubble, out of the
-          layout, so a hidden button never moves the transcript. */}
-      <div className={cn("group/user-message relative min-w-0", maxWidth)}>
-        {!compactMode && (
+          (#616 follow-up). */}
+      <div className="flex flex-col items-end max-w-[80%] min-w-0">
+      <div
+        className={cn(
+          "bg-user-message-bubble rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
+          compactMode ? "px-4 py-2" : "px-5 py-3.5"
+        )}
+      >
+        {showQueued && (
           <div
-            data-touch-reveal="true"
-            className={cn(
-              HOVER_REVEAL,
-              "absolute right-full top-2.25 mr-1 group-hover/user-message:opacity-100 group-hover/user-message:duration-instant"
-            )}
+            className="flex items-center gap-1.5 text-foreground/55 mb-1.5"
+            role="status"
+            aria-live="polite"
           >
-            <TurnIconButton
-              aria-label={copied ? t('common.copied') : t('common.copy')}
-              tooltip
-              icon={copied ? <Check className="size-3.5 text-success" /> : <Copy />}
-              onClick={() => copy(displayContent)}
-              className="select-none"
-            />
+            <Clock className="h-3 w-3 animate-pulse" aria-hidden="true" />
+            <span className="text-[11px] italic">{t('chat.queuedBadge')}</span>
           </div>
         )}
-        <div className="min-w-0 select-text break-words rounded-xl bg-user-message-bubble px-3.5 py-2.25 text-copy text-foreground [&_p]:m-0">
-          {showQueued && (
-            <div
-              className="mb-1 flex items-center gap-1.5 text-tertiary"
-              role="status"
-              aria-live="polite"
-            >
-              <Clock className="size-3 animate-pulse" aria-hidden="true" />
-              <span className="text-caption font-normal italic">{t('chat.queuedBadge')}</span>
+        {restoreDisplay ? (
+          <div className="flex min-w-[168px] max-w-full flex-col items-center gap-2">
+            <FileTypeIcon fileName={restoreDisplay.fileName} className="h-10 w-10" />
+            <div className="max-w-full self-stretch truncate text-center text-sm font-medium leading-5" title={restoreDisplay.path}>{restoreDisplay.fileName}</div>
+            <div className="flex items-center gap-2 whitespace-nowrap text-xs leading-4">
+              <span className="text-muted-foreground">
+                {restoreDisplay.fromOrdinal === undefined
+                  ? t('chat.artifactVersions.previousVersion')
+                  : t('chat.artifactVersions.version', { number: restoreDisplay.fromOrdinal })}
+              </span>
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="font-medium text-success">{t('chat.artifactVersions.version', { number: restoreDisplay.ordinal })}</span>
             </div>
+            {restoreDisplay.summary && <p className="max-w-[260px] text-center text-xs leading-relaxed text-muted-foreground">{restoreDisplay.summary}</p>}
+          </div>
+        ) : hasInlineBadges
+          ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick, followUpsLabel)
+          : (
+            <Markdown
+              mode="minimal"
+              onUrlClick={onUrlClick}
+              onFileClick={onFileClick}
+              className="text-sm [&_a]:underline [&_code]:bg-foreground/10 [&_p]:whitespace-pre-wrap"
+            >
+              {localizeFollowUpSectionHeading(displayContent, followUpsLabel)}
+            </Markdown>
+          )
+        }
+      </div>
+      {showMeta && (
+        <div className="flex items-center justify-end gap-2 pt-1">
+          {timeLabel && (
+            <time
+              dateTime={timestamp != null ? new Date(timestamp).toISOString() : undefined}
+              className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+            >
+              {timeLabel}
+            </time>
           )}
-          {hasInlineBadges
-            ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick)
-            : (
-              <Markdown
-                mode="minimal"
-                onUrlClick={onUrlClick}
-                onFileClick={onFileClick}
-                className={BUBBLE_MARKDOWN}
-              >
-                {displayContent}
-              </Markdown>
-            )
-          }
+          {canCopy && (
+            <button
+              type="button"
+              onClick={handleCopy}
+              aria-label={copied ? t('common.copied') : t('common.copy')}
+              aria-live="polite"
+              title={copied ? t('common.copied') : t('common.copy')}
+              className={cn(
+                "p-0.5 rounded-[4px] select-none",
+                "text-muted-foreground/70 hover:text-foreground",
+                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+            >
+              <span className="relative block h-3.5 w-3.5">
+                <Copy
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-0 h-3.5 w-3.5 pointer-events-none transition-opacity duration-200 ease-in-out motion-reduce:transition-none",
+                    copied ? "opacity-0" : "opacity-100",
+                  )}
+                />
+                <Check
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-0 h-3.5 w-3.5 pointer-events-none text-success transition-opacity duration-200 ease-in-out motion-reduce:transition-none",
+                    copied ? "opacity-100" : "opacity-0",
+                  )}
+                />
+              </span>
+            </button>
+          )}
         </div>
+      )}
       </div>
     </div>
+  )
+  if (!enterFromComposer) return bubble
+  return (
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reduceMotion ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.25 }}
+    >
+      {bubble}
+    </motion.div>
   )
 }

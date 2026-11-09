@@ -1,0 +1,86 @@
+import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+function read(relative: string): string {
+  return readFileSync(join(import.meta.dir, relative), 'utf8')
+}
+
+describe('desktop top bar entries (#262)', () => {
+  it('removes the desktop brand menu, creation-jobs slot, and add-panel plus', () => {
+    const topBar = read('../TopBar.tsx')
+    const appMenuStart = topBar.indexOf('{isCompact && (')
+    const appMenuTag = topBar.indexOf('<AppMenu')
+
+    expect(appMenuStart).toBeGreaterThan(-1)
+    expect(appMenuTag).toBeGreaterThan(appMenuStart)
+    expect(topBar).toContain('BrowserTabStrip')
+    expect(topBar).toContain('menu.immersiveMode')
+    expect(topBar).toContain('data-immersive-toggle')
+    expect(topBar).toContain('aria-pressed={immersive}')
+    expect(topBar).toContain('PanelLeftRounded')
+    expect(topBar).toContain('isActive={immersive}')
+    expect(topBar).not.toContain('ImmersiveModeIcon')
+    expect(topBar).not.toContain('menu.toggleSidebar')
+    expect(topBar).toContain('common.back')
+    expect(topBar).toContain('common.forward')
+    expect(topBar).toContain('WorkspaceSwitcher')
+    expect(topBar).not.toContain('workspaceActivity')
+    expect(topBar).not.toContain('onAddSessionPanel')
+    expect(topBar).not.toContain('onAddBrowserPanel')
+    expect(topBar).not.toContain('menu.addPanelMenu')
+    expect(topBar).not.toContain('CreationJobsButton')
+    expect(topBar).not.toContain('ListChecks')
+    expect(topBar).not.toContain('menu.craftMenu')
+  })
+
+  it('keeps compact AppMenu props and does not leave empty add-panel wrappers', () => {
+    const topBar = read('../TopBar.tsx')
+    expect(topBar).toContain('onNewChat={onNewChat}')
+    expect(topBar).toContain('onOpenSettings={onOpenSettings}')
+    expect(topBar).not.toContain('session.newSessionInPanel')
+    expect(topBar).not.toContain('browser.newWindow')
+    expect(topBar).not.toContain('SquarePenRounded')
+  })
+
+  it('mounts creation-job validation without visual management entries (#357)', () => {
+    const appShell = read('../AppShell.tsx')
+    const host = appShell.indexOf('<CreationJobsHost')
+    const topBar = appShell.indexOf('<TopBar')
+    const sources = appShell.indexOf('isSourcesNavigation(navState) && activeWorkspace')
+    const skills = appShell.indexOf('isSkillsNavigation(navState) && activeWorkspace')
+    const automations = appShell.indexOf('isAutomationsNavigation(navState) && activeWorkspace')
+    const projects = appShell.indexOf('isProjectsNavigation(navState) && activeWorkspace')
+    const sourcesSection = appShell.slice(sources, skills)
+    const skillsSection = appShell.slice(skills, automations)
+    const automationsSection = appShell.slice(automations, projects)
+
+    expect(host).toBeGreaterThan(-1)
+    expect(host).toBeLessThan(topBar)
+    expect(appShell).toContain("useAction('app.newChatInPanel', () => handleNewChat(true))")
+    expect(appShell).not.toContain('workspaceActivity')
+    expect(appShell).not.toContain('onAddSessionPanel')
+    expect(appShell).not.toContain('onAddBrowserPanel')
+    expect(appShell).not.toContain('handleNewBrowserWindow')
+    expect(appShell).not.toContain('<CreationJobsButton')
+    expect(sourcesSection).not.toContain('<CreationJobsButton')
+    expect(skillsSection).not.toContain('<CreationJobsButton')
+    expect(automationsSection).not.toContain('<CreationJobsButton')
+  })
+
+  it('runs creation-job reconciliation in the host, not the visual button', () => {
+    const source = read('../CreationJobsButton.tsx')
+    const host = source.slice(source.indexOf('export function CreationJobsHost'))
+    const button = source.slice(source.indexOf('export function CreationJobsButton'))
+
+    expect(host).toContain('useCreationJobReconciler')
+    expect(host).toContain('return null')
+    expect(button).not.toContain('useCreationJobReconciler')
+    expect(button).toContain('creationJobs.title')
+    expect(source).toContain('toast.success')
+    expect(source).toContain('toast.error')
+    expect(source).toContain('toast.info')
+    expect(source).toContain('validateCreationJob')
+    expect(source).toContain('shouldCancelCreationJob')
+  })
+})

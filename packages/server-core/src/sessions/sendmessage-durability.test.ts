@@ -1,8 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { getSessionFilePath } from '@craft-agent/shared/sessions/storage'
+import * as config from '@craft-agent/shared/config'
+import { messageToStored, storedToMessage } from '@craft-agent/core'
+import { assertAnnotationSource } from '../reliability/annotation-follow-ups'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 
 // Regression test for the High-severity finding in eb81086e:
@@ -111,4 +114,369 @@ describe('sendMessage durability', () => {
     expect(ackedMessageId).not.toBeNull()
     expect(onDiskAtAck).toBe(true)
   })
+
+  it('persists optional document context before acknowledging and accepts retries after preview/file closure', async () => {
+    const managed = buildSession('office-context-queued')
+    managed.isProcessing = true
+    const file = join(tmpRoot, '当前 文档.docx')
+    writeFileSync(file, 'document')
+    const canonical = realpathSync(file)
+    const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(managed.workspace)
+    const options = { optimisticMessageId: 'office-context-client', officeContext: { path: file } }
+    const acknowledgements: string[] = []
+    const ack = (id: string) => {
+      acknowledgements.push(id)
+      const lines = readFileSync(getSessionFilePath(tmpRoot, managed.id), 'utf8').trim().split('\n')
+      expect(lines.slice(1).map(line => JSON.parse(line))).toContainEqual(expect.objectContaining({
+        id, content: '更换内容，换成一个七言绝句', officeDocumentPath: canonical, officeContextPath: file, isQueued: true,
+      }))
+    }
+    try {
+      await sm.sendMessage(managed.id, '更换内容，换成一个七言绝句', undefined, undefined, options, undefined, undefined, ack)
+      const restored = storedToMessage(JSON.parse(JSON.stringify(messageToStored(managed.messages[0]!))))
+      expect(restored.officeDocumentPath).toBe(canonical)
+      expect(restored.content).toBe('更换内容，换成一个七言绝句')
+      rmSync(file)
+      await sm.sendMessage(managed.id, restored.content, undefined, undefined, options, undefined, undefined, ack)
+      expect(acknowledgements).toEqual([restored.id, restored.id])
+      expect(managed.messages).toHaveLength(1)
+      expect(managed.messageQueue).toHaveLength(1)
+      await expect(sm.sendMessage(managed.id, restored.content, undefined, undefined, {
+        ...options, officeContext: { path: join(tmpRoot, '另一份.docx') },
+      })).rejects.toThrow('different content')
+    } finally { lookup.mockRestore() }
+  })
+
+  it('validates ordinary Office context against workspace/upload scope without needing a selection', async () => {
+    const managed = buildSession('office-context-scope')
+    const other = buildSession('other-session')
+    managed.isProcessing = true
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'office-context-outside-'))
+    const outside = join(outsideRoot, 'other.docx')
+    writeFileSync(outside, 'outside')
+    other.messages.push({ id: 'upload', role: 'user', content: '', timestamp: 1,
+      attachments: [{ storedPath: outside } as never] })
+    const linked = join(tmpRoot, 'outside-link.docx')
+    symlinkSync(outside, linked)
+    const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(managed.workspace)
+    try {
+      for (const path of [outside, linked]) {
+        await expect(sm.sendMessage(managed.id, '这份文档说了什么？', undefined, undefined, { officeContext: { path } })).rejects.toThrow()
+      }
+      expect(managed.messages).toEqual([])
+      expect(managed.messageQueue).toEqual([])
+      managed.messages.push({ id: 'own-upload', role: 'user', content: '', timestamp: 1,
+        attachments: [{ storedPath: outside } as never] })
+      await sm.sendMessage(managed.id, '这份文档说了什么？', undefined, undefined, { officeContext: { path: outside } })
+      expect(managed.messages.at(-1)).toMatchObject({ content: '这份文档说了什么？', officeDocumentPath: realpathSync(outside) })
+    } finally { lookup.mockRestore(); rmSync(outsideRoot, { recursive: true, force: true }) }
+  })
+
+  it('rejects explicit delegation instead of queueing its turn capability', async () => {
+    const sessionId = 'delegate-midstream'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+
+    await expect(sm.sendMessage(
+      sessionId,
+      'delegate this task',
+      undefined,
+      undefined,
+      { userAuthorizedSpawn: true },
+    )).rejects.toThrow('cannot be queued')
+    expect(managed.messageQueue).toHaveLength(0)
+    expect(managed.messages).toHaveLength(0)
+  })
+
+  it('deduplicates a replayed normal send by its persisted client message id', async () => {
+    const sessionId = 'idempotent-normal'
+    const managed = buildSession(sessionId)
+    const ackedIds: string[] = []
+    const options = { optimisticMessageId: 'client-message-1' }
+
+    await sm.sendMessage(
+      sessionId,
+      'send once',
+      undefined,
+      undefined,
+      options,
+      undefined,
+      undefined,
+      messageId => ackedIds.push(messageId),
+    ).catch(() => { /* expected post-ack agent-init failure */ })
+
+    await sm.sendMessage(
+      sessionId,
+      'send once',
+      undefined,
+      undefined,
+      options,
+      undefined,
+      undefined,
+      messageId => ackedIds.push(messageId),
+    )
+
+    const userMessages = managed.messages.filter(message => message.role === 'user')
+    expect(userMessages).toHaveLength(1)
+    expect(userMessages[0]?.clientMessageId).toBe('client-message-1')
+    expect(ackedIds).toHaveLength(2)
+    expect(ackedIds[1]).toBe(ackedIds[0])
+
+    const path = getSessionFilePath(tmpRoot, sessionId)
+    const storedMessages = readFileSync(path, 'utf-8')
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map(line => JSON.parse(line) as { clientMessageId?: string })
+    expect(storedMessages[0]?.clientMessageId).toBe('client-message-1')
+  })
+
+  it('deduplicates a replayed mid-stream send before adding a second queue entry', async () => {
+    const sessionId = 'idempotent-midstream'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    const ackedIds: string[] = []
+    const options = { optimisticMessageId: 'client-message-queued' }
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await sm.sendMessage(
+        sessionId,
+        'queued once',
+        undefined,
+        undefined,
+        options,
+        undefined,
+        undefined,
+        messageId => ackedIds.push(messageId),
+      )
+    }
+
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(ackedIds).toHaveLength(2)
+    expect(ackedIds[1]).toBe(ackedIds[0])
+  })
+
+  it('deduplicates concurrent sends before either RPC has finished', async () => {
+    const sessionId = 'idempotent-concurrent'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    const ackedIds: string[] = []
+    const options = { optimisticMessageId: 'client-message-concurrent' }
+
+    await Promise.all(Array.from({ length: 2 }, () => sm.sendMessage(
+      sessionId,
+      'send concurrently once',
+      undefined,
+      undefined,
+      options,
+      undefined,
+      undefined,
+      messageId => ackedIds.push(messageId),
+    )))
+
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(ackedIds).toHaveLength(2)
+    expect(new Set(ackedIds).size).toBe(1)
+  })
+
+  it('rejects reuse of a client message id for different content', async () => {
+    const sessionId = 'idempotent-conflict'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    const options = { optimisticMessageId: 'client-message-conflict' }
+
+    await sm.sendMessage(sessionId, 'original', undefined, undefined, options)
+
+    await expect(sm.sendMessage(sessionId, 'different', undefined, undefined, options))
+      .rejects.toThrow('was reused with different content')
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messageQueue).toHaveLength(1)
+  })
+  function addFeedbackSource(managed: ReturnType<typeof createManagedSession>) {
+    managed.messages.push({
+      id: 'source', role: 'assistant', content: 'Original answer', timestamp: 1,
+      annotations: [{
+        id: 'note', schemaVersion: 1, createdAt: 1,
+        body: [{ type: 'note', text: 'Revise this' }],
+        target: { source: { sessionId: managed.id, messageId: 'source' }, selectors: [] },
+        meta: { keep: true },
+      }],
+    })
+    return { optimisticMessageId: 'feedback-client', annotationFollowUps: [
+      { messageId: 'source', annotationId: 'note', text: 'Revise this', updatedAt: 1 },
+    ] }
+  }
+
+  it('does not accept or publish feedback when flush returns without writing', async () => {
+    const managed = buildSession('feedback-no-write')
+    managed.isProcessing = true
+    const options = addFeedbackSource(managed)
+    const events: any[] = []
+    sm.setEventSink((_channel, _target, event) => events.push(event))
+    ;(sm as any).persistSession = () => {}
+    sm.flushSession = async () => {}
+    let acknowledged = false
+    await expect(sm.sendMessage(managed.id, 'feedback', undefined, undefined, options,
+      undefined, undefined, () => { acknowledged = true }))
+      .rejects.toThrow('persistence could not be verified')
+    expect(acknowledged).toBe(false)
+    expect(events).toHaveLength(0)
+    expect(managed.messageQueue).toHaveLength(0)
+    expect(managed.messages).toHaveLength(1)
+    expect(managed.messages[0]?.annotations?.[0]?.meta).toEqual({ keep: true })
+  })
+
+  it('rolls back a real disk write failure and accepts retry without losing the annotation', async () => {
+    const managed = buildSession('feedback-write-fault')
+    managed.isProcessing = true
+    const options = addFeedbackSource(managed)
+    ;(sm as any).persistSession(managed)
+    await sm.flushSession(managed.id)
+    const path = getSessionFilePath(tmpRoot, managed.id)
+    // Atomic writes use unique temp names. Block their final rename with a
+    // directory, preserving the last acknowledged file for the retry.
+    const savedFile = `${path}.before-fault`
+    renameSync(path, savedFile)
+    mkdirSync(path)
+    const events: any[] = []
+    let persistedBeforePublish = false
+    sm.setEventSink((_channel, _target, event: any) => {
+      events.push(event)
+      if (event.type === 'message_annotations_updated') {
+        const disk = readFileSync(path, 'utf-8')
+        const requestId = event.annotations[0].meta.followUp.requestMessageId
+        persistedBeforePublish = disk.includes(requestId) && readPersistedMessageIds(managed.id).includes(requestId)
+      }
+    })
+    try {
+      await expect(sm.sendMessage(managed.id, 'feedback', undefined, undefined, options))
+        .rejects.toThrow('persistence could not be verified')
+    } finally {
+      rmSync(path, { recursive: true })
+      renameSync(savedFile, path)
+    }
+    expect(events).toHaveLength(0)
+    expect(readPersistedMessageIds(managed.id)).toEqual(['source'])
+    expect(managed.messages[0]?.annotations?.[0]?.meta).toEqual({ keep: true })
+    expect(managed.messageQueue).toHaveLength(0)
+    await sm.sendMessage(managed.id, 'feedback', undefined, undefined, options)
+    expect(persistedBeforePublish).toBe(true)
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(events.filter(event => event.type === 'message_annotations_updated')).toHaveLength(1)
+    expect(readPersistedMessageIds(managed.id)).toHaveLength(2)
+  })
+
+  it('a concurrent duplicate waits for the original durable acceptance before acknowledging', async () => {
+    const managed = buildSession('feedback-concurrent-flush')
+    managed.isProcessing = true
+    const options = addFeedbackSource(managed)
+    const flush = sm.flushSession.bind(sm)
+    let started!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    sm.flushSession = async id => { started(); await gate; await flush(id) }
+    const acked: string[] = []
+    const send = () => sm.sendMessage(managed.id, 'feedback', undefined, undefined, options,
+      undefined, undefined, id => {
+        expect(readPersistedMessageIds(managed.id)).toContain(id)
+        acked.push(id)
+      })
+    const first = send()
+    await entered
+    const duplicate = send()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(acked).toHaveLength(0)
+    release()
+    await Promise.all([first, duplicate])
+    expect(acked).toHaveLength(2)
+    expect(new Set(acked).size).toBe(1)
+    expect(managed.messageQueue).toHaveLength(1)
+  })
+
+  it('rejects a reused request id with different feedback even when message text matches', async () => {
+    const managed = buildSession('feedback-payload-conflict')
+    managed.isProcessing = true
+    const options = addFeedbackSource(managed)
+    await sm.sendMessage(managed.id, 'feedback', undefined, undefined, options)
+    // Later annotation edits must not change the original accepted request payload.
+    managed.messages[0]!.annotations![0]!.meta = { followUp: { text: 'Later edit' } }
+    await sm.sendMessage(managed.id, 'feedback', undefined, undefined, options)
+    await expect(sm.sendMessage(managed.id, 'feedback', undefined, undefined, {
+      ...options, annotationFollowUps: options.annotationFollowUps.map(reference => ({ ...reference, text: 'Different feedback' })),
+    })).rejects.toThrow('was reused with different content')
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    const stored = readFileSync(getSessionFilePath(tmpRoot, managed.id), 'utf-8')
+      .trim().split('\n').slice(1).map(line => JSON.parse(line))
+    const accepted = stored.find(message => message.type === 'user').annotationFollowUps
+    expect(accepted.map(({ messageId, annotationId, text, updatedAt }: any) => ({ messageId, annotationId, text, updatedAt }))).toEqual(options.annotationFollowUps)
+    expect(accepted[0].sourceContentHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(accepted[0].target.source.messageId).toBe('source')
+  })
+
+  it('rejects stale annotation creation and editing and accepts an explicitly reselected source', async () => {
+    const managed = buildSession('annotation-source-version')
+    managed.isProcessing = true
+    addFeedbackSource(managed)
+    const source = managed.messages[0]!
+    const annotation = source.annotations![0]!
+    annotation.target.selectors = [
+      { type: 'text-position', start: 0, end: 8 },
+      { type: 'text-quote', exact: 'Original' },
+    ]
+    source.annotations = []
+    const originalHash = assertAnnotationSource(source.content, annotation)
+    sm.addMessageAnnotation(managed.id, source.id, { ...annotation, meta: { sourceContentHash: originalHash } })
+    expect(source.annotations).toHaveLength(1)
+    expect(source.annotations![0]!.meta?.sourceContentHash).toBe(originalHash)
+    await sm.flushSession(managed.id)
+    sm.updateMessageContent(managed.id, source.id, source.content + ' updated')
+    expect(() => sm.addMessageAnnotation(managed.id, source.id, {
+      ...annotation, id: 'stale-new', meta: { sourceContentHash: originalHash },
+    })).toThrow('Annotation source changed')
+    expect(() => sm.updateMessageAnnotation(managed.id, source.id, annotation.id, {
+      body: [{ type: 'note', text: 'Changed note' }],
+    })).toThrow('Annotation source changed')
+    expect(source.annotations).toHaveLength(1)
+    expect(source.annotations![0]!.body).toEqual(annotation.body)
+    const currentHash = assertAnnotationSource(source.content, { ...annotation, meta: undefined })
+    sm.addMessageAnnotation(managed.id, source.id, {
+      ...annotation, id: 'reselected', meta: { sourceContentHash: currentHash },
+    })
+    await sm.flushSession(managed.id)
+    const persisted = readFileSync(getSessionFilePath(tmpRoot, managed.id), 'utf-8')
+      .trim().split('\n').slice(1).map(line => JSON.parse(line))
+    expect(persisted[0].annotations.find((item: any) => item.id === 'reselected').meta.sourceContentHash).toBe(currentHash)
+    expect(persisted[0].content).toBe('Original answer updated')
+    // Explicit reselection can rebind the existing feedback instead of leaving a stale pending duplicate.
+    sm.updateMessageAnnotation(managed.id, source.id, annotation.id, {
+      target: annotation.target,
+      meta: { sourceContentHash: currentHash, followUp: { text: 'Revise this' } },
+    })
+    await sm.sendMessage(managed.id, 'feedback', undefined, undefined, {
+      annotationFollowUps: [{ messageId: source.id, annotationId: annotation.id, text: 'Revise this',
+        updatedAt: source.annotations![0]!.updatedAt! }],
+    })
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(source.annotations![0]!.id).toBe(annotation.id)
+    expect(source.annotations![0]!.meta?.sourceContentHash).toBe(currentHash)
+  })
+
+  it('deleting queued feedback persists its stopped state and cannot run the removed request', async () => {
+    const managed = buildSession('feedback-queue-stop')
+    managed.isProcessing = true
+    const options = addFeedbackSource(managed)
+    await sm.sendMessage(managed.id, 'feedback', undefined, undefined, options)
+    const request = managed.messages.find(message => message.role === 'user')!
+    expect(managed.messages[0]!.annotations![0]!.meta?.followUp).toMatchObject({ status: 'queued' })
+    await sm.deleteQueuedMessage(managed.id, request.id)
+    expect(managed.messageQueue).toHaveLength(0)
+    expect(readPersistedMessageIds(managed.id)).not.toContain(request.id)
+    const source = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, managed.id), 'utf-8').trim().split('\n')[1]!)
+    expect(source.annotations[0].meta.followUp.status).toBe('interrupted')
+  })
+
 })

@@ -22,8 +22,6 @@ import {
 } from './auth'
 import { generateCallbackPage } from '@craft-agent/shared/auth'
 import type { PlatformServices } from '../runtime/platform'
-import type { IOAuthFlowStore } from '../handlers/oauth-flow-store-interface'
-import type { ISessionManager } from '../handlers/session-manager-interface'
 
 // ---------------------------------------------------------------------------
 // MIME types for static file serving
@@ -114,9 +112,9 @@ export function resolveWebSocketUrl(
 
 /** Dependencies for the /api/oauth/callback HTTP route (server-side OAuth completion). */
 export interface OAuthCallbackDeps {
-  flowStore: Pick<IOAuthFlowStore, 'getByState' | 'remove'>
+  flowStore: { getByState: (state: string) => any; remove: (state: string) => void }
   credManager: { exchangeAndStore: (...args: any[]) => Promise<any> }
-  sessionManager: Pick<ISessionManager, 'completeAuthRequest' | 'completeAuthRequestsForSource'>
+  sessionManager: { completeAuthRequest: (...args: any[]) => Promise<void> }
   pushSourcesChanged: (workspaceId: string) => void
 }
 
@@ -296,9 +294,9 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       const errorDescription = url.searchParams.get('error_description')
 
       if (error) {
+        const flow = state ? options.oauthCallbackDeps.flowStore.getByState(state) : null
+        if (flow && state) options.oauthCallbackDeps.flowStore.remove(state)
         const errorMsg = errorDescription || error
-        // Ending the flow with the provider's reason releases clients that joined it
-        if (state) options.oauthCallbackDeps.flowStore.remove(state, { success: false, error: errorMsg })
         logger.warn(`[webui] OAuth callback error: ${errorMsg}`)
         return new Response(generateCallbackPage({ title: 'Authorization Failed', isSuccess: false, errorDetail: errorMsg }), {
           status: 200,
@@ -358,17 +356,14 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       })
     }
 
-    // Return the default workspace ID so the webui can include it in the WS handshake.
-    // A deep link names its workspace by slug (`?ws=`, as the app writes it); that one wins when it exists.
+    // Return the default workspace ID so the webui can include it in the WS handshake
     if (path === '/api/config/workspaces' && req.method === 'GET') {
       const configSession = await validateSession(req.headers.get('cookie'), secret)
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
       }
-      const { getActiveWorkspace, getWorkspaces } = await import('@craft-agent/shared/config/storage')
-      const linkedSlug = url.searchParams.get('ws')
-      const linked = linkedSlug ? getWorkspaces().find(w => w.slug === linkedSlug) : undefined
-      const active = linked ?? getActiveWorkspace()
+      const { getActiveWorkspace } = await import('@craft-agent/shared/config/storage')
+      const active = getActiveWorkspace()
       return Response.json({
         defaultWorkspaceId: active?.id ?? null,
       })

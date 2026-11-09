@@ -1,15 +1,18 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { RPC_CHANNELS, AUTOMATIONS_LOAD_ISSUES_KEY } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { appendAutomationHistoryEntry } from '@craft-agent/shared/automations/history-store'
 import { AUTOMATION_HISTORY_MAX_RUNS_PER_MATCHER } from '@craft-agent/shared/automations/constants'
+import { APP_EVENTS, validateAutomationsConfig, type AutomationEvent } from '@craft-agent/shared/automations'
+import { omitRetiredAutomations } from '@craft-agent/shared/automations/legacy-migration'
+import { DEPRECATED_EVENT_ALIASES } from '@craft-agent/shared/automations/schemas'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 // History file name — matches AUTOMATIONS_HISTORY_FILE from @craft-agent/shared/automations/constants
 const HISTORY_FILE = 'automations-history.jsonl'
-interface HistoryEntry { id: string; ts: number; ok: boolean; sessionId?: string; prompt?: string; error?: string; skipped?: string; webhook?: { method: string; url: string; statusCode: number; durationMs: number; attempts?: number; error?: string; responseBody?: string } }
+interface HistoryEntry { id: string; ts: number; ok: boolean; sessionId?: string; prompt?: string; error?: string; webhook?: { method: string; url: string; statusCode: number; durationMs: number; attempts?: number; error?: string; responseBody?: string } }
 
 // Per-workspace config mutex: serializes read-modify-write cycles on automations.json
 // to prevent concurrent IPC calls from clobbering each other's changes.
@@ -21,9 +24,38 @@ function withConfigMutex<T>(workspaceRoot: string, fn: () => Promise<T>): Promis
   return next
 }
 
+export function findStrictAutomationRegistrationErrors(
+  content: unknown,
+  validEvents: readonly string[],
+): string[] {
+  const strictErrors: string[] = []
+  const rawAutomations = (content as { automations?: unknown } | null)?.automations
+  if (!rawAutomations || typeof rawAutomations !== 'object') return strictErrors
+  for (const [event, matchers] of Object.entries(rawAutomations as Record<string, unknown>)) {
+    if (!validEvents.includes(event)) strictErrors.push(`Unknown automation event: ${event}`)
+    if (!Array.isArray(matchers)) continue
+    for (let index = 0; index < matchers.length; index++) {
+      const actions = (matchers[index] as { actions?: unknown } | null)?.actions
+      if (!Array.isArray(actions)) continue
+      for (const action of actions) {
+        const type = (action as { type?: unknown } | null)?.type
+        if (type !== 'prompt' && type !== 'webhook') {
+          strictErrors.push(`automations.${event}[${index}]: Unknown action type: ${String(type)}`)
+        }
+      }
+    }
+  }
+  return strictErrors
+}
+
+function assertSupportedEvent(event: string): asserts event is AutomationEvent {
+  if (!APP_EVENTS.includes((DEPRECATED_EVENT_ALIASES[event] ?? event) as AutomationEvent)) throw new Error(`Unsupported automation event: ${event}`)
+}
+
 // Shared helper: resolve workspace, read automations.json, validate matcher, mutate, write back
 interface AutomationsConfigJson { automations?: Record<string, Record<string, unknown>[]>; [key: string]: unknown }
 async function withAutomationMatcher(workspaceId: string, eventName: string, matcherIndex: number, mutate: (matchers: Record<string, unknown>[], index: number, config: AutomationsConfigJson, genId: () => string) => void) {
+  assertSupportedEvent(eventName)
   const workspace = getWorkspaceByNameOrId(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
 
@@ -56,6 +88,7 @@ async function withAutomationMatcher(workspaceId: string, eventName: string, mat
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.automations.GET,
+  RPC_CHANNELS.automations.VALIDATE,
   RPC_CHANNELS.automations.TEST,
   RPC_CHANNELS.automations.SET_ENABLED,
   RPC_CHANNELS.automations.DUPLICATE,
@@ -81,26 +114,10 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
       const configPath = resolveAutomationsConfigPath(workspace.rootPath)
       log.info(`AUTOMATIONS_GET: Reading config from: ${configPath}`)
       const content = await readFile(configPath, 'utf-8')
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(content)
-      } catch (parseError) {
-        // Show why on the Automations screen instead of an unexplained empty list.
-        const message = parseError instanceof Error ? parseError.message : String(parseError)
-        log.warn(`AUTOMATIONS_GET: ${configPath} is not valid JSON: ${message}`)
-        return { automations: {}, [AUTOMATIONS_LOAD_ISSUES_KEY]: [{ messages: [`automations.json is not valid JSON: ${message}`] }] }
-      }
-      // The raw config is what the screen lists; the same lenient load the runtime
-      // uses says which entries won't run and why, so the two always agree.
-      const { loadAutomationsConfigLenient } = await import('@craft-agent/shared/automations')
-      const { issues } = loadAutomationsConfigLenient(parsed)
-      const raw = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : { automations: {} }
-      const eventMap = raw.automations
-      const eventCount = eventMap && typeof eventMap === 'object' ? Object.keys(eventMap).length : 0
-      log.info(`AUTOMATIONS_GET: Loaded ${eventCount} event type(s) from ${configPath}${issues.length > 0 ? `, ${issues.length} will not run` : ''}`)
-      return { ...raw, [AUTOMATIONS_LOAD_ISSUES_KEY]: issues }
+      const parsed = JSON.parse(content)
+      const eventCount = parsed?.automations ? Object.keys(parsed.automations).length : 0
+      log.info(`AUTOMATIONS_GET: Loaded ${eventCount} event type(s) from ${configPath}`)
+      return omitRetiredAutomations(parsed)
     } catch (error) {
       if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         log.info(`AUTOMATIONS_GET: No automations.json found for workspace ${workspaceId}`)
@@ -111,9 +128,68 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
     }
   })
 
+  // Validate the exact persisted file with the same schema and semantic checks
+  // used by AutomationSystem before renderer code is allowed to report success.
+  server.handle(RPC_CHANNELS.automations.VALIDATE, async (_ctx, workspaceId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return { valid: false, errors: ['Workspace not found'], registeredIds: [] }
+    try {
+      const { resolveAutomationsConfigPath } = await import('@craft-agent/shared/automations/resolve-config-path')
+      const { validateAutomationsConfig, VALID_EVENTS } = await import('@craft-agent/shared/automations')
+      const content = JSON.parse(await readFile(resolveAutomationsConfigPath(workspace.rootPath), 'utf-8'))
+      const result = validateAutomationsConfig(content)
+      const strictErrors = [
+        ...result.errors,
+        ...findStrictAutomationRegistrationErrors(content, VALID_EVENTS),
+      ]
+      const registeredIds = result.config
+        ? Object.values(result.config.automations)
+          .flatMap((matchers) => matchers ?? [])
+          .map((matcher) => matcher.id?.trim())
+          .filter((id): id is string => Boolean(id))
+        : []
+      return {
+        valid: result.valid && strictErrors.length === 0,
+        errors: strictErrors,
+        registeredIds: [...new Set(registeredIds)].sort(),
+      }
+    } catch (error) {
+      return {
+        valid: false,
+        errors: [error instanceof Error ? error.message : String(error)],
+        registeredIds: [],
+      }
+    }
+  })
+
   server.handle(RPC_CHANNELS.automations.TEST, async (_ctx, payload: import('@craft-agent/shared/protocol').TestAutomationPayload) => {
     const workspace = getWorkspaceByNameOrId(payload.workspaceId)
     if (!workspace) throw new Error('Workspace not found')
+
+    if (payload.event) assertSupportedEvent(payload.event)
+    if (payload.automationId) {
+      const { resolveAutomationsConfigPath } = await import('@craft-agent/shared/automations/resolve-config-path')
+      const raw = JSON.parse(await readFile(resolveAutomationsConfigPath(workspace.rootPath), 'utf-8'))
+      const validated = validateAutomationsConfig(raw)
+      const found = Object.values(validated.config?.automations ?? {}).some(matchers => matchers?.some(matcher => matcher.id === payload.automationId))
+      if (!found) throw new Error('Automation not found or no longer supported')
+    }
+
+    if (payload.dryRun) {
+      const event = payload.event
+      if (!event) throw new Error('dryRun requires an event name')
+      const { AutomationSystem } = await import('@craft-agent/shared/automations')
+      const system = new AutomationSystem({
+        workspaceRootPath: workspace.rootPath,
+        workspaceId: payload.workspaceId,
+      })
+      try {
+        const matches = system.matchEvent((DEPRECATED_EVENT_ALIASES[event] ?? event) as AutomationEvent, payload.sample ?? {})
+        return { actions: [], matches } satisfies import('@craft-agent/shared/protocol').TestAutomationResult
+      } finally {
+        await system.dispose()
+      }
+    }
 
     const results: import('@craft-agent/shared/protocol').TestAutomationActionResult[] = []
     const { parsePromptReferences } = await import('@craft-agent/shared/automations')
@@ -153,50 +229,6 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
         continue
       }
 
-      if (action.type === 'script') {
-        // Execute the script through the same executor the ScriptHandler uses,
-        // with a synthesized SchedulerTick env (tests simulate the cron path).
-        // Timeout is clamped below the 30s RPC timeout so a slow script fails
-        // the test visibly instead of tripping the transport (see #943).
-        const { executeScriptAction, createScriptHistoryEntry, buildScriptEnv } = await import('@craft-agent/shared/automations')
-        const env = buildScriptEnv(
-          'SchedulerTick',
-          { workspaceId: payload.workspaceId, timestamp: Date.now() },
-          { workspaceRootPath: workspace.rootPath, page: action.page },
-        )
-        const result = await executeScriptAction(
-          {
-            type: 'script',
-            script: action.script,
-            args: action.args,
-            runtime: action.runtime,
-            timeoutMs: Math.min(action.timeoutMs ?? 25_000, 25_000),
-            page: action.page,
-          },
-          { workspaceRootPath: workspace.rootPath, env },
-        )
-
-        results.push({
-          type: 'script',
-          success: result.success,
-          script: result.script,
-          exitCode: result.exitCode,
-          ...(result.stdout ? { stdout: result.stdout.slice(0, 2000) } : {}),
-          ...(result.success || !result.stderr ? {} : { error: result.stderr.slice(0, 2000) }),
-          duration: Date.now() - start,
-        })
-
-        if (payload.automationId) {
-          const entry = createScriptHistoryEntry({ matcherId: payload.automationId, result })
-          try {
-            await appendAutomationHistoryEntry(workspace.rootPath, entry)
-          } catch (e) {
-            log.warn('[Automations] Failed to write history:', e)
-          }
-        }
-        continue
-      }
-
       // Prompt action
       // Parse @mentions from the prompt to resolve source/skill references
       const references = parsePromptReferences(action.prompt)
@@ -213,7 +245,6 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
           model: action.model,
           thinkingLevel: action.thinkingLevel,
           automationName: payload.automationName,
-          telegramTopic: payload.telegramTopic,
           // Test = "did it launch + start producing output", not "did the whole
           // turn finish". Return once the session is created so a long run doesn't
           // trip the 30s RPC timeout (craft-agents-oss#943).
@@ -313,6 +344,7 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
 
   // Replay webhook actions for a specific automation matcher
   server.handle(RPC_CHANNELS.automations.REPLAY, async (_ctx, workspaceId: string, automationId: string, eventName: string) => {
+    assertSupportedEvent(eventName)
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
@@ -326,12 +358,7 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
     if (!matcher) throw new Error('Automation not found')
 
     const webhookActions = (matcher.actions ?? []).filter(a => a.type === 'webhook')
-    if (webhookActions.length === 0) {
-      const hasScripts = (matcher.actions ?? []).some(a => a.type === 'script')
-      throw new Error(hasScripts
-        ? 'No webhook actions to replay — script actions re-run via "Run test"'
-        : 'No webhook actions to replay')
-    }
+    if (webhookActions.length === 0) throw new Error('No webhook actions to replay')
 
     const { executeWebhookRequest, createWebhookHistoryEntry } = await import('@craft-agent/shared/automations/webhook-utils')
     const results = await Promise.all(
@@ -373,8 +400,7 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
       for (const line of content.trim().split('\n')) {
         try {
           const entry = JSON.parse(line)
-          // A run skipped by its semantic condition is not an execution.
-          if (entry.id && entry.ts && !entry.skipped) result[entry.id] = entry.ts
+          if (entry.id && entry.ts) result[entry.id] = entry.ts
         } catch { /* skip malformed lines */ }
       }
       return result

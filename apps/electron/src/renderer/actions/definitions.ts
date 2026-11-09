@@ -125,14 +125,15 @@ export const actions = {
   // ═══════════════════════════════════════════
   'view.toggleSidebar': {
     id: 'view.toggleSidebar',
-    label: 'Toggle Sidebar',
+    label: 'Immersive Mode',
+    description: 'Hide the left navigation and list. Press again to restore them.',
     defaultHotkey: 'mod+b',
     category: 'View',
   },
   'view.toggleFocusMode': {
     id: 'view.toggleFocusMode',
-    label: 'Toggle Focus Mode',
-    description: 'Hide both sidebars for distraction-free work',
+    label: 'Immersive Mode',
+    description: 'Hide the left navigation and list. Same switch as ⌘/Ctrl+B.',
     defaultHotkey: 'mod+.',
     category: 'View',
   },

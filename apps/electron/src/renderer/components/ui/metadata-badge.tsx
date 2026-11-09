@@ -70,14 +70,13 @@ export const MetadataBadge = React.forwardRef<HTMLButtonElement, MetadataBadgePr
 
         {value ? (
           <>
-            <span aria-hidden="true" className="mx-1 text-tertiary">·</span>
+            <span className="opacity-30 mx-1">·</span>
             <span
               className={cn(
                 'whitespace-nowrap max-w-[140px] truncate',
-                // Roles, not opacity: a faded value fell below AA on the chip's fill
                 onValueClick
-                  ? 'text-secondary cursor-pointer hover:underline underline-offset-2'
-                  : 'text-tertiary'
+                  ? 'opacity-80 cursor-pointer hover:underline underline-offset-2'
+                  : 'opacity-60'
               )}
               title={onValueClick ? value : undefined}
               onClick={onValueClick ? (e) => { e.stopPropagation(); onValueClick(e) } : undefined}
@@ -88,14 +87,14 @@ export const MetadataBadge = React.forwardRef<HTMLButtonElement, MetadataBadgePr
         ) : (
           valueHintIcon && (
             <>
-              <span aria-hidden="true" className="mx-1 text-tertiary">·</span>
+              <span className="opacity-30 mx-1">·</span>
               {valueHintIcon}
             </>
           )
         )}
 
         {showChevron && (
-          <ChevronDown aria-hidden className="h-3 w-3 text-tertiary ml-1 shrink-0" />
+          <ChevronDown className="h-3 w-3 opacity-40 ml-1 shrink-0" />
         )}
       </button>
     )

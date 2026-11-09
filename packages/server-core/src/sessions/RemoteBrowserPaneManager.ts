@@ -14,10 +14,9 @@
  */
 
 import { CodedError } from '@craft-agent/shared/protocol'
-import type { BrowserInstanceInfo, BrowserSecurityChallenge } from '@craft-agent/shared/protocol'
+import type { BrowserInstanceInfo } from '@craft-agent/shared/protocol'
 import type {
   IBrowserPaneManager,
-  BrowserClickResult,
   BrowserScreenshotOptions,
   BrowserScreenshotRegionTarget,
   BrowserScreenshotResult,
@@ -76,7 +75,7 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
       throw new CodedError(
         'BROWSER_NO_CAPABLE_CLIENT',
         'No connected desktop client supports browser tools for this session. ' +
-        'Open this workspace from the Craft Agent desktop app and try again.',
+        'Open this workspace from the Selection desktop app and try again.',
       )
     }
     if (!this.rpcServer.hasClientCapability(clientId, CLIENT_BROWSER_INVOKE)) {
@@ -246,8 +245,8 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
   async clickElement(
     id: string, ref: string,
     options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number },
-  ): Promise<BrowserClickResult | void> {
-    return await this.invoke('clickElement', [id, ref, options])
+  ): Promise<void> {
+    await this.invoke('clickElement', [id, ref, options])
   }
   async clickAtCoordinates(id: string, x: number, y: number): Promise<void> {
     await this.invoke('clickAtCoordinates', [id, x, y])
@@ -316,7 +315,7 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
   async getDownloads(id: string, options?: BrowserDownloadOptions): Promise<BrowserDownloadEntry[]> {
     return await this.invoke('getDownloads', [id, options])
   }
-  async detectSecurityChallenge(id: string): Promise<BrowserSecurityChallenge> {
+  async detectSecurityChallenge(id: string): Promise<{ detected: boolean; provider: string; signals: string[] }> {
     return await this.invoke('detectSecurityChallenge', [id])
   }
 
@@ -340,6 +339,10 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
       imageBuffer: buffer,
       imageFormat: wire.imageFormat,
       metadata: wire.metadata,
+      sourceWidth: wire.sourceWidth,
+      sourceHeight: wire.sourceHeight,
+      width: wire.width,
+      height: wire.height,
     }
   }
 }

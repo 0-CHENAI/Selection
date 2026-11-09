@@ -3,7 +3,7 @@
  * Summaries provide quick context; "Learn more" opens the full docs.
  */
 
-const DOC_BASE_URL = 'https://thecraftagents.com/docs'
+const DOC_BASE_URL = 'https://agents.craft.do/docs'
 
 export type DocFeature =
   | 'sources'
@@ -71,7 +71,7 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/core-concepts/permissions',
     title: 'Permissions',
     summary:
-      'Control how much autonomy your agent has. Explore mode is read-only, Ask to Edit prompts before changes, and Execute mode runs without prompts.',
+      'Control how much autonomy your agent has. Explore mode is read-only, Smart Approval runs low-risk work automatically and asks for approval before risky actions, and Execute mode runs without prompts.',
   },
   labels: {
     path: '/labels/overview',
@@ -95,13 +95,13 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/reference/config/config-file',
     title: 'App Settings',
     summary:
-      'Configure global app settings like your default model, authentication method, and workspace list. Settings are stored in ~/.craft-agent/config.json.',
+      'Configure global app settings like your default model, authentication method, and workspace list. Settings are stored in ~/.selection/config.json.',
   },
   preferences: {
     path: '/reference/config/preferences',
     title: 'Preferences',
     summary:
-      'Personal preferences like your name, timezone, and language that help the agent personalize responses. Stored in ~/.craft-agent/preferences.json.',
+      'Personal preferences like your name, timezone, and language that help the agent personalize responses. Stored in ~/.selection/preferences.json.',
   },
   automations: {
     path: '/automations/overview',
@@ -113,7 +113,7 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/messaging/overview',
     title: 'Messaging',
     summary:
-      'Connect a session to a chat platform — Telegram, WhatsApp, or Lark / Feishu — and reach your agent from anywhere. Pair workspace supergroups, route automations to forum topics, and send rich replies natively.',
+      'Connect a session to Lark / Feishu and reach your agent from anywhere with native rich replies.',
   },
 }
 

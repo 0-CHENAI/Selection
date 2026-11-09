@@ -28,21 +28,15 @@
  */
 
 import * as React from 'react'
-import { FileText, Maximize2, Minimize2 } from 'lucide-react'
+import { FileText, Maximize2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
-import {
-  PreviewBlockAction,
-  PreviewBlockError,
-  PreviewBlockFade,
-  PreviewBlockFrame,
-  PreviewBlockHeader,
-  PreviewBlockLoading,
-  PreviewItemNavigator,
-} from './PreviewBlockChrome'
+import { ItemNavigator } from '../overlay/ItemNavigator'
 import { usePlatform } from '../../context/PlatformContext'
 import { useTranslation } from 'react-i18next'
 import { Markdown } from './Markdown'
+import { PreviewOverlay } from '../overlay/PreviewOverlay'
+import { InlineDocumentPreview } from './InlineDocumentPreview'
 import {
   parseMarkdownPreviewSpec,
   normalizePreviewItems,
@@ -87,22 +81,15 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const activeItem = items[activeIndex]
+  const selectedIndex = activeIndex < items.length ? activeIndex : 0
+  const activeItem = items[selectedIndex]
   const activeContent = activeItem ? contentCache[activeItem.src] : undefined
-
-  React.useEffect(() => {
-    if (!activeItem) {
-      setActiveIndex(0)
-      return
-    }
-    if (activeIndex > items.length - 1) {
-      setActiveIndex(0)
-    }
-  }, [activeIndex, activeItem, items.length])
+  React.useEffect(() => { setActiveIndex(selectedIndex) }, [selectedIndex])
 
   React.useEffect(() => {
     if (!activeItem?.src || !onReadFile) return
-    if (contentCache[activeItem.src] !== undefined) {
+    if (activeContent !== undefined) {
+      setLoading(false)
       setError(null)
       return
     }
@@ -122,7 +109,7 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [activeItem?.src, onReadFile, contentCache])
+  }, [activeItem?.src, onReadFile, activeContent])
 
   const fallback = <CodeBlock code={code} language="json" mode="full" className={className} />
 
@@ -130,35 +117,26 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
     return fallback
   }
 
-  const headerTitle = spec.title || t('preview.markdownPreview')
-  // Until the active file arrives, keep the content area at its 400px cap so the transcript
-  // doesn't shift when the document renders.
-  const awaitingContent = activeContent === undefined && !error && !!onReadFile
+  const headerTitle = activeItem?.src.split(/[\\/]/).pop() || spec.title || t('preview.markdownPreview')
 
   return (
     <MarkdownDocBlockErrorBoundary fallback={fallback}>
-      <PreviewBlockFrame className={className}>
-        {/* Header: title · item navigator · expand in place */}
-        <PreviewBlockHeader icon={<FileText />} title={headerTitle}>
-          <PreviewItemNavigator items={items} activeIndex={activeIndex} onSelect={setActiveIndex} />
-          <PreviewBlockAction
-            aria-label={isFullscreen ? t('common.close') : t('preview.expandPreview')}
-            aria-expanded={isFullscreen}
-            icon={isFullscreen ? <Minimize2 /> : <Maximize2 />}
-            onClick={() => setIsFullscreen((v) => !v)}
-          />
-        </PreviewBlockHeader>
+      <div className={cn('relative group my-4 rounded-xl overflow-hidden border border-foreground/15 bg-background shadow-minimal', className)}>
+        <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-2">
+          <FileText className="w-3.5 h-3.5 text-muted-foreground/50" />
+          <span title={activeItem?.src} className="min-w-0 truncate text-[12px] text-foreground font-medium flex-1">{headerTitle}</span>
+          <span className="text-xs text-muted-foreground">Markdown</span>
+          <div className="flex items-center gap-1">
+            <ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />
+            <button type="button" onClick={() => setIsFullscreen(true)} aria-label={t('common.viewFullscreen')}
+              className="rounded p-1 hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring">
+              <Maximize2 className="size-3.5" />
+            </button>
+          </div>
+        </div>
 
-        {/* The document sits on paper inside the well (nested code wells stay distinct); the fade
-            is a sibling of the scroller so it stays pinned to the bottom edge while scrolling. */}
-        <div className="relative bg-paper">
-          <div
-            className={cn(
-              'overflow-auto px-3 py-2',
-              isFullscreen ? 'max-h-[80vh]' : 'max-h-[400px]',
-              awaitingContent && 'h-[400px]'
-            )}
-          >
+        <InlineDocumentPreview key={activeItem?.src} onViewFull={() => setIsFullscreen(true)}>
+          <div className="relative px-3 py-2 overflow-x-auto">
             {activeContent !== undefined && (
               <Markdown
                 mode="minimal"
@@ -171,17 +149,25 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
             )}
 
             {activeContent === undefined && loading && (
-              <PreviewBlockLoading className="h-full">{t('common.loading')}</PreviewBlockLoading>
+              <div className="py-8 text-center text-muted-foreground text-[13px]">{t('common.loading')}</div>
             )}
 
             {activeContent === undefined && !loading && error && (
-              <PreviewBlockError>{error}</PreviewBlockError>
+              <div className="py-6 text-center text-destructive/70 text-[13px]">{error}</div>
             )}
           </div>
-
-          {!isFullscreen && activeContent !== undefined && <PreviewBlockFade surface="paper" />}
+        </InlineDocumentPreview>
+      </div>
+      <PreviewOverlay isOpen={isFullscreen} onClose={() => setIsFullscreen(false)}
+        typeBadge={{ icon: FileText, label: 'Markdown', variant: 'blue' }} filePath={activeItem?.src}
+        headerActions={<ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />}>
+        <div className="mx-auto w-full max-w-5xl px-6 py-4 break-words">
+          {activeContent !== undefined ? (
+            <Markdown mode="full" disablePreviewBlocks={DISABLE_INNER_MARKDOWN_PREVIEW}
+              onUrlClick={onUrlClick} onFileClick={onFileClick}>{activeContent}</Markdown>
+          ) : <p className="text-sm text-muted-foreground">{error || t('common.loading')}</p>}
         </div>
-      </PreviewBlockFrame>
+      </PreviewOverlay>
     </MarkdownDocBlockErrorBoundary>
   )
 }

@@ -17,6 +17,7 @@ import {
   getLlmConnection,
   updateLlmConnection,
   isCompatProvider,
+  isUnsupportedLlmConnection,
   getModelsForProviderType,
 } from '@craft-agent/shared/config'
 import { MODEL_FETCHERS } from './registry'
@@ -38,6 +39,7 @@ type CredentialResolver = (slug: string) => Promise<ModelFetcherCredentials>
 class ModelRefreshService {
   private timers = new Map<string, ReturnType<typeof setInterval>>()
   private inFlight = new Map<string, Promise<void>>()
+  private stopped = false
 
   constructor(
     private fetchers: ModelFetcherMap,
@@ -67,7 +69,7 @@ class ModelRefreshService {
    * Updates connection.models in storage on success.
    */
   private async _doRefresh(slug: string): Promise<void> {
-    const connection = getLlmConnection(slug)
+    let connection = getLlmConnection(slug)
     if (!connection) {
       handlerLog.warn(`Model refresh: connection not found: ${slug}`)
       return
@@ -78,7 +80,13 @@ class ModelRefreshService {
       return
     }
 
+    if (isUnsupportedLlmConnection(connection)) {
+      handlerLog.warn(`Model refresh: skipping unsupported connection ${slug}`)
+      return
+    }
+
     const providerType = connection.providerType as FetchableProvider
+    const isCopilot = connection.providerType === 'pi' && connection.piAuthProvider === 'github-copilot'
     const fetcher = this.fetchers[providerType]
     if (!fetcher) {
       handlerLog.warn(`Model refresh: no fetcher for provider type: ${providerType}`)
@@ -87,10 +95,12 @@ class ModelRefreshService {
 
     let newModels: ModelDefinition[] | null = null
     let serverDefault: string | undefined
+    let usedCredentials: ModelFetcherCredentials | undefined
 
     // Layer 1: Provider API/SDK
     try {
       const credentials = await this.getCredentials(slug)
+      usedCredentials = credentials
       handlerLog.info(`Model refresh [${slug}]: fetching (provider=${connection.providerType}, piAuth=${connection.piAuthProvider}, hasOAuthRefresh=${!!credentials.oauthRefreshToken}, hasOAuthAccess=${!!credentials.oauthAccessToken})`)
       const result = await fetcher.fetchModels(connection, credentials)
       newModels = result.models
@@ -101,10 +111,43 @@ class ModelRefreshService {
       handlerLog.warn(`Model refresh [${slug}]: provider fetch failed: ${msg}`)
     }
 
+    if (newModels && isCopilot && connection.authType === 'oauth') {
+      try {
+        const currentCredentials = await this.getCredentials(slug)
+        if ((usedCredentials?.oauthRefreshToken || usedCredentials?.oauthAccessToken)
+          !== (currentCredentials.oauthRefreshToken || currentCredentials.oauthAccessToken)) {
+          handlerLog.info(`Model refresh [${slug}]: credentials changed during fetch; discarding result`)
+          return
+        }
+      } catch {
+        handlerLog.warn(`Model refresh [${slug}]: could not verify current credentials; discarding result`)
+        return
+      }
+    }
+
+    // The network request can overlap edits, deletion, or recreation of this
+    // connection. Never apply a catalog to a different account/provider.
+    const latest = getLlmConnection(slug)
+    if (!latest || latest.createdAt !== connection.createdAt || latest.providerType !== connection.providerType
+      || latest.authType !== connection.authType || latest.piAuthProvider !== connection.piAuthProvider
+      || latest.baseUrl !== connection.baseUrl || latest.oauthAccountUuid !== connection.oauthAccountUuid
+      || latest.oauthOrganizationUuid !== connection.oauthOrganizationUuid
+      || latest.oauthProfileVerifiedAt !== connection.oauthProfileVerifiedAt) {
+      handlerLog.info(`Model refresh [${slug}]: connection changed during fetch; discarding result`)
+      return
+    }
+    connection = latest
+
     // Layer 2: Persisted connection.models (keep what we have)
     if (!newModels && connection.models && connection.models.length > 0) {
       handlerLog.warn(`Model refresh [${slug}]: keeping ${connection.models.length} stale persisted models (live fetch failed)`)
       return // Nothing to update
+    }
+
+    // An unfiltered SDK catalog cannot represent Copilot account policy.
+    if (!newModels && isCopilot && connection.authType === 'oauth') {
+      handlerLog.warn(`Model refresh [${slug}]: no cached Copilot policy catalog available`)
+      return
     }
 
     // Layer 3: MODEL_REGISTRY hardcoded fallback
@@ -116,18 +159,27 @@ class ModelRefreshService {
       }
     }
 
+    if (newModels && newModels.length === 0 && isCopilot && connection.authType === 'oauth') {
+      updateLlmConnection(slug, {
+        models: [],
+        defaultModel: '',
+        modelSelectionMode: 'automaticallySyncedFromProvider',
+      })
+      return
+    }
+
     if (!newModels || newModels.length === 0) {
       handlerLog.warn(`Model refresh [${slug}]: no models available from any source`)
       return
     }
 
-    // For Pi connections with explicit user-owned 3-tier selection,
-    // never overwrite model lists from background refresh.
+    // For Pi API-key connections with explicit user-owned selection,
+    // never overwrite model lists from background refresh. OAuth catalogs
+    // are provider-managed even if a legacy connection has a custom mode.
     // Exception: Copilot connections are always server-managed — GitHub's
     // model policy controls which models are enabled, so we must always
     // accept the live API result.
-    const isCopilot = connection.providerType === 'pi' && connection.piAuthProvider === 'github-copilot'
-    if (connection.providerType === 'pi' && connection.modelSelectionMode === 'userDefined3Tier' && !isCopilot) {
+    if (connection.providerType === 'pi' && connection.authType !== 'oauth' && connection.modelSelectionMode === 'userDefined3Tier' && !isCopilot) {
       const modelCount = connection.models?.length ?? 0
       handlerLog.info(`Model refresh [${slug}]: preserving user-defined Pi model list (${modelCount} models)`)
       if (modelCount > 10) {
@@ -139,12 +191,14 @@ class ModelRefreshService {
     // Preserve user's defaultModel if still valid
     const currentDefault = connection.defaultModel
     const stillValid = currentDefault && newModels.some(m => m.id === currentDefault)
-    const newDefault = stillValid
-      ? currentDefault
-      : serverDefault ?? newModels[0]?.id
+    const newDefault = stillValid ? currentDefault
+      : (serverDefault && newModels.some(model => model.id === serverDefault) ? serverDefault : newModels[0]?.id)
 
     updateLlmConnection(slug, {
       models: newModels,
+      ...(connection.providerType === 'pi' && connection.authType === 'oauth'
+        ? { modelSelectionMode: 'automaticallySyncedFromProvider' as const }
+        : {}),
       ...(newDefault && !stillValid ? { defaultModel: newDefault } : {}),
     })
   }
@@ -155,10 +209,11 @@ class ModelRefreshService {
    * Call on app startup after IPC handlers are registered.
    */
   startAll(): void {
+    this.stopped = false
     const connections = getLlmConnections()
 
     for (const conn of connections) {
-      if (isCompatProvider(conn.providerType)) continue
+      if (isCompatProvider(conn.providerType) || isUnsupportedLlmConnection(conn)) continue
 
       const providerType = conn.providerType as FetchableProvider
       const fetcher = this.fetchers[providerType]
@@ -185,6 +240,7 @@ class ModelRefreshService {
    * Stop all refresh timers. Call on app quit.
    */
   stopAll(): void {
+    this.stopped = true
     for (const [slug, timer] of this.timers) {
       clearInterval(timer)
       handlerLog.info(`Stopped model refresh timer for ${slug}`)
@@ -198,11 +254,15 @@ class ModelRefreshService {
    * Called when: connection created, auth completed, user clicks refresh.
    */
   async refreshNow(slug: string): Promise<void> {
+    // A credential change can arrive during an older request. Waiting for it
+    // and then fetching again prevents deduplication from losing the re-auth.
+    const pending = this.inFlight.get(slug)
+    if (pending) await pending
     await this.refreshConnection(slug)
 
     // Ensure periodic timer is running
     const connection = getLlmConnection(slug)
-    if (!connection || isCompatProvider(connection.providerType)) return
+    if (!connection || isCompatProvider(connection.providerType) || isUnsupportedLlmConnection(connection)) return
 
     const providerType = connection.providerType as FetchableProvider
     const fetcher = this.fetchers[providerType]
@@ -227,7 +287,7 @@ class ModelRefreshService {
 
   private startTimer(slug: string, intervalMs: number): void {
     // Don't create duplicate timers
-    if (this.timers.has(slug)) return
+    if (this.stopped || this.timers.has(slug)) return
 
     const timer = setInterval(async () => {
       try {

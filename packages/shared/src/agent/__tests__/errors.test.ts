@@ -36,6 +36,10 @@ describe('parseError proxy interception handling', () => {
   })
 })
 
+it('keeps upstream 500 proxy authentication failures separate from user credentials', () => {
+  expect(parseError(new Error('500: {"message":"socks connect: username/password authentication failed"}')).code).toBe('service_error')
+})
+
 describe('parseError tool-support classification', () => {
   // Regression for the misclassification in the screenshot: an Anthropic
   // cache_control TTL ordering error mentioning `tools` in its hint string
@@ -69,3 +73,57 @@ describe('parseError tool-support classification', () => {
     }
   })
 })
+
+describe('parseError OpenRouter availability', () => {
+  it('maps no-endpoints 404s to invalid_model with the model id', () => {
+    const parsed = parseError(new Error('404: {"message":"No endpoints found for ai21/jamba-large-1.7.","code":404}'))
+    expect(parsed.code).toBe('invalid_model')
+    expect(parsed.message).toContain('ai21/jamba-large-1.7')
+    expect(parsed.canRetry).toBe(false)
+  })
+
+  it('does not steal tool-support endpoint errors', () => {
+    const parsed = parseError(new Error('No endpoints found that support tool use for this model'))
+    expect(parsed.code).toBe('model_no_tool_support')
+  })
+})
+
+describe('parseError image-input classification', () => {
+  it('maps distinct image failure prefixes to distinct codes', () => {
+    expect(parseError(new Error('image_capability_mismatch: text-only model')).code)
+      .toBe('image_capability_mismatch')
+    expect(parseError(new Error('image_bytes_unavailable: shot.png')).code)
+      .toBe('image_bytes_unavailable')
+    expect(parseError(new Error('image_resource_expired: stored file gone')).code)
+      .toBe('image_resource_expired')
+    expect(parseError(new Error('unsupported image format')).code)
+      .toBe('image_unsupported_format')
+    expect(parseError(new Error('unable to process image')).code)
+      .toBe('image_remote_rejected')
+    expect(parseError(new Error('The image of the rejected proposal was saved')).code)
+      .not.toBe('image_remote_rejected')
+  })
+})
+
+
+describe('terminal response diagnostics (#295)', () => {
+  it.each([
+    ['The model service is taking too long to respond.', 'provider_timeout'],
+    ['context_length_exceeded: private payload', 'context_limit'],
+    ['Response stream closed unexpectedly: secret endpoint', 'stream_interrupted'],
+    ['Pi subprocess exited unexpectedly (code 1): private path', 'agent_process_exited'],
+  ] as const)('classifies %s without exposing raw details', (message, code) => {
+    const error = parseError(new Error(message))
+    expect(error.code).toBe(code)
+    expect(error.originalError).toBeUndefined()
+    expect(error.canRetry).toBe(false)
+    expect(error.actions).toEqual([])
+  })
+})
+
+it('classifies the local request resource limit without offering automatic retry', () => {
+  const error = parseError(new Error('Model request time limit reached. Continue this session to resume from recorded work.'));
+  expect(error.code).toBe('model_request_timeout');
+  expect(error.canRetry).toBe(false);
+  expect(error.actions).toEqual([]);
+});

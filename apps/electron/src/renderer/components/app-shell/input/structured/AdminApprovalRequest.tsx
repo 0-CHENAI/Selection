@@ -1,19 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ShieldAlert } from 'lucide-react'
+import { ShieldAlert, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import {
-  DECISION_ACTION,
-  DecisionActions,
-  DecisionBody,
-  DecisionCard,
-  DecisionDetails,
-  DecisionHeader,
-  DecisionPreview,
-  DecisionSpacer,
-} from './DecisionCard'
+import { cn } from '@/lib/utils'
 
 export interface AdminApprovalRequestData {
   appName: string
@@ -28,15 +19,14 @@ interface AdminApprovalRequestProps {
   request: AdminApprovalRequestData
   onApprove: (options: { rememberForMinutes?: number }) => void
   onCancel: () => void
-  /** When true, the composer slot (InputContainer) draws the card material and ring */
+  /** When true, removes container styling (shadow, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
 }
 
 /**
  * AdminApprovalRequest - Friendly admin-elevation approval card for non-technical users.
  *
- * Goal: make privileged escalation understandable and safe. Decision-card anatomy (spec §7.6):
- * Approve (primary) · Cancel (ghost) · "Remember" switch.
+ * Goal: make privileged escalation understandable and safe.
  */
 export function AdminApprovalRequest({
   request,
@@ -46,67 +36,97 @@ export function AdminApprovalRequest({
 }: AdminApprovalRequestProps) {
   const { t } = useTranslation()
   const [rememberChoice, setRememberChoice] = React.useState(false)
+  const [responded, setResponded] = React.useState(false)
+  const respondedRef = React.useRef(false)
 
   const rememberForMinutes = request.rememberForMinutes ?? 10
 
   const handleApprove = () => {
+    if (respondedRef.current) return
+    respondedRef.current = true
+    setResponded(true)
     onApprove({ rememberForMinutes: rememberChoice ? rememberForMinutes : undefined })
   }
 
+  const handleCancel = () => {
+    if (respondedRef.current) return
+    respondedRef.current = true
+    setResponded(true)
+    onCancel()
+  }
+
   return (
-    <DecisionCard tone="info" standalone={!unstyled}>
-      <DecisionBody>
-        <DecisionHeader tone="info" icon={<ShieldAlert />} title={t('chat.adminApprovalRequired')} />
-        <DecisionDetails>
-          <p className="text-label text-secondary">
-            Installing <span className="font-medium text-foreground">{request.appName}</span> needs your Mac admin approval.
-            {request.requiresSystemPrompt ? " You’ll see your regular macOS password/Touch ID prompt." : ''}
+    <div
+      className={cn(
+        'overflow-hidden h-full flex flex-col bg-info/5',
+        unstyled
+          ? 'border-0'
+          : 'border border-info/30 rounded-[8px] shadow-middle'
+      )}
+    >
+      <div className="p-4 space-y-3 flex-1 min-h-0 flex flex-col overflow-y-auto">
+        <div className="space-y-2 pb-1">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+            <ShieldAlert className="h-3.5 w-3.5 text-info" />
+            <span>{t('chat.adminApprovalRequired')}</span>
+          </div>
+          <div className="text-xs leading-[18px] text-muted-foreground">
+            {t('chat.adminNeedsApproval', { appName: request.appName })}
+            {request.requiresSystemPrompt ? ` ${t('chat.adminSystemPromptNote')}` : ''}
             <br />
-            <span className="font-medium text-foreground">Why:</span> {request.reason}
+            <span className="font-medium text-foreground">{t('chat.adminWhyLabel')}</span>{' '}
+            {request.reason}
             {request.impact && (
               <>
                 <br />
-                <span className="font-medium text-foreground">Impact:</span> {request.impact}
+                <span className="font-medium text-foreground">{t('chat.adminImpactLabel')}</span>{' '}
+                {request.impact}
               </>
             )}
-          </p>
+          </div>
+        </div>
 
-          <DecisionPreview>{request.command}</DecisionPreview>
-        </DecisionDetails>
-      </DecisionBody>
+        <div className="bg-foreground/5 rounded-md p-3 font-mono text-xs text-foreground/90 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+          {request.command}
+        </div>
+      </div>
 
-      <DecisionActions>
+      <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 border-t border-border/50">
         <Button
-          variant="primary"
-          size="lg"
-          className={`${DECISION_ACTION} cursor-pointer`}
+          size="sm"
+          variant="default"
+          className="h-7 gap-1.5 cursor-pointer"
           onClick={handleApprove}
+          disabled={responded}
         >
-          Approve
+          <Check className="h-3.5 w-3.5" />
+          {t('chat.adminApprove')}
         </Button>
 
         <Button
+          size="sm"
           variant="ghost"
-          size="lg"
-          className={DECISION_ACTION}
-          onClick={onCancel}
+          className="h-7 gap-1.5 text-destructive hover:text-destructive border border-dashed border-destructive/50 hover:bg-destructive/10 hover:border-destructive/70 active:bg-destructive/20"
+          onClick={handleCancel}
+          disabled={responded}
         >
-          Cancel
+          <X className="h-3.5 w-3.5" />
+          {t('chat.adminCancel')}
         </Button>
 
-        <DecisionSpacer />
+        <div className="min-w-0 flex-1" />
 
         <div className="flex items-center gap-2">
           <Switch
             checked={rememberChoice}
             onCheckedChange={setRememberChoice}
-            aria-label={`Remember this exact command for ${rememberForMinutes} minutes`}
+            aria-label={t('chat.adminRememberAria', { minutes: rememberForMinutes })}
           />
-          <Label className="cursor-pointer text-label-sm text-secondary" onClick={() => setRememberChoice(!rememberChoice)}>
-            Remember for {rememberForMinutes} min
+          <Label className="text-[11px] text-muted-foreground cursor-pointer" onClick={() => setRememberChoice(!rememberChoice)}>
+            {t('chat.adminRememberFor', { minutes: rememberForMinutes })}
           </Label>
         </div>
-      </DecisionActions>
-    </DecisionCard>
+      </div>
+    </div>
   )
 }

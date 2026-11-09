@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { startOfDay } from "date-fns"
 
 import { searchLog } from "@/lib/logger"
@@ -6,7 +7,7 @@ import { parseLabelEntry, matchesLabelFilter } from "@craft-agent/shared/labels"
 import type { LabelConfig } from "@craft-agent/shared/labels"
 import { fuzzyScore } from "@craft-agent/shared/search"
 import { getSessionTitle, getSessionStatus } from "@/utils/session"
-import { buildSessionFamilies, flatRow, flattenFamilies, type SessionFamily, type SessionListRow } from "@/utils/session-tree"
+import { formatSessionDateGroupLabel } from "@/utils/session-date"
 import type { SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionFilter } from "@/contexts/NavigationContext"
@@ -18,7 +19,6 @@ import type { SessionFilter } from "@/contexts/NavigationContext"
 const INITIAL_DISPLAY_LIMIT = 50
 const BATCH_SIZE = 50
 const MAX_SEARCH_RESULTS = 100
-const NO_COLLAPSED_FAMILIES: ReadonlySet<string> = new Set()
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,6 +26,12 @@ const NO_COLLAPSED_FAMILIES: ReadonlySet<string> = new Set()
 
 /** Filter mode for tri-state filtering: include shows only matching, exclude hides matching */
 export type FilterMode = 'include' | 'exclude'
+
+export interface DateGroup {
+  date: Date
+  label: string
+  sessions: SessionMeta[]
+}
 
 export interface ContentSearchResult {
   matchCount: number
@@ -38,8 +44,6 @@ export interface CollapsedGroupMeta {
   count: number
 }
 
-export type SessionGroupingMode = 'date' | 'status' | 'unread' | 'project'
-
 export interface UseSessionSearchOptions {
   items: SessionMeta[]
   searchActive: boolean
@@ -51,12 +55,10 @@ export interface UseSessionSearchOptions {
   labelFilterMap?: Map<string, FilterMode>
   /** Workspace label tree — label filters match descendants through it (shared matchesLabelFilter). */
   labelConfigs?: LabelConfig[]
-  /** Collapsed group keys — collapsed items are excluded from pagination and rows */
+  /** Collapsed group keys — collapsed items are excluded from pagination and flatItems */
   collapsedGroups?: Set<string>
-  /** Sessions whose sub-sessions are hidden */
-  collapsedFamilies?: ReadonlySet<string>
   /** Grouping mode — needed to compute group keys for collapse-aware pagination */
-  groupingMode?: SessionGroupingMode
+  groupingMode?: 'date' | 'status' | 'unread' | 'project'
   /** Ref to the ScrollArea viewport element — used for scroll-based pagination */
   scrollViewportRef?: React.RefObject<HTMLDivElement>
 }
@@ -77,10 +79,9 @@ export interface UseSessionSearchResult {
   exceededSearchLimit: boolean
 
   // Render-ready outputs
-  /** Visible rows: the paginated families minus the sessions under collapsed rows, or the flat search results */
-  rows: SessionListRow[]
-  /** Every family of the filtered list, paginated or not (empty in search mode) */
-  families: SessionFamily[]
+  flatItems: SessionMeta[]
+  dateGroups: DateGroup[]
+  sessionIndexMap: Map<string, number>
 
   // Pagination
   hasMore: boolean
@@ -95,54 +96,37 @@ export interface UseSessionSearchResult {
 // Pure helpers (moved from SessionList)
 // ---------------------------------------------------------------------------
 
-function getCollapseGroupKey(item: SessionMeta, groupingMode?: SessionGroupingMode): string {
+export function groupSessionsByDate(
+  sessions: SessionMeta[],
+  t: (key: 'common.today' | 'common.yesterday') => string,
+  language: string,
+): DateGroup[] {
+  const groups = new Map<string, { date: Date; sessions: SessionMeta[] }>()
+
+  for (const session of sessions) {
+    const timestamp = session.lastMessageAt || 0
+    const date = startOfDay(new Date(timestamp))
+    const key = date.toISOString()
+
+    if (!groups.has(key)) {
+      groups.set(key, { date, sessions: [] })
+    }
+    groups.get(key)!.sessions.push(session)
+  }
+
+  return Array.from(groups.values())
+    .sort((a, b) => b.date.getTime() - a.date.getTime())
+    .map(group => ({
+      ...group,
+      label: formatSessionDateGroupLabel(group.date, t, language),
+    }))
+}
+
+function getCollapseGroupKey(item: SessionMeta, groupingMode?: 'date' | 'status' | 'unread' | 'project'): string {
   if (groupingMode === 'status') return `status-${getSessionStatus(item)}`
   if (groupingMode === 'unread') return item.hasUnread ? 'unread-yes' : 'unread-no'
   if (groupingMode === 'project') return `project-${(item as { projectId?: string }).projectId ?? '__none__'}`
   return startOfDay(new Date(item.lastMessageAt || 0)).toISOString()
-}
-
-/**
- * Date groups follow the newest-first order of the list, so one global window that grows on
- * scroll shows every group in turn. Status, unread and project groups don't: an old To-do sits
- * past the window and vanished from its group until the user scrolled far enough (#501). Those
- * modes window each group separately, so small groups show in full and big ones (Done) stay
- * bounded; `displayLimit` still grows on scroll.
- */
-function paginatesPerGroup(groupingMode?: SessionGroupingMode): boolean {
-  return groupingMode === 'status' || groupingMode === 'unread' || groupingMode === 'project'
-}
-
-/** How many sessions an item stands for (a family view: the family's size) */
-type WeightOf = (item: SessionMeta) => number
-const ONE_SESSION: WeightOf = () => 1
-
-/**
- * Items up to `limit` sessions, or up to `limit` sessions of each group. An item is never split:
- * the one that crosses the limit is shown whole. Keeps the order of `items`.
- */
-function windowItems(
-  items: SessionMeta[],
-  limit: number,
-  groupingMode: SessionGroupingMode | undefined,
-  weightOf: WeightOf,
-): { visible: SessionMeta[]; hasMore: boolean } {
-  const perGroup = paginatesPerGroup(groupingMode)
-  const shownPerGroup = new Map<string, number>()
-  const visible: SessionMeta[] = []
-  let hasMore = false
-  for (const item of items) {
-    const key = perGroup ? getCollapseGroupKey(item, groupingMode) : ''
-    const shown = shownPerGroup.get(key) ?? 0
-    if (shown < limit) {
-      visible.push(item)
-      shownPerGroup.set(key, shown + weightOf(item))
-    } else {
-      hasMore = true
-      if (!perGroup) break
-    }
-  }
-  return { visible, hasMore }
 }
 
 export interface CollapsedPaginationResult {
@@ -151,29 +135,43 @@ export interface CollapsedPaginationResult {
   collapsedGroupsMeta: CollapsedGroupMeta[]
 }
 
-/** `weightOf` counts sessions per item, for family views; collapsed-group counts are in sessions too. */
 export function computeCollapsedPagination(
   items: SessionMeta[],
   displayLimit: number,
   collapsedGroups?: Set<string>,
-  groupingMode?: SessionGroupingMode,
-  weightOf: WeightOf = ONE_SESSION,
+  groupingMode?: 'date' | 'status' | 'unread' | 'project',
 ): CollapsedPaginationResult {
-  const effectiveCollapsedKeys = new Set<string>()
-  if (collapsedGroups && collapsedGroups.size > 0) {
-    const groupKeysInView = new Set(items.map(item => getCollapseGroupKey(item, groupingMode)))
-    // Safety guard: don't allow collapse state to hide the entire list when only one
-    // group exists in the current filtered view (there would be no meaningful collapse UX).
-    if (groupKeysInView.size > 1) {
-      for (const key of collapsedGroups) {
-        if (groupKeysInView.has(key)) effectiveCollapsedKeys.add(key)
-      }
+  // Fast path: no collapse state → original slice
+  if (!collapsedGroups || collapsedGroups.size === 0) {
+    return {
+      paginatedItems: items.slice(0, displayLimit),
+      hasMore: displayLimit < items.length,
+      collapsedGroupsMeta: [],
     }
   }
 
+  const groupKeysInView = new Set(items.map(item => getCollapseGroupKey(item, groupingMode)))
+
+  // Safety guard: don't allow collapse state to hide the entire list when only one
+  // group exists in the current filtered view (there would be no meaningful collapse UX).
+  if (groupKeysInView.size <= 1) {
+    return {
+      paginatedItems: items.slice(0, displayLimit),
+      hasMore: displayLimit < items.length,
+      collapsedGroupsMeta: [],
+    }
+  }
+
+  const effectiveCollapsedKeys = new Set(
+    Array.from(collapsedGroups).filter(key => groupKeysInView.has(key))
+  )
+
   if (effectiveCollapsedKeys.size === 0) {
-    const { visible, hasMore } = windowItems(items, displayLimit, groupingMode, weightOf)
-    return { paginatedItems: visible, hasMore, collapsedGroupsMeta: [] }
+    return {
+      paginatedItems: items.slice(0, displayLimit),
+      hasMore: displayLimit < items.length,
+      collapsedGroupsMeta: [],
+    }
   }
 
   const expandedItems: SessionMeta[] = []
@@ -183,7 +181,7 @@ export function computeCollapsedPagination(
     const groupKey = getCollapseGroupKey(item, groupingMode)
 
     if (effectiveCollapsedKeys.has(groupKey)) {
-      collapsedCounts.set(groupKey, (collapsedCounts.get(groupKey) || 0) + weightOf(item))
+      collapsedCounts.set(groupKey, (collapsedCounts.get(groupKey) || 0) + 1)
     } else {
       expandedItems.push(item)
     }
@@ -193,37 +191,11 @@ export function computeCollapsedPagination(
     ([key, count]) => ({ key, count })
   )
 
-  const { visible, hasMore } = windowItems(expandedItems, displayLimit, groupingMode, weightOf)
-  return { paginatedItems: visible, hasMore, collapsedGroupsMeta: meta }
-}
-
-export interface FamilyPage {
-  rows: SessionListRow[]
-  hasMore: boolean
-  collapsedGroupsMeta: CollapsedGroupMeta[]
-}
-
-/**
- * The list outside search: families are grouped and paginated whole, by their views, then
- * flattened into rows without the sessions under collapsed rows.
- */
-export function paginateFamilies(
-  families: SessionFamily[],
-  displayLimit: number,
-  collapsedGroups: Set<string> | undefined,
-  groupingMode: SessionGroupingMode | undefined,
-  collapsedFamilies: ReadonlySet<string>,
-): FamilyPage {
-  const familyById = new Map(families.map(family => [family.view.id, family]))
-  const { paginatedItems, hasMore, collapsedGroupsMeta } = computeCollapsedPagination(
-    families.map(family => family.view),
-    displayLimit,
-    collapsedGroups,
-    groupingMode,
-    view => familyById.get(view.id)!.members.length,
-  )
-  const rows = flattenFamilies(paginatedItems.map(view => familyById.get(view.id)!), collapsedFamilies)
-  return { rows, hasMore, collapsedGroupsMeta }
+  return {
+    paginatedItems: expandedItems.slice(0, displayLimit),
+    hasMore: displayLimit < expandedItems.length,
+    collapsedGroupsMeta: meta,
+  }
 }
 
 interface FilterMatchOptions {
@@ -277,6 +249,10 @@ export function sessionMatchesCurrentFilter(
   if (!currentFilter) return true
 
   switch (currentFilter.kind) {
+    case 'ppt':
+      return session.ppt !== undefined
+    case 'office':
+      return session.office?.mode === currentFilter.section
     case 'allSessions':
       return session.isArchived !== true
 
@@ -324,10 +300,11 @@ export function useSessionSearch({
   labelFilterMap,
   labelConfigs,
   collapsedGroups,
-  collapsedFamilies,
   groupingMode,
   scrollViewportRef,
 }: UseSessionSearchOptions): UseSessionSearchResult {
+
+  const { t, i18n } = useTranslation()
 
   const [contentSearchResults, setContentSearchResults] = useState<Map<string, ContentSearchResult>>(new Map())
   const [isSearchingContent, setIsSearchingContent] = useState(false)
@@ -507,23 +484,12 @@ export function useSessionSearch({
     setDisplayLimit(INITIAL_DISPLAY_LIMIT)
   }, [searchQuery])
 
-  // Outside search a sub-session sits under its parent, and the family is placed, grouped and
-  // paginated as a whole by its view. Search results stay flat.
-  const families = useMemo(
-    () => isSearchMode ? [] : buildSessionFamilies(searchFilteredItems),
-    [isSearchMode, searchFilteredItems]
-  )
-
   // Collapse-aware pagination: collapsed items are excluded entirely from
-  // rows (and therefore keyboard nav). Their counts are returned as
-  // collapsedGroupsMeta so the renderer can show header-only groups.
-  const { rows, hasMore, collapsedGroupsMeta } = useMemo((): FamilyPage => {
-    if (isSearchMode) {
-      const { hasMore, collapsedGroupsMeta } = computeCollapsedPagination(searchFilteredItems, displayLimit, collapsedGroups, groupingMode)
-      return { rows: [...matchingFilterItems, ...otherResultItems].map(flatRow), hasMore, collapsedGroupsMeta }
-    }
-    return paginateFamilies(families, displayLimit, collapsedGroups, groupingMode, collapsedFamilies ?? NO_COLLAPSED_FAMILIES)
-  }, [isSearchMode, searchFilteredItems, matchingFilterItems, otherResultItems, families, displayLimit, collapsedGroups, groupingMode, collapsedFamilies])
+  // paginatedItems (and therefore flatItems / keyboard nav). Their counts are
+  // returned as collapsedGroupsMeta so the renderer can show header-only groups.
+  const { paginatedItems, hasMore, collapsedGroupsMeta } = useMemo(() => {
+    return computeCollapsedPagination(searchFilteredItems, displayLimit, collapsedGroups, groupingMode)
+  }, [searchFilteredItems, displayLimit, collapsedGroups, groupingMode])
 
   const loadMore = useCallback(() => {
     setDisplayLimit(prev => Math.min(prev + BATCH_SIZE, searchFilteredItems.length))
@@ -543,10 +509,31 @@ export function useSessionSearch({
       }
     }
 
-    check() // fill viewport on mount / after group expand / after a family collapses
+    check() // fill viewport on mount / after group expand
     viewport.addEventListener('scroll', check, { passive: true })
     return () => viewport.removeEventListener('scroll', check)
-  }, [hasMore, loadMore, displayLimit, collapsedFamilies, scrollViewportRef])
+  }, [hasMore, loadMore, displayLimit, scrollViewportRef])
+
+  // --- Derived render data ---
+
+  const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
+  const dateGroups = useMemo(
+    () => groupSessionsByDate(paginatedItems, t, language),
+    [paginatedItems, t, language],
+  )
+
+  const flatItems = useMemo(() => {
+    if (isSearchMode) {
+      return [...matchingFilterItems, ...otherResultItems]
+    }
+    return dateGroups.flatMap(group => group.sessions)
+  }, [isSearchMode, matchingFilterItems, otherResultItems, dateGroups])
+
+  const sessionIndexMap = useMemo(() => {
+    const map = new Map<string, number>()
+    flatItems.forEach((item, index) => map.set(item.id, index))
+    return map
+  }, [flatItems])
 
   return {
     isSearchMode,
@@ -557,8 +544,9 @@ export function useSessionSearch({
     matchingFilterItems,
     otherResultItems,
     exceededSearchLimit,
-    rows,
-    families,
+    flatItems,
+    dateGroups,
+    sessionIndexMap,
     hasMore,
     collapsedGroupsMeta,
     searchInputRef,

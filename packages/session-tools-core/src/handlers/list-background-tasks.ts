@@ -44,15 +44,11 @@ export async function handleListBackgroundTasks(
       (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'stopped'
     );
 
-    const untracked = tasks.filter((t) => t.untracked);
     const summary =
       `${tasks.length} background task(s) for session ${targetId}: ` +
       `${running.length} running, ${orphaned.length} orphaned, ${terminal.length} finished.` +
       (orphaned.length > 0
         ? ` Orphaned tasks were terminated when their owning turn ended (the per-turn subprocess was torn down); their in-process state was lost.`
-        : '') +
-      (untracked.length > 0
-        ? ` ${untracked.length} of the finished ones are untracked: completions for tasks this session's agent did not launch (typically a subagent's own background command); their start time is unknown and they were not reported to you as your own.`
         : '');
 
     return successResponse(`${summary}\n\n${JSON.stringify(tasks, null, 2)}`);

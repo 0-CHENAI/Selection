@@ -18,9 +18,9 @@ import {
   EVENT_BUFFER_MAX_SIZE,
   EVENT_BUFFER_TTL_MS,
   DISCONNECTED_CLIENT_TTL_MS,
-  NODE_WS_MAX_MESSAGE_BYTES,
-  runtimeMaxMessageBytes,
+  requestTimeoutMsForChannel,
   isErrorCode,
+  runtimeMaxMessageBytes,
   type MessageEnvelope,
   type PushTarget,
   type ErrorCode,
@@ -60,7 +60,7 @@ interface PendingInvoke {
   clientId: string
   resolve: (value: any) => void
   reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout>
+  timeout?: ReturnType<typeof setTimeout>
 }
 
 // ---------------------------------------------------------------------------
@@ -143,8 +143,6 @@ export class WsRpcServer implements RpcServer {
   private readonly serverId: string
   private readonly tlsOptions: WsRpcTlsOptions | null
   private readonly serverVersion: string
-  /** Largest message this server accepts, advertised in handshake_ack (Bun ignores `maxPayload`). */
-  private readonly maxMessageBytes = runtimeMaxMessageBytes()
   private readonly maxClients: number
   private readonly onClientConnected: WsRpcServerOptions['onClientConnected']
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected']
@@ -241,12 +239,15 @@ export class WsRpcServer implements RpcServer {
       }
 
       const id = randomUUID()
-      const timeout = setTimeout(() => {
-        this.pendingInvokes.delete(id)
-        const err = new Error(`Client request timeout: ${channel} (30000ms)`)
-        ;(err as any).code = 'CLIENT_REQUEST_TIMEOUT'
-        reject(err)
-      }, 30_000)
+      const timeoutMs = requestTimeoutMsForChannel(channel)
+      const timeout = timeoutMs == null
+        ? undefined
+        : setTimeout(() => {
+          this.pendingInvokes.delete(id)
+          const err = new Error(`Client request timeout: ${channel} (${timeoutMs}ms)`)
+          ;(err as any).code = 'CLIENT_REQUEST_TIMEOUT'
+          reject(err)
+        }, timeoutMs)
 
       this.pendingInvokes.set(id, { clientId, resolve, reject, timeout })
 
@@ -282,7 +283,7 @@ export class WsRpcServer implements RpcServer {
           this.httpHandler,
         )
 
-        this.wss = new WebSocketServer({ server: this.httpsServer, maxPayload: NODE_WS_MAX_MESSAGE_BYTES })
+        this.wss = new WebSocketServer({ server: this.httpsServer, maxPayload: runtimeMaxMessageBytes() })
 
         this.httpsServer.on('error', (err) => reject(err))
 
@@ -298,7 +299,7 @@ export class WsRpcServer implements RpcServer {
         // Plain WS + HTTP handler: create an HTTP server for both.
         this._protocol = 'ws'
         this.httpServer = createHttpServer(this.httpHandler)
-        this.wss = new WebSocketServer({ server: this.httpServer, maxPayload: NODE_WS_MAX_MESSAGE_BYTES })
+        this.wss = new WebSocketServer({ server: this.httpServer, maxPayload: runtimeMaxMessageBytes() })
 
         this.httpServer.on('error', (err) => reject(err))
 
@@ -316,7 +317,7 @@ export class WsRpcServer implements RpcServer {
         this.wss = new WebSocketServer({
           host: this.host,
           port: this.requestedPort,
-          maxPayload: NODE_WS_MAX_MESSAGE_BYTES,
+          maxPayload: runtimeMaxMessageBytes(),
         })
 
         this.wss.on('listening', () => {
@@ -493,16 +494,7 @@ export class WsRpcServer implements RpcServer {
               if (canReplay) {
                 const replayEvents = prevClient.eventBuffer.filter(e => e.seq > lastSeq)
 
-                const ack: MessageEnvelope = {
-                  id: envelope.id,
-                  type: 'handshake_ack',
-                  protocolVersion: PROTOCOL_VERSION,
-                  serverVersion: this.serverVersion || undefined,
-                  maxMessageBytes: this.maxMessageBytes,
-                  clientId: prevClient.id,
-                  registeredChannels: [...this.handlers.keys()],
-                  reconnected: true,
-                }
+                const ack = this.handshakeAck(envelope.id, prevClient.id, { reconnected: true })
                 this.safeSend(ws, serializeEnvelope(ack))
 
                 // Replay missed events in order
@@ -517,17 +509,7 @@ export class WsRpcServer implements RpcServer {
                 })
               } else {
                 // Buffer evicted — client must full-refresh
-                const ack: MessageEnvelope = {
-                  id: envelope.id,
-                  type: 'handshake_ack',
-                  protocolVersion: PROTOCOL_VERSION,
-                  serverVersion: this.serverVersion || undefined,
-                  maxMessageBytes: this.maxMessageBytes,
-                  clientId: prevClient.id,
-                  registeredChannels: [...this.handlers.keys()],
-                  reconnected: true,
-                  stale: true,
-                }
+                const ack = this.handshakeAck(envelope.id, prevClient.id, { reconnected: true, stale: true })
                 this.safeSend(ws, serializeEnvelope(ack))
 
                 transportLog.info('Client reconnected as stale', {
@@ -579,15 +561,7 @@ export class WsRpcServer implements RpcServer {
         handshakeCompleted = true
 
         // Send handshake_ack
-        const ack: MessageEnvelope = {
-          id: envelope.id,
-          type: 'handshake_ack',
-          protocolVersion: PROTOCOL_VERSION,
-          serverVersion: this.serverVersion || undefined,
-          maxMessageBytes: this.maxMessageBytes,
-          clientId,
-          registeredChannels: [...this.handlers.keys()],
-        }
+        const ack = this.handshakeAck(envelope.id, clientId)
         this.safeSend(ws, serializeEnvelope(ack))
 
         // Notify lifecycle listener
@@ -884,6 +858,19 @@ export class WsRpcServer implements RpcServer {
       ;(err as any).code = 'CLIENT_DISCONNECTED'
       pending.reject(err)
       this.pendingInvokes.delete(id)
+    }
+  }
+
+  private handshakeAck(id: string, clientId: string, extra: Partial<MessageEnvelope> = {}): MessageEnvelope {
+    return {
+      id,
+      type: 'handshake_ack',
+      protocolVersion: PROTOCOL_VERSION,
+      serverVersion: this.serverVersion || undefined,
+      clientId,
+      registeredChannels: [...this.handlers.keys()],
+      maxMessageBytes: runtimeMaxMessageBytes(),
+      ...extra,
     }
   }
 

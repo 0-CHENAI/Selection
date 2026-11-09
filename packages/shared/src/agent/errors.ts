@@ -175,7 +175,7 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
   },
   model_no_tool_support: {
     title: 'Model Does Not Support Tools',
-    message: 'The selected model does not support tool/function calling, which is required for Craft Agent. Please choose a model with tool support (e.g., Claude, GPT-4, Gemini).',
+    message: 'The selected model does not support tool/function calling, which is required for Selection. Please choose a model with tool support (e.g., Claude, GPT-4, Gemini).',
     actions: [
       { key: 's', label: 'Change model', command: '/settings', action: 'settings' },
     ],
@@ -205,18 +205,49 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     ],
     canRetry: true,
   },
-  model_refusal: {
-    title: 'Reply Stopped by Safeguards',
-    message: "The model's safeguards stopped its reply to your last message. Rephrase the request, or switch to another model.",
-    actions: [],
-    // The same request on the same model is stopped again
-    canRetry: false,
-  },
   image_too_large: {
     title: 'Image Too Large',
     message: 'The image exceeds API limits (max 8000px or 5MB). Please resize or use a smaller image.',
     actions: [],
     canRetry: false,
+  },
+  image_capability_mismatch: {
+    title: 'Model Does Not Accept Images',
+    message: 'This model is not configured for image input. The message was not sent as text-only.',
+    actions: [
+      { key: 's', label: 'Change model or enable Multimodal', command: '/settings', action: 'settings' },
+    ],
+    canRetry: false,
+  },
+  image_bytes_unavailable: {
+    title: 'Image Could Not Be Read',
+    message: 'The image was attached, but its bytes could not be loaded for the model request.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+  },
+  image_resource_expired: {
+    title: 'Image No Longer Available',
+    message: 'The stored image file is missing or no longer readable. Re-attach the image and try again.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+  },
+  image_unsupported_format: {
+    title: 'Unsupported Image Format',
+    message: 'This image format could not be decoded or converted for the model.',
+    actions: [],
+    canRetry: false,
+  },
+  image_remote_rejected: {
+    title: 'Provider Rejected the Image',
+    message: 'The model provider rejected the image after it was included in the request.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
   },
   provider_error: {
     title: 'AI Provider Error',
@@ -240,7 +271,7 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     message:
       'The Claude Agent SDK binary expected on disk is not present. ' +
       'This usually means the app bundle is incomplete (interrupted download, partial update, ' +
-      'or a security tool removed it). Reinstalling Craft Agents typically fixes this.',
+      'or a security tool removed it). Reinstalling Selection typically fixes this.',
     actions: [
       { key: 'r', label: 'Retry', action: 'retry' },
     ],
@@ -258,6 +289,57 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     ],
     canRetry: true,
     retryDelayMs: 1000,
+  },
+  model_request_timeout: {
+    title: 'Model request stayed silent too long',
+    message: 'This model request stayed silent too long. Recorded work is retained. Continue this conversation to resume.',
+    actions: [],
+    canRetry: false,
+  },
+  provider_timeout: {
+    title: 'Model response timed out',
+    message: 'The model service did not respond in time. This may be an upstream timeout. Check the node results before retrying.',
+    actions: [],
+    canRetry: false,
+  },
+  no_response: {
+    title: 'No final response',
+    message: 'The agent ended without a final response. Send a follow-up in this conversation to continue from the existing history.',
+    actions: [],
+    canRetry: false,
+  },
+  tool_only_response: {
+    title: 'Tools ran without a final response',
+    message: 'Tool activity was recorded, but the agent did not provide a final response. Review the tool results before continuing; completed operations may have changed files or external state.',
+    actions: [],
+    canRetry: false,
+  },
+  context_limit: {
+    title: 'Context limit reached',
+    message: 'This request reached the context safety limit. Original messages and attachments are retained. Compact available history, choose a larger-context model, or adjust the input and read attachments in batches in a new session.',
+    actions: [],
+    canRetry: false,
+  },
+  output_limit: {
+    title: 'Output limit reached', message: 'This model call exhausted its output budget. Continue from recorded results; no completed artifact is guaranteed.', actions: [], canRetry: false,
+  },
+  answer_delivery_missing: { title: 'Answer not submitted', message: 'The model did not formally submit its answer. Recorded work is retained.', actions: [], canRetry: false },
+  answer_persistence_failed: { title: 'Answer save failed', message: 'The submitted answer could not be saved. Model retries cannot resolve this storage failure.', actions: [], canRetry: false },
+  progress_needs_user: { title: 'User input required', message: 'Task paused pending required user input.', actions: [], canRetry: false },
+  call_time_limit: {
+    title: 'Model call paused', message: 'The model stream stayed silent too long. Review recorded results before continuing.', actions: [], canRetry: false,
+  },
+  stream_interrupted: {
+    title: 'Response stream interrupted',
+    message: 'The response stream ended unexpectedly. Review the recorded results before continuing from this conversation.',
+    actions: [],
+    canRetry: false,
+  },
+  agent_process_exited: {
+    title: 'Agent process exited',
+    message: 'The agent process exited before completing the response. Review the recorded results before continuing.',
+    actions: [],
+    canRetry: false,
   },
   unknown_error: {
     title: 'Error',
@@ -374,6 +456,18 @@ function buildProxyErrorMessage(errorMessage: string, fullErrorText: string): st
   return `Received an unexpected HTML error page${suffix} instead of a JSON API response. This is usually caused by a proxy, firewall, or captive portal intercepting the request. Check your proxy settings in Settings > Network.`;
 }
 
+export function createTypedError(
+  code: ErrorCode,
+  overrides?: Partial<Omit<AgentError, 'code'>>,
+): AgentError {
+  const definition = ERROR_DEFINITIONS[code]!
+  return {
+    code,
+    ...definition,
+    ...overrides,
+  }
+}
+
 /**
  * Parse an error and return a typed AgentError with user-friendly info
  */
@@ -390,7 +484,17 @@ export function parseError(
   let code: ErrorCode = 'unknown_error';
 
   // Check for OpenRouter data policy errors first (these contain "no endpoints" which could confuse other checks)
-  if (lowerMessage.includes('data policy') || lowerMessage.includes('privacy')) {
+  if (lowerMessage.includes('model request time limit reached')) {
+    code = 'model_request_timeout';
+  } else if (lowerMessage.includes('taking too long to respond') || lowerMessage.includes('request timed out') || lowerMessage.includes('etimedout')) {
+    code = 'provider_timeout';
+  } else if (lowerMessage.includes('pi subprocess exited unexpectedly')) {
+    code = 'agent_process_exited';
+  } else if (/context[ _](window|length|limit)|maximum context|prompt is too long/.test(lowerMessage)) {
+    code = 'context_limit';
+  } else if (/stream.*(premature|unexpected|closed|truncat)|unexpected.*(eof|end of stream)/.test(lowerMessage)) {
+    code = 'stream_interrupted';
+  } else if (lowerMessage.includes('data policy') || lowerMessage.includes('privacy')) {
     code = 'data_policy_error';
   // Check for model-specific errors (OpenRouter, etc.)
   // Tool support errors must be checked BEFORE model errors since tool errors often contain "model"
@@ -410,7 +514,13 @@ export function parseError(
     // refusals without these broad fallbacks.
   ) {
     code = 'model_no_tool_support';
-  } else if (lowerMessage.includes('is not a valid model') || lowerMessage.includes('model not found') || lowerMessage.includes('invalid model') || lowerMessage.includes('model identifier is invalid')) {
+  } else if (
+    lowerMessage.includes('no endpoints found for')
+    || lowerMessage.includes('is not a valid model')
+    || lowerMessage.includes('model not found')
+    || lowerMessage.includes('invalid model')
+    || lowerMessage.includes('model identifier is invalid')
+  ) {
     code = 'invalid_model';
   // HTML-intercepted responses (proxy/firewall/captive portal).
   // Must be checked BEFORE status codes: a 502 Cloudflare page or 401 proxy login
@@ -418,6 +528,10 @@ export function parseError(
   } else if (isLikelyProxyInterception(lowerMessage)) {
     code = 'proxy_error';
   // Check for specific HTTP status codes or patterns
+  } else if (/^(?:error:\s*)?(?:500|502|503|504)\s*[: ]/.test(lowerMessage.trim())) {
+    // An upstream proxy's authentication failure is still an HTTP 5xx service error.
+    // Never ask users to replace their API key or replay their turn for that payload.
+    code = 'service_error';
   } else if (lowerMessage.includes('402') || lowerMessage.includes('payment required')) {
     code = 'billing_error';
   } else if (lowerMessage.includes('401') || lowerMessage.includes('unauthorized') || lowerMessage.includes('invalid api key') || lowerMessage.includes('invalid x-api-key') || lowerMessage.includes('authentication failed') || lowerMessage.includes('token is expired') || lowerMessage.includes('token expired')) {
@@ -429,7 +543,14 @@ export function parseError(
     }
   } else if (lowerMessage.includes('429') || lowerMessage.includes('rate limit') || lowerMessage.includes('too many requests')) {
     code = 'rate_limited';
-  } else if (lowerMessage.includes('500') || lowerMessage.includes('502') || lowerMessage.includes('503') || lowerMessage.includes('504') || lowerMessage.includes('529') || lowerMessage.includes('internal server error') || lowerMessage.includes('service unavailable') || lowerMessage.includes('overloaded')) {
+  } else if (
+    lowerMessage.includes('officecli document')
+    && !lowerMessage.includes('was aborted')
+  ) {
+    // Stall / idle-deadline after the stream wrapper already retried.
+    // User-initiated abort stays unclassified so SessionManager can ignore it.
+    code = 'provider_error';
+  } else if (lowerMessage.includes('500') || lowerMessage.includes('502') || lowerMessage.includes('503') || lowerMessage.includes('504') || lowerMessage.includes('internal server error') || lowerMessage.includes('service unavailable')) {
     code = 'service_error';
   } else if (lowerMessage.includes('network') || lowerMessage.includes('econnrefused') || lowerMessage.includes('enotfound') || lowerMessage.includes('fetch failed') || lowerMessage.includes('connection')) {
     code = 'network_error';
@@ -441,6 +562,24 @@ export function parseError(
     (lowerMessage.includes('exceed') || lowerMessage.includes('too large'))
   ) {
     code = 'image_too_large';
+  } else if (lowerMessage.includes('image_capability_mismatch')) {
+    code = 'image_capability_mismatch';
+  } else if (lowerMessage.includes('image_resource_expired')) {
+    code = 'image_resource_expired';
+  } else if (lowerMessage.includes('image_bytes_unavailable')) {
+    code = 'image_bytes_unavailable';
+  } else if (
+    lowerMessage.includes('image_unsupported_format')
+    || lowerMessage.includes('unsupported image format')
+    || lowerMessage.includes('could not decode image')
+  ) {
+    code = 'image_unsupported_format';
+  } else if (
+    lowerMessage.includes('image_remote_rejected')
+    || lowerMessage.includes('could not process image')
+    || lowerMessage.includes('unable to process image')
+  ) {
+    code = 'image_remote_rejected';
   } else if (lowerMessage.includes('exited with code') || lowerMessage.includes('process exited')) {
     // SDK subprocess crashed - likely auth/setup issue
     // Check if the error contains more specific info
@@ -469,6 +608,11 @@ export function parseError(
       ) ?? undefined
     : undefined;
 
+  // Terminal diagnostics must not expose provider payloads, paths, or subprocess arguments.
+  if (code === 'model_request_timeout' || code === 'provider_timeout' || code === 'context_limit' || code === 'stream_interrupted' || code === 'agent_process_exited') {
+    return { code, ...definition, providerInfo };
+  }
+
   // For proxy_error, prefer safe user-facing text over raw HTML payloads.
   if (code === 'proxy_error') {
     return {
@@ -478,6 +622,20 @@ export function parseError(
       originalError: errorMessage,
       providerInfo,
     };
+  }
+
+  if (code === 'invalid_model') {
+    const endpointMatch = fullErrorText.match(/no endpoints found for ([a-z0-9][a-z0-9_.:/-]*)/i)
+    const unavailableId = endpointMatch?.[1]?.replace(/\.$/, '')
+    if (unavailableId) {
+      return {
+        code,
+        ...definition,
+        message: `OpenRouter has no available providers for "${unavailableId}". Choose another model.`,
+        originalError: errorMessage,
+        providerInfo,
+      }
+    }
   }
 
   // For model_no_tool_support errors, try to extract the model name for a more helpful message
@@ -490,7 +648,7 @@ export function parseError(
       return {
         code,
         ...definition,
-        message: `Model "${modelMatch[1]}" does not support tool/function calling, which is required for Craft Agent. Please choose a different model with tool support in Settings.`,
+        message: `Model "${modelMatch[1]}" does not support tool/function calling, which is required for Selection. Please choose a different model with tool support in Settings.`,
         originalError: errorMessage,
         providerInfo,
       };
@@ -501,36 +659,6 @@ export function parseError(
     code,
     ...definition,
     originalError: errorMessage,
-    providerInfo,
-  };
-}
-
-/**
- * Build a typed {@link AgentError} for a code the caller has already
- * determined, e.g. when a backend-specific classifier (the Pi SDK's
- * `isRetryableAssistantError`) recognizes a transient failure that
- * {@link parseError}'s generic text matching does not.
- *
- * Same shape as a `parseError` result: user-facing text and recovery actions
- * come from `ERROR_DEFINITIONS`, the raw provider text is kept in
- * `originalError` for diagnostics.
- */
-export function createAgentError(
-  code: ErrorCode,
-  originalError?: string,
-  providerContext?: { providerType?: string; piAuthProvider?: string },
-): AgentError {
-  const definition = ERROR_DEFINITIONS[code]!;
-  const providerInfo = providerContext
-    ? getProviderMetadata(
-        providerContext.providerType ?? 'anthropic',
-        providerContext.piAuthProvider,
-      ) ?? undefined
-    : undefined;
-  return {
-    code,
-    ...definition,
-    originalError,
     providerInfo,
   };
 }

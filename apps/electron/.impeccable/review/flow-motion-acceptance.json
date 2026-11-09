@@ -1,0 +1,146 @@
+{
+  "scope": "Production renderer with labelled synthetic transport; Windows platform and native-caption area simulated on macOS.",
+  "replayStatic": true,
+  "movingSignal": true,
+  "joinSignals": [
+    "e-official-report-2",
+    "e-community-report-3"
+  ],
+  "reducedMotion": true,
+  "visibilityPause": true,
+  "completedStatic": true,
+  "windowsDesktop": {
+    "dialog": {
+      "x": 20,
+      "y": 68,
+      "width": 1400,
+      "height": 812,
+      "top": 68,
+      "right": 1420,
+      "bottom": 880,
+      "left": 20
+    },
+    "close": {
+      "x": 1365.25,
+      "y": 81.875,
+      "width": 36,
+      "height": 36,
+      "top": 81.875,
+      "right": 1401.25,
+      "bottom": 117.875,
+      "left": 1365.25
+    },
+    "avoidsCaption": true,
+    "closeHitTarget": true
+  },
+  "closeFocus": true,
+  "windowsNarrow": {
+    "dialog": {
+      "x": 15,
+      "y": 72,
+      "width": 410,
+      "height": 812,
+      "top": 72,
+      "right": 425,
+      "bottom": 884,
+      "left": 15
+    },
+    "close": {
+      "x": 370.25,
+      "y": 93.375,
+      "width": 36,
+      "height": 36,
+      "top": 93.375,
+      "right": 406.25,
+      "bottom": 129.375,
+      "left": 370.25
+    },
+    "avoidsCaption": true,
+    "noHorizontalOverflow": true,
+    "closeHitTarget": true
+  },
+  "escapeFocus": true,
+  "writeCalls": "写调用：0 · 运行：running",
+  "runningIconsStatic": true,
+  "finishReview": {
+    "disposition": "ship",
+    "scoredFix": "Removed spinning task-node icons and their dedicated pause/replay rules; dependency signals remain the only continuous motion.",
+    "directRegressions": "none observed",
+    "scope": "Verdict pass for the single requested fix; Windows evidence remains simulated."
+  },
+  "documentation": "flow-motion-documentation.md",
+  "issueEvidence": "https://github.com/0-CHENAI/Selection/issues/480#issuecomment-6097557132",
+  "lightStateContrast": [
+    {
+      "label": "Done",
+      "ratio": 5.001097000369127,
+      "foreground": [
+        10,
+        116,
+        35
+      ],
+      "background": [
+        228.64705882352945,
+        237.56862745098042,
+        233.37254901960785
+      ]
+    },
+    {
+      "label": "Running",
+      "ratio": 4.826780910536481,
+      "foreground": [
+        139,
+        85,
+        39
+      ],
+      "background": [
+        233.07843137254903,
+        227.23529411764707,
+        222.31372549019608
+      ]
+    },
+    {
+      "label": "Running",
+      "ratio": 4.826780910536481,
+      "foreground": [
+        139,
+        85,
+        39
+      ],
+      "background": [
+        233.07843137254903,
+        227.23529411764707,
+        222.31372549019608
+      ]
+    },
+    {
+      "label": "Pending",
+      "ratio": 6.079109690722452,
+      "foreground": [
+        86,
+        87,
+        91
+      ],
+      "background": [
+        234.60784313725492,
+        235.52941176470588,
+        237.37254901960785
+      ]
+    }
+  ],
+  "checks": {
+    "focusedTests": {
+      "pass": 42,
+      "fail": 0,
+      "files": 6
+    },
+    "electronTypecheck": "pass",
+    "electronLint": {
+      "errors": 0,
+      "existingWarnings": 87
+    },
+    "rendererBuild": "pass",
+    "afterFinalFix": "Electron typecheck, lint and renderer build rerun; all passed. Lint retained 87 existing warnings.",
+    "diffCheck": "pass"
+  }
+}

@@ -1,7 +1,6 @@
 import * as React from 'react'
-import { Button } from '@/components/ui/button'
 import { useTranslation } from 'react-i18next'
-import { Zap } from 'lucide-react'
+import { Upload, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { EntityPanel } from '@/components/ui/entity-panel'
@@ -9,9 +8,17 @@ import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { skillSelection } from '@/hooks/useEntitySelection'
 import { SkillMenu } from './SkillMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
+import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { readEditPopoverTriggerAnchor } from '@/components/ui/edit-popover-layout'
+import { FadingText } from '@/components/ui/fading-text'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
+import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
+import { cn } from '@/lib/utils'
+import { hasFileDragType } from '@/components/resources/external-resource-import'
 import type { LoadedSkill } from '../../../shared/types'
 
 export interface SkillsListPanelProps {
@@ -21,7 +28,14 @@ export interface SkillsListPanelProps {
   selectedSkillSlug?: string | null
   workspaceId?: string
   workspaceRootPath?: string
+  /** Session working directory — needed to rename project-level skills */
+  workingDirectory?: string
   className?: string
+  /** Controlled open state for copy-from-workspace dialog (header button) */
+  copyFromOpen?: boolean
+  onCopyFromOpenChange?: (open: boolean) => void
+  onImportFromFile?: React.MouseEventHandler<HTMLButtonElement>
+  onImportDroppedFiles?: (files: File[]) => void
 }
 
 export function SkillsListPanel({
@@ -31,28 +45,104 @@ export function SkillsListPanel({
   selectedSkillSlug,
   workspaceId,
   workspaceRootPath,
+  workingDirectory,
   className,
+  copyFromOpen: copyFromOpenProp,
+  onCopyFromOpenChange,
+  onImportFromFile,
+  onImportDroppedFiles,
 }: SkillsListPanelProps) {
   const { t } = useTranslation()
   const activeWorkspace = useActiveWorkspace()
   const canRevealLocally = !activeWorkspace?.remoteServer
   const { workspaces, activeWorkspaceId } = useAppShellContext()
   const hasOtherWorkspaces = workspaces.length > 1
+  const hasOtherLocalWorkspaces = workspaces.some(
+    (w) => w.id !== activeWorkspaceId && !w.remoteServer,
+  )
 
   // Send to Workspace dialog state
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
+  const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
+  const [exportResourceSlug, setExportResourceSlug] = React.useState<string | null>(null)
+  const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
+  const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
+  const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId, workingDirectory)
+  const [isDraggingFile, setIsDraggingFile] = React.useState(false)
+  const dragDepthRef = React.useRef(0)
+  const [addSkillOpen, setAddSkillOpen] = React.useState(false)
+  const [addSkillAnchor, setAddSkillAnchor] = React.useState<{ left: number; top: number } | null>(null)
+  const addSkillButtonRef = React.useRef<HTMLButtonElement>(null)
+
+  const openAddSkill = React.useCallback(() => {
+    setAddSkillAnchor(readEditPopoverTriggerAnchor(addSkillButtonRef.current?.getBoundingClientRect()))
+    setAddSkillOpen(true)
+  }, [])
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current += 1
+    setIsDraggingFile(true)
+  }
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isDraggingFile) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDraggingFile(false)
+  }
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = 0
+    setIsDraggingFile(false)
+    onImportDroppedFiles(Array.from(event.dataTransfer.files))
+  }
 
   return (
     <>
+    <div
+      className={cn('relative flex min-h-0 flex-1', className)}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+    {workspaceRootPath && addSkillOpen && (
+      <EditPopover
+        align="center"
+        open={addSkillOpen}
+        onOpenChange={setAddSkillOpen}
+        trigger={
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed h-0 w-0"
+            style={{ left: addSkillAnchor?.left ?? 0, top: addSkillAnchor?.top ?? 0 }}
+          />
+        }
+        {...getEditConfig('add-skill', workspaceRootPath)}
+      />
+    )}
     <EntityPanel<LoadedSkill>
       items={skills}
       getId={(s) => s.slug}
       selection={skillSelection}
       selectedId={selectedSkillSlug}
       onItemClick={onSkillClick}
-      className={className}
       containerProps={{ 'data-list-role': 'skills' }}
       emptyState={
         <EntityListEmptyScreen
@@ -61,53 +151,118 @@ export function SkillsListPanel({
           description={t('skillsList.emptyDescription')}
           docKey="skills"
         >
-          {workspaceRootPath && (
-            <EditPopover
-              align="center"
-              trigger={
-                <Button variant="secondary">
-                  {t('skillsList.addSkill')}
-                </Button>
-              }
-              {...getEditConfig('add-skill', workspaceRootPath)}
-            />
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {workspaceRootPath && (
+              <button
+                ref={addSkillButtonRef}
+                type="button"
+                onClick={openAddSkill}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('skillsList.addSkill')}
+              </button>
+            )}
+            {onImportFromFile && (
+              <button
+                type="button"
+                onClick={onImportFromFile}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('fileImport.skillTitle')}
+              </button>
+            )}
+            {hasOtherLocalWorkspaces && (
+              <button
+                type="button"
+                onClick={() => setCopyFromOpen(true)}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('skillsList.copyFromWorkspace')}
+              </button>
+            )}
+          </div>
         </EntityListEmptyScreen>
       }
-      mapItem={(skill) => ({
-        icon: <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />,
-        title: skill.metadata.name,
-        titleTrailing: skill.source === 'project' ? t('skillsList.projectBadge') : undefined,
-        subtitle: skill.metadata.description || undefined,
-        menu: (
-          <SkillMenu
-            skillSlug={skill.slug}
-            skillName={skill.metadata.name}
-            onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://skills/skill/${skill.slug}?window=focused`)}
-            onShowInFinder={async () => {
-              if (!canRevealLocally) return
-              try {
-                await window.electronAPI.showInFolder(skill.path)
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err)
-                toast.error(t('toast.failedToReveal', { fileManager: getFileManagerName() }), {
-                  description: message,
-                })
-              }
-            }}
-            canShowInFinder={canRevealLocally}
-            onDelete={skill.source === 'workspace' ? () => onDeleteSkill(skill.slug) : undefined}
-            canDelete={skill.source === 'workspace'}
-            deleteLabel={skill.source === 'workspace' ? t('skillsList.deleteSkill') : t('skillsList.managedByProject')}
-            onSendToWorkspace={hasOtherWorkspaces && skill.source === 'workspace' ? () => {
-              setSendResourceSlug(skill.slug)
-              setSendResourceLabel(skill.metadata.name)
-              setSendDialogOpen(true)
-            } : undefined}
-          />
-        ),
-      })}
+      mapItem={(skill) => {
+        const title = resolveSkillTitle(skill)
+        return {
+          icon: <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />,
+          title,
+          badgesEdgeFade: false,
+          badges: (
+            <span className="flex flex-1 items-center gap-1.5 min-w-0 overflow-hidden">
+              {skill.source === 'project' && (
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                  {t('skillsList.projectBadge')}
+                </span>
+              )}
+              {skill.source === 'bundled' && (
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                  {t('skillsList.bundledBadge')}
+                </span>
+              )}
+              <FadingText
+                className="block min-w-0 flex-1 pr-3"
+                fadeWidth={16}
+                trailingGap={12}
+                overflowTitle={skill.metadata.description}
+              >
+                {skill.metadata.description}
+              </FadingText>
+            </span>
+          ),
+          menu: (
+            <SkillMenu
+              skillSlug={skill.slug}
+              skillName={title}
+              onRename={() => rename.start(skill.slug, {
+                displayTitle: skill.displayTitle,
+                defaultTitle: skill.metadata.name,
+              })}
+              onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://skills/skill/${skill.slug}?window=focused`)}
+              onShowInFinder={async () => {
+                if (!canRevealLocally) return
+                try {
+                  await window.electronAPI.showInFolder(skill.path)
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err)
+                  toast.error(t('toast.failedToReveal', { fileManager: getFileManagerName() }), {
+                    description: message,
+                  })
+                }
+              }}
+              canShowInFinder={canRevealLocally}
+              onDelete={skill.source === 'workspace' ? () => onDeleteSkill(skill.slug) : undefined}
+              canDelete={skill.source === 'workspace'}
+              deleteLabel={skill.source === 'workspace'
+                ? t('skillsList.deleteSkill')
+                : skill.source === 'bundled'
+                  ? t('skillsList.managedByApp')
+                  : t('skillsList.managedByProject')}
+              onSendToWorkspace={hasOtherWorkspaces && skill.source === 'workspace' ? () => {
+                setSendResourceSlug(skill.slug)
+                setSendResourceLabel(title)
+                setSendDialogOpen(true)
+              } : undefined}
+              onExport={skill.source === 'workspace' ? () => setExportResourceSlug(skill.slug) : undefined}
+            />
+          ),
+        }
+      }}
     />
+    {isDraggingFile && (
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/40 bg-background/90 backdrop-blur-sm"
+      >
+        <div className="flex flex-col items-center gap-2 px-4 text-center text-sm font-medium">
+          <Upload className="h-5 w-5" />
+          <span>{t('fileImport.skillDropHint')}</span>
+        </div>
+      </div>
+    )}
+    </div>
 
     {/* Send to Workspace dialog */}
     {sendResourceSlug && (
@@ -121,6 +276,24 @@ export function SkillsListPanel({
         activeWorkspaceId={activeWorkspaceId}
       />
     )}
+
+    <CopyResourcesFromWorkspaceDialog
+      open={copyFromOpen}
+      onOpenChange={setCopyFromOpen}
+      workspaces={workspaces}
+      activeWorkspaceId={activeWorkspaceId}
+      resourceType="skill"
+    />
+    {exportResourceSlug && activeWorkspaceId && (
+      <ResourceTransferDialog
+        open
+        mode="export"
+        workspaceId={activeWorkspaceId}
+        initialSelection={[{ type: 'skill', id: exportResourceSlug }]}
+        onOpenChange={(isOpen) => { if (!isOpen) setExportResourceSlug(null) }}
+      />
+    )}
+    {rename.dialog}
     </>
   )
 }

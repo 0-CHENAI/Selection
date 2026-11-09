@@ -21,11 +21,12 @@ import { resolveAutomationsConfigPath, generateShortId } from './resolve-config-
 import { compactAutomationHistorySync } from './history-store.ts';
 import { createLogger } from '../utils/debug.ts';
 import { WorkspaceEventBus, type EventPayloadMap } from './event-bus.ts';
-import { PromptHandler, EventLogHandler, WebhookHandler, ScriptHandler, type AutomationsConfigProvider } from './handlers/index.ts';
-import { type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type WebhookActionResult, type ScriptActionResult, type AppEvent, type AgentEvent, type SdkAutomationCallbackMatcher, type SdkAutomationInput, type AutomationLoadIssue, type AutomationsLenientLoadResult } from './types.ts';
-import { buildPageRefreshMatchers } from '../pages/refresh.ts';
-import { loadAutomationsConfigLenient } from './validation.ts';
-import { matcherMatchesSdk } from './utils.ts';
+import { PromptHandler, EventLogHandler, WebhookHandler, type AutomationsConfigProvider } from './handlers/index.ts';
+import { APP_EVENTS, type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type WebhookActionResult, type AppEvent } from './types.ts';
+import { matcherMatches } from './utils.ts';
+import { omitRetiredAutomations } from './legacy-migration.ts';
+import { deriveAutomationName } from './name-utils.ts';
+import { validateAutomationsConfig } from './validation.ts';
 import { SchedulerService, type SchedulerTickPayload } from '../scheduler/scheduler-service.ts';
 
 const log = createLogger('automation-system');
@@ -50,11 +51,9 @@ export interface AutomationSystemOptions {
   /** Whether to start the scheduler service (default: false) */
   enableScheduler?: boolean;
   /** Called when prompts are ready to be executed */
-  onPromptsReady?: (prompts: PendingPrompt[]) => void;
+  onPromptsReady?: (prompts: PendingPrompt[]) => void | Promise<void>;
   /** Called when webhook results are available */
   onWebhookResults?: (results: WebhookActionResult[]) => void;
-  /** Called when script results are available */
-  onScriptResults?: (results: ScriptActionResult[]) => void;
   /** Called when an error occurs during automation execution */
   onError?: (event: AutomationEvent, error: Error) => void;
   /** Called when events are lost after retries */
@@ -72,12 +71,9 @@ export class AutomationSystem implements AutomationsConfigProvider {
   private config: AutomationsConfig | null = null;
   private promptHandler: PromptHandler | null = null;
   private webhookHandler: WebhookHandler | null = null;
-  private scriptHandler: ScriptHandler | null = null;
   private eventLogHandler: EventLogHandler | null = null;
   private scheduler: SchedulerService | null = null;
   private disposed = false;
-  /** Synthetic SchedulerTick matchers derived from page refresh specs */
-  private pageRefreshMatchers: AutomationMatcher[] = [];
 
   // Session metadata tracking (moved from SessionManager)
   private readonly lastKnownMetadata: Map<string, SessionMetadataSnapshot> = new Map();
@@ -88,9 +84,6 @@ export class AutomationSystem implements AutomationsConfigProvider {
 
     // Load configuration
     this.loadConfig();
-
-    // Materialize page refresh specs as synthetic cron matchers
-    this.reloadPageRefreshMatchers();
 
     // Create handlers
     this.createHandlers();
@@ -108,25 +101,17 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
-   * Read and parse automations.json, then load it leniently: every valid
-   * matcher is kept, invalid ones are skipped and reported, so one bad entry
-   * can't stop the others (see loadAutomationsConfigLenient). Shared pipeline
-   * for loadConfig/reloadConfig; returns the raw JSON too so backfillIds doesn't
-   * re-read. Throws only when the file is not valid JSON.
+   * Read, parse, and validate automations.json. Shared pipeline for loadConfig/reloadConfig.
+   * Returns the raw parsed JSON alongside validation results (avoids re-reading for backfillIds).
    */
-  private readAndLoadConfig(configPath: string): { raw: unknown; result: AutomationsLenientLoadResult } {
-    const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-    return { raw, result: loadAutomationsConfigLenient(raw) };
-  }
-
-  /** One line per load issue, for logs and reloadConfig's result. */
-  private static formatLoadIssues(issues: AutomationLoadIssue[]): string[] {
-    return issues.map((issue) => {
-      const where = issue.event === undefined
-        ? 'automations.json'
-        : `${issue.event}${issue.index === undefined ? '' : `[${issue.index}]`}${issue.name ? ` (${issue.name})` : ''}`;
-      return `${where}: ${issue.messages.join('; ')}`;
-    });
+  private readAndValidateConfig(configPath: string): { raw: unknown; validation: import('./types.ts').AutomationsValidationResult } {
+    const original = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const raw = omitRetiredAutomations(original);
+    const validation = validateAutomationsConfig(raw);
+    if (validation.valid && JSON.stringify(original) !== JSON.stringify(raw)) {
+      writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+    }
+    return { raw, validation };
   }
 
   /**
@@ -142,11 +127,15 @@ export class AutomationSystem implements AutomationsConfigProvider {
     }
 
     try {
-      const { raw, result } = this.readAndLoadConfig(configPath);
-      this.config = result.config;
-      if (result.issues.length > 0) {
-        console.warn('[AutomationSystem] Some automations will not run:', AutomationSystem.formatLoadIssues(result.issues));
+      const { raw, validation } = this.readAndValidateConfig(configPath);
+
+      if (!validation.valid) {
+        console.warn('[AutomationSystem] Invalid automations config:', validation.errors);
+        this.config = { automations: {} };
+        return;
       }
+
+      this.config = validation.config;
       this.backfillIds(configPath, raw);
       this.rotateHistory();
       const actionCount = this.getActionCount();
@@ -161,11 +150,6 @@ export class AutomationSystem implements AutomationsConfigProvider {
   /**
    * Reload automations configuration.
    * Call this when automations.json changes.
-   *
-   * `success` means the file was read and loaded; `errors` lists the automations
-   * that will not run (skipped as invalid, or on an event that never runs).
-   * When the file is not valid JSON (e.g. mid-edit) the last loaded config keeps
-   * running and `success` is false.
    */
   reloadConfig(): { success: boolean; automationCount: number; errors: string[] } {
     const configPath = resolveAutomationsConfigPath(this.options.workspaceRootPath);
@@ -176,12 +160,17 @@ export class AutomationSystem implements AutomationsConfigProvider {
     }
 
     try {
-      const { raw, result } = this.readAndLoadConfig(configPath);
-      this.config = result.config;
+      const { raw, validation } = this.readAndValidateConfig(configPath);
+
+      if (!validation.valid) {
+        return { success: false, automationCount: 0, errors: validation.errors };
+      }
+
+      this.config = validation.config;
       this.backfillIds(configPath, raw);
       const actionCount = this.getActionCount();
       log.debug(`[AutomationSystem] Reloaded ${actionCount} actions`);
-      return { success: true, automationCount: actionCount, errors: AutomationSystem.formatLoadIssues(result.issues) };
+      return { success: true, automationCount: actionCount, errors: [] };
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Unknown error';
       return { success: false, automationCount: 0, errors: [`Failed to parse JSON: ${error}`] };
@@ -209,6 +198,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
 
       if (changed) {
         writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+        this.config = validateAutomationsConfig(raw).config;
         log.debug('[AutomationSystem] Backfilled missing matcher IDs');
       }
     } catch {
@@ -250,31 +240,15 @@ export class AutomationSystem implements AutomationsConfigProvider {
   }
 
   getMatchersForEvent(event: AutomationEvent): AutomationMatcher[] {
-    const configured = this.config?.automations[event] ?? [];
-    // Page refreshes are cron-driven: synthetic matchers only join SchedulerTick
-    if (event === 'SchedulerTick' && this.pageRefreshMatchers.length > 0) {
-      return [...configured, ...this.pageRefreshMatchers];
-    }
-    return configured;
+    return this.config?.automations[event] ?? [];
   }
 
-  /**
-   * Rebuild the synthetic page-refresh matchers from pages/{slug}/page.json.
-   * Called at construction and whenever the config watcher reports a pages
-   * change. Returns the number of scheduled page refreshes.
-   */
-  reloadPageRefreshMatchers(): number {
-    try {
-      this.pageRefreshMatchers = buildPageRefreshMatchers(this.options.workspaceRootPath);
-    } catch (e) {
-      // Non-critical — a broken page config must never break automations
-      log.debug(`[AutomationSystem] Failed to build page refresh matchers: ${e}`);
-      this.pageRefreshMatchers = [];
-    }
-    if (this.pageRefreshMatchers.length > 0) {
-      log.debug(`[AutomationSystem] ${this.pageRefreshMatchers.length} page refresh matcher(s) active`);
-    }
-    return this.pageRefreshMatchers.length;
+  /** Preview supported app rules without executing actions. */
+  matchEvent(event: AutomationEvent, payload: Record<string, unknown>) {
+    if (this.disposed || !APP_EVENTS.includes(event)) return [];
+    return this.getMatchersForEvent(event)
+      .filter(matcher => matcherMatches(matcher, event, payload))
+      .map(matcher => ({ matcherId: matcher.id ?? 'unknown', name: deriveAutomationName(event, matcher), event }));
   }
 
   // ============================================================================
@@ -308,18 +282,6 @@ export class AutomationSystem implements AutomationsConfigProvider {
       this
     );
     this.webhookHandler.subscribe(this.eventBus);
-
-    // Script handler
-    this.scriptHandler = new ScriptHandler(
-      {
-        workspaceId: this.options.workspaceId,
-        workspaceRootPath: this.options.workspaceRootPath,
-        onScriptResults: this.options.onScriptResults,
-        onError: this.options.onError,
-      },
-      this
-    );
-    this.scriptHandler.subscribe(this.eventBus);
 
     // Event log handler
     this.eventLogHandler = new EventLogHandler({
@@ -524,55 +486,6 @@ export class AutomationSystem implements AutomationsConfigProvider {
   }
 
   // ============================================================================
-  // Agent Event Execution (Backend-Agnostic)
-  // ============================================================================
-
-  /**
-   * Match an agent event (PreToolUse, Stop, …) against automations.json.
-   * Entry point for backends that emit agent events themselves (Pi); Claude would
-   * go through buildSdkHooks.
-   *
-   * Agent events do NOT run actions: prompt, webhook and script actions run on
-   * app events only (#1117). This counts matching matchers (conditions included)
-   * and nothing else. loadAutomationsConfigLenient and config_validate report
-   * agent-event automations as never running, so users and agents learn it.
-   *
-   * @param signal - Optional AbortSignal (unused while nothing runs)
-   * @returns Number of matched matchers (for diagnostics/testing)
-   */
-  async executeAgentEvent(event: AgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<number> {
-    if (!this.config) return 0;
-
-    const matchers = this.config.automations[event];
-    if (!matchers?.length) return 0;
-
-    let matchedCount = 0;
-
-    for (const matcher of matchers) {
-      if (!matcherMatchesSdk(matcher, event, input)) continue;
-
-      matchedCount++;
-      log.debug(`[AutomationSystem] Matched ${event} automation (agent events don't run actions)`);
-    }
-
-    return matchedCount;
-  }
-
-  // ============================================================================
-  // SDK Automation Integration
-  // ============================================================================
-
-  /**
-   * Claude SDK hooks for agent-event automations. Always empty: agent events don't
-   * run actions (prompt, webhook and script actions run on app events only; #1117).
-   * Kept as the seam ClaudeAgent merges into its query hooks, should agent-event
-   * actions ever be built.
-   */
-  buildSdkHooks(): Partial<Record<AgentEvent, SdkAutomationCallbackMatcher[]>> {
-    return {};
-  }
-
-  // ============================================================================
   // Lifecycle
   // ============================================================================
 
@@ -597,7 +510,6 @@ export class AutomationSystem implements AutomationsConfigProvider {
     // Dispose handlers
     this.promptHandler?.dispose();
     this.webhookHandler?.dispose();
-    this.scriptHandler?.dispose();
     await this.eventLogHandler?.dispose();
 
     // Dispose event bus

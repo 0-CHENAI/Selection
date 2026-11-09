@@ -1,0 +1,339 @@
+{
+  "source": "dsh-desktop 588412b packages/dsh-desktop-office/lib/docx-layout.py",
+  "sha256": "52df231d9873b8de8ad8af246c267ded42eb5aba96a37a5625bcf5c96747c367",
+  "python": "3.13.5",
+  "cases": {
+    "government-notice": {
+      "inventorySha256": "4aadd960274fd83b2d73b55757f6cc354ac36d51d09fc7799dbf72b76f0827e8",
+      "paragraphs": 30,
+      "removable": 26,
+      "sourceCanonicalSha256": "26e0ea50a85ed4869b781bcfd6a0a015cb5d23932f4bc5d354342982c4296cfd",
+      "identity": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "plan": {
+        "replacements": [
+          {
+            "id": "p1",
+            "text": "中国中车集团有限公司文件"
+          },
+          {
+            "id": "p3",
+            "text": "中国中车关于开展2026年\n“质量安全月”活动的通知"
+          },
+          {
+            "id": "p10",
+            "text": "（一）开展学习宣贯。组织全员学习安全生产法规，落实岗位责任。",
+            "runs": [
+              {
+                "source": "p10:r0",
+                "text": "（一）"
+              },
+              {
+                "source": "p10:r1",
+                "text": "开展学习宣贯。"
+              },
+              {
+                "source": "p10:r2",
+                "text": "组织全员学习安全生产法规，落实岗位责任。"
+              }
+            ]
+          },
+          {
+            "id": "p11",
+            "text": "（二）开展隐患排查。围绕重点场所逐项排查，建立整改台账。",
+            "runs": [
+              {
+                "source": "p11:r0",
+                "text": "（二）"
+              },
+              {
+                "source": "p11:r1",
+                "text": "开展隐患排查。"
+              },
+              {
+                "source": "p11:r2",
+                "text": "围绕重点场所逐项排查，建立整改台账。"
+              }
+            ]
+          },
+          {
+            "id": "p12",
+            "text": "（三）开展科普宣传。利用展板和短视频普及隐患辨识知识。",
+            "runs": [
+              {
+                "source": "p12:r0",
+                "text": "（三）"
+              },
+              {
+                "source": "p12:r1",
+                "text": "开展科普宣传。"
+              },
+              {
+                "source": "p12:r2",
+                "text": "利用展板和短视频普及隐患辨识知识。"
+              }
+            ]
+          }
+        ],
+        "additions": [
+          {
+            "after": "p16",
+            "source": "p16",
+            "text": "（八）开展总结评估。活动结束后形成书面总结，报送公司安全部门。",
+            "runs": [
+              {
+                "source": "p16:r0",
+                "text": "（八）"
+              },
+              {
+                "source": "p16:r1",
+                "text": "开展总结评估。"
+              },
+              {
+                "source": "p16:r2",
+                "text": "活动结束后形成书面总结，报送公司安全部门。"
+              }
+            ]
+          }
+        ],
+        "removals": [
+          "p22"
+        ]
+      },
+      "editCanonicalSha256": "b42b3e0f314f73c3a4cb916e286cdaee48b7647ea9928c29fb19f6dec68bdb95",
+      "edit": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "mutations": {
+        "delete-footer": {
+          "error": "Preserve the template embedded fonts, headers and page-number footers"
+        },
+        "margins": {
+          "error": "Preserve the template page geometry, section settings and header/footer references"
+        },
+        "font": {
+          "error": "Use the font assignments from the selected template"
+        }
+      },
+      "protectedRemoval": {
+        "id": "p2",
+        "error": "Keep the template layout paragraphs and table structure"
+      }
+    },
+    "meeting-minutes": {
+      "inventorySha256": "0e965f4a567fc0863445eb29694a2edb9c8e62cf3dee2c4d1bee90de615facf3",
+      "paragraphs": 111,
+      "removable": 33,
+      "sourceCanonicalSha256": "e1e01008fe23239a38ce35d3a8ec656cb07288858577472e5c38d2fddcd5d7fc",
+      "identity": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "plan": {
+        "replacements": [
+          {
+            "id": "p0",
+            "text": "替换后的标题文字"
+          },
+          {
+            "id": "p1",
+            "text": "替换后的正文段落，用于对拍。"
+          }
+        ],
+        "additions": [
+          {
+            "after": "p1",
+            "source": "p1",
+            "text": "新增段落，继承原段落样式。"
+          }
+        ],
+        "removals": [
+          "p2"
+        ]
+      },
+      "editCanonicalSha256": "422d04d9637028341136b851a3f3b97d534dc2281e91a56426e972daaf5056fc",
+      "edit": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "mutations": {
+        "delete-footer": {
+          "error": "Preserve the template embedded fonts, headers and page-number footers"
+        },
+        "margins": {
+          "error": "Preserve the template page geometry, section settings and header/footer references"
+        },
+        "font": {
+          "error": "Use the font assignments from the selected template"
+        }
+      },
+      "protectedRemoval": {
+        "id": "p23",
+        "error": "Keep the template layout paragraphs and table structure"
+      }
+    },
+    "coffee-market": {
+      "inventorySha256": "86b8334d63632194eb1b19e676b3a50e050995a88ba09a9de500dc41744edd96",
+      "paragraphs": 148,
+      "removable": 67,
+      "sourceCanonicalSha256": "314d05890de33219af4326e7431eb528b7ce26c5e52be42d6c162a495d645674",
+      "identity": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "plan": {
+        "replacements": [
+          {
+            "id": "p0",
+            "text": "替换后的标题文字"
+          },
+          {
+            "id": "p1",
+            "text": "替换后的正文段落，用于对拍。"
+          }
+        ],
+        "additions": [
+          {
+            "after": "p1",
+            "source": "p1",
+            "text": "新增段落，继承原段落样式。"
+          }
+        ],
+        "removals": [
+          "p2"
+        ]
+      },
+      "editCanonicalSha256": "460d837955e7b4814216e3200cdd478cc1b131730b53108def0721c9a4306384",
+      "edit": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "mutations": {
+        "delete-footer": {
+          "error": "Preserve the template embedded fonts, headers and page-number footers"
+        },
+        "margins": {
+          "error": "Preserve the template page geometry, section settings and header/footer references"
+        },
+        "font": {
+          "error": "Use the font assignments from the selected template"
+        }
+      },
+      "protectedRemoval": {
+        "id": "p4",
+        "error": "Keep the template layout paragraphs and table structure"
+      }
+    },
+    "equity-research": {
+      "inventorySha256": "54f15498771625714d86dd3a728e6536321813a396eac3f09619c94023abdc93",
+      "paragraphs": 330,
+      "removable": 174,
+      "sourceCanonicalSha256": "71dbf995be2815129de5860dc05aae4bf3340cee266355d234bc9009ad17940a",
+      "identity": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "plan": {
+        "replacements": [
+          {
+            "id": "p3",
+            "text": "替换后的标题文字"
+          },
+          {
+            "id": "p4",
+            "text": "替换后的正文段落，用于对拍。"
+          }
+        ],
+        "additions": [
+          {
+            "after": "p4",
+            "source": "p4",
+            "text": "新增段落，继承原段落样式。"
+          }
+        ],
+        "removals": [
+          "p5"
+        ]
+      },
+      "editCanonicalSha256": "e35b1cdd8aac2e4e2abf5c41f5470bbad55cea24efaf87cb8be654f390df2e72",
+      "edit": {
+        "checks": [
+          "embedded-fonts-and-running-content",
+          "style-and-theme-definitions",
+          "page-geometry",
+          "borders-and-drawing-frames",
+          "template-font-assignments",
+          "paragraph-and-run-styles",
+          "editable-issuer-header"
+        ]
+      },
+      "mutations": {
+        "delete-footer": {
+          "error": "Preserve the template embedded fonts, headers and page-number footers"
+        },
+        "margins": {
+          "error": "Preserve the template page geometry, section settings and header/footer references"
+        },
+        "font": {
+          "error": "Use the font assignments from the selected template"
+        }
+      },
+      "protectedRemoval": {
+        "id": "p0",
+        "error": "Keep the template layout paragraphs and table structure"
+      }
+    }
+  }
+}

@@ -1,10 +1,10 @@
 /**
  * TopBar - Persistent top bar above all panels (Slack-style)
  *
- * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+] [Help]
+ * Desktop: [Sidebar] [Back] [Forward] [Workspace selector] [afterWorkspace] ... [Browser strip]
+ * Compact: [App menu] [Workspace selector] [afterWorkspace]
  *
- * Fixed at top of window, 44px tall (56px in compact) — recessive chrome on the navigator canvas
- * (design spec §7.1). Icon buttons are 28px ghost buttons with names and tooltips.
+ * Fixed at top of window, 48px tall.
  * macOS: offset left to avoid stoplight controls.
  */
 
@@ -15,22 +15,14 @@ import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { TopBarButton } from "../ui/TopBarButton"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
+import { windowsCaptionEdgeStyle } from "@/lib/windows-caption-inset"
 import { useActionLabel } from "@/actions"
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-  StyledDropdownMenuSeparator,
-} from "@/components/ui/styled-dropdown"
 import type { SettingsMenuItem } from "../../../shared/menu-schema"
-import { SquarePenRounded } from "../icons/SquarePenRounded"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
-import { getDocUrl } from "@craft-agent/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
 
 const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
@@ -56,8 +48,10 @@ interface TopBarProps {
   canGoForward: boolean
   onToggleSidebar: () => void
   onToggleFocusMode: () => void
-  onAddSessionPanel: () => void
-  onAddBrowserPanel: () => void
+  /** Immersive mode is on. The button stays in the top bar either way. */
+  immersive?: boolean
+  /** Mode navigation rendered immediately after the workspace selector. */
+  afterWorkspace?: ReactNode
   /** When true, hides controls that don't apply in compact/mobile layout */
   isCompact?: boolean
 }
@@ -82,8 +76,8 @@ export function TopBar({
   canGoForward,
   onToggleSidebar,
   onToggleFocusMode,
-  onAddSessionPanel,
-  onAddBrowserPanel,
+  immersive = false,
+  afterWorkspace,
   isCompact,
 }: TopBarProps) {
   const { t } = useTranslation()
@@ -127,20 +121,20 @@ export function TopBar({
 
   // Stoplight padding clears macOS traffic-light controls, which only exist
   // in the Electron desktop window. The webui runs in a regular browser tab
-  // and has no traffic lights regardless of host OS — there the first glyph
-  // lands on the 16px gutter (28px desktop buttons pad 6px, 36px compact ones 8px).
-  const menuLeftPadding = isMac && !isWebUI ? 86 : isCompact ? 8 : 10
-  // The last glyph lines up with the panel headers' trailing glyphs: 6px window inset + 16px gutter,
-  // minus the button's 6px inner padding.
-  const menuRightPadding = 16
+  // and has no traffic lights regardless of host OS — collapse to a normal
+  // 12px inset so the first control sits at the edge.
+  const menuLeftPadding = isMac && !isWebUI ? 86 : 12
+  const captionEdge = windowsCaptionEdgeStyle()
 
   return (
     <div
       className="fixed top-0 left-0 right-0 z-panel titlebar-drag-region"
-      style={{ height: 'var(--topbar-height)' }}
+      style={{ height: 'var(--topbar-height)', ...captionEdge }}
     >
-      <div className="flex h-full w-full items-center justify-between gap-2">
-      {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
+      <div
+        className={cn("h-full w-full items-center gap-2", isCompact ? "flex justify-between" : "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]")}
+      >
+      {/* === LEFT: Sidebar + Navigation + Workspace (compact: App menu) === */}
       {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
       {/* In compact mode the right slot is hidden, so we add right padding here
           so the workspace pill doesn't run flush against the viewport edge. */}
@@ -152,14 +146,21 @@ export function TopBar({
         {!isCompact && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <TopBarButton onClick={onToggleSidebar} aria-label={t("menu.toggleSidebar")}>
-              <PanelLeftRounded className="size-4" />
+            <TopBarButton
+              onClick={onToggleSidebar}
+              aria-label={t("menu.immersiveMode")}
+              aria-pressed={immersive}
+              data-immersive-toggle=""
+              isActive={immersive}
+            >
+              <PanelLeftRounded className="h-[18px] w-[18px] text-foreground/70" />
             </TopBarButton>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{t("menu.toggleSidebar")}</TooltipContent>
+          <TooltipContent side="bottom">{t("menu.immersiveMode")}</TooltipContent>
         </Tooltip>
         )}
 
+        {isCompact && (
         <AppMenu
           onNewChat={onNewChat}
           onNewWindow={onNewWindow}
@@ -170,6 +171,7 @@ export function TopBar({
           onToggleSidebar={onToggleSidebar}
           onToggleFocusMode={onToggleFocusMode}
         />
+        )}
         </div>
 
         {/* Back / Forward / Workspace selector (moved from center).
@@ -177,13 +179,13 @@ export function TopBar({
             drill-in chevron in PanelHeader plus the browser's native back gesture
             cover that affordance, and the freed width lets the workspace pill
             actually fit on phone-width viewports. */}
-        <div className={cn("ml-1 flex min-w-0 items-center gap-1", isCompact ? "flex-1" : "w-[clamp(220px,42vw,640px)]")}>
+        <div className={cn("ml-1 flex min-w-0 items-center gap-1", isCompact ? "flex-1" : "flex-1")}>
           {!isCompact && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <TopBarButton onClick={onBack} disabled={!canGoBack} aria-label={t("common.back")}>
-                    <Icons.ChevronLeft className="size-4" strokeWidth={1.75} />
+                    <Icons.ChevronLeft className="h-[18px] w-[18px] text-foreground/70" strokeWidth={1.5} />
                   </TopBarButton>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{t("common.back")} {goBackHotkey}</TooltipContent>
@@ -192,7 +194,7 @@ export function TopBar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <TopBarButton onClick={onForward} disabled={!canGoForward} aria-label={t("common.forward")}>
-                    <Icons.ChevronRight className="size-4" strokeWidth={1.75} />
+                    <Icons.ChevronRight className="h-[18px] w-[18px] text-foreground/70" strokeWidth={1.5} />
                   </TopBarButton>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{t("common.forward")} {goForwardHotkey}</TooltipContent>
@@ -224,76 +226,16 @@ export function TopBar({
           </div>
         </div>
       </div>
+      <div className={cn("titlebar-no-drag flex shrink-0 justify-center", isCompact && "pr-2")} >
+        {afterWorkspace}
+      </div>
 
-      {/* === RIGHT: Browser strip + add + help === */}
+      {/* === RIGHT: Browser strip === */}
       {!isCompact && (
-      <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: menuRightPadding }}>
+      <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
         <div className="min-w-0">
           <BrowserTabStrip activeSessionId={activeSessionId} maxVisibleBadges={maxVisibleBrowserBadges} />
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.addPanelMenu")} className="ml-1">
-              <Icons.Plus className="size-4" strokeWidth={1.75} />
-            </TopBarButton>
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-56">
-            <StyledDropdownMenuItem onClick={onAddSessionPanel}>
-              <SquarePenRounded className="h-3.5 w-3.5" />
-              {t("session.newSessionInPanel")}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={onAddBrowserPanel}>
-              <Icons.Globe className="h-3.5 w-3.5" />
-              {t("browser.newWindow")}
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Help button */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.helpAndDocs")}>
-              <Icons.HelpCircle className="size-4" strokeWidth={1.75} />
-            </TopBarButton>
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-48">
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('sources'))}>
-              <Icons.DatabaseZap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.sources")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-tertiary" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('skills'))}>
-              <Icons.Zap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.skills")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-tertiary" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('statuses'))}>
-              <Icons.CheckCircle2 className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.statuses")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-tertiary" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('permissions'))}>
-              <Icons.Settings className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.permissions.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-tertiary" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('automations'))}>
-              <Icons.Webhook className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.automations")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-tertiary" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('messaging'))}>
-              <Icons.MessageSquare className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.messaging.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-tertiary" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://thecraftagents.com/docs')}>
-              <Icons.ExternalLink className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("menu.allDocumentation")}</span>
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
       </div>
       )}
       </div>

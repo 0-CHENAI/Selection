@@ -12,14 +12,14 @@ import { Spinner } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 
 const groupHeaderVariants = cva(
-  'px-3.5 py-2 border-b border-subtle text-label-sm font-medium',
+  'px-4 py-2 border-b border-border/30 text-xs font-semibold uppercase tracking-wide',
   {
     variants: {
       variant: {
-        success: 'bg-success-tint text-success',
-        info: 'bg-info-tint text-info',
-        warning: 'bg-info-tint text-info',
-        muted: 'bg-fill-hover text-tertiary',
+        success: 'bg-success/5 text-success',
+        info: 'bg-info/5 text-info',
+        warning: 'bg-warning/5 text-warning',
+        muted: 'bg-foreground/5 text-muted-foreground',
       },
     },
     defaultVariants: {
@@ -66,14 +66,14 @@ function Info_GroupedListRoot({
   if (loading) {
     return (
       <div className={cn('flex items-center justify-center py-8', className)}>
-        <Spinner className="text-tertiary" />
+        <Spinner className="text-muted-foreground" />
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className={cn('px-3.5 py-4 text-label text-tertiary', className)}>
+      <div className={cn('px-4 py-4 text-sm text-muted-foreground', className)}>
         {error === 'Source requires authentication' ? (
           <span>{t('sourceInfo.authenticateToViewTools')}</span>
         ) : (
@@ -93,7 +93,7 @@ function Info_GroupedListRoot({
 
   if (!hasItems && empty) {
     return (
-      <div className={cn('px-3.5 py-4 text-label text-tertiary', className)}>
+      <div className={cn('px-4 py-4 text-sm text-muted-foreground', className)}>
         {empty}
       </div>
     )
@@ -114,18 +114,18 @@ function Info_GroupedListGroup({
   }
 
   return (
-    <div className={cn('border-t border-subtle first:border-t-0', className)}>
+    <div className={cn('border-t border-border/30 first:border-t-0', className)}>
       <div className={groupHeaderVariants({ variant })}>
         {label}
         {count !== undefined && ` (${count})`}
       </div>
-      <div className="divide-y divide-separator">{children}</div>
+      <div className="divide-y divide-border/30">{children}</div>
     </div>
   )
 }
 
 function Info_GroupedListItem({ children, className }: Info_GroupedListItemProps) {
-  return <div className={cn('px-3.5 py-2', className)}>{children}</div>
+  return <div className={cn('px-4 py-2', className)}>{children}</div>
 }
 
 export const Info_GroupedList = Object.assign(Info_GroupedListRoot, {

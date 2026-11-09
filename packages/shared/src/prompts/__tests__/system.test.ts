@@ -9,89 +9,149 @@ mock.module('../../config/preferences.ts', () => ({
   formatPreferencesForPrompt: () => '',
 }))
 
+// System prompt assertions are independent of persisted app configuration.
+// Keep the browser section at its default-on state without reading ~/.selection.
+mock.module('../../config/storage.ts', () => ({
+  getBrowserToolEnabled: () => true,
+  getSwarmAgentsEnabled: () => true,
+}))
+
 import {
-  getDateTimeContext,
-  getMiniAgentSystemPrompt,
-  getPermissionModesSection,
   getSystemPrompt,
-  getWorkingDirectoryContext,
+  getMiniAgentSystemPrompt,
   formatProjectContextForPrompt,
+  getWorkingDirectoryContext,
 } from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
-import { getBrowserToolEnabled } from '../../config/storage.ts'
-import { DOC_REFS } from '../../docs/index.ts'
+import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
+import {
+  GIT_COAUTHOR_TRAILER,
+  LEGACY_CRAFT_GIT_COAUTHOR_EMAILS,
+} from '../../branding.ts'
 
 const GIT_CONVENTIONS_HEADING = '## Git Conventions'
-const CO_AUTHOR_TRAILER = 'Co-Authored-By: Craft Agent <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
-  it('keeps the default static prompt below the budget', () => {
+  it('audits completion in the existing model turn without adding a router or reviewer (#770)', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
-    expect(prompt.length).toBeLessThan(22_000)
+    expect(prompt).toContain('## Completion Audit')
+    expect(prompt).toContain('current raw user request')
+    expect(prompt).toContain('keep all unretracted constraints')
+    expect(prompt).toContain('A Task List or plan state is progress, not proof')
+    expect(prompt).toContain('A narrow test cannot prove a broader goal')
+    expect(prompt).toContain('Do not create an intent router, mini-completion, hidden reviewer, sub-agent')
   })
 
-  it('limits subagents only where the Agent tool exists (Claude)', () => {
-    const claude = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
-    const pi = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, 'Craft Agents Backend')
-
-    expect(claude).toContain('## Subagents (Agent tool)')
-    expect(claude).toContain('Use `Explore` for read-only searches')
-    expect(pi).not.toContain('## Subagents (Agent tool)')
-  })
-
-  it('treats date/time as current now without overriding explicit dated content', () => {
-    const context = getDateTimeContext()
-
-    expect(context).toContain('Use this as the current “now”')
-    expect(context).toContain('explicit dates')
-    expect(context).not.toContain('Ignore any other date information')
-  })
-
-  it('distinguishes Explore plan-gating from Ask/Execute execution', () => {
+  it('keeps chat citations inline without requesting a duplicate bibliography', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
-
-    expect(prompt).toContain('If permissionMode is **Explore**')
-    expect(prompt).toContain('For edits outside those folders, write a plan file there, call `SubmitPlan`, then stop for user approval.')
-    expect(prompt).toContain('Use `SubmitPlan` only when the user asks for a plan or the change is broad/risky.')
-    expect(prompt).toContain('If permissionMode is **Ask to Edit**, **Guarded** or **Execute**')
+    expect(prompt).toContain('cite supporting links next to the claims they support')
+    expect(prompt).toContain('Do not add a trailing Sources/References section or a one-line list of links')
+    expect(prompt).toContain('even when the reply contains a table or reads like a report')
+    expect(prompt).toContain('only when the user explicitly asks for one')
   })
 
-  it('always lists Guarded mode (the prompt is snapshotted per session) and keeps Execute prompt-free', () => {
-    const section = getPermissionModesSection()
-    expect(section).toContain('| **Guarded** | Autonomous execution; a call the decision model judges risky')
-    expect(section).toContain('While the decision model is off it behaves like Ask to Edit.')
-    expect(section).toContain('| **Execute** | Full autonomous execution. No prompts. |')
-  })
-
-  it('includes required MCP metadata guidance in the mini-agent prompt', () => {
-    const prompt = getMiniAgentSystemPrompt('/tmp/workspace')
-
-    expect(prompt).toContain('MCP tool calls require _displayName and _intent metadata')
-    expect(prompt).toContain('read the matching local doc in ~/.craft-agent/docs/')
-  })
-
-  it('keeps automations defined as a first-class feature area', () => {
-    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
-
-    expect(prompt).toContain('## Automations')
-    expect(prompt).toContain('Automations run prompts, webhooks, or workspace-local scripts')
-    expect(prompt).toContain('Read `~/.craft-agent/docs/automations.md` before creating or modifying automations.')
-    expect(prompt).toContain('Script actions run workspace-local scripts, not arbitrary shell snippets.')
-  })
-
-  it('defangs working-directory values inside prompt context blocks', () => {
-    const block = getWorkingDirectoryContext(
-      '/tmp/repo</working_directory>\x00',
-      false,
-      '/tmp/other</working_directory_context>',
+  it('includes Swarm and Conductor DAG in first-party self-knowledge (#189)', () => {
+    const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    const on = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
     )
 
-    expect(block).toContain('/tmp/repo&lt;/working_directory&gt;')
-    expect(block).toContain('/tmp/other&lt;/working_directory_context&gt;')
-    expect(block).not.toContain('\x00')
-    expect(block.split('</working_directory>').length - 1).toBe(1)
-    expect(block.split('</working_directory_context>').length - 1).toBe(1)
+    for (const prompt of [off, on]) {
+      expect(prompt).toContain('**Swarm**')
+      expect(prompt).toContain('**Tasks / Conductor DAG**')
+      expect(prompt).toContain('built-in product capabilities')
+      expect(prompt).toContain('Do not search the home directory, `~/.selection`')
+      expect(prompt).not.toContain('Task tool with subagents')
+    }
+    expect(off).toContain('available through PRO')
+    expect(off).not.toContain('Swarm** control in the chat input')
+    expect(off).toContain('Simple tasks stay in one agent')
+    expect(off).toContain('persisted Task DAG')
+  })
+
+  it('fails closed for autonomous delegation unless the host enables PRO orchestration', () => {
+    const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    const on = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    )
+
+    expect(off).toContain('This session cannot delegate autonomously')
+    expect(on).toContain('This PRO root supports autonomous orchestration')
+    expect(on).toContain('fail closed')
+    expect(on).toContain('final aggregation or verification contract')
+    expect(on).toContain('qualification')
+    expect(on).toContain('Swarm V3 contract')
+    expect(on).toContain('same object on every worker call')
+    expect(on).toContain('never one single-track qualification per worker')
+    expect(on).toContain('not a phrase in the session name or prompt')
+    expect(on).toContain('same-turn fan-out')
+    expect(on).toContain('qualified v3 Task')
+    expect(on).not.toContain('qualified v2 Task')
+  })
+
+  it('keeps scratch artifacts out of the user-selected working directory (#163)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/deliverables')
+
+    expect(prompt).toContain('## Artifact Hygiene')
+    expect(prompt).toContain('user-visible deliverable location, not a scratch directory')
+    expect(prompt).toContain('every disposable or intermediate artifact')
+    expect(prompt).toContain('exact `dataFolderPath` from `<session_state>`')
+    expect(prompt).toContain('explicitly requests any file as a deliverable')
+    expect(prompt).toContain('including a TXT, JSON, CSV, Markdown, or script file')
+    expect(prompt).toContain('Do not scan or delete pre-existing files')
+  })
+
+  it('separates default session deliverables from scratch files', () => {
+    const context = getWorkingDirectoryContext('/tmp/session', true, '/tmp/session')
+    expect(context).toContain('/tmp/session/outputs/')
+    expect(context).toContain('never put final deliverables there')
+  })
+
+  it('labels a user-selected working directory as a non-scratch location (#163)', () => {
+    const context = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/deliverables')
+    const changedMidSession = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/original')
+
+    expect(context).toContain('user-visible deliverables and project files')
+    expect(context).toContain('not for scratch or intermediate artifacts')
+    expect(changedMidSession).toContain('user-visible deliverables and project files')
+    expect(changedMidSession).toContain('not for scratch or intermediate artifacts')
+    expect(changedMidSession).toContain('bash shell runs from a different directory')
+  })
+
+  it('can omit schema-enforced tool metadata guidance for incompatible models', () => {
+    const prompt = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      'Selection Backend',
+      undefined,
+      undefined,
+      false,
+    )
+
+    expect(prompt).not.toContain('All MCP tools require two metadata fields')
+    expect(prompt).toContain('## Document Tools')
   })
 
   it('uses backend-neutral debug log querying guidance (rg/grep via Bash)', () => {
@@ -115,22 +175,130 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
-  it('points at the MCP resource and prompt tools for existing sources on every backend', () => {
-    for (const backend of [undefined, 'Pi']) {
-      const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, backend)
+  it('tells call_llm to inherit the current session model (#192)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
-      expect(prompt).toContain('Use `source_list_resources` / `source_read_resource` / `source_list_prompts` / `source_get_prompt`')
-      expect(prompt).toContain('read guide resources a source points at before using its tools')
+    expect(prompt).toContain("omit `model` to inherit this session's current model")
+    expect(prompt).not.toContain('Use Haiku for simple tasks')
+    expect(prompt).not.toContain('single completion, no tools, cheap, parallel')
+  })
+
+  it('does not advertise a Task/subagent/Workflow tool', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).not.toContain('Task tool with subagents')
+    expect(prompt).not.toContain('call_llm vs Task (subagents)')
+    expect(prompt).toContain("apply the session's Swarm policy")
+    expect(prompt).not.toContain('Spawn only if **one** of these is true')
+    expect(prompt).toContain('context isolation or a long task alone never grants permission')
+    expect(prompt).toContain('Default: do the work yourself in this session')
+    expect(prompt).toContain('Do not spawn "just in case"')
+    expect(prompt).toContain('summarizing/classifying/extracting fields from existing text')
+    expect(prompt).toContain('Prefer at most 3 background children in one turn')
+    expect(prompt).toContain('Do not spawn another child to collect that result')
+    expect(prompt).toContain('do **not** automatically `archive_session`')
+    expect(prompt).toContain('`run_task`')
+    expect(prompt).toContain('`control_task_run`')
+    expect(prompt).toContain('Do not ask for plan approval when the user already authorized the goal')
+    expect(prompt).toContain('Editor submit_task_definition still creates only an unsaved proposal')
+    expect(prompt).not.toContain('mandatory when generating a new task')
+    expect(prompt).toContain('`submit_task_output`')
+    expect(prompt).toContain('`submit_task_verdict`')
+    expect(prompt).toContain('`submit_orchestration_decision`')
+    expect(prompt).toContain('`submit_task_node_verdict`')
+  })
+
+  it('tells the model to speak source titles rather than slugs', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('Identify each source as `{title} ({slug})`')
+    expect(prompt).toContain('Name sources and skills as title + slug')
+  })
+
+  it('uses configured sources directly and relies on automatic guide preparation', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('meaningful source guidelines are supplied automatically before execution')
+    expect(prompt).toContain('Do not read its `config.json` or `guide.md`')
+    expect(prompt).not.toContain('Usage guidelines (read before first use!)')
+    expect(prompt).not.toContain('read its `config.json` + `guide.md`, then use it')
+  })
+
+  it('keeps Codex tool-naming guidance aligned with title + slug speech', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, 'Codex')
+
+    expect(prompt).toContain('user-facing replies still use `{title} ({slug})`')
+    expect(prompt).not.toContain('user-facing replies still use the display title')
+  })
+
+
+  it('uses fast Word/Excel delivery even when old guides remain in session history', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    expect(prompt).toContain('Each format guide owns its complete workflow')
+    expect(prompt).toContain('separate paths')
+    expect(prompt).toContain('do not append one path')
+    expect(prompt).not.toContain('Office work has no special')
+    expect(prompt).not.toContain('close only after the loaded official Delivery Gate passes')
+  })
+
+  it('states that markdown-preview is reply syntax, not a tool (#255)', () => {
+    const prompts = [
+      getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),
+      getSystemPrompt(
+        undefined,
+        undefined,
+        '/tmp/workspace',
+        '/tmp/workspace',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        true,
+      ),
+    ]
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('`markdown-preview` is **not a tool**')
+      expect(prompt).toContain('Never emit a tool call named `markdown-preview`')
+      expect(prompt).toContain('In your assistant reply — not as a tool call')
+      expect(prompt).toContain('Use the required `path` and `content` fields')
+    }
+  })
+
+  it('keeps internal math-formatting rules out of user-facing replies (#103)', () => {
+    const prompts = [
+      getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),
+      getMiniAgentSystemPrompt('/tmp/workspace'),
+    ]
+
+    for (const prompt of prompts) {
+      const normalizedPrompt = prompt.toLowerCase()
+      expect(normalizedPrompt).toContain('present only user-relevant content')
+      expect(normalizedPrompt).toContain('silently normalize markdown and math formatting')
+      expect(normalizedPrompt).toMatch(/never (?:mention|discuss) delimiter choices/)
+      expect(normalizedPrompt).toContain('tool-output formatting')
+      expect(prompt).not.toContain('Do NOT use single-dollar delimiters')
+      expect(prompt).not.toContain('avoid single $...$ in prose')
+      expect(prompt).not.toContain('currency remains plain text')
     }
   })
 })
+
+function expectNoLegacyCraftGitHubIdentity(prompt: string) {
+  for (const email of LEGACY_CRAFT_GIT_COAUTHOR_EMAILS) {
+    expect(prompt).not.toContain(`<${email}>`)
+  }
+  expect(prompt).not.toContain('Co-Authored-By: Craft Agent')
+  expect(prompt).not.toContain('Co-Authored-By: Craft Agents')
+}
 
 describe('includeCoAuthoredBy handling', () => {
   beforeEach(() => {
     mockIncludeCoAuthoredBy = true
   })
 
-  it('includes the Git Conventions block when the arg is explicitly true', () => {
+  it('includes the Selection GitHub trailer when the arg is explicitly true', () => {
     const prompt = getSystemPrompt(
       undefined,
       undefined,
@@ -142,10 +310,12 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).toContain(GIT_COAUTHOR_TRAILER)
+    expect(prompt).toContain('GitHub pull request, issue, or comment bodies')
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 
-  it('omits the Git Conventions block when the arg is explicitly false', () => {
+  it('omits the Git Conventions trailer when the arg is explicitly false', () => {
     const prompt = getSystemPrompt(
       undefined,
       undefined,
@@ -157,7 +327,8 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).not.toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).not.toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).not.toContain(GIT_COAUTHOR_TRAILER)
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 
   // Regression test for #576: Pi-backed sessions called getSystemPrompt without
@@ -173,12 +344,13 @@ describe('includeCoAuthoredBy handling', () => {
       '/tmp/workspace',
       '/tmp/workspace',
       undefined,
-      'Craft Agents Backend'
+      'Selection Backend'
       // 7th arg omitted — must not regress to `true` default
     )
 
     expect(prompt).not.toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).not.toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).not.toContain(GIT_COAUTHOR_TRAILER)
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 
   it('falls back to getCoAuthorPreference() === true when the arg is omitted and the user has not opted out', () => {
@@ -192,7 +364,8 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).toContain(GIT_COAUTHOR_TRAILER)
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 })
 
@@ -213,10 +386,29 @@ describe('formatProjectContextForPrompt', () => {
     // Single source of truth for working dir is <working_directory> in the user message.
   })
 
-  it('always renders the memory path; assets path is always present', () => {
+  it('renders the memory path and assets path for shared mode', () => {
     const block = formatProjectContextForPrompt(baseCtx())
     expect(block).toContain('<project_assets_path>/ws/projects/acme/assets</project_assets_path>')
     expect(block).toContain('<project_memory_path>/ws/projects/acme/MEMORY.md</project_memory_path>')
+  })
+
+  it('omits all automatic memory context and write guidance for isolated mode', () => {
+    const block = formatProjectContextForPrompt(baseCtx({
+      memoryPath: undefined,
+      memoryContent: undefined,
+      description: 'Project description survives isolation.',
+      details: 'Project details survive isolation.',
+      assets: [{ filename: 'spec.pdf', mimeType: 'application/pdf', sizeBytes: 2048 }],
+    }))
+
+    expect(block).not.toContain('<project_memory_path>')
+    expect(block).not.toContain('<project_memory>')
+    expect(block).not.toContain('MEMORY.md')
+    expect(block).not.toContain('record it')
+    expect(block).toContain('Project description survives isolation.')
+    expect(block).toContain('Project details survive isolation.')
+    expect(block).toContain('<project_assets_path>')
+    expect(block).toContain('spec.pdf')
   })
 
   it('renders an asset manifest when assets are present', () => {
@@ -232,14 +424,6 @@ describe('formatProjectContextForPrompt', () => {
     expect(block).toContain('- spec.pdf (application/pdf, 2.0 KB)')
     expect(block).toContain('- notes.txt (text/plain, 512 B)')
     expect(block).toContain('lists reference files')
-  })
-
-  // Found 2026-10-11: sessions rewrote MEMORY.md from their snapshot and dropped other sessions' notes.
-  it('points memory writes at the append-only tool, never at rewriting the file', () => {
-    const block = formatProjectContextForPrompt(baseCtx())
-    expect(block).toContain('project_memory_append')
-    expect(block).toContain('Never')
-    expect(block).not.toContain('via Write/Edit')
   })
 
   it('omits the manifest entirely when there are no assets', () => {
@@ -322,94 +506,31 @@ describe('formatProjectContextForPrompt', () => {
   })
 })
 
-describe('coding agent profile', () => {
-  const coding = (includeCoAuthoredBy?: boolean) =>
-    getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, undefined, includeCoAuthoredBy, undefined, 'coding')
-
-  beforeEach(() => {
-    mockIncludeCoAuthoredBy = true
-  })
-
-  it('leaves the default prompt unchanged when the profile is default', () => {
-    const plain = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
-    const explicitDefault = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, undefined, undefined, undefined, 'default')
-    expect(explicitDefault).toBe(plain)
-  })
-
-  it('stays within the coding budget (preferences are stubbed out here)', () => {
-    // ~9.4k with every optional section on: subagents (Claude), browser, rtk note, developer feedback, co-author
-    expect(coding().length).toBeLessThan(10_500)
-  })
-
-  it('keeps the coding essentials', () => {
-    const prompt = coding()
-    expect(prompt).toContain('<craft_agent_environment')
-    expect(prompt).toContain('Coding mode')
-    expect(prompt).toContain('## Coding Workflow')
-    expect(prompt).toContain('<project_context_files>')
-    expect(prompt).toContain('SubmitPlan')
-    expect(prompt).toContain('[skill:slug]')
-    expect(prompt).toContain('unified diffs')
-    // All four modes stay listed: Claude snapshots the prompt, so a later switch must find its rule
-    for (const mode of ['Explore', 'Ask to Edit', 'Guarded', 'Execute']) expect(prompt).toContain(mode)
-  })
-
-  it('teaches the app features a coding session uses', () => {
-    const prompt = coding()
-    for (const text of [
-      '## Preview Blocks', 'html-preview', '## Structured Data', 'transform_data', '## Diagrams', 'mermaid_validate',
-      '## Sessions', 'spawn_session', 'get_session_info', 'list_sessions', '## LLM Tool', 'call_llm',
-      '## Pages', 'create_page', DOC_REFS.pages, '## Document Tools', 'markitdown', 'source_test',
-    ]) {
-      expect(prompt).toContain(text)
+describe('lean context contracts', () => {
+  it('keeps a compact prompt with discoverable guides and no unconditional fan-out rule', async () => {
+    const { estimateTextTokensConservatively, estimateContextInputBreakdown } = await import('../../agent/backend/pi/context-budget.ts');
+    const prompt = getSystemPrompt('', undefined, '/evaluation/workspace', undefined, 'default', 'Selection Backend', false, undefined, false, false);
+    expect(estimateTextTokensConservatively(prompt)).toBeLessThan(8000);
+    for (const guide of ['browser-tools.md', 'data-tables.md', 'html-preview.md', 'pdf-preview.md', 'image-preview.md', 'markdown-preview.md', 'mermaid.md', 'llm-tool.md']) {
+      expect(prompt).toContain(`/docs/${guide}`);
     }
-    // The browser section follows the "Built-in browser" setting, like the tool itself
-    expect(prompt.includes('## Browser Tools')).toBe(getBrowserToolEnabled())
-    if (getBrowserToolEnabled()) expect(prompt).toContain('dev server')
-  })
-
-  it('gives the subagent guidance only to Claude, which has the Agent tool', () => {
-    expect(coding()).toContain('## Subagents (Agent tool)')
-    const pi = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, 'Craft Agents Backend', undefined, undefined, 'coding')
-    expect(pi).not.toContain('## Subagents (Agent tool)')
-  })
-
-  it('shares those sections with the default prompt instead of copying them', () => {
-    const prompt = coding()
-    const plain = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
-    const section = (heading: string) => {
-      const start = prompt.indexOf(heading)
-      expect(start).toBeGreaterThanOrEqual(0)
-      const end = prompt.indexOf('\n## ', start)
-      return prompt.slice(start, end === -1 ? undefined : end)
-    }
-    for (const heading of ['## Preview Blocks', '## Structured Data', '## Diagrams', '## Subagents', '## LLM Tool', '## Pages', '## Document Tools']) {
-      expect(plain).toContain(section(heading))
-    }
-    if (getBrowserToolEnabled()) {
-      // The browser section opens with its own "when to use" line; the rest is shared
-      const browser = section('## Browser Tools')
-      expect(plain).toContain(browser.slice(browser.indexOf('**Before first use')))
-    }
-  })
-
-  it('drops the desktop-workflow sections whose tools the coding profile does not register', () => {
-    const prompt = coding()
-    for (const section of ['## Session Self-Management', '## Automations', '## Configuration Documentation', 'update_user_preferences', 'set_session_labels', 'send_agent_message', 'create_task']) {
-      expect(prompt).not.toContain(section)
-    }
-  })
-
-  it('honors the co-author preference like the default prompt', () => {
-    expect(coding(true)).toContain(CO_AUTHOR_TRAILER)
-    expect(coding(false)).not.toContain(GIT_CONVENTIONS_HEADING)
-  })
-
-  it('still appends the user preferences (only the base prompt is swapped)', () => {
-    const preferences = '\n<user_preferences>\n- Name: Test User\n</user_preferences>\n'
-    const prompt = getSystemPrompt(preferences, undefined, '/tmp/workspace', '/tmp/workspace', undefined, undefined, undefined, undefined, 'coding')
-    expect(prompt).toContain(preferences)
-    // The tool that edits preferences is not registered in coding mode, so the prompt must not offer it
-    expect(prompt).not.toContain('update_user_preferences')
-  })
-})
+    expect(prompt).toContain('read it again if compaction removed necessary details');
+    expect(prompt).toContain('Calls are blocked until this prerequisite succeeds');
+    expect(prompt).toContain('20+ rows');
+    expect(prompt).toContain('renderer by default for tables and structured comparisons, including small tables');
+    expect(prompt).toContain('Use Markdown tables only when the user explicitly requests');
+    expect(prompt).not.toContain('Use simple Markdown tables for small static comparisons');
+    expect(prompt).not.toContain('Spawn only if **one** of these is true');
+    expect(prompt).not.toContain("it's 2026");
+    expect(prompt).toContain('`natural-writing` is Chinese prose only');
+    expect(prompt).toContain('`humanizer` is English general prose');
+    expect(prompt).toContain('`academic-humanizer` is English papers');
+    expect(prompt).toContain('verbatim quotes or translation');
+    expect(prompt).toContain('academic-paper guide');
+    // Real system prose mentions these tags several times. Only the appended catalog counts.
+    const catalog = '<available_skills>\n- natural-writing: /skills/natural-writing/SKILL.md\n</available_skills>';
+    const stats = estimateContextInputBreakdown({ systemPrompt: prompt + '\n' + catalog, messages: [] });
+    expect(stats.skills).toBe(estimateTextTokensConservatively(catalog));
+    expect(stats.systemPrompt).toBeGreaterThan(6000);
+  });
+});

@@ -13,6 +13,106 @@ import { resolveBackendRuntimePaths } from '../internal/runtime-resolver.ts';
 import { resolveBackendHostTooling } from '../factory.ts';
 import type { BackendHostRuntimeContext } from '../types.ts';
 
+describe('resolve Bun runtime in dev mode', () => {
+  const tmpBase = join(tmpdir(), `bun-resolver-test-${Date.now()}`);
+  const originalCraftBun = process.env.CRAFT_BUN;
+  const originalBunInstall = process.env.BUN_INSTALL;
+  const originalPath = process.env.PATH;
+
+  afterEach(() => {
+    try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+    if (originalCraftBun === undefined) delete process.env.CRAFT_BUN;
+    else process.env.CRAFT_BUN = originalCraftBun;
+    if (originalBunInstall === undefined) delete process.env.BUN_INSTALL;
+    else process.env.BUN_INSTALL = originalBunInstall;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  });
+
+  it('uses BUN_INSTALL even when PATH does not contain Windows system tools', () => {
+    const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
+    const bunInstall = join(tmpBase, 'bun-install');
+    const bunPath = join(bunInstall, 'bin', bunBinary);
+    mkdirSync(join(bunInstall, 'bin'), { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    process.env.BUN_INSTALL = bunInstall;
+    delete process.env.CRAFT_BUN;
+    process.env.PATH = '';
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: join(tmpBase, 'app'),
+      resourcesPath: join(tmpBase, 'resources'),
+      isPackaged: false,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+
+  it('prefers an explicit CRAFT_BUN runtime override', () => {
+    const bunPath = join(tmpBase, process.platform === 'win32' ? 'custom-bun.exe' : 'custom-bun');
+    mkdirSync(tmpBase, { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    process.env.CRAFT_BUN = bunPath;
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: join(tmpBase, 'app'),
+      resourcesPath: join(tmpBase, 'resources'),
+      isPackaged: false,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+});
+
+describe('resolve bundled Bun in packaged apps', () => {
+  const tmpBase = join(tmpdir(), `bun-packaged-resolver-${Date.now()}`);
+  const originalCraftBun = process.env.CRAFT_BUN;
+  const originalResourcesBase = process.env.CRAFT_RESOURCES_BASE;
+
+  afterEach(() => {
+    try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+    if (originalCraftBun === undefined) delete process.env.CRAFT_BUN;
+    else process.env.CRAFT_BUN = originalCraftBun;
+    if (originalResourcesBase === undefined) delete process.env.CRAFT_RESOURCES_BASE;
+    else process.env.CRAFT_RESOURCES_BASE = originalResourcesBase;
+  });
+
+  it('finds Windows extraResources bun under resources/app/vendor/bun', () => {
+    const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
+    const resourcesPath = join(tmpBase, 'resources');
+    const appRoot = join(resourcesPath, 'app');
+    const bunPath = join(appRoot, 'vendor', 'bun', bunBinary);
+    mkdirSync(join(appRoot, 'vendor', 'bun'), { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    delete process.env.CRAFT_BUN;
+    delete process.env.CRAFT_RESOURCES_BASE;
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: appRoot,
+      resourcesPath,
+      isPackaged: true,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+
+  it('honors CRAFT_BUN in packaged mode when vendor layouts differ', () => {
+    const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
+    const bunPath = join(tmpBase, 'override', bunBinary);
+    mkdirSync(join(tmpBase, 'override'), { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    process.env.CRAFT_BUN = bunPath;
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: join(tmpBase, 'app'),
+      resourcesPath: join(tmpBase, 'resources'),
+      isPackaged: true,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+});
+
 describe('resolveServerPath fallback', () => {
   const tmpBase = join(tmpdir(), `resolver-test-${Date.now()}`);
 
@@ -121,53 +221,6 @@ describe('resolveRipgrepPath', () => {
       // Must be a vendored path, not a system PATH resolution
       expect(result.ripgrepPath).toContain('node_modules');
     }
-  });
-});
-
-describe('resolveClaudeBinaryPath (native binary, SDK ≥ 0.2.113)', () => {
-  const tmpBase = join(tmpdir(), `claude-bin-resolver-test-${Date.now()}`);
-
-  afterEach(() => {
-    try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
-  });
-
-  it('finds the per-platform native binary in the optional-dep package', () => {
-    const appRoot = join(tmpBase, 'app');
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-    const platformPkg = process.platform === 'win32'
-      ? `claude-agent-sdk-win32-${arch}`
-      : process.platform === 'darwin'
-        ? `claude-agent-sdk-darwin-${arch}`
-        : `claude-agent-sdk-linux-${arch}`;
-    const binaryName = process.platform === 'win32' ? 'claude.exe' : 'claude';
-    const binDir = join(appRoot, 'node_modules', '@anthropic-ai', platformPkg);
-    mkdirSync(binDir, { recursive: true });
-    const binPath = join(binDir, binaryName);
-    writeFileSync(binPath, '#!/bin/sh\n');
-    chmodSync(binPath, 0o755);
-
-    const hostRuntime: BackendHostRuntimeContext = {
-      appRootPath: appRoot,
-      resourcesPath: appRoot,
-      isPackaged: true,
-    };
-
-    const paths = resolveBackendRuntimePaths(hostRuntime);
-    expect(paths.claudeCliPath).toBe(binPath);
-  });
-
-  it('returns undefined when the platform package is missing', () => {
-    const appRoot = join(tmpBase, 'no-binary');
-    mkdirSync(appRoot, { recursive: true });
-
-    const hostRuntime: BackendHostRuntimeContext = {
-      appRootPath: appRoot,
-      resourcesPath: appRoot,
-      isPackaged: true,
-    };
-
-    const paths = resolveBackendRuntimePaths(hostRuntime);
-    expect(paths.claudeCliPath).toBeUndefined();
   });
 });
 

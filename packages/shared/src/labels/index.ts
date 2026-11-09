@@ -24,11 +24,5 @@ export * from './resolve.ts';
 // Label filter matching (the single list/AppShell filter predicate)
 export * from './filter.ts';
 
-// Session label chips (one per plain label, one per valued entry)
-export * from './chips.ts';
-
-// Canonical stored form of session label entries (+ the value-case rule)
-export * from './canonical.ts';
-
 // Auto-labels: import directly from '@craft-agent/shared/labels/auto' to keep
 // regex evaluation code out of the renderer bundle (backend-only concern).

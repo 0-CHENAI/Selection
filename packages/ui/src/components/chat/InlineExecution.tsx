@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle2, XCircle, X } from 'lucide-react'
 import { cn } from '@craft-agent/ui'
 import { ActivityStatusIcon, SIZE_CONFIG, type ActivityItem, type ActivityStatus } from './TurnCard'
+import { ResponseActionRow, TurnRetryButton } from './TurnActionRow'
 import { LoadingIndicator } from '../ui/LoadingIndicator'
 import { Markdown } from '../markdown'
 
@@ -53,7 +54,7 @@ function InlineActivityRow({ activity }: { activity: InlineActivityItem }) {
   return (
     <div
       className={cn(
-        "flex min-h-7 items-center gap-2 text-secondary",
+        "flex items-center gap-2 py-0.5 text-muted-foreground",
         SIZE_CONFIG.fontSize
       )}
     >
@@ -61,8 +62,8 @@ function InlineActivityRow({ activity }: { activity: InlineActivityItem }) {
       <span className="shrink-0">{activity.name}</span>
       {activity.description && (
         <>
-          <span aria-hidden className="shrink-0 text-tertiary">·</span>
-          <span className="truncate min-w-0 flex-1 text-tertiary">{activity.description}</span>
+          <span className="opacity-60 shrink-0">·</span>
+          <span className="truncate min-w-0 flex-1">{activity.description}</span>
         </>
       )}
     </div>
@@ -91,7 +92,7 @@ export function InlineExecution({
         {/* Header with spinner */}
         <div className="flex items-center gap-2">
           <LoadingIndicator animated showElapsed />
-          <span className={cn("text-secondary", SIZE_CONFIG.fontSize)}>
+          <span className={cn("text-foreground/80", SIZE_CONFIG.fontSize)}>
             {t('common.editing')}
           </span>
         </div>
@@ -106,12 +107,12 @@ export function InlineExecution({
         )}
 
         {/* Actions */}
-        <div className="flex items-center justify-start pt-1 border-t border-subtle">
+        <div className="flex items-center justify-start pt-1 border-t border-border/30">
           <button
             type="button"
             onClick={onCancel}
             className={cn(
-              "text-tertiary transition-colors duration-micro ease-out-subtle hover:text-foreground hover:duration-instant",
+              "text-muted-foreground hover:text-foreground transition-colors",
               SIZE_CONFIG.fontSize
             )}
           >
@@ -128,7 +129,7 @@ export function InlineExecution({
       <div className={cn("space-y-3", className)}>
         {/* Header with checkmark */}
         <div className="flex items-center gap-2">
-          <CheckCircle2 aria-hidden className="size-4 text-success" />
+          <CheckCircle2 className="w-4 h-4 text-success" />
           <span className={cn("text-foreground font-medium", SIZE_CONFIG.fontSize)}>
             {t('common.done')}
           </span>
@@ -136,22 +137,22 @@ export function InlineExecution({
 
         {/* Result message - rendered as markdown */}
         {result && (
-          <div className={cn("text-secondary leading-relaxed prose-compact", SIZE_CONFIG.fontSize)}>
+          <div className={cn("text-muted-foreground leading-relaxed prose-compact", SIZE_CONFIG.fontSize)}>
             <Markdown>{result}</Markdown>
           </div>
         )}
 
         {/* Actions */}
-        <div className="flex items-center justify-end pt-1 border-t border-subtle">
+        <div className="flex items-center justify-end pt-1 border-t border-border/30">
           <button
             type="button"
             onClick={onDismiss}
             className={cn(
-              "state-overlay flex items-center gap-1 px-2 py-1 rounded-md bg-success-tint text-success",
+              "flex items-center gap-1 px-2 py-1 rounded-md bg-success/10 text-success hover:bg-success/20 transition-colors",
               SIZE_CONFIG.fontSize
             )}
           >
-            <CheckCircle2 aria-hidden className="size-3" />
+            <CheckCircle2 className="w-3 h-3" />
             {t('common.done')}
           </button>
         </div>
@@ -164,7 +165,7 @@ export function InlineExecution({
     <div className={cn("space-y-3", className)}>
       {/* Header with error icon */}
       <div className="flex items-center gap-2">
-        <XCircle aria-hidden className="size-4 text-destructive" />
+        <XCircle className="w-4 h-4 text-destructive" />
         <span className={cn("text-foreground font-medium", SIZE_CONFIG.fontSize)}>
           {t('common.failed')}
         </span>
@@ -172,37 +173,27 @@ export function InlineExecution({
 
       {/* Error message - rendered as markdown */}
       {error && (
-        <div className={cn("text-destructive leading-relaxed prose-compact", SIZE_CONFIG.fontSize)}>
+        <div className={cn("text-destructive/80 leading-relaxed prose-compact", SIZE_CONFIG.fontSize)}>
           <Markdown>{error}</Markdown>
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2 pt-1 border-t border-subtle">
+      <ResponseActionRow compact>
+        {onRetry && (
+          <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
+        )}
         <button
           type="button"
           onClick={onDismiss}
           className={cn(
-            "flex items-center gap-1 text-tertiary transition-colors duration-micro ease-out-subtle hover:text-foreground hover:duration-instant",
+            "ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors",
             SIZE_CONFIG.fontSize
           )}
         >
-          <X aria-hidden className="size-3" />
+          <X className="w-3 h-3" />
           {t('common.dismiss')}
         </button>
-        {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className={cn(
-              "state-overlay px-2 py-1 rounded-md bg-accent-tint text-accent",
-              SIZE_CONFIG.fontSize
-            )}
-          >
-            {t('common.retry')}
-          </button>
-        )}
-      </div>
+      </ResponseActionRow>
     </div>
   )
 }

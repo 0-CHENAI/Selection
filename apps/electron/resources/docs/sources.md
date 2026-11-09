@@ -1,6 +1,6 @@
 # Sources Configuration Guide
 
-This guide explains how to configure sources (MCP servers, APIs, local filesystems) in Craft Agent.
+This guide explains how to configure sources (MCP servers, APIs, local filesystems) in Selection.
 
 > **CLI-first workflow (recommended):** Use `craft-agent source ...` commands instead of editing source config files directly.
 > - `craft-agent source --help`
@@ -10,9 +10,13 @@ This guide explains how to configure sources (MCP servers, APIs, local filesyste
 
 When a user wants to add a new source, follow this conversational setup process to create a tailored, well-documented integration.
 
-### 0. Check for a Specialized Source Guide (REQUIRED FIRST STEP)
+### 0. Search for Specialized Source Guide (REQUIRED FIRST STEP)
 
-**Before doing anything else**, check the product documentation at https://thecraftagents.com/docs for a service-specific setup guide (fetch pages with your web tools, e.g. search for "{service} source setup").
+**Before doing anything else**, search for a specialized guide using the craft-agents-docs MCP:
+
+```
+mcp__craft-agents-docs__SearchCraftAgents({ query: "{service} source setup" })
+```
 
 **Available guides:** GitHub, Linear, Slack, Gmail, Google Calendar, Google Drive, Google Docs, Google Sheets, Outlook, Microsoft Calendar, Teams, SharePoint, Craft, Filesystem, Brave Search, Memory
 
@@ -204,7 +208,8 @@ Concrete examples tailored to the user's workflow:
 ```
 User: I want to add Linear
 
-Agent: [FIRST: Fetches the Linear setup guide from https://thecraftagents.com/docs]
+Agent: [FIRST: Searches for Linear guide]
+       mcp__craft-agents-docs__SearchCraftAgents({ query: "linear source setup" })
 
 Agent: I found the Linear setup guide! A few questions:
 1. What will you primarily use Linear for? (issue tracking, sprint planning, reporting?)
@@ -237,7 +242,7 @@ Would you like me to show you what issues are currently open?
 ## Overview
 
 Sources are stored as folders under:
-- `~/.craft-agent/workspaces/{workspaceId}/sources/{sourceSlug}/`
+- `~/.selection/workspaces/{workspaceId}/sources/{sourceSlug}/`
 
 Each source folder contains:
 - `config.json` - Source configuration (required)
@@ -317,10 +322,6 @@ Model Context Protocol servers provide tools via HTTP/SSE.
 
 After creating, use `source_oauth_trigger` to authenticate.
 
-If the server only accepts loopback redirect URIs (client registration fails with an error like "only HTTP loopback callbacks"), add `"oauthRelay": false` to the `mcp` block. This skips the hosted OAuth relay and uses the local callback URL directly. Default (unset) uses the relay.
-
-If the server grants narrower default scopes than you need (e.g. read-only), list them in the `mcp` block: `"scopes": ["app:read", "app:write"]`. They are sent as the `scope` parameter on authorization; re-authenticate after adding them. Default (unset) sends no `scope`.
-
 **Bearer token authentication:**
 ```json
 {
@@ -395,15 +396,6 @@ With environment variables:
   }
 }
 ```
-
-**Resources and prompts:**
-
-Besides tools, an MCP server can publish *resources* (documents such as usage guides, schemas or files, addressed by URI) and *prompts* (reusable instructions or playbooks with arguments). They are not tools; read them with session tools:
-
-- `source_list_resources` / `source_read_resource`: list a source's resources and resource templates, read one by URI
-- `source_list_prompts` / `source_get_prompt`: list its prompts, get one with its arguments filled in
-
-`<sources>` notes once per session when a connected source offers either, and shows the server's own instructions if it sent any. If those instructions or the source's `guide.md` point at a guide resource, read it before using the source's tools. When writing `guide.md` for such a source, name the resource URIs worth reading.
 
 ### API Sources
 
@@ -517,8 +509,6 @@ When `headerNames` is specified:
 - All header values are stored together as a JSON object
 - Each header is added to every API request
 
-Use `headerName` (singular) for APIs that need one header. A credential entered through the multi-header prompt for a single-header source is unpacked to the bare value, never sent as a JSON blob. `source_test` sends exactly what the `api_<source>` tools send, so a passing authenticated test means real calls authenticate too.
-
 To prompt for multi-header credentials:
 ```typescript
 source_credential_prompt({
@@ -538,7 +528,7 @@ Common multi-header use cases:
 
 For API sources that use OAuth 2.0 but aren't Google, Slack, or Microsoft. Two modes:
 
-**Auto-discovery (recommended):** If the API supports RFC 9728 (OAuth Protected Resource Metadata), just set `authType: "oauth"` — endpoints, client registration and the RFC 8707 `resource` indicator (so resource-bound servers accept the token) are discovered automatically:
+**Auto-discovery (recommended):** If the API supports RFC 9728 (OAuth Protected Resource Metadata), just set `authType: "oauth"` — endpoints and client registration are discovered automatically:
 
 ```json
 {
@@ -580,7 +570,6 @@ The `oauth` block fields (only needed for explicit config):
 - `clientSecret` (optional): Client secret — not required for public PKCE clients
 - `scopes` (optional): Requested OAuth scopes
 - `audience` (optional): Auth0-style audience parameter
-- `resource` (optional): RFC 8707 resource indicator for servers that issue audience-scoped tokens; sent on the authorization, token and refresh requests
 - `extraParams` (optional): Additional query params for the authorization URL (e.g. `{"access_type": "offline"}`)
 
 To trigger OAuth authentication, use `source_oauth_trigger` (the same tool used for MCP OAuth):
@@ -816,7 +805,7 @@ The `config.icon` field controls the source icon. Resolution follows this priori
 ## Provider Domain Cache
 
 For favicon resolution, a cache maps provider names to their canonical domains at:
-`~/.craft-agent/provider-domains.json`
+`~/.selection/provider-domains.json`
 
 **Format:**
 ```json
@@ -846,7 +835,7 @@ Requires user-provided OAuth credentials in the source config:
 - `googleOAuthClientId`: Your Google OAuth Client ID
 - `googleOAuthClientSecret`: Your Google OAuth Client Secret
 
-Create credentials at [Google Cloud Console](https://console.cloud.google.com/apis/credentials) as a **Web application** client (not "Desktop app"), and add `https://thecraftagents.com/auth/callback` as an authorized redirect URI. A client secret is required.
+Create credentials at [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (Desktop app type).
 Uses OAuth via `source_google_oauth_trigger`.
 
 ### Linear
@@ -885,7 +874,7 @@ Technical steps:
 
 1. Create the source folder:
    ```bash
-   mkdir -p ~/.craft-agent/workspaces/{ws}/sources/my-source
+   mkdir -p ~/.selection/workspaces/{ws}/sources/my-source
    ```
 
 2. Write `config.json` with appropriate settings (see schemas above)

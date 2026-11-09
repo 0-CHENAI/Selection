@@ -19,6 +19,7 @@
  */
 
 import { protocol, nativeImage } from 'electron'
+import { HTML_ARTIFACT_SCHEME } from './html-artifact'
 import { stat } from 'fs/promises'
 import { isAbsolute } from 'path'
 import { mainLog } from './logger'
@@ -105,6 +106,7 @@ async function generateThumbnail(filePath: string, ext: string): Promise<Buffer 
  */
 export function registerThumbnailScheme(): void {
   protocol.registerSchemesAsPrivileged([
+    { scheme: HTML_ARTIFACT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
     {
       scheme: 'thumbnail',
       privileges: {

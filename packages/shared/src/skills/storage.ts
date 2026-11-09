@@ -15,8 +15,11 @@ import {
 import { homedir } from 'os';
 import { join } from 'path';
 import matter from 'gray-matter';
+import { recoverSkillInstalls, skillReadDirectory, pendingSkillSlugs } from './install-transaction.ts';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
+import { clearDisplayTitle, loadDisplayTitles } from '../display-titles-storage.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
+import { getBundledAssetsDir } from '../utils/paths.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -34,6 +37,54 @@ export const GLOBAL_AGENT_SKILLS_DIR = join(homedir(), '.agents', 'skills');
 
 /** Project-level agent skills relative directory name */
 export const PROJECT_AGENT_SKILLS_DIR = '.agents/skills';
+
+/**
+ * App-shipped skills (read-only). Overrides global; workspace/project still win.
+ */
+export function getBundledSkillsDir(): string | undefined {
+  const fromAssets = getBundledAssetsDir('skills');
+  if (fromAssets) return fromAssets;
+
+  const candidates = [
+    join(process.cwd(), 'apps', 'electron', 'resources', 'skills'),
+    join(process.cwd(), 'resources', 'skills'),
+    join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'skills'),
+  ];
+  return candidates.find(dir => existsSync(dir));
+}
+
+/** Bundled Selection skills. Versioned OfficeCLI guides are private CLI resources. */
+export function getBundledSkillDirectories(): string[] {
+  const dirs: string[] = [];
+  const appBundled = getBundledSkillsDir();
+  if (appBundled) dirs.push(appBundled);
+  return dirs;
+}
+
+/** App-bundled skills stay callable by the agent but are omitted from user-facing skill lists and slash commands. */
+export function isUserFacingSkill(skill: Pick<LoadedSkill, 'source'> & { slug?: string }): boolean {
+  return skill.source !== 'bundled';
+}
+
+export function filterUserFacingSkills<T extends { source: SkillSource; slug?: string }>(skills: T[]): T[] {
+  return skills.filter(isUserFacingSkill);
+}
+
+/**
+ * App-owned prose skills. Explicit `[skill:slug]` selection of the bundled
+ * file may enter the stable prefix for that turn. `natural-writing` keeps its
+ * original directory id so existing mentions and workspace overrides still resolve.
+ */
+export const BUNDLED_PROSE_SKILL_SLUGS = ['natural-writing', 'humanizer', 'academic-humanizer'] as const;
+
+/** First app-bundled `SKILL.md` for a slug. Versioned OfficeCLI guides stay private. */
+export function resolveBundledSkillMdPath(slug: string): string | undefined {
+  for (const dir of getBundledSkillDirectories()) {
+    const skillMd = join(dir, slug, 'SKILL.md');
+    if (existsSync(skillMd)) return skillMd;
+  }
+  return undefined;
+}
 
 /**
  * Normalize requiredSources frontmatter to a clean string array.
@@ -68,9 +119,9 @@ function normalizeRequiredSources(value: unknown): string[] | undefined {
 function parseSkillFile(content: string): { metadata: SkillMetadata; body: string } | null {
   try {
     const parsed = matter(content);
-
-    // Validate required fields
-    if (!parsed.data.name || !parsed.data.description) {
+    const name = coerceSkillName(parsed.data.name);
+    const description = coerceSkillDescription(parsed.data.description);
+    if (!name || !description) {
       return null;
     }
 
@@ -80,9 +131,9 @@ function parseSkillFile(content: string): { metadata: SkillMetadata; body: strin
 
     return {
       metadata: {
-        name: parsed.data.name as string,
-        description: parsed.data.description as string,
-        globs: parsed.data.globs as string[] | undefined,
+        name,
+        description,
+        globs: coerceSkillGlobs(parsed.data.globs),
         alwaysAllow: parsed.data.alwaysAllow as string[] | undefined,
         icon,
         requiredSources: normalizeRequiredSources(parsed.data.requiredSources),
@@ -170,14 +221,28 @@ function loadSkillsFromDir(skillsDir: string, source: SkillSource): LoadedSkill[
   return skills;
 }
 
+function withSkillDisplayTitles(workspaceRoot: string, skills: LoadedSkill[]): LoadedSkill[] {
+  const titles = loadDisplayTitles(workspaceRoot).skills;
+  return skills.map((skill) => {
+    const displayTitle = titles[skill.slug];
+    return displayTitle ? { ...skill, displayTitle } : skill;
+  });
+}
+
+function withSkillDisplayTitle(workspaceRoot: string, skill: LoadedSkill): LoadedSkill {
+  return withSkillDisplayTitles(workspaceRoot, [skill])[0]!;
+}
+
 /**
  * Load a single skill from a workspace
  * @param workspaceRoot - Absolute path to workspace root
  * @param slug - Skill directory name
  */
 export function loadSkill(workspaceRoot: string, slug: string): LoadedSkill | null {
-  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  return loadSkillFromDir(skillsDir, slug, 'workspace');
+  recoverSkillInstalls(workspaceRoot);
+  const skillsDir = skillReadDirectory(workspaceRoot, slug);
+  const skill = skillsDir ? loadSkillFromDir(skillsDir, slug, 'workspace') : null;
+  return skill ? withSkillDisplayTitle(workspaceRoot, skill) : null;
 }
 
 /**
@@ -186,29 +251,103 @@ export function loadSkill(workspaceRoot: string, slug: string): LoadedSkill | nu
  */
 export function loadWorkspaceSkills(workspaceRoot: string): LoadedSkill[] {
   const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  return loadSkillsFromDir(skillsDir, 'workspace');
+  recoverSkillInstalls(workspaceRoot);
+  const slugs = new Set([...(existsSync(skillsDir) ? readdirSync(skillsDir).filter(slug => !slug.startsWith('.')) : []), ...pendingSkillSlugs(workspaceRoot)]);
+  return [...slugs].flatMap(slug => {
+    const dir = skillReadDirectory(workspaceRoot, slug);
+    const skill = dir ? loadSkillFromDir(dir, slug, 'workspace') : null;
+    return skill ? [skill] : [];
+  });
 }
 
 // ── Skills cache ────────────────────────────────────────────────────────
-// loadAllSkills reads from up to 3 directories on every call (~100ms).
-// The result rarely changes during a session, so we cache it per
-// (workspaceRoot, projectRoot) pair with a 5-minute safety TTL.
+// loadAllSkills reads from up to 5 directories on every call (~100ms).
+// Cache per (workspaceRoot, projectRoot) with a short safety TTL. Skill
+// writes must call invalidateSkillsCache() so the next turn (or the rest
+// of this turn) sees the new SKILL.md without waiting out the TTL.
 
 const skillsCache = new Map<string, { skills: LoadedSkill[]; ts: number }>();
-const SKILLS_CACHE_TTL = 5 * 60_000; // 5 minutes
+const SKILLS_CACHE_TTL = 10_000;
+const SKILL_MARKDOWN_PATH_RE = /(?:^|[\\/])SKILL\.md$/i;
 
 /** Invalidate the skills cache (call on working dir change or skill file events). */
 export function invalidateSkillsCache(): void {
   skillsCache.clear();
 }
 
+export function isSkillMarkdownPath(filePath: string): boolean {
+  return SKILL_MARKDOWN_PATH_RE.test(filePath.replace(/\\/g, '/'));
+}
+
+/** True when a Write/Edit path or Bash command touched a SKILL.md. */
+export function shouldInvalidateSkillsCacheForTool(input: {
+  filePath?: string;
+  command?: string;
+}): boolean {
+  if (input.filePath && isSkillMarkdownPath(input.filePath)) return true;
+  return typeof input.command === 'string' && SKILL_MARKDOWN_PATH_RE.test(input.command);
+}
+
+/** Drop the list cache when a tool writes or edits SKILL.md. */
+export function invalidateSkillsCacheIfSkillMarkdown(input: {
+  filePath?: string;
+  command?: string;
+}): boolean {
+  if (!shouldInvalidateSkillsCacheForTool(input)) return false;
+  invalidateSkillsCache();
+  return true;
+}
+
+/** tool_result events omit input — capture this from tool_start instead. */
+export function skillMutationFromToolEvent(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+): { filePath?: string; command?: string } | null {
+  if (!input) return null;
+  if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
+    const filePath = (typeof input.file_path === 'string' && input.file_path)
+      || (typeof input.path === 'string' && input.path)
+      || undefined;
+    return filePath && isSkillMarkdownPath(filePath) ? { filePath } : null;
+  }
+  if (toolName === 'Bash' && typeof input.command === 'string') {
+    return SKILL_MARKDOWN_PATH_RE.test(input.command) ? { command: input.command } : null;
+  }
+  return null;
+}
+
+export function coerceSkillName(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function coerceSkillDescription(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!Array.isArray(value)) return '';
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function coerceSkillGlobs(value: unknown): string[] | undefined {
+  const asArray = typeof value === 'string' ? [value] : Array.isArray(value) ? value : undefined;
+  if (!asArray) return undefined;
+  const globs = asArray
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean);
+  return globs.length > 0 ? globs : undefined;
+}
+
 /**
- * Load all skills from all sources (global, workspace, project)
+ * Load all skills from all sources (global, bundled, workspace, project)
  * Skills with the same slug are overridden by higher-priority sources.
- * Priority: global (lowest) < workspace < project (highest)
+ * Priority: global < bundled < workspace < project
  *
  * Results are cached per (workspaceRoot, projectRoot) pair. Call
- * invalidateSkillsCache() on working directory changes or skill file events.
+ * invalidateSkillsCache() on working directory changes or skill file events
+ * so a conversation-created skill is visible on the next load.
  *
  * @param workspaceRoot - Absolute path to workspace root
  * @param projectRoot - Optional project root (working directory) for project-level skills
@@ -218,22 +357,30 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
   const now = Date.now();
   const cached = skillsCache.get(cacheKey);
   if (cached && now - cached.ts < SKILLS_CACHE_TTL) {
-    return cached.skills;
+    return withSkillDisplayTitles(workspaceRoot, cached.skills);
   }
 
   const skillsBySlug = new Map<string, LoadedSkill>();
 
-  // 1. Global skills (lowest priority): ~/.agents/skills/
+  // 1. Global skills (lowest): ~/.agents/skills/
   for (const skill of loadSkillsFromDir(GLOBAL_AGENT_SKILLS_DIR, 'global')) {
     skillsBySlug.set(skill.slug, skill);
   }
 
-  // 2. Workspace skills (medium priority)
+  // 2. Bundled skills override global so the app-owned copy (PATH, no curl-install)
+  // wins over a same-slug skill dropped by another agent into ~/.agents.
+  for (const bundledDir of getBundledSkillDirectories()) {
+    for (const skill of loadSkillsFromDir(bundledDir, 'bundled')) {
+      skillsBySlug.set(skill.slug, skill);
+    }
+  }
+
+  // 3. Workspace skills
   for (const skill of loadWorkspaceSkills(workspaceRoot)) {
     skillsBySlug.set(skill.slug, skill);
   }
 
-  // 3. Project skills (highest priority): {projectRoot}/.agents/skills/
+  // 4. Project skills (highest priority): {projectRoot}/.agents/skills/
   if (projectRoot) {
     const projectSkillsDir = join(projectRoot, PROJECT_AGENT_SKILLS_DIR);
     for (const skill of loadSkillsFromDir(projectSkillsDir, 'project')) {
@@ -243,11 +390,11 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
 
   const result = Array.from(skillsBySlug.values());
   skillsCache.set(cacheKey, { skills: result, ts: now });
-  return result;
+  return withSkillDisplayTitles(workspaceRoot, result);
 }
 
 /**
- * Load a single skill by slug from all sources (project > workspace > global).
+ * Load a single skill by slug (project > workspace > bundled > global).
  * Unlike loadAllSkills(), this only reads the specific slug directory — O(1) not O(N).
  *
  * @param workspaceRoot - Absolute path to workspace root
@@ -255,19 +402,32 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
  * @param projectRoot - Optional project root for project-level skills
  */
 export function loadSkillBySlug(workspaceRoot: string, slug: string, projectRoot?: string): LoadedSkill | null {
+  let skill: LoadedSkill | null = null;
+
   // Highest priority: project-level
   if (projectRoot) {
     const projectSkillsDir = join(projectRoot, PROJECT_AGENT_SKILLS_DIR);
-    const skill = loadSkillFromDir(projectSkillsDir, slug, 'project');
-    if (skill) return skill;
+    skill = loadSkillFromDir(projectSkillsDir, slug, 'project');
   }
 
   // Medium priority: workspace
-  const workspaceSkill = loadSkillFromDir(getWorkspaceSkillsPath(workspaceRoot), slug, 'workspace');
-  if (workspaceSkill) return workspaceSkill;
+  if (!skill) {
+    skill = loadSkill(workspaceRoot, slug);
+  }
 
-  // Lowest priority: global
-  return loadSkillFromDir(GLOBAL_AGENT_SKILLS_DIR, slug, 'global');
+  // App-bundled overrides global for shipped slugs
+  if (!skill) {
+    for (const bundledDir of getBundledSkillDirectories()) {
+      skill = loadSkillFromDir(bundledDir, slug, 'bundled');
+      if (skill) break;
+    }
+  }
+
+  if (!skill) {
+    skill = loadSkillFromDir(GLOBAL_AGENT_SKILLS_DIR, slug, 'global');
+  }
+
+  return skill ? withSkillDisplayTitle(workspaceRoot, skill) : null;
 }
 
 /**
@@ -305,6 +465,8 @@ export function deleteSkill(workspaceRoot: string, slug: string): boolean {
 
   try {
     rmSync(skillDir, { recursive: true });
+    clearDisplayTitle(workspaceRoot, 'skills', slug);
+    invalidateSkillsCache();
     return true;
   } catch {
     return false;

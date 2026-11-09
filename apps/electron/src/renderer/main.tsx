@@ -1,3 +1,4 @@
+import { ConfirmationHost } from './components/ConfirmationHost'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { init as sentryInit } from '@sentry/electron/renderer'
@@ -9,10 +10,11 @@ import { ThemeProvider } from './context/ThemeContext'
 import { windowWorkspaceIdAtom } from './atoms/sessions'
 import { Toaster } from '@/components/ui/sonner'
 import { setupI18n, i18n } from '@craft-agent/shared/i18n'
-import { redactSensitiveHeadersInPlace, redactSensitiveKeysInPlace } from '@craft-agent/shared/utils/redaction'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import './index.css'
+// generative-loaders styles for InlineLoader (thinking / preparing response)
+import 'generative-loaders/styles.css'
 
 // Initialize i18n before any React rendering
 setupI18n([LanguageDetector, initReactI18next])
@@ -65,16 +67,23 @@ sentryInit(
         return null
       }
 
-      // Scrub sensitive data (shared logic with the main process hook).
-      // The header scrub was previously missing here — renderer drift, fixed
-      // by moving both hooks onto @craft-agent/shared/utils redaction.ts.
-      if (event.request?.headers) {
-        redactSensitiveHeadersInPlace(event.request.headers)
-      }
+      // Scrub sensitive data from breadcrumbs (mirrors main process scrubbing in main/index.ts)
       if (event.breadcrumbs) {
         for (const breadcrumb of event.breadcrumbs) {
           if (breadcrumb.data) {
-            redactSensitiveKeysInPlace(breadcrumb.data)
+            for (const key of Object.keys(breadcrumb.data)) {
+              const lowerKey = key.toLowerCase()
+              if (
+                lowerKey.includes('token') ||
+                lowerKey.includes('key') ||
+                lowerKey.includes('secret') ||
+                lowerKey.includes('password') ||
+                lowerKey.includes('credential') ||
+                lowerKey.includes('auth')
+              ) {
+                breadcrumb.data[key] = '[REDACTED]'
+              }
+            }
           }
         }
       }
@@ -115,6 +124,7 @@ function Root() {
   return (
     <ThemeProvider activeWorkspaceId={workspaceId}>
       <App />
+      <ConfirmationHost />
       <Toaster />
     </ThemeProvider>
   )

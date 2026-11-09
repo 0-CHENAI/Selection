@@ -20,12 +20,14 @@ import type {
 import { validateSourceConfig } from '../config/validators.ts';
 import { debug } from '../utils/debug.ts';
 import { readJsonFileSync } from '../utils/files.ts';
+import { getBuiltinSources, isBuiltinSource, getDocsSource } from './builtin-sources.ts';
 import { expandPath, toPortablePath } from '../utils/paths.ts';
 import { getWorkspaceSourcesPath } from '../workspaces/storage.ts';
 // Circular import (credential-manager imports from this file) is safe here:
 // getSourceCredentialManager is only referenced lazily inside saveSourceConfig,
 // not at module-eval time.
 import { getSourceCredentialManager } from './credential-manager.ts';
+import { clearDisplayTitle, getDisplayTitle } from '../display-titles-storage.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -138,7 +140,7 @@ export function saveSourceConfig(
     };
   }
 
-  writeFileSync(join(dir, 'config.json'), JSON.stringify(storageConfig, null, 2));
+  writeFileSync(join(dir, 'config.json'), JSON.stringify(storageConfig, null, 2), 'utf-8');
 
   // Orphan-credential cleanup: when an API source is set to authType:'none',
   // any credential previously stored for this slug (e.g. from authType:'header')
@@ -347,6 +349,8 @@ export function loadSource(workspaceRootPath: string, sourceSlug: string): Loade
   // Pre-compute icon path for renderer (avoids fs access in browser)
   const iconPath = findIconFile(folderPath);
 
+  const displayTitle = getDisplayTitle(workspaceRootPath, 'sources', sourceSlug);
+
   return {
     config,
     guide: loadSourceGuide(workspaceRootPath, sourceSlug),
@@ -354,6 +358,7 @@ export function loadSource(workspaceRootPath: string, sourceSlug: string): Loade
     workspaceRootPath,
     workspaceId,
     iconPath,
+    ...(displayTitle ? { displayTitle } : {}),
   };
 }
 
@@ -411,10 +416,21 @@ export function isSourceUsable(source: LoadedSource): boolean {
 
 /**
  * Get sources by slugs for a workspace.
+ * Includes both user-configured sources from disk and builtin sources
+ * (like craft-agents-docs) that don't have filesystem folders.
  */
 export function getSourcesBySlugs(workspaceRootPath: string, slugs: string[]): LoadedSource[] {
+  const workspaceId = basename(workspaceRootPath);
   const sources: LoadedSource[] = [];
   for (const slug of slugs) {
+    // Check builtin sources first (they don't exist on disk)
+    if (isBuiltinSource(slug)) {
+      // Currently only craft-agents-docs is a builtin source
+      if (slug === 'craft-agents-docs') {
+        sources.push(getDocsSource(workspaceId, workspaceRootPath));
+      }
+      continue;
+    }
     // Load user-configured source from disk
     const source = loadSource(workspaceRootPath, slug);
     if (source) {
@@ -425,12 +441,18 @@ export function getSourcesBySlugs(workspaceRootPath: string, slugs: string[]): L
 }
 
 /**
- * Load all sources for a workspace.
+ * Load all sources for a workspace INCLUDING built-in sources.
+ * Built-in sources (like craft-agents-docs) are always available and merged
+ * with user-configured sources from the workspace.
  *
- * Use this when the agent needs visibility into all available sources.
+ * Use this when the agent needs visibility into all available sources,
+ * including system-provided ones that don't live on disk.
  */
 export function loadAllSources(workspaceRootPath: string): LoadedSource[] {
-  return loadWorkspaceSources(workspaceRootPath);
+  const workspaceId = basename(workspaceRootPath);
+  const userSources = loadWorkspaceSources(workspaceRootPath);
+  const builtinSources = getBuiltinSources(workspaceId, workspaceRootPath);
+  return [...userSources, ...builtinSources];
 }
 
 // ============================================================
@@ -482,7 +504,8 @@ export function generateSourceSlug(workspaceRootPath: string, name: string): str
  */
 export async function createSource(
   workspaceRootPath: string,
-  input: CreateSourceInput
+  input: CreateSourceInput,
+  options: { skipIconDownload?: boolean } = {},
 ): Promise<FolderSourceConfig> {
   const slug = generateSourceSlug(workspaceRootPath, input.name);
   const now = Date.now();
@@ -533,12 +556,12 @@ export async function createSource(
   // If icon is a URL, download it immediately
   // (watcher will also handle this, but doing it here provides immediate feedback)
   const sourcePath = getSourcePath(workspaceRootPath, slug);
-  if (config.icon && isIconUrl(config.icon)) {
+  if (!options.skipIconDownload && config.icon && isIconUrl(config.icon)) {
     const iconPath = await downloadIcon(sourcePath, config.icon, 'Sources');
     if (iconPath) {
       debug(`[createSource] Icon downloaded for ${slug}: ${iconPath}`);
     }
-  } else if (!config.icon) {
+  } else if (!options.skipIconDownload && !config.icon) {
     // No icon provided - try to auto-fetch from service URL
     const { deriveServiceUrl, getHighQualityLogoUrl } = await import('../utils/logo.ts');
     const { downloadIcon } = await import('../utils/icon.ts');
@@ -557,7 +580,7 @@ export async function createSource(
   }
 
   // Create guide.md with skeleton template
-  // (bundled guides removed - service-specific guidance lives in the product docs at https://thecraftagents.com/docs)
+  // (bundled guides removed - agent should search craft-agents-docs MCP for service-specific guidance)
   const guideContent = `# ${input.name}
 
 ## Guidelines
@@ -581,6 +604,7 @@ export function deleteSource(workspaceRootPath: string, sourceSlug: string): voi
   if (existsSync(dir)) {
     rmSync(dir, { recursive: true });
   }
+  clearDisplayTitle(workspaceRootPath, 'sources', sourceSlug);
 }
 
 /**
@@ -602,4 +626,3 @@ export function sourceExists(workspaceRootPath: string, sourceSlug: string): boo
 // ============================================================
 
 export { parseGuideMarkdown };
-

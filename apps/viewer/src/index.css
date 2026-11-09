@@ -1,5 +1,5 @@
 /**
- * Craft Agent Viewer - Main stylesheet
+ * Selection Viewer - Main stylesheet
  *
  * Imports the shared UI theme and adds viewer-specific styles.
  */
@@ -14,11 +14,13 @@
 
 /* Viewer-specific overrides */
 
-/* The page is the navigator canvas (App.tsx bg-navigator); legacy bg-background cards and
-   buttons render as paper so they sit one step above it in both modes. */
-:root,
+/* Override background to pure white (cards/buttons pop on the off-white page) */
+:root {
+  --background: white;
+}
+
 .dark {
-  --background: var(--surface-paper);
+  --background: oklch(0.26 0.01 270);
 }
 
 html, body, #root {
@@ -28,9 +30,7 @@ html, body, #root {
 
 /* Drop zone styling */
 .drop-zone {
-  transition:
-    border-color var(--dur-fast) var(--ease-out-subtle),
-    background-color var(--dur-fast) var(--ease-out-subtle);
+  transition: all 0.2s ease;
 }
 
 .drop-zone.active {

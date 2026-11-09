@@ -2,17 +2,19 @@
 // Kept out of @craft-agent/shared (Node-only) — the renderer can't import it.
 // Keys are 1:1 with the NodeRunState literals the runner emits
 // (packages/shared/src/tasks/storage.ts): pending | running | done | failed | cancelled | skipped.
-//
-// Colors are solved roles (design spec §2.4 run-state vocabulary): done = success, failed =
-// destructive, running = accent (the "working" color — amber/info is reserved for "needs you").
 
-const NEUTRAL_PILL = 'bg-fill-hover text-secondary'
+const NEUTRAL_PILL = 'border-border bg-foreground/[0.06] text-foreground/55'
 
 const NODE_STATE_PILL: Record<string, string> = {
-  done: 'bg-success-tint text-success',
-  failed: 'bg-destructive-tint text-destructive',
-  running: 'bg-accent-tint text-accent',
-  // cancelled is a user/system stop, not a failure — keep it neutral so it never reads as red/error.
+  done: 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-600 dark:text-emerald-300',
+  failed: 'border-red-500/30 bg-red-500/[0.06] text-red-600 dark:text-red-300',
+  invalid: 'border-red-500/30 bg-red-500/[0.06] text-red-600 dark:text-red-300',
+  running: 'border-amber-500/30 bg-amber-500/[0.06] text-amber-600 dark:text-amber-300',
+  'retry-wait': 'border-amber-500/30 bg-amber-500/[0.06] text-amber-600 dark:text-amber-300',
+  'waiting-approval': 'border-amber-500/30 bg-amber-500/[0.06] text-amber-600 dark:text-amber-300',
+  'waiting-help': NEUTRAL_PILL,
+  ready: 'border-amber-500/30 bg-amber-500/[0.06] text-amber-600 dark:text-amber-300',
+  interrupted: NEUTRAL_PILL,
   cancelled: NEUTRAL_PILL,
   skipped: NEUTRAL_PILL,
   pending: NEUTRAL_PILL,
@@ -21,7 +23,13 @@ const NODE_STATE_PILL: Record<string, string> = {
 const NODE_STATE_LABEL_KEY: Record<string, string> = {
   done: 'tasks.nodeStateDone',
   failed: 'tasks.nodeStateFailed',
+  invalid: 'tasks.nodeStateInvalid',
   running: 'tasks.nodeStateRunning',
+  'retry-wait': 'tasks.nodeStateRetryWait',
+  'waiting-approval': 'tasks.nodeStateWaitingApproval',
+  'waiting-help': 'tasks.nodeStateWaitingHelp',
+  ready: 'tasks.nodeStateReady',
+  interrupted: 'tasks.nodeStateInterrupted',
   cancelled: 'tasks.nodeStateCancelled',
   skipped: 'tasks.nodeStateSkipped',
   pending: 'tasks.nodeStatePending',

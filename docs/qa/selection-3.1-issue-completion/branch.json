@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "rootId": "261009-spry-cove",
+  "branchId": "261009-eager-coast",
+  "workMode": "NORM",
+  "immediateHistory": [
+    {
+      "id": "msg-1791545340237-zv7wjd",
+      "role": "user",
+      "content": "只回复：分支之前的第一条内容。不要调用工具。"
+    },
+    {
+      "id": "msg-1791545352805-t2e8b2",
+      "role": "tool",
+      "content": "Running mcp__session__submit_answer..."
+    },
+    {
+      "id": "msg-1791545352791-jx0g3j",
+      "role": "assistant",
+      "content": "我看不到分支之前的内容。"
+    }
+  ],
+  "sourceMessageCount": 6,
+  "reopenedMessageCount": 3,
+  "workers": 0
+}

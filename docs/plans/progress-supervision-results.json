@@ -1,0 +1,212 @@
+{
+  "date": "2026-09-15",
+  "mode": "observe",
+  "productSmoke": [
+    {
+      "kind": "simple",
+      "run": 1,
+      "elapsedMs": 3050,
+      "answerCommitted": 1,
+      "errors": [],
+      "usage": {
+        "inputTokens": 25039,
+        "outputTokens": 103,
+        "totalTokens": 25142,
+        "cacheReadTokens": 8384,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "modelCallCount": 2,
+        "startedAt": 1789442018245,
+        "completedAt": 1789442021288,
+        "wallClockMs": 3043
+      },
+      "artifactLabelsVerified": null
+    },
+    {
+      "kind": "simple",
+      "run": 2,
+      "elapsedMs": 2067,
+      "answerCommitted": 1,
+      "errors": [],
+      "usage": {
+        "inputTokens": 12175,
+        "outputTokens": 93,
+        "totalTokens": 12268,
+        "cacheReadTokens": 21248,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "modelCallCount": 2,
+        "startedAt": 1789442021291,
+        "completedAt": 1789442023356,
+        "wallClockMs": 2065
+      },
+      "artifactLabelsVerified": null
+    },
+    {
+      "kind": "simple",
+      "run": 3,
+      "elapsedMs": 2201,
+      "answerCommitted": 1,
+      "errors": [],
+      "usage": {
+        "inputTokens": 12175,
+        "outputTokens": 123,
+        "totalTokens": 12298,
+        "cacheReadTokens": 21248,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "modelCallCount": 2,
+        "startedAt": 1789442023358,
+        "completedAt": 1789442025556,
+        "wallClockMs": 2198
+      },
+      "artifactLabelsVerified": null
+    },
+    {
+      "kind": "svg",
+      "run": 1,
+      "elapsedMs": 15541,
+      "answerCommitted": 1,
+      "errors": [],
+      "artifact": true,
+      "svg": true,
+      "usage": {
+        "inputTokens": 4268,
+        "outputTokens": 3420,
+        "totalTokens": 7688,
+        "cacheReadTokens": 103040,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "modelCallCount": 4,
+        "startedAt": 1789442025558,
+        "completedAt": 1789442041098,
+        "wallClockMs": 15540
+      },
+      "artifactLabelsVerified": true
+    },
+    {
+      "kind": "svg",
+      "run": 2,
+      "elapsedMs": 19627,
+      "answerCommitted": 1,
+      "errors": [],
+      "artifact": true,
+      "svg": true,
+      "usage": {
+        "inputTokens": 16703,
+        "outputTokens": 3864,
+        "totalTokens": 20567,
+        "cacheReadTokens": 91072,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "modelCallCount": 4,
+        "startedAt": 1789442041100,
+        "completedAt": 1789442060722,
+        "wallClockMs": 19622
+      },
+      "artifactLabelsVerified": true
+    },
+    {
+      "kind": "svg",
+      "run": 3,
+      "elapsedMs": 15372,
+      "answerCommitted": 1,
+      "errors": [],
+      "artifact": true,
+      "svg": true,
+      "usage": {
+        "inputTokens": 4049,
+        "outputTokens": 3147,
+        "totalTokens": 7196,
+        "cacheReadTokens": 102336,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "modelCallCount": 4,
+        "startedAt": 1789442060727,
+        "completedAt": 1789442076097,
+        "wallClockMs": 15370
+      },
+      "artifactLabelsVerified": true
+    }
+  ],
+  "semanticEvaluations": [
+    {
+      "scenario": "insufficient-reasoning-only",
+      "run": 1,
+      "pass": false,
+      "elapsedMs": 3825,
+      "tokens": 1067,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "insufficient-reasoning-only",
+      "run": 2,
+      "pass": true,
+      "elapsedMs": 4234,
+      "tokens": 1246,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "insufficient-reasoning-only",
+      "run": 3,
+      "pass": true,
+      "elapsedMs": 3565,
+      "tokens": 1149,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "productive-long-analysis",
+      "run": 1,
+      "pass": true,
+      "elapsedMs": 2598,
+      "tokens": 953,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "productive-long-analysis",
+      "run": 2,
+      "pass": true,
+      "elapsedMs": 1847,
+      "tokens": 874,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "productive-long-analysis",
+      "run": 3,
+      "pass": true,
+      "elapsedMs": 2853,
+      "tokens": 982,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "change-failing-method",
+      "run": 1,
+      "pass": true,
+      "elapsedMs": 2414,
+      "tokens": 1020,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "change-failing-method",
+      "run": 2,
+      "pass": true,
+      "elapsedMs": 2544,
+      "tokens": 1071,
+      "estimatedTokens": 0
+    },
+    {
+      "scenario": "change-failing-method",
+      "run": 3,
+      "pass": true,
+      "elapsedMs": 3341,
+      "tokens": 1073,
+      "estimatedTokens": 0
+    },
+    {
+      "cancellation": "cancelled",
+      "elapsedMs": 104
+    }
+  ],
+  "fullProductAcceptance": false,
+  "windowsAcceptance": false
+}

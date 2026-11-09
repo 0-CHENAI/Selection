@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { validateToolArguments } from '@earendil-works/pi-ai';
 import { createSearchTool } from './create-search-tool.ts';
 import type { WebSearchProvider } from './types.ts';
 
@@ -19,25 +18,6 @@ describe('createSearchTool', () => {
     expect(tool.description).toContain('Search the web');
   });
 
-  it('validates arguments through the SDK TypeBox build (coercion + required checks)', () => {
-    const provider: WebSearchProvider = {
-      name: 'Mock',
-      async search() {
-        return [];
-      },
-    };
-    const tool = createSearchTool(provider);
-    const call = (args: unknown) =>
-      validateToolArguments(tool as any, { type: 'toolCall', id: 'call-1', name: tool.name, arguments: args } as any);
-
-    // The SDK only coerces model-emitted argument types (e.g. "3" -> 3) for schemas
-    // built with its own TypeBox; a schema from a second TypeBox copy would be
-    // validated strictly and reject this call instead.
-    expect(call({ query: 'craft', count: '3' })).toEqual({ query: 'craft', count: 3 });
-    expect(() => call({ count: 3 })).toThrow(/Validation failed/);
-    expect(() => call({ query: 'craft', count: 99 })).toThrow(/Validation failed/);
-  });
-
   it('clamps count to [1, 10] and formats results', async () => {
     let capturedCount = 0;
     const provider: WebSearchProvider = {
@@ -52,12 +32,28 @@ describe('createSearchTool', () => {
     const result = await tool.execute('tool-1', { query: 'craft', count: 99 });
 
     expect(capturedCount).toBe(10);
-    expect(result.isError).toBeUndefined();
+    expect(result.details?.isError).toBeUndefined();
     expect(result.content[0]?.type).toBe('text');
     expect((result.content[0] as any).text).toContain('(via MockProvider)');
   });
 
-  it('automatically falls back when primary provider fails', async () => {
+  it('treats an empty result set as a successful search', async () => {
+    const provider: WebSearchProvider = {
+      name: 'AnySearch',
+      async search() {
+        return [];
+      },
+    };
+
+    const result = await createSearchTool(provider).execute('tool-empty', {
+      query: 'no matching documents',
+    });
+
+    expect(result.details?.isError).toBeUndefined();
+    expect((result.content[0] as any).text).toContain('No relevant results found.');
+  });
+
+  it('uses an explicitly supplied fallback when the primary provider fails', async () => {
     const provider: WebSearchProvider = {
       name: 'OpenAI',
       async search() {
@@ -66,7 +62,7 @@ describe('createSearchTool', () => {
     };
 
     const fallbackProvider: WebSearchProvider = {
-      name: 'DuckDuckGo',
+      name: 'MockFallback',
       async search() {
         return [{ title: 'Fallback hit', url: 'https://fallback.example', description: 'ok' }];
       },
@@ -75,8 +71,8 @@ describe('createSearchTool', () => {
     const tool = createSearchTool(provider, fallbackProvider);
     const result = await tool.execute('tool-2', { query: 'craft', count: 5 });
 
-    expect(result.isError).toBeUndefined();
-    expect((result.content[0] as any).text).toContain('automatically fell back to DuckDuckGo');
+    expect(result.details?.isError).toBeUndefined();
+    expect((result.content[0] as any).text).toContain('automatically fell back to MockFallback');
     expect((result.content[0] as any).text).toContain('401 missing scope');
     expect((result.content[0] as any).text).toContain('https://fallback.example');
   });
@@ -90,7 +86,7 @@ describe('createSearchTool', () => {
     };
 
     const fallbackProvider: WebSearchProvider = {
-      name: 'DuckDuckGo',
+      name: 'MockFallback',
       async search() {
         throw new Error('fallback boom');
       },
@@ -99,53 +95,63 @@ describe('createSearchTool', () => {
     const tool = createSearchTool(provider, fallbackProvider);
     const result = await tool.execute('tool-3', { query: 'craft', count: -1 });
 
-    expect(result.isError).toBe(true);
+    expect(result.details?.isError).toBe(true);
     expect((result.content[0] as any).text).toContain('primary (OpenAI) failed');
-    expect((result.content[0] as any).text).toContain('fallback (DuckDuckGo) failed');
+    expect((result.content[0] as any).text).toContain('fallback (MockFallback) failed');
   });
 
-  it('truncates oversized provider errors in the tool result', async () => {
-    const hugePrimary = `primary detail ${'x'.repeat(5_000)}`;
-    const hugeFallback = `fallback detail ${'y'.repeat(5_000)}`;
+  it('returns a structured error without contacting an implicit fallback', async () => {
+    let calls = 0;
     const provider: WebSearchProvider = {
-      name: 'OpenAI',
+      name: 'Unavailable',
       async search() {
-        throw new Error(hugePrimary);
+        calls += 1;
+        throw new Error('provider-native search unavailable');
       },
     };
 
-    const fallbackProvider: WebSearchProvider = {
-      name: 'DuckDuckGo',
-      async search() {
-        throw new Error(hugeFallback);
-      },
-    };
-
-    const tool = createSearchTool(provider, fallbackProvider);
-    const result = await tool.execute('tool-5', { query: 'craft' });
-
-    const text = (result.content[0] as any).text as string;
-    expect(result.isError).toBe(true);
-    expect(text).toContain('primary detail');
-    expect(text).toContain('fallback detail');
-    expect(text).toContain('…');
-    // Both messages capped at 400 chars — the combined result stays compact.
-    expect(text.length).toBeLessThan(1_000);
-  });
-
-  it('does not recurse fallback when provider is already fallback provider', async () => {
-    const ddgProvider: WebSearchProvider = {
-      name: 'DuckDuckGo',
-      async search() {
-        throw new Error('ddg boom');
-      },
-    };
-
-    const tool = createSearchTool(ddgProvider, ddgProvider);
+    const tool = createSearchTool(provider);
     const result = await tool.execute('tool-4', { query: 'craft' });
 
-    expect(result.isError).toBe(true);
+    expect(calls).toBe(1);
+    expect(result.details?.isError).toBe(true);
     expect((result.content[0] as any).text).toContain('Search failed');
-    expect((result.content[0] as any).text).toContain('ddg boom');
+    expect((result.content[0] as any).text).toContain('provider-native search unavailable');
+  });
+
+  it('propagates user cancellation without invoking the fallback', async () => {
+    let fallbackCalls = 0;
+    const provider: WebSearchProvider = {
+      name: 'Native',
+      async search(_query, _count, signal) {
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    };
+    const fallback: WebSearchProvider = {
+      name: 'AnySearch',
+      async search() {
+        fallbackCalls += 1;
+        return [];
+      },
+    };
+    const controller = new AbortController();
+    const pending = createSearchTool(provider, fallback).execute(
+      'tool-abort',
+      { query: 'cancel me' },
+      controller.signal,
+    );
+
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    let rejected = false;
+    try {
+      await pending;
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+    expect(fallbackCalls).toBe(0);
   });
 });

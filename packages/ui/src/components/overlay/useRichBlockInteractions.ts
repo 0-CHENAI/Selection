@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
 import { RICH_BLOCK_DEFAULTS, type RichBlockInteractionOptions } from './rich-block-interaction-spec'
 
 export function clampScale(value: number, min: number, max: number): number {
@@ -33,7 +33,7 @@ export function computeFitScale(
 }
 
 interface UseRichBlockInteractionsOptions extends RichBlockInteractionOptions {
-  containerRef: RefObject<HTMLDivElement | null>
+  containerRef: MutableRefObject<HTMLDivElement | null>
 }
 
 export function useRichBlockInteractions({
@@ -45,11 +45,17 @@ export function useRichBlockInteractions({
   wheelSensitivity = RICH_BLOCK_DEFAULTS.wheelSensitivity,
   keyboardShortcuts = true,
 }: UseRichBlockInteractionsOptions) {
+  const [container, setContainer] = useState<HTMLDivElement | null>(null)
+  const attachContainerRef = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node
+    setContainer(node)
+  }, [containerRef])
   const [scale, setScale] = useState(1)
   const [translate, setTranslate] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
 
+  const didDragRef = useRef(false)
   const isDraggingRef = useRef(false)
   const dragStartRef = useRef({ x: 0, y: 0 })
   const translateAtDragStartRef = useRef({ x: 0, y: 0 })
@@ -91,8 +97,9 @@ export function useRichBlockInteractions({
   }, [containerRef, minScale, maxScale, reset])
 
   const onMouseDown = useCallback((e: ReactMouseEvent) => {
-    if (e.button !== 0) return
+    if (!isOpen || e.button !== 0) return
     e.preventDefault()
+    didDragRef.current = false
     isDraggingRef.current = true
     setIsDragging(true)
     setIsAnimating(false)
@@ -101,7 +108,7 @@ export function useRichBlockInteractions({
       translateAtDragStartRef.current = { x: t.x, y: t.y }
       return t
     })
-  }, [])
+  }, [isOpen])
 
   const onDoubleClick = useCallback(() => {
     reset()
@@ -110,6 +117,7 @@ export function useRichBlockInteractions({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current) return
+      if (Math.hypot(e.clientX - dragStartRef.current.x, e.clientY - dragStartRef.current.y) > 4) didDragRef.current = true
       setIsAnimating(false)
       setTranslate({
         x: translateAtDragStartRef.current.x + (e.clientX - dragStartRef.current.x),
@@ -132,8 +140,7 @@ export function useRichBlockInteractions({
   }, [])
 
   useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+    if (!isOpen || !container) return
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault()
@@ -159,7 +166,7 @@ export function useRichBlockInteractions({
 
     container.addEventListener('wheel', handleWheel, { passive: false })
     return () => container.removeEventListener('wheel', handleWheel)
-  }, [containerRef, minScale, maxScale, wheelSensitivity])
+  }, [isOpen, container, minScale, maxScale, wheelSensitivity])
 
   useEffect(() => {
     if (!isOpen || !keyboardShortcuts) return
@@ -185,14 +192,16 @@ export function useRichBlockInteractions({
   }, [isOpen, keyboardShortcuts, reset, zoomByStep])
 
   useEffect(() => {
+    setIsDragging(false)
+    isDraggingRef.current = false
+    didDragRef.current = false
     if (!isOpen) return
     setScale(1)
     setTranslate({ x: 0, y: 0 })
-    setIsDragging(false)
-    isDraggingRef.current = false
   }, [isOpen])
 
   return {
+    attachContainerRef,
     scale,
     translate,
     isDragging,
@@ -204,5 +213,6 @@ export function useRichBlockInteractions({
     reset,
     onMouseDown,
     onDoubleClick,
+    didDrag: () => didDragRef.current,
   }
 }

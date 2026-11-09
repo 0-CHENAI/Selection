@@ -9,61 +9,101 @@
  *   tasks:get      — spec + (optional) active run-state
  *   tasks:list     — task slugs with a task.yaml
  *
- * Background-task output and stop (the composer's task chips) are session channels in sessions.ts
- * (`sessions:getBackgroundTaskOutput`, `sessions:stopBackgroundTask`).
+ * The legacy `tasks:getOutput` (background-task remnant) is handled in sessions.ts
+ * and intentionally left untouched; retiring it is a separate cleanup.
  */
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import type {
-  TaskCreateRequest,
-  TaskCreateResult,
+  TaskPatchRunRequest,
   TaskGenerateRequest,
   TaskGenerateAck,
-  TaskGenerateResult,
+  TaskCreateRequest,
+  TaskCreateResult,
+  TaskSaveRequest,
+  TaskSaveResult,
   TaskRunRequest,
   TaskValidationResultDto,
   TaskGetResult,
   TaskResultsDto,
-  TaskResultNodeDto,
+  TaskControlResultDto,
+  TaskRunSnapshotDto,
+  TaskRespondApprovalRequest,
+  TaskUpdateRunLimitsRequest,
+  TaskApplyRunRevisionRequest,
+  TaskApplyRunRevisionResult,
+  TaskTemplateSaveRequest,
+  TaskTemplateSaveResult,
+  TaskTemplateSummaryDto,
+  TaskTemplateDetailDto,
+  TaskCreateFromTemplateRequest,
 } from '@craft-agent/shared/protocol'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
+import { assertComplexCapability } from '@craft-agent/shared/sessions/work-mode'
+import { createHash } from 'node:crypto'
+import { unlinkSync } from 'node:fs'
+import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
 import {
-  parseTaskYaml,
-  saveTaskSpec,
-  loadTaskSpec,
-  listTaskSlugs,
+  definitionToPatch,
+  planProtectionErrors,
+  planValueKey,
   buildGeneratorPrompt,
   buildRepairPrompt,
+  parseTaskYaml,
+  parseTaskDocument,
+  parseTaskImport,
+  loadTaskDocument,
+  saveTaskDocument,
+  taskYamlPath,
+  listTaskSlugs,
   listRunIds,
-  readRunLog,
-  readNodeOutput,
-  readRunSpecSnapshot,
-  nodeTitle,
-  DEFAULT_REPAIR_ATTEMPTS,
-  MAX_REPAIR_ATTEMPTS_CAP,
+  loadTaskResults,
+  inspectTaskRun,
+  revisionImpact,
+  TaskEtagConflictError,
+  definitionDiff,
+  mergeRunDefinition,
+  previewV3Migration,
+  readLatestSpecRevision,
+  serializeTaskYaml,
+  listTaskTemplateSummaries,
+  loadTaskTemplate,
+  saveTaskTemplate,
+  deleteTaskTemplate,
+  specFromTemplate,
+  redactTemplateSource,
 } from '@craft-agent/shared/tasks'
-import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import type { ISessionManager } from '../session-manager-interface'
-import { TaskRunner, createTaskFromSpec, finishTaskOrchestrator } from '../../tasks'
-import { buildTaskVerdictDecider } from '../../decisions/task-verdict'
-import { buildNodeOutcomeClassifier } from '../../decisions/turn-outcome'
-import { buildRepairScopePicker } from '../../decisions/task-repairs'
+import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
 
+import { createLogger } from '@craft-agent/shared/utils'
 const tasksLog = createLogger('tasks-generate')
+const GENERATE_TIMEOUT_MS = 180_000
+const MAX_GENERATE_ATTEMPTS = 2
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
+  RPC_CHANNELS.tasks.SAVE,
   RPC_CHANNELS.tasks.GENERATE,
   RPC_CHANNELS.tasks.RUN,
   RPC_CHANNELS.tasks.PAUSE,
   RPC_CHANNELS.tasks.RESUME,
   RPC_CHANNELS.tasks.STOP,
+  RPC_CHANNELS.tasks.CONTINUE,
+  RPC_CHANNELS.tasks.RESPOND_APPROVAL,
+  RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS,
   RPC_CHANNELS.tasks.GET,
   RPC_CHANNELS.tasks.LIST,
+  RPC_CHANNELS.tasks.LIST_TEMPLATES,
+  RPC_CHANNELS.tasks.GET_TEMPLATE,
+  RPC_CHANNELS.tasks.SAVE_TEMPLATE,
+  RPC_CHANNELS.tasks.DELETE_TEMPLATE,
+  RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE,
+  RPC_CHANNELS.tasks.LIST_RUNS,
+  RPC_CHANNELS.tasks.PATCH_RUN,
+  RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
+  RPC_CHANNELS.tasks.INSPECT_RUN,
 ] as const
 
 /** Map a shared ValidationResult (+ parsed spec) onto the wire DTO. */
@@ -80,75 +120,8 @@ function toValidationDto(result: ReturnType<typeof parseTaskYaml>): TaskValidati
     errors: result.errors.map(issue),
     warnings: result.warnings.map(issue),
     estimate: result.spec ? { nodeCount: result.spec.nodes.length, sessionNodeCount } : undefined,
+    ...(result.spec ? { spec: result.spec } : {}),
   }
-}
-
-// An authoring turn fails when it shows no activity (text, thinking, tools) for this long, or
-// when one attempt runs past the cap. A fixed 180 s limit cut off turns that were slow but
-// still writing. The editor's fallback timer (TaskEditor GENERATE_CLIENT_TIMEOUT_MS) must stay
-// above MAX_GENERATE_ATTEMPTS × GENERATE_ATTEMPT_MAX_MS.
-export const GENERATE_IDLE_TIMEOUT_MS = 90_000
-export const GENERATE_ATTEMPT_MAX_MS = 300_000
-
-/**
- * Send a turn and wait for its reply. Subscribes BEFORE sending, so a fast turn can't complete
- * before we listen. Fails a turn that shows no activity for `idleMs` and any turn running past
- * `maxMs`, and a stopped or failed turn at once. Resolves to that turn's reply only, never an
- * earlier one.
- */
-export function waitForTurnReply(
-  sessions: Pick<ISessionManager, 'onSessionComplete' | 'onSessionActivity'>,
-  sessionId: string,
-  send: () => Promise<void> | void,
-  opts: { idleMs?: number; maxMs?: number } = {},
-): Promise<string> {
-  const idleMs = opts.idleMs ?? GENERATE_IDLE_TIMEOUT_MS
-  const maxMs = opts.maxMs ?? GENERATE_ATTEMPT_MAX_MS
-  return new Promise<string>((resolve, reject) => {
-    let settled = false
-    let idleTimer: ReturnType<typeof setTimeout> | undefined
-    const cleanups: Array<() => void> = []
-    const finish = (fn: () => void) => {
-      if (settled) return
-      settled = true
-      for (const cleanup of cleanups) cleanup()
-      clearTimeout(idleTimer)
-      fn()
-    }
-    const armIdleTimer = () => {
-      clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => finish(() => reject(new Error(`Task generation stalled (no progress for ${Math.round(idleMs / 1000)} s)`))), idleMs)
-    }
-    cleanups.push(sessions.onSessionActivity(sessionId, armIdleTimer))
-    cleanups.push(sessions.onSessionComplete((evt) => {
-      if (evt.sessionId !== sessionId) return
-      if (evt.reason !== 'complete') {
-        finish(() => reject(new Error(evt.reason === 'error' ? 'The authoring turn failed' : 'The authoring turn was stopped')))
-        return
-      }
-      finish(() => resolve(evt.finalText ?? ''))
-    }))
-    armIdleTimer()
-    const capTimer = setTimeout(() => finish(() => reject(new Error('Task generation timed out'))), maxMs)
-    cleanups.push(() => clearTimeout(capTimer))
-    void Promise.resolve()
-      .then(send)
-      .catch((err: unknown) => finish(() => reject(err instanceof Error ? err : new Error(String(err)))))
-  })
-}
-
-// Authoring a short YAML needs little thinking. Without this the turn ran at the workspace's
-// default level (often max), thought for minutes before its first token and hit the timeout.
-const GENERATE_THINKING_LEVEL: ThinkingLevel = 'medium'
-
-// One initial generation plus up to one feedback-driven repair turn. Bounded so a model
-// that keeps emitting invalid specs can't loop forever; the last attempt is returned as-is.
-const MAX_GENERATE_ATTEMPTS = 2
-
-/** Pull the YAML body out of an LLM reply (tolerate ```yaml fences or surrounding prose). */
-function extractYaml(text: string): string {
-  const fenced = text.match(/```(?:ya?ml)?\s*\n?([\s\S]*?)```/i)
-  return (fenced ? fenced[1] : text).trim()
 }
 
 export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -169,110 +142,182 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         host: deps.sessionManager,
         workspaceId: ws.id,
         workspaceRoot: ws.rootPath,
-        // Decision model (Jev) reads verdicts out of replies without a VERDICT line; gated per call,
-        // `null` when the layer is off → the runner re-asks exactly as before.
-        decide: buildTaskVerdictDecider(),
-        // Decision model reads how a child's turn ended; a child that asked for input or gave up
-        // is failed (retry / needs-review) instead of marked done. `null` → marked done as before.
-        classifyNodeOutcome: buildNodeOutcomeClassifier(),
-        // Decision model narrows a FAIL without named subtasks to the ones its reason implicates.
-        pickRepairNodes: buildRepairScopePicker(),
+        // Dynamic nodes may only name a model exposed by a configured
+        // connection. The global registry is a catalog, not proof that this
+        // workspace can actually dispatch the model.
+        allowedModels: new Set(
+          getLlmConnections().flatMap((connection) => [
+            ...(connection.defaultModel ? [connection.defaultModel] : []),
+            ...(connection.models ?? []).map((model) => typeof model === 'string' ? model : model.id),
+          ]),
+        ),
+        onRunChanged: (snapshot) => {
+          pushTyped(server, RPC_CHANNELS.tasks.RUN_CHANGED, { to: 'workspace', workspaceId: ws.id }, ws.id, snapshot)
+        },
       })
       runners.set(workspaceId, runner)
+      runner.scanUnfinished()
+      runner.revalidateKnownArtifacts()
+      runner.resumePreparedDeliveries()
     }
     return runner
   }
 
-  // tasks:validate — lint/dry-run; no side effects.
-  server.handle(RPC_CHANNELS.tasks.VALIDATE, async (_ctx, _workspaceId: string, yaml: string): Promise<TaskValidationResultDto> => {
-    return toValidationDto(parseTaskYaml(yaml))
+  deps.sessionManager.onArtifactApplied?.(workspaceId => {
+    runnerFor(workspaceId).revalidateKnownArtifacts()
   })
 
-  // tasks:create — write task.yaml + create the orchestrator parent session.
-  server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
+  // Handler registration precedes session initialization in desktop and headless
+  // boot. Wait for restored sessions and permissions before claiming deliveries.
+  void Promise.resolve().then(async () => {
+    await deps.sessionManager.waitForInit()
+    for (const workspace of deps.sessionManager.getWorkspaces()) {
+      try { runnerFor(workspace.id) }
+      catch { tasksLog.warn('task-startup-recovery-blocked', { workspaceId: workspace.id }) }
+    }
+  }).catch(() => { tasksLog.warn('task-startup-recovery-init-failed') })
+
+  function controlResult(
+    runner: TaskRunner,
+    slug: string,
+    runId: string,
+    fn: () => TaskRunSnapshotDto | Promise<TaskRunSnapshotDto>,
+  ): Promise<TaskControlResultDto> {
+    return Promise.resolve()
+      .then(fn)
+      .then((snapshot) => ({ snapshot }))
+      .catch((err: unknown) => {
+        if (err instanceof TaskControlError) {
+          // Preserve the authoritative run snapshot on conflicts. Returning an
+          // empty placeholder makes the renderer briefly lose node/revision and
+          // budget state precisely when it needs to explain the blocker.
+          const snapshot = runner.getRunState(slug, runId) ?? {
+            slug,
+            runId,
+            taskId: slug,
+            status: err.status,
+            nodes: [],
+            tokensUsed: 0,
+          }
+          return { snapshot, conflict: { code: 'conflict' as const, message: err.message } }
+        }
+        throw err
+      })
+  }
+
+  deps.sessionManager.setTaskRunnerLookup((workspaceId) => runnerFor(workspaceId))
+
+  // tasks:validate — lint/dry-run; no side effects.
+  server.handle(RPC_CHANNELS.tasks.VALIDATE, async (_ctx, _workspaceId: string, yaml: string): Promise<TaskValidationResultDto> => {
+    return toValidationDto(parseTaskDocument(yaml))
+  })
+
+  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean, rootSessionId?: string): Promise<TaskCreateResult> {
     const ws = workspaceOrThrow(workspaceId)
-    const parsed = parseTaskYaml(req.yaml)
+    const parsed = parseTaskImport(yaml)
     const validation = toValidationDto(parsed)
     if (!parsed.valid || !parsed.spec) {
       return { slug: '', orchestratorSessionId: '', validation }
     }
     const spec = parsed.spec
-    saveTaskSpec(ws.rootPath, spec)
-
-    // Single choke point for ALL orchestrator paths (attach / adopt / fresh): apply the reserved
-    // "Task" label (surfacing its resolved id so the renderer can navigate to the label filter)
-    // and enable the spec's sources on the orchestrator session. Fail-soft — neither a label nor
-    // a sources problem may fail task creation. The body lives in finishTaskOrchestrator
-    // (../../tasks/create-task) so the create_task session tool shares it verbatim.
-    const finish = async (orchestratorSessionId: string): Promise<TaskCreateResult> => {
-      const setup = await finishTaskOrchestrator(deps.sessionManager, orchestratorSessionId, spec)
-      return { slug: spec.id, orchestratorSessionId, validation, taskLabelId: setup.taskLabelId }
+    const root = rootSessionId ? await deps.sessionManager.getSession(rootSessionId) : undefined
+    if (rootSessionId) {
+      if (!root || root.workspaceId !== workspaceId || root.hidden) throw new Error('Choose a visible PRO root in this workspace')
+      assertComplexCapability(root, 'create-workflow')
+      deps.sessionManager.assertTaskRunAllowed(workspaceId, rootSessionId, { slug: spec.id })
+      if (root.taskSlug && root.taskSlug !== spec.id) throw new Error('This root already owns a different plan')
+      if (root.isProcessing || deps.sessionManager.getSessions(workspaceId).some(session => session.id !== root.id
+        && (session.executionRootSessionId ?? session.orchestrationRootSessionId ?? session.parentSessionId) === root.id
+        && (session.isProcessing || session.orchestrationStatus === 'running'))) throw new Error('Wait for this root and its workers to settle before creating a plan')
     }
+    const existing = loadTaskDocument(ws.rootPath, spec.id)
+    if (existing && (!rootSessionId || !existing.valid || planValueKey(existing.spec) !== planValueKey(spec)
+      || deps.sessionManager.getSessions(workspaceId).some(session => session.taskSlug === spec.id && session.id !== rootSessionId)
+      || root?.taskSlug !== spec.id && listRunIds(ws.rootPath, spec.id).length)) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
+    // An identical unowned file may be the committed first half of an interrupted explicit creation.
+    const saved = existing ?? saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
 
-    // Edit-mode bind: the user saved this spec onto an existing, visible tile (e.g. a quick-add
-    // session). Bind that session to the slug. Unlike adoption this HARD-ERRORS on failure — it
-    // must never fall through to createSession, which would leave a duplicate orchestrator tile.
-    if (req.attachToExistingSession) {
-      const bound = await deps.sessionManager.bindExistingSessionToTask(req.attachToExistingSession, spec.id, {
-        name: spec.title,
-        projectId: spec.project,
-        ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),
-        ...(spec.defaults?.model ? { model: spec.defaults.model } : {}),
-        ...(spec.defaults?.llmConnection ? { llmConnection: spec.defaults.llmConnection } : {}),
-        ...(spec.defaults?.permissionMode ? { permissionMode: spec.defaults.permissionMode } : {}),
-      })
-      if (!bound) {
-        throw new Error(
-          `Cannot attach task "${spec.id}" to session ${req.attachToExistingSession}: ` +
-            `session is missing, is a sub-session, or is already bound to a different task.`,
-        )
+    // YAML imports create a fresh orchestrator without adopting generation drafts.
+    try {
+      if (rootSessionId) {
+        if (!await deps.sessionManager.bindExistingSessionToTask(rootSessionId, spec.id)) throw new Error('The chosen PRO root can no longer own this plan')
+        const setup = await finishTaskOrchestrator(deps.sessionManager, rootSessionId, spec)
+        validation.warnings.push(...setup.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
+        return { slug: spec.id, orchestratorSessionId: rootSessionId, validation, taskLabelId: setup.taskLabelId }
       }
-      return finish(req.attachToExistingSession)
-    }
-
-    // Adoption path: when the YAML was authored by a generate orchestrator, promote that hidden
-    // draft in place instead of creating a second top-level session (#bug1). Falls back to a fresh
-    // session if the draft is gone / already adopted / bound to another slug.
-    if (req.orchestratorSessionId) {
-      const adopted = await deps.sessionManager.adoptGeneratedTaskOrchestrator(req.orchestratorSessionId, spec.id, {
-        name: spec.title,
-        projectId: spec.project,
-        ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),
-        ...(spec.defaults?.model ? { model: spec.defaults.model } : {}),
-        // Reconcile the connection + permission mode from the saved spec (bind already does this) so an
-        // orch model/mode changed after generation actually takes effect on the promoted orchestrator.
-        ...(spec.defaults?.llmConnection ? { llmConnection: spec.defaults.llmConnection } : {}),
-        ...(spec.defaults?.permissionMode ? { permissionMode: spec.defaults.permissionMode } : {}),
-      })
-      if (adopted) {
-        return finish(req.orchestratorSessionId)
+      const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, saved.spec!, { save: false })
+      validation.warnings.push(...created.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
+      return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+    } catch (error) {
+      // Remove only this import's unchanged file, allowing retry after session creation fails.
+      if (!existing && loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag
+        && (!rootSessionId || (await deps.sessionManager.getSession(rootSessionId))?.taskSlug !== spec.id)) {
+        unlinkSync(taskYamlPath(ws.rootPath, spec.id))
       }
+      throw error
     }
+  }
 
-    // Fresh create — shared core with the create_task session tool. The spec was already saved
-    // above (all three paths persist first), so skip the core's save. createSession announces the
-    // orchestrator to the renderer by default, so its tile appears on the board immediately.
-    const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, spec, { save: false })
-    return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+  // tasks:create — write task.yaml + create the orchestrator parent session.
+  server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
+    if (req.attachToExistingSession || req.orchestratorSessionId) {
+      throw new Error('Import cannot adopt or bind an existing session. Import a new task instead.')
+    }
+    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration, req.rootSessionId)
   })
 
-  // tasks:generate — the persistent orchestrator session AUTHORS the task.yaml from a goal (#2).
-  // It also remains the home for "ask the agent to revise it" (it holds the conversation).
-  //
-  // ASYNC: the orchestrator session is created synchronously (cheap) and its id is returned
-  // immediately so the RPC never approaches the uniform client timeout. The authored spec is
-  // streamed back via the `tasks:generated` push event keyed by orchestratorSessionId. The
-  // session is a hidden taskDraft (off the board) until adopted by tasks:create; the editor
-  // discards an unadopted draft on close, and because drafts are hidden a give-up-early client
-  // never leaves a visible orphan tile.
+  // tasks:save — etag-guarded write that stamps schema_version 2 or 3 and backups a v1 original.
+  server.handle(RPC_CHANNELS.tasks.SAVE, async (_ctx, workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult> => {
+    const ws = workspaceOrThrow(workspaceId)
+    try {
+      const incoming = parseTaskDocument(req.yaml)
+      if (!incoming.spec || !loadTaskDocument(ws.rootPath, incoming.spec.id)) {
+        throw new Error('Save requires an existing task. Create the workflow in the editor first.')
+      }
+      const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag, {
+        confirmV3Migration: req.confirmV3Migration,
+      })
+      return {
+        slug: saved.slug,
+        validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }),
+        spec: saved.spec,
+        yaml: saved.yaml,
+        etag: saved.etag,
+        sourceVersion: saved.sourceVersion,
+        migrationWarnings: saved.migrationWarnings,
+      }
+    } catch (err) {
+      if (err instanceof TaskEtagConflictError) {
+        return {
+          slug: '',
+          validation: {
+            valid: false,
+            errors: [{ path: 'etag', message: err.message, severity: 'error' }],
+            warnings: [],
+          },
+          conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual },
+          etag: err.actual,
+        }
+      }
+      throw err
+    }
+  })
+
+  // Proposal only: acknowledge a temporary safe-mode session, publish its validated
+  // definition asynchronously, then dispose it. CREATE is a separate user action.
   server.handle(RPC_CHANNELS.tasks.GENERATE, async (_ctx, workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck> => {
-    workspaceOrThrow(workspaceId) // validate the workspace exists; generate no longer writes task.yaml
+    workspaceOrThrow(workspaceId)
+    if (!req.goal?.trim() || req.goal.length > 50_000) throw new Error('A goal of 1–50000 characters is required')
+    if (req.baseDraftVersion !== undefined && (!Number.isSafeInteger(req.baseDraftVersion) || req.baseDraftVersion < 0)) throw new Error('Invalid draft version')
+    if (req.currentYaml !== undefined && (typeof req.currentYaml !== 'string' || req.currentYaml.length > 1_000_000)) throw new Error('Invalid proposal input')
+    if (req.conversation !== undefined && (!Array.isArray(req.conversation) || req.conversation.some(turn =>
+      !turn || typeof turn.goal !== 'string' || turn.goal.length > 50_000 ||
+      !['proposed', 'applied', 'discarded', 'superseded', 'failed'].includes(turn.status) ||
+      (turn.yaml !== undefined && (typeof turn.yaml !== 'string' || turn.yaml.length > 1_000_000))
+    ))) throw new Error('Invalid proposal conversation')
     const orchestrator = await deps.sessionManager.createSession(workspaceId, {
       name: req.title?.trim() || 'New task',
-      sessionStatus: 'todo',
-      // Hidden until the authored spec is validated and adopted via tasks:create. Keeps the
-      // generate-time session off the board so "Generate → Create & Run" can't mint a duplicate
-      // top-level tile (#bug1). Promotion clears this flag in adoptGeneratedTaskOrchestrator.
+      // Hidden and never adopted into a persistent task.
       taskDraft: true,
       // Bind the draft to the project so it authors against the project's <project_context>.
       ...(req.projectId ? { projectId: req.projectId } : {}),
@@ -286,7 +331,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       // Task-level sources become the draft's enabled set (omitted → workspace default).
       ...(req.enabledSourceSlugs?.length ? { enabledSourceSlugs: req.enabledSourceSlugs } : {}),
       // Seed the visible task autonomy so authoring runs at the chosen mode, not the workspace default.
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      permissionMode: 'safe',
     })
     const sessionId = orchestrator.id
     tasksLog.info('generate started', {
@@ -297,12 +342,40 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       projectId: req.projectId,
       hasConnection: Boolean(req.llmConnection),
       permissionMode: req.permissionMode,
-      thinkingLevel: GENERATE_THINKING_LEVEL,
     })
 
+    // Send `prompt` to the orchestrator and await its next final turn. Subscribe BEFORE
+    // sending so a fast turn can't complete before we listen; a timeout keeps a hung turn
+    // from blocking forever.
     const askOrchestrator = (prompt: string) =>
-      waitForTurnReply(deps.sessionManager, sessionId, () =>
-        deps.sessionManager.sendMessage(sessionId, prompt, undefined, undefined, { thinkingLevel: GENERATE_THINKING_LEVEL }))
+      new Promise<{ text: string; generation: number }>((resolve, reject) => {
+        clearSubmittedDefinition(sessionId)
+        let settled = false
+        let off: (() => void) | undefined
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const finish = (fn: () => void) => {
+          if (settled) return
+          settled = true
+          off?.()
+          if (timer) clearTimeout(timer)
+          fn()
+        }
+        off = deps.sessionManager.onSessionComplete((evt) => {
+          if (evt.sessionId !== sessionId) return
+          if (evt.reason && evt.reason !== 'complete') {
+            finish(() => reject(new Error(`Proposal session ended with ${evt.reason}. Check the model connection and retry.`)))
+            return
+          }
+          const text = evt.finalText ?? deps.sessionManager.getSessionFinalText(sessionId) ?? ''
+          finish(() => resolve({ text, generation: evt.generation }))
+        })
+        timer = setTimeout(() => finish(() => {
+          clearSubmittedDefinition(sessionId)
+          reject(new Error('Task generation timed out'))
+        }), GENERATE_TIMEOUT_MS)
+        void Promise.resolve(deps.sessionManager.sendMessage(sessionId, prompt))
+          .catch((err: unknown) => finish(() => reject(err instanceof Error ? err : new Error(String(err)))))
+      })
 
     // Run the generate→repair loop in the background and push the result when done. Awaiting
     // here would re-introduce the synchronous-RPC-over-WS timeout this async path exists to avoid.
@@ -313,15 +386,31 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         // authored spec fails validation (commonly a ${nodes.X.output} ref to an undeclared
         // node) hand the concrete errors back and re-validate. Bounded so a model that can't
         // self-correct can't loop forever — the last attempt's validation is returned as-is.
-        let prompt = buildGeneratorPrompt(req.goal, req.title)
+        const baseSpec = req.currentYaml ? parseTaskYaml(req.currentYaml).spec : undefined
+        const baseId = baseSpec?.id
+        // Canonical JSON keeps long prompt strings exact; folded YAML is ambiguous to copy into a tool payload.
+        let prompt = buildGeneratorPrompt(req.goal, req.title, { ...req, currentYaml: baseSpec ? JSON.stringify(baseSpec, null, 2) : req.currentYaml })
         let yaml = ''
         let parsed = parseTaskYaml(yaml)
         let attempts = 0
         for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
           attempts = attempt + 1
-          const finalText = await askOrchestrator(prompt)
-          yaml = extractYaml(finalText)
+          const turn = await askOrchestrator(prompt)
+          try {
+            yaml = resolveGeneratedYaml(sessionId, turn.generation, turn.text)
+          } catch (error) {
+            if (attempt + 1 >= MAX_GENERATE_ATTEMPTS) throw error
+            prompt = 'Submit the COMPLETE V3 definition with submit_task_definition. No task has been created.'
+            continue
+          }
           parsed = parseTaskYaml(yaml)
+          if (baseId && parsed.spec && parsed.spec.id !== baseId) {
+            parsed = { ...parsed, valid: false, errors: [...parsed.errors, { file: 'task.yaml', path: 'id', message: `Preserve the existing task id: ${baseId}`, severity: 'error' }] }
+          }
+          if (baseSpec && parsed.spec) {
+            const protection = planProtectionErrors(baseSpec, parsed.spec)
+            if (protection.length) parsed = { ...parsed, valid: false, errors: [...parsed.errors, ...protection.map(message => ({ file: 'task.yaml', path: 'locks', message, severity: 'error' as const }))] }
+          }
           if (parsed.valid) break
           prompt = buildRepairPrompt(parsed.errors)
         }
@@ -337,6 +426,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
           slug: parsed.spec?.id ?? '',
         })
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
+          baseDraftVersion: req.baseDraftVersion,
           orchestratorSessionId: sessionId,
           slug: parsed.spec?.id ?? '',
           spec: parsed.spec,
@@ -346,56 +436,102 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         tasksLog.error('generate failed', { sessionId, elapsedMs: Date.now() - startedAt, error: message })
-        // Deliver the failure so the client can stop its spinner and surface a toast. The
-        // orchestrator stays a hidden taskDraft (never shown on the board); the editor discards
-        // it on close, so a failed generation leaves nothing for the user to clean up.
+        // Preserve the caller's draft and report failure; cleanup runs in finally.
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
+          baseDraftVersion: req.baseDraftVersion,
           orchestratorSessionId: sessionId,
           slug: '',
           yaml: '',
           validation: { valid: false, errors: [], warnings: [] },
           error: message,
         })
+      } finally {
+        clearSubmittedDefinition(sessionId)
+        await deps.sessionManager.deleteSession(sessionId).catch(error => tasksLog.error('draft cleanup failed', { sessionId, error: String(error) }))
       }
     })()
 
     return { orchestratorSessionId: sessionId }
   })
 
-  // tasks:run — start a run.
+  // tasks:run — start an existing run.
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
+    const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
+    if (!getDagOrchestrationEnabled()) {
+      throw new Error('PRO orchestration is disabled by this build')
+    }
+    const orchestrator = req.orchestratorSessionId
+      ? await deps.sessionManager.getSession(req.orchestratorSessionId)
+      : null
+    if (orchestrator?.workspaceId !== workspaceId) throw new Error('Task run requires a PRO root in this workspace')
+    assertComplexCapability(orchestrator, 'run-workflow')
+    if (req.expectedEtag && loadTaskDocument(workspaceOrThrow(workspaceId).rootPath, req.slug)?.etag !== req.expectedEtag) throw new Error('Saved task changed before run; review and save again')
     return runnerFor(workspaceId).run(req.slug, {
       runId: req.runId,
+      resumedFrom: req.resumedFrom,
       orchestratorSessionId: req.orchestratorSessionId,
       params: req.params,
+      orchestrateAllowed: orchestrator?.workMode === 'PRO',
     })
   })
 
   server.handle(RPC_CHANNELS.tasks.PAUSE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    runnerFor(workspaceId).pause(slug, runId)
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.pause(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.RESUME, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    runnerFor(workspaceId).resume(slug, runId)
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.resume(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.STOP, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    await runnerFor(workspaceId).stop(slug, runId)
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.stop(slug, runId))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.CONTINUE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.continue(slug, runId))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.RESPOND_APPROVAL, async (_ctx, workspaceId: string, req: TaskRespondApprovalRequest) => {
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, req.slug, req.runId, () => runner.respondApproval(req.slug, req.runId, req.nodeId, req.approved, req.feedback, req.feedbackOnly))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS, async (_ctx, workspaceId: string, req: TaskUpdateRunLimitsRequest) => {
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, req.slug, req.runId, () => runner.updateRunLimits(req.slug, req.runId, req.tokenBudget, req.params))
   })
 
   // tasks:get — spec + (optional) active run-state.
-  server.handle(RPC_CHANNELS.tasks.GET, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult> => {
+  server.handle(RPC_CHANNELS.tasks.GET, async (_ctx, workspaceId: string, slug: string, runId?: string, orchestratorSessionId?: string): Promise<TaskGetResult> => {
     const ws = workspaceOrThrow(workspaceId)
-    const loaded = loadTaskSpec(ws.rootPath, slug)
+    const runHistory = orchestratorSessionId ? runnerFor(workspaceId).getRunHistory(slug, orchestratorSessionId) : undefined
+    const loaded = loadTaskDocument(ws.rootPath, slug)
     if (!loaded) {
       return {
         slug,
         validation: { valid: false, errors: [{ path: 'root', message: `Task "${slug}" not found`, severity: 'error' }], warnings: [] },
         run: null,
+        runHistory,
       }
     }
-    const run = runId ? runnerFor(workspaceId).getRunState(slug, runId) : null
-    return { slug, validation: toValidationDto(loaded), spec: loaded.spec, run }
+    const runner = runnerFor(workspaceId)
+    const run = runId ? runner.getRunState(slug, runId) : null
+    return {
+      slug,
+      validation: toValidationDto({ valid: loaded.valid, errors: loaded.errors, warnings: loaded.warnings, spec: loaded.spec }),
+      spec: loaded.spec,
+      yaml: loaded.yaml,
+      etag: loaded.etag,
+      sourceVersion: loaded.sourceVersion,
+      migrationWarnings: loaded.migrationWarnings,
+      run,
+      latestRun: run ?? (runHistory ? runHistory.at(-1) ?? null : runner.getLatestRun(slug)),
+      runHistory,
+    }
   })
 
   // tasks:list — slugs with a task.yaml.
@@ -403,88 +539,186 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return listTaskSlugs(workspaceOrThrow(workspaceId).rootPath)
   })
 
+  server.handle(RPC_CHANNELS.tasks.LIST_TEMPLATES, async (_ctx, workspaceId: string): Promise<TaskTemplateSummaryDto[]> => {
+    return listTaskTemplateSummaries(workspaceOrThrow(workspaceId).rootPath)
+  })
+
+  server.handle(RPC_CHANNELS.tasks.GET_TEMPLATE, async (_ctx, workspaceId: string, id: string): Promise<TaskTemplateDetailDto> => {
+    const loaded = loadTaskTemplate(workspaceOrThrow(workspaceId).rootPath, id)
+    if (!loaded) throw new Error(`Template "${id}" was not found.`)
+    const { spec, yaml, ...summary } = loaded
+    return { ...summary, spec, yaml }
+  })
+
+  server.handle(RPC_CHANNELS.tasks.SAVE_TEMPLATE, async (_ctx, workspaceId: string, req: TaskTemplateSaveRequest): Promise<TaskTemplateSaveResult> => {
+    if (typeof req?.yaml !== 'string' || !req.yaml.trim()) throw new Error('Template YAML is required.')
+    if (typeof req.name !== 'string' || !req.name.trim()) throw new Error('A template name is required.')
+    const yaml = redactTemplateSource(req.yaml)
+    const imported = parseTaskImport(yaml)
+    const validation = toValidationDto(imported)
+    if (!imported.valid || !imported.spec) return { id: '', validation }
+    const saved = saveTaskTemplate(workspaceOrThrow(workspaceId).rootPath, {
+      name: req.name,
+      description: req.description,
+      tags: req.tags,
+      sourceTaskSlug: req.sourceTaskSlug,
+      yaml,
+    })
+    return { id: saved.id, validation }
+  })
+
+  server.handle(RPC_CHANNELS.tasks.DELETE_TEMPLATE, async (_ctx, workspaceId: string, id: string): Promise<{ deleted: boolean }> => {
+    return { deleted: deleteTaskTemplate(workspaceOrThrow(workspaceId).rootPath, id) }
+  })
+
+  server.handle(RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE, async (_ctx, workspaceId: string, req: TaskCreateFromTemplateRequest): Promise<TaskCreateResult> => {
+    if (typeof req?.templateId !== 'string' || !req.templateId.trim()) throw new Error('Template id is required.')
+    const spec = specFromTemplate(workspaceOrThrow(workspaceId).rootPath, req.templateId, req.projectId)
+    return persistImportedYaml(workspaceId, serializeTaskYaml(spec))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.LIST_RUNS, async (_ctx, workspaceId: string, slug: string): Promise<string[]> => {
+    return listRunIds(workspaceOrThrow(workspaceId).rootPath, slug)
+  })
+
   // tasks:getResults — storage-backed read of a run's outcome (verdict + per-node output).
   // Reads the durable artifacts (run-log.jsonl, nodes/<id>.json, per-run spec.json snapshot), so it
   // works after restart and without an active in-memory run — unlike tasks:get's run snapshot.
+  server.handle(RPC_CHANNELS.tasks.INSPECT_RUN, async (_ctx, workspaceId: string, slug: string, runId: string, cursor?: number | null, patch?: import('@craft-agent/shared/tasks').OrchestrationPatch) => {
+    // JSON transports serialize an omitted positional argument as null.
+    return inspectTaskRun(workspaceOrThrow(workspaceId).rootPath, slug, runId, cursor ?? undefined, patch)
+  })
+
   server.handle(RPC_CHANNELS.tasks.GET_RESULTS, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto> => {
-    const root = workspaceOrThrow(workspaceId).rootPath
-    const runIds = listRunIds(root, slug)
-    const chosen = runId ?? runIds.at(-1) ?? null
-    if (!chosen) return { slug, runId: null, runIds, nodes: [] }
+    return loadTaskResults(workspaceOrThrow(workspaceId).rootPath, slug, runId)
+  })
 
-    const log = readRunLog(root, slug, chosen)
-
-    // Node titles come from the run-time spec snapshot (so historical runs aren't relabeled by a
-    // later edit). Older runs predate snapshots → fall back to the run-log node ids.
-    const snapshot = readRunSpecSnapshot(root, slug, chosen)
-    const titleById = new Map<string, string>()
-    if (snapshot) for (const n of snapshot.nodes) titleById.set(n.id, nodeTitle(n))
-
-    // Fold the append-only log into the latest per-node state + session id, preserving first-seen
-    // order. node-spawned/node-finished both carry sessionId; the last one wins.
-    const byId = new Map<string, { id: string; state: string; sessionId?: string }>()
-    const ensure = (id: string) => {
-      let e = byId.get(id)
-      if (!e) { e = { id, state: 'pending' }; byId.set(id, e) }
-      return e
+  server.handle(RPC_CHANNELS.tasks.PATCH_RUN, async (_ctx, workspaceId: string, req: TaskPatchRunRequest): Promise<TaskControlResultDto> => {
+    const runner = runnerFor(workspaceId)
+    const snapshot = runner.getRunState(req.slug, req.runId)
+    if (!snapshot?.orchestratorSessionId) throw new Error('An active owned run is required')
+    const session = await deps.sessionManager.getSession(snapshot.orchestratorSessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Run workspace mismatch')
+    assertComplexCapability(session, 'change-plan')
+    const spec = runner.currentRunSpec(req.slug, req.runId)
+    if (!spec) throw new Error('No active run plan')
+    if (typeof req.yaml !== 'string' || !Number.isSafeInteger(req.baseRevision) || typeof req.rationale !== 'string' || !req.rationale.trim()) throw new Error('Invalid run patch')
+    const parsed = parseTaskYaml(req.yaml)
+    if (!parsed.valid || !parsed.spec) throw new Error(parsed.errors.map(error => error.message).join('; '))
+    const incoming = { ...parsed.spec, execution: { ...parsed.spec.execution, artifact_delivery: spec.execution?.artifact_delivery } }
+    const patch = definitionToPatch(spec, incoming, { runId: req.runId, baseRevision: req.baseRevision, decisionId: crypto.randomUUID(), rationale: req.rationale })
+    try { return { snapshot: runner.applyManualPlanPatch(req.slug, req.runId, patch) } }
+    catch (error) {
+      if (error instanceof TaskControlError) return { snapshot: runner.getRunState(req.slug, req.runId) ?? snapshot, conflict: { code: 'conflict', message: error.message } }
+      throw error
     }
-    const verdicts: NonNullable<TaskResultsDto['verdicts']> = []
-    // Recover the terminal run status from the run-log's lifecycle markers (last one wins).
-    let runStatus: string | undefined
-    for (const entry of log) {
-      if (entry.kind === 'node-scheduled' || entry.kind === 'node-spawned') {
-        const e = ensure(entry.nodeId)
-        if (entry.kind === 'node-spawned') e.sessionId = entry.sessionId
-      } else if (entry.kind === 'node-finished') {
-        const e = ensure(entry.nodeId)
-        e.state = entry.state
-        if (entry.sessionId) e.sessionId = entry.sessionId
-      } else if (entry.kind === 'verdict') {
-        verdicts.push({
-          result: entry.result,
-          ...(entry.reason ? { reason: entry.reason } : {}),
-          ...(entry.nodes?.length ? { nodes: entry.nodes } : {}),
-          // Provenance: a decision-model verdict must stay distinguishable from a parsed VERDICT line.
-          ...(entry.via ? { via: entry.via } : {}),
-          ...(typeof entry.confidence === 'number' ? { confidence: entry.confidence } : {}),
-        })
-      } else if (entry.kind === 'run-completed') {
-        runStatus = 'completed'
-      } else if (entry.kind === 'run-failed') {
-        runStatus = 'failed'
-      } else if (entry.kind === 'run-stopped') {
-        runStatus = 'stopped'
-      } else if (entry.kind === 'run-verifying') {
-        runStatus = 'verifying'
-      }
-    }
+  })
 
-    const nodes: TaskResultNodeDto[] = [...byId.values()].map((e) => {
-      const out = readNodeOutput(root, slug, chosen, e.id)
+  server.handle(RPC_CHANNELS.tasks.APPLY_RUN_REVISION, async (_ctx, workspaceId: string, req: TaskApplyRunRevisionRequest): Promise<TaskApplyRunRevisionResult> => {
+    const ws = workspaceOrThrow(workspaceId)
+    const live = loadTaskDocument(ws.rootPath, req.slug)
+    if (!live?.spec) {
       return {
-        id: e.id,
-        title: titleById.get(e.id) ?? e.id,
-        state: e.state,
-        ...(e.sessionId ? { sessionId: e.sessionId } : {}),
-        ...(out?.text ? { output: out.text } : {}),
+        diff: { added: [], removed: [], changed: [] },
+        validation: { valid: false, errors: [{ path: 'root', message: `Task "${req.slug}" not found`, severity: 'error' }], warnings: [] },
       }
-    })
-
-    // Repair accounting: each FAIL verdict consumed one repair attempt; the cap is the per-run
-    // snapshot's max_iterations clamped to the shared bound (default when omitted).
-    const repairUsed = verdicts.filter((v) => v.result === 'fail').length
-    const repairMax = Math.min(snapshot?.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP)
-
-    return {
-      slug,
-      runId: chosen,
-      runIds,
-      verdict: verdicts.at(-1),
-      verdicts,
-      repair: { used: repairUsed, max: repairMax },
-      ...(runStatus ? { runStatus } : {}),
-      ...(snapshot?.acceptance_criteria ? { acceptanceCriteria: snapshot.acceptance_criteria } : {}),
-      nodes,
+    }
+    const runner = runnerFor(workspaceId)
+    const activeSnapshot = runner.getRunState(req.slug, req.runId)
+    const activeSpec = runner.currentRunSpec(req.slug, req.runId)
+    const runRevision = activeSpec && activeSnapshot
+      ? { revision: activeSnapshot.revision ?? 0, spec: activeSpec }
+      : readLatestSpecRevision(ws.rootPath, req.slug, req.runId)
+    if (!runRevision) {
+      return {
+        diff: { added: [], removed: [], changed: [] },
+        validation: { valid: false, errors: [{ path: 'run', message: `No run spec for ${req.runId}`, severity: 'error' }], warnings: [] },
+      }
+    }
+    const runSpecHash = createHash('sha256')
+      .update(JSON.stringify(runRevision.spec.nodes))
+      .digest('hex')
+    const merged = mergeRunDefinition(live.spec, runRevision.spec)
+    const diff = definitionDiff(live.spec, merged)
+    const yaml = serializeTaskYaml(merged)
+    const parsed = parseTaskYaml(yaml)
+    const incoming = parseTaskDocument(yaml)
+    const validation = toValidationDto(parsed)
+    const migrationWarnings = [
+      ...incoming.migrationWarnings,
+      ...(live.sourceVersion < 3 && incoming.sourceVersion === 3 && incoming.spec
+        ? previewV3Migration(incoming.spec).warnings
+        : []),
+    ]
+    const resultBase = {
+      diff,
+      impact: revisionImpact(live.spec, merged),
+      validation,
+      yaml,
+      runRevision: runRevision.revision,
+      runSpecHash,
+      sourceVersion: incoming.sourceVersion,
+      migrationWarnings,
+    }
+    if (!req.confirm) return resultBase
+    if (diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0) {
+      return resultBase
+    }
+    if (req.expectedRunRevision === undefined || req.expectedRunSpecHash === undefined) {
+      return {
+        ...resultBase,
+        validation: {
+          ...validation,
+          valid: false,
+          errors: [...validation.errors, {
+            path: 'run',
+            message: 'Run revision confirmation requires the preceding preview identity',
+            severity: 'error' as const,
+          }],
+        },
+      }
+    }
+    if (req.expectedRunRevision !== runRevision.revision) {
+      return {
+        ...resultBase,
+        conflict: { code: 'run-revision-conflict', expected: req.expectedRunRevision, actual: runRevision.revision },
+      }
+    }
+    if (req.expectedRunSpecHash !== runSpecHash) {
+      return {
+        ...resultBase,
+        conflict: { code: 'run-spec-conflict', expected: req.expectedRunSpecHash, actual: runSpecHash },
+      }
+    }
+    try {
+      const saved = saveTaskDocument(ws.rootPath, yaml, req.expectedEtag, {
+        confirmV3Migration: req.confirmV3Migration === true,
+      })
+      return {
+        ...resultBase,
+        validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }),
+        applied: true,
+        etag: saved.etag,
+        yaml: saved.yaml,
+        sourceVersion: saved.sourceVersion,
+        migrationWarnings: saved.migrationWarnings,
+      }
+    } catch (err) {
+      if (err instanceof TaskEtagConflictError) {
+        return { ...resultBase, conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual } }
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      if (/without confirmation/.test(message)) {
+        return {
+          ...resultBase,
+          validation: {
+            ...validation,
+            valid: false,
+            errors: [...validation.errors, { path: 'schema_version', message, severity: 'error' as const }],
+          },
+        }
+      }
+      throw err
     }
   })
 }

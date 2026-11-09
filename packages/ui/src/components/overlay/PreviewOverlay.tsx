@@ -16,7 +16,7 @@
  */
 
 import { useEffect, type ReactNode } from 'react'
-import * as ReactDOM from 'react-dom'
+import * as Dialog from '@radix-ui/react-dialog'
 import { type LucideIcon } from 'lucide-react'
 import { useOverlayMode, OVERLAY_LAYOUT } from '../../lib/layout'
 import { FullscreenOverlayBase } from './FullscreenOverlayBase'
@@ -93,19 +93,14 @@ export function PreviewOverlay({
   const responsiveMode = useOverlayMode()
   const isModal = responsiveMode === 'modal'
 
-  // Handle Escape key for modal mode only (fullscreen mode uses FullscreenOverlayBase which handles ESC)
+  // Restore the exact opener without moving the underlying conversation.
   useEffect(() => {
-    if (!isOpen || !isModal) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
+    if (!isOpen || embedded) return
+    const opener = document.activeElement
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true })
     }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, isModal, onClose])
+  }, [isOpen, embedded])
 
   if (!isOpen && !embedded) return null
 
@@ -169,6 +164,8 @@ export function PreviewOverlay({
   if (!isModal) {
     return (
       <FullscreenOverlayBase
+        autoFocus
+        accessibleTitle={title || filePath || typeBadge.label}
         isOpen={isOpen}
         onClose={onClose}
         typeBadge={typeBadge}
@@ -184,27 +181,22 @@ export function PreviewOverlay({
     )
   }
 
-  // Modal mode - uses its own portal with backdrop click to close
-  return ReactDOM.createPortal(
-    <div
-      className={`fixed inset-0 z-50 flex items-center justify-center ${OVERLAY_LAYOUT.modalBackdropClass}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div
-        className={`flex flex-col ${bgClass} shadow-3xl overflow-hidden smooth-corners`}
-        style={{
-          width: '90vw',
-          maxWidth: OVERLAY_LAYOUT.modalMaxWidth,
-          height: `${OVERLAY_LAYOUT.modalMaxHeightPercent}vh`,
-          borderRadius: 16,
-        }}
-      >
-        {header}
-        {contentArea}
-      </div>
-    </div>,
-    document.body
+  // Use the same dialog primitive as fullscreen: trap focus and lock background scroll.
+  return (
+    <Dialog.Root open={isOpen} onOpenChange={open => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={`fixed inset-0 ${OVERLAY_LAYOUT.modalBackdropClass}`} style={{ zIndex: 'var(--z-fullscreen, 350)' }} />
+        <Dialog.Content
+          aria-describedby={undefined}
+          className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col ${bgClass} shadow-3xl overflow-hidden smooth-corners outline-none`}
+          style={{ zIndex: 'var(--z-fullscreen, 350)', width: '90vw', maxWidth: OVERLAY_LAYOUT.modalMaxWidth,
+            height: `${OVERLAY_LAYOUT.modalMaxHeightPercent}vh`, borderRadius: 16 }}
+        >
+          <Dialog.Title className="sr-only">{title || filePath || typeBadge.label}</Dialog.Title>
+          {header}
+          {contentArea}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

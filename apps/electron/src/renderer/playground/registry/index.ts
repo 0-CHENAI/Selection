@@ -1,10 +1,9 @@
 import type { ComponentEntry, CategoryGroup, Category } from './types'
 import { onboardingComponents } from './onboarding'
-import { workspaceComponents } from './workspaces'
 import { chatComponents } from './chat'
-import { chatHeaderComponents } from './chat-header'
-import { chatPanelComponents } from './chat-panel'
 import { turnCardComponents, fullscreenOverlayComponents } from './turn-card'
+import { taskRailComponents } from './task-rail'
+import { taskCardComponents } from './task-card'
 import { turnCardModesComponents } from './turn-card-modes'
 import { messagesComponents } from './messages'
 import { inputComponents } from './input'
@@ -14,7 +13,6 @@ import { iconComponents } from './icons'
 import { oauthComponents } from './oauth'
 import { toastsComponents } from './toasts'
 import { sessionListComponents } from './session-list'
-import { subSessionsComponents } from './sub-sessions'
 import { projectColorsComponents } from './project-colors'
 import { editPopoverComponents } from './edit-popover'
 import { automationComponents } from './automations'
@@ -25,27 +23,31 @@ import { customShadowsComponents } from './custom-shadows'
 import { transportBannerComponents } from './transport-banner'
 import { containerTransitionsComponents } from './container-transitions'
 import { apiKeyInputComponents } from './api-key-input'
-import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
-import { kanbanComponents } from './kanban'
+import { handoverComponents } from './handover'
+import { workModeComponents } from './work-mode'
+import { officeCollaborationComponents } from './office-collaboration'
+import { officeCasePreviewComponents } from './office-case-preview'
+import { officeInputCaseComponents } from './office-input-case'
+import { officeSentCaseComponents } from './office-sent-case'
+import { pptOfficeProgressComponents } from './ppt-office-progress'
 import { taskEditorComponents } from './task-editor'
-import { primitivesComponents } from './primitives'
-import { chatStartersComponents } from './chat-starters'
+import { taskEditorLiveComponents } from './task-editor-live'
+import { automaticTaskGraphComponents } from './automatic-task-graph'
+import { x6TaskGraphComponents } from './x6-task-graph'
+import { projectSettingsComponents } from './project-settings'
 
 export * from './types'
 
 export const componentRegistry: ComponentEntry[] = [
-  ...primitivesComponents,
-  ...chatStartersComponents,
   ...mobileWebUIComponents,
   ...apiKeyInputComponents,
   ...onboardingComponents,
-  ...workspaceComponents,
-  ...chatHeaderComponents,
-  ...chatPanelComponents,
   ...chatComponents,
   ...turnCardComponents,
+  ...taskRailComponents,
+  ...taskCardComponents,
   ...turnCardModesComponents,
   ...fullscreenOverlayComponents,
   ...messagesComponents,
@@ -56,9 +58,17 @@ export const componentRegistry: ComponentEntry[] = [
   ...iconComponents,
   ...oauthComponents,
   ...sessionListComponents,
-  ...subSessionsComponents,
-  ...kanbanComponents,
+  ...workModeComponents,
+  ...officeCollaborationComponents,
+  ...officeCasePreviewComponents,
+  ...officeInputCaseComponents,
+  ...officeSentCaseComponents,
+  ...pptOfficeProgressComponents,
+  ...handoverComponents,
   ...taskEditorComponents,
+  ...taskEditorLiveComponents,
+  ...automaticTaskGraphComponents,
+  ...x6TaskGraphComponents,
   ...projectColorsComponents,
   ...editPopoverComponents,
   ...automationComponents,
@@ -68,12 +78,12 @@ export const componentRegistry: ComponentEntry[] = [
   ...customShadowsComponents,
   ...transportBannerComponents,
   ...containerTransitionsComponents,
-  ...messagingComponents,
   ...imageSupportComponents,
+  ...projectSettingsComponents,
 ]
 
 export function getCategories(): CategoryGroup[] {
-  const categoryOrder: Category[] = ['Primitives', 'Mobile WebUI', 'Automations', 'Onboarding', 'Agent Setup', 'Settings', 'Chat', 'Island', 'Browser', 'Planner', 'Custom Shadows', 'Session List', 'Sub Sessions', 'Kanban', 'Entity Lists', 'Edit Popover', 'Turn Cards', 'TurnCard Modes', 'Fullscreen', 'Chat Messages', 'Chat Inputs', 'Toast Messages', 'Markdown', 'Icons', 'OAuth', 'Messaging']
+  const categoryOrder: Category[] = ['Mobile WebUI', 'Automations', 'Onboarding', 'Agent Setup', 'Chat', 'Island', 'Browser', 'Planner', 'Custom Shadows', 'Session List', 'Kanban', 'Entity Lists', 'Edit Popover', 'Turn Cards', 'TurnCard Modes', 'Fullscreen', 'Chat Messages', 'Chat Inputs', 'Toast Messages', 'Markdown', 'Icons', 'Settings', 'OAuth', 'Messaging']
   const categoryMap = new Map<Category, ComponentEntry[]>()
 
   for (const entry of componentRegistry) {

@@ -8,7 +8,7 @@
  * so the gateway can route the press back to the right session.
  *
  * Limits enforced here:
- *   - Up to 10 buttons per card (matching Telegram's cap)
+ *   - Up to 10 buttons per card
  *   - Button labels truncated to 30 chars (Lark's display threshold)
  */
 
@@ -70,7 +70,7 @@ export function buildLarkCard(
         ...capped.map((btn, idx) => ({
           tag: 'button' as const,
           text: { tag: 'plain_text' as const, content: truncateLabel(btn.label) },
-          // First button is "primary" (visually emphasised) — matches Telegram's first-button-styled convention.
+          // First button is "primary" (visually emphasised).
           type: idx === 0 ? ('primary' as const) : ('default' as const),
           behaviors: [
             {
@@ -116,7 +116,7 @@ export function buildClearedCard(text: string): LarkCardSchema {
  * editable time window (currently 24h for bots) or when the message can't
  * otherwise be edited (deleted, type-mismatched, etc.).
  *
- * The grammY-style HttpError shape isn't applicable here; the SDK throws an
+ * The Lark SDK throws an
  * Error with a `code` property attached. We match on the code values rather
  * than message strings to avoid breaking on i18n changes from Lark.
  */

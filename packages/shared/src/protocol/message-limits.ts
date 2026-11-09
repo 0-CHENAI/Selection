@@ -71,6 +71,21 @@ export function checkAttachmentSizes(
   return total > limit ? { kind: 'total', size: total, limit } : null
 }
 
+/** UTF-8 size without allocating a second copy of a large frame. */
+export function utf8ByteLength(value: string): number {
+  let bytes = 0
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code >= 0xD800 && code <= 0xDBFF) {
+      bytes += 4
+      i += 1
+    } else bytes += 3
+  }
+  return bytes
+}
+
 /** "59.7 MB" style size for messages about attachment limits (1 MB = 1,000,000 bytes, as in Finder). */
 export function formatAttachmentBytes(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`

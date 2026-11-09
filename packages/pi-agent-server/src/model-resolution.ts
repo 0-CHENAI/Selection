@@ -1,4 +1,5 @@
 import type { ModelRegistry as PiModelRegistry } from '@earendil-works/pi-coding-agent';
+import { toPiProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 
 // Re-export from shared so the auth-aware mini-model denylist has a single
 // source of truth (also used by `getMiniModel()` at selection time).
@@ -6,6 +7,21 @@ export { isDeniedMiniModelId } from '../../shared/src/config/llm-connections.ts'
 
 // Re-export the PiModel type used by callers
 type PiModel<T = any> = ReturnType<PiModelRegistry['find']>;
+
+function findCustomEndpointModel(
+  modelRegistry: PiModelRegistry,
+  modelId: string,
+): PiModel | undefined {
+  const exact = modelRegistry.find('custom-endpoint', modelId);
+  if (exact) return exact;
+
+  const lower = modelId.toLowerCase();
+  return modelRegistry.getAll().find((model) => {
+    const provider = (model as { provider?: string }).provider;
+    if (provider !== 'custom-endpoint') return false;
+    return model.id.toLowerCase() === lower || model.name.toLowerCase() === lower;
+  });
+}
 
 /**
  * Resolve a Pi SDK model from the registry, with optional custom-endpoint precedence.
@@ -22,25 +38,34 @@ export function resolvePiModel(
   piAuthProvider?: string,
   preferCustomEndpoint?: boolean,
 ): PiModel | undefined {
-  // Strip Craft's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-6")
-  const bareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
+  // Strip Selection's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-6")
+  const requestedBareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
+  // Stored connection ids (azure-openai-responses) become SDK ids (azure) here.
+  const sdkProvider = piAuthProvider ? toPiProviderId(piAuthProvider) : undefined;
 
-  // Custom-endpoint takes precedence when configured
+  // Custom-endpoint takes precedence when configured.
+  // Case-insensitive: ORDER ids like DeepSeek-V4-Flash must not miss the
+  // registered custom model and fall through to Pi's official DeepSeek catalog.
   if (preferCustomEndpoint) {
-    const custom = modelRegistry.find('custom-endpoint', bareId);
+    const custom = findCustomEndpointModel(modelRegistry, requestedBareId);
     if (custom) return custom;
   }
+
+  // DeepSeek temporarily routes its retired V4 Flash ID to V4.1 Flash, but
+  // Pi's current catalog only exposes the canonical deepseek-flash ID.
+  const bareId = sdkProvider === 'deepseek' && requestedBareId === 'deepseek-v4-flash'
+    ? 'deepseek-flash' : requestedBareId;
 
   // If we know the auth provider, do an exact provider+model lookup first.
   // This avoids the getAll() ambiguity where the same model ID exists under
   // multiple providers (e.g., "gpt-5.2" under both "openai" and
   // "azure") and the wrong one matches first.
-  if (piAuthProvider) {
-    const exact = modelRegistry.find(piAuthProvider, bareId);
+  if (sdkProvider) {
+    const exact = modelRegistry.find(sdkProvider, bareId);
     if (exact) {
       // MiniMax CN API rejects model IDs with the 'MiniMax-' prefix (e.g. 500 for
       // 'MiniMax-M2.5-highspeed') but accepts bare names ('M2.5-highspeed').
-      if (piAuthProvider === 'minimax-cn' && exact.id.startsWith('MiniMax-')) {
+      if (sdkProvider === 'minimax-cn' && exact.id.startsWith('MiniMax-')) {
         return { ...exact, id: exact.id.slice('MiniMax-'.length) };
       }
       return exact;
@@ -56,7 +81,7 @@ export function resolvePiModel(
   const allModels = modelRegistry.getAll();
   const match = allModels.find(m =>
     (m.id === bareId || m.name === bareId) &&
-    (!piAuthProvider || (m as any).provider === piAuthProvider || (m as any).provider === 'custom-endpoint'),
+    (!sdkProvider || (m as any).provider === sdkProvider || (m as any).provider === 'custom-endpoint'),
   );
   if (match) return match;
 
@@ -64,8 +89,10 @@ export function resolvePiModel(
   const providers = ['custom-endpoint', 'anthropic', 'openai', 'google'];
   for (const provider of providers) {
     // Skip providers incompatible with the authenticated provider
-    if (piAuthProvider && provider !== piAuthProvider && provider !== 'custom-endpoint') continue;
-    const model = modelRegistry.find(provider, bareId);
+    if (sdkProvider && provider !== sdkProvider && provider !== 'custom-endpoint') continue;
+    const model = provider === 'custom-endpoint'
+      ? findCustomEndpointModel(modelRegistry, bareId)
+      : modelRegistry.find(provider, bareId);
     if (model) return model;
   }
 
@@ -89,13 +116,9 @@ export function isModelNotFoundError(message: string): boolean {
 }
 
 /**
- * Stricter variant of `isModelNotFoundError` for contexts where a 400 can also mean a
- * rejected *tool* or parameter — e.g. the ChatGPT Codex search path, where a hosted-tool
- * refusal ("Hosted tool 'web_search' is not supported") must not be mistaken for a model
- * rejection (that would skip the tool-type retry and burn every candidate model instead).
- * The ambiguous phrasings ("is not supported", "does not exist") only count when the
- * message names the requested model — the known Codex refusal quotes it verbatim
- * ("The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.").
+ * A strict model-rejection check for request paths where a generic 400 may instead
+ * describe an unsupported tool or parameter. Ambiguous messages only count when
+ * they identify the model that was actually requested.
  */
 export function isModelRejectionError(message: string, modelId: string): boolean {
   if (!isModelNotFoundError(message)) return false;

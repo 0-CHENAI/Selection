@@ -1,13 +1,13 @@
+import { confirmAction } from '@/lib/confirmation'
 import * as React from "react"
 import { useTranslation } from "react-i18next"
-import { useState, useCallback, useRef } from "react"
-import { Check, FolderPlus, ExternalLink, ChevronDown, Cloud, CloudOff, Trash2 } from "lucide-react"
+import { useState, useCallback } from "react"
+import { Check, FolderPlus, ChevronDown, Trash2 } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { useSetAtom } from "jotai"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import { isWebUI } from "@/lib/platform"
 import { fullscreenOverlayOpenAtom } from "@/atoms/overlay"
 import {
   DropdownMenu,
@@ -19,10 +19,7 @@ import {
 import { WorkspaceAvatar } from "@/components/ui/workspace-avatar"
 import { FadingText } from "@/components/ui/fading-text"
 import { WorkspaceCreationScreen } from "@/components/workspace"
-import { RemoveWorkspaceDialog } from "@/components/workspace/RemoveWorkspaceDialog"
-import { waitForTransportConnected } from '@/lib/transport-wait'
 import { useWorkspaceIcons } from "@/hooks/useWorkspaceIcon"
-import { useTransportConnectionState } from "@/hooks/useTransportConnectionState"
 import type { Workspace } from "../../../shared/types"
 
 interface WorkspaceSwitcherProps {
@@ -56,72 +53,10 @@ export function WorkspaceSwitcher({
 }: WorkspaceSwitcherProps) {
   const { t } = useTranslation()
   const [showCreationScreen, setShowCreationScreen] = useState(false)
-  const [reconnectTarget, setReconnectTarget] = useState<Workspace | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [pendingRemoval, setPendingRemoval] = useState<Workspace | null>(null)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
   const selectedWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
   const workspaceIconMap = useWorkspaceIcons(workspaces)
-  const connectionState = useTransportConnectionState()
-  const isRemote = connectionState?.mode === 'remote'
 
-  // Health check results for non-active remote workspaces (checked on dropdown open)
-  const [remoteHealthMap, setRemoteHealthMap] = useState<Map<string, 'ok' | 'error' | 'checking'>>(new Map())
-  const healthCheckAbort = useRef<AbortController | null>(null)
-
-  /** Check connectivity for all non-active remote workspaces when dropdown opens. */
-  const checkRemoteHealth = useCallback(() => {
-    // Cancel any in-flight checks
-    healthCheckAbort.current?.abort()
-    const abort = new AbortController()
-    healthCheckAbort.current = abort
-
-    const remoteWorkspaces = workspaces.filter(w => w.remoteServer && w.id !== activeWorkspaceId)
-    if (remoteWorkspaces.length === 0) return
-
-    // Mark all as checking
-    setRemoteHealthMap(prev => {
-      const next = new Map(prev)
-      for (const ws of remoteWorkspaces) next.set(ws.id, 'checking')
-      return next
-    })
-
-    // Fire parallel checks
-    for (const ws of remoteWorkspaces) {
-      window.electronAPI.testRemoteConnection(ws.remoteServer!.url, ws.remoteServer!.token)
-        .then(result => {
-          if (abort.signal.aborted) return
-          setRemoteHealthMap(prev => new Map(prev).set(ws.id, result.ok ? 'ok' : 'error'))
-        })
-        .catch(() => {
-          if (abort.signal.aborted) return
-          setRemoteHealthMap(prev => new Map(prev).set(ws.id, 'error'))
-        })
-    }
-  }, [workspaces, activeWorkspaceId])
-
-  /** Tooltip for disconnected remote workspaces — shows error kind. */
-  const getDisconnectTooltip = (workspaceId: string): string => {
-    if (workspaceId === activeWorkspaceId && connectionState?.lastError) {
-      const { kind } = connectionState.lastError
-      if (kind === 'auth') return t('toast.authenticationFailed')
-      if (kind === 'timeout') return t('toast.serverUnreachable')
-      if (kind === 'network') return t('toast.serverUnreachable')
-    }
-    return t('toast.disconnected')
-  }
-
-  /** True when we know a remote workspace is unreachable. */
-  const isRemoteDisconnected = (workspaceId: string) => {
-    // Active workspace: use live transport state
-    if (workspaceId === activeWorkspaceId) {
-      if (!isRemote || !connectionState) return false
-      const { status } = connectionState
-      return status !== 'connected' && status !== 'connecting' && status !== 'idle'
-    }
-    // Non-active: use health check result
-    return remoteHealthMap.get(workspaceId) === 'error'
-  }
 
   const hasUnreadInOtherWorkspaces = React.useMemo(() => {
     if (!activeWorkspaceId || !workspaceUnreadMap) return false
@@ -141,36 +76,32 @@ export function WorkspaceSwitcher({
     onSelect(workspace.id)
   }
 
-  /** Close the menu, then ask in RemoveWorkspaceDialog (rendered outside the menu). */
-  const handleRemoveWorkspace = useCallback((workspace: Workspace) => {
+  const handleRemoveWorkspace = useCallback(async (workspace: Workspace) => {
     if (workspace.id === activeWorkspaceId) {
       toast.error(t('toast.cannotRemoveActiveWorkspace'))
       return
     }
-    setMenuOpen(false)
-    setPendingRemoval(workspace)
-  }, [activeWorkspaceId, t])
+    if (!await confirmAction(t('workspace.removeWorkspaceConfirm', { name: workspace.name }))) {
+      return
+    }
+    try {
+      const removed = await window.electronAPI.removeWorkspace(workspace.id)
+      if (removed) {
+        toast.success(t('toast.removedWorkspace', { name: workspace.name }))
+        onWorkspaceRemoved?.()
+      } else {
+        toast.error(t('toast.failedToRemoveWorkspace', { name: workspace.name }))
+      }
+    } catch {
+      toast.error(t('toast.failedToRemoveWorkspace', { name: workspace.name }))
+    }
+  }, [activeWorkspaceId, onWorkspaceRemoved, t])
 
   const handleCloseCreationScreen = useCallback(() => {
     setShowCreationScreen(false)
-    setReconnectTarget(null)
     setFullscreenOverlayOpen(false)
   }, [setFullscreenOverlayOpen])
 
-  const handleReconnectWorkspace = useCallback(async (workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }) => {
-    await window.electronAPI.updateWorkspaceRemoteServer(workspaceId, remoteServer)
-
-    if (workspaceId === activeWorkspaceId) {
-      await window.electronAPI.reconnectTransport()
-      await waitForTransportConnected(window.electronAPI)
-    } else {
-      await Promise.resolve(onSelect(workspaceId))
-      await waitForTransportConnected(window.electronAPI)
-    }
-
-    handleCloseCreationScreen()
-    toast.success(t('toast.workspaceReconnected'))
-  }, [activeWorkspaceId, handleCloseCreationScreen, onSelect])
 
   return (
     <>
@@ -180,43 +111,29 @@ export function WorkspaceSwitcher({
           <WorkspaceCreationScreen
             onWorkspaceCreated={handleWorkspaceCreated}
             onClose={handleCloseCreationScreen}
-            reconnectWorkspace={reconnectTarget ?? undefined}
-            onReconnectWorkspace={handleReconnectWorkspace}
           />
         )}
       </AnimatePresence>
 
-      <RemoveWorkspaceDialog
-        workspace={pendingRemoval}
-        iconUrl={pendingRemoval ? workspaceIconMap.get(pendingRemoval.id) : undefined}
-        onClose={() => setPendingRemoval(null)}
-        onRemoved={onWorkspaceRemoved}
-      />
-
-      <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); if (open) checkRemoteHealth() }}>
+      <DropdownMenu>
         <DropdownMenuTrigger asChild>
           {variant === 'topbar' ? (
             <button
               type="button"
               data-workspace-switcher="topbar"
-              className="titlebar-no-drag ml-1 min-w-0 max-w-full flex items-center justify-start gap-2 h-control pl-1 pr-1.5 rounded-md text-label font-medium text-foreground hover:bg-fill-hover data-[state=open]:bg-fill-hover transition-[background-color] duration-micro ease-out-subtle hover:duration-instant cursor-pointer"
+              className="header-icon-btn titlebar-no-drag ml-1 flex-1 min-w-0 flex items-center justify-start gap-0.5 h-[30px] px-3 rounded-[8px] border border-foreground/6 text-[13px] text-foreground/50 hover:bg-foreground/5 hover:text-foreground transition-colors cursor-pointer data-[state=open]:bg-foreground/5 data-[state=open]:text-foreground"
               aria-label={t('workspace.selectWorkspace')}
             >
               <WorkspaceAvatar
                 workspaceId={selectedWorkspace?.id}
                 workspaceName={selectedWorkspace?.name}
                 src={selectedWorkspace ? workspaceIconMap.get(selectedWorkspace.id) : undefined}
-                className="size-5 rounded-sm shadow-elev-0"
-                fallbackClassName="rounded-sm"
+                className="h-4 w-4 mr-1.5 rounded-full ring-1 ring-border/50"
+                fallbackClassName="rounded-full"
               />
-              <span className="truncate min-w-0 text-left">{selectedWorkspace?.name || 'Workspace'}</span>
-              {selectedWorkspace?.remoteServer && (
-                isRemoteDisconnected(selectedWorkspace.id)
-                  ? <CloudOff className="size-3.5 text-destructive shrink-0" />
-                  : <Cloud className="size-3.5 text-tertiary shrink-0" />
-              )}
-              <ChevronDown data-slot="chevron" className="size-3.5 text-tertiary shrink-0" />
-              {hasUnreadInOtherWorkspaces && <span className="size-1.5 rounded-full bg-accent-solid shrink-0" />}
+              <span className="truncate min-w-0 flex-1 text-left">{selectedWorkspace?.name || 'Workspace'}</span>
+              <ChevronDown data-slot="chevron" className="h-3 w-3 opacity-60 shrink-0" />
+              {hasUnreadInOtherWorkspaces && <span className="h-2 w-2 rounded-full bg-accent shrink-0" />}
             </button>
           ) : (
             <button
@@ -240,11 +157,6 @@ export function WorkspaceSwitcher({
                   <FadingText className="ml-1 font-sans min-w-0 text-sm" fadeWidth={36}>
                     {selectedWorkspace?.name || 'Select workspace'}
                   </FadingText>
-                  {selectedWorkspace?.remoteServer && (
-                    isRemoteDisconnected(selectedWorkspace.id)
-                      ? <CloudOff className="h-3 w-3 text-destructive shrink-0" />
-                      : <Cloud className="h-3 w-3 text-muted-foreground shrink-0" />
-                  )}
                   <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                 </>
               )}
@@ -256,29 +168,18 @@ export function WorkspaceSwitcher({
           align={variant === 'topbar' ? 'center' : 'start'}
           sideOffset={variant === 'topbar' ? 6 : 4}
           minWidth={variant === 'topbar' ? 'min-w-64' : undefined}
-          // The remove dialog takes focus; don't pull it back to the trigger
-          onCloseAutoFocus={(event) => { if (pendingRemoval) event.preventDefault() }}
         >
           {workspaces.map((workspace) => {
-            const disconnected = isRemoteDisconnected(workspace.id)
             return (
               <StyledDropdownMenuItem
                 key={workspace.id}
                 onClick={(e) => {
-                  if (disconnected && workspace.remoteServer) {
-                    setReconnectTarget(workspace)
-                    setShowCreationScreen(true)
-                    setFullscreenOverlayOpen(true)
-                    return
-                  }
-                  if (disconnected) return
                   const openInNewWindow = e.metaKey || e.ctrlKey
                   onSelect(workspace.id, openInNewWindow)
                 }}
                 className={cn(
                   "justify-between group",
                   activeWorkspaceId === workspace.id && "bg-foreground/10",
-                  disconnected && "opacity-60",
                 )}
               >
                 <div className="flex items-center gap-3 font-sans min-w-0 flex-1">
@@ -290,17 +191,11 @@ export function WorkspaceSwitcher({
                     fallbackClassName="rounded-full text-xs"
                   />
                   <span className="truncate">{workspace.name}</span>
-                  {workspace.remoteServer && (
-                    disconnected
-                      ? <span title={getDisconnectTooltip(workspace.id)} className="shrink-0"><CloudOff className="h-3.5 w-3.5 text-destructive" /></span>
-                      : <Cloud className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  )}
                   {workspaceUnreadMap?.[workspace.id] && <span className="h-2 w-2 rounded-full bg-accent shrink-0" />}
                 </div>
                 <div className="flex items-center gap-1">
-                  {/* Action buttons - only visible on hover for non-active workspaces.
-                      Remove is Electron-only: the Web UI can't remove workspaces. */}
-                  {activeWorkspaceId !== workspace.id && !isWebUI && (
+                  {/* Action buttons - only visible on hover for non-active workspaces */}
+                  {activeWorkspaceId !== workspace.id && (
                     <button
                       data-touch-reveal="true"
                       className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/20 hover:text-destructive transition-opacity"
@@ -311,19 +206,6 @@ export function WorkspaceSwitcher({
                       title={t("workspace.removeWorkspace")}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                  {activeWorkspaceId !== workspace.id && !disconnected && (
-                    <button
-                      data-touch-reveal="true"
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-foreground/10 transition-opacity"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onSelect(workspace.id, true)
-                      }}
-                      title={t("sidebarMenu.openInNewWindow")}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
                     </button>
                   )}
                   {activeWorkspaceId === workspace.id && (

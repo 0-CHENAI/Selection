@@ -1,0 +1,39 @@
+# Path-filtered recovery contract. Linux + Windows is enough for these unit
+# tests; macos-15 is not required and used to compete for scarce runners.
+name: Conductor Recovery Contract
+
+on:
+  pull_request:
+    paths:
+      - 'packages/server-core/src/tasks/**'
+      - 'packages/server-core/src/handlers/rpc/tasks*'
+      - 'packages/pi-agent-server/src/**'
+      - 'packages/shared/src/sse-diagnostics*'
+      - 'apps/electron/src/renderer/components/app-shell/kanban/**'
+      - '.github/workflows/conductor-recovery.yml'
+      - '.github/actions/setup-selection-ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conductor-recovery-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HUSKY: "0"
+
+jobs:
+  recovery:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2025]
+    runs-on: ${{ matrix.os }}
+    name: conductor-recovery (${{ matrix.os }})
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-selection-ci
+      - run: bun test packages/server-core/src/tasks packages/pi-agent-server/src/provider-timeout.test.ts apps/electron/src/renderer/components/app-shell/kanban/__tests__/orchestration-run-progress.test.tsx

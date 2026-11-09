@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError, isModelRejectionError } from './model-resolution.ts';
+import {
+  resolvePiModel,
+  isDeniedMiniModelId,
+  isModelNotFoundError,
+  isModelRejectionError,
+} from './model-resolution.ts';
 
 /**
  * Minimal mock of PiModelRegistry.
@@ -48,6 +53,18 @@ describe('resolvePiModel', () => {
       expect(result!.provider).toBe('anthropic');
     });
 
+    it('matches ORDER DeepSeek-V4-Flash case-insensitively on custom-endpoint', () => {
+      const registry = createMockRegistry({
+        'custom-endpoint': [{ id: 'DeepSeek-V4-Flash', name: 'DeepSeek-V4-Flash', provider: 'custom-endpoint' }],
+        deepseek: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'deepseek' }],
+      });
+
+      const result = resolvePiModel(registry, 'deepseek-v4-flash', 'openai', true);
+      expect(result).toBeDefined();
+      expect(result!.provider).toBe('custom-endpoint');
+      expect(result!.id).toBe('DeepSeek-V4-Flash');
+    });
+
     it('falls through to piAuthProvider when preferCustomEndpoint=true but model not in custom-endpoint', () => {
       const registry = createMockRegistry({
         'custom-endpoint': [],
@@ -61,15 +78,33 @@ describe('resolvePiModel', () => {
   });
 
   describe('exact provider lookup', () => {
+    it('resolves saved DeepSeek V4 Flash selections to the current catalog ID', () => {
+      const registry = createMockRegistry({
+        deepseek: [{ id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash' }],
+      });
+      expect(resolvePiModel(registry, 'pi/deepseek-v4-flash', 'deepseek')?.id).toBe('deepseek-flash');
+    });
+
     it('returns exact match for piAuthProvider', () => {
       const registry = createMockRegistry({
         openai: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'openai' }],
-        'azure': [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'azure' }],
+        azure: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'azure' }],
       });
 
       const result = resolvePiModel(registry, 'gpt-5.2', 'openai');
       expect(result).toBeDefined();
       expect(result!.provider).toBe('openai');
+    });
+
+    it('resolves a stored Azure connection against the renamed SDK provider', () => {
+      const registry = createMockRegistry({
+        azure: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'azure' }],
+      });
+
+      const stored = resolvePiModel(registry, 'gpt-5.2', 'azure-openai-responses');
+      expect(stored?.provider).toBe('azure');
+      expect(stored?.id).toBe('gpt-5.2');
+      expect(resolvePiModel(registry, 'pi/gpt-5.2', 'azure')?.provider).toBe('azure');
     });
 
     it('strips MiniMax- prefix for minimax-cn provider', () => {
@@ -141,7 +176,7 @@ describe('resolvePiModel', () => {
       // With github-copilot auth, the fallback must not return the azure model.
       const registry = createMockRegistry({
         'github-copilot': [{ id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', provider: 'github-copilot' }],
-        'azure': [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure' }],
+        azure: [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure' }],
       });
 
       const result = resolvePiModel(registry, 'gpt-5.4', 'github-copilot');
@@ -176,7 +211,7 @@ describe('resolvePiModel', () => {
 
     it('does not filter by provider when piAuthProvider is not set', () => {
       const registry = createMockRegistry({
-        'azure': [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure' }],
+        azure: [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure' }],
       });
 
       const result = resolvePiModel(registry, 'gpt-5.4');
@@ -262,33 +297,18 @@ describe('isModelNotFoundError', () => {
 });
 
 describe('isModelRejectionError', () => {
-  it('matches the Codex refusal that quotes the requested model', () => {
-    expect(
-      isModelRejectionError(
-        "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
-        'gpt-5.6-sol',
-      ),
-    ).toBe(true);
+  it('matches an unsupported response that names the requested model', () => {
+    expect(isModelRejectionError(
+      "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+      'gpt-5.6-sol',
+    )).toBe(true);
   });
 
-  it('does NOT match a hosted-tool refusal that also says "is not supported"', () => {
+  it('does not mistake an unsupported hosted tool for a model rejection', () => {
     expect(isModelRejectionError("Hosted tool 'web_search' is not supported.", 'gpt-5.6-sol')).toBe(false);
-    expect(isModelRejectionError("The 'web_search_preview' tool is not supported.", 'gpt-5.6-sol')).toBe(false);
   });
 
-  it('matches unambiguous model shapes without requiring the model id', () => {
+  it('matches explicit model_not_found errors without requiring the model id', () => {
     expect(isModelRejectionError('Error code: model_not_found', 'gpt-5.6-sol')).toBe(true);
-    expect(isModelRejectionError('No such model: foo-bar', 'gpt-5.6-sol')).toBe(true);
-    expect(isModelRejectionError('The requested model is not available or does not exist', 'gpt-5.6-sol')).toBe(true);
-  });
-
-  it('matches ambiguous shapes only when the message names the model (case-insensitive)', () => {
-    expect(isModelRejectionError('The model `GPT-5.6-SOL` does not exist', 'gpt-5.6-sol')).toBe(true);
-    expect(isModelRejectionError('The model `gpt-99` does not exist', 'gpt-5.6-sol')).toBe(false);
-  });
-
-  it('does not match unrelated errors at all', () => {
-    expect(isModelRejectionError('rate limit exceeded for gpt-5.6-sol', 'gpt-5.6-sol')).toBe(false);
-    expect(isModelRejectionError('', 'gpt-5.6-sol')).toBe(false);
   });
 });

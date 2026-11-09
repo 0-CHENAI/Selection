@@ -3,7 +3,7 @@
  *
  * CRUD operations for workspaces.
  * Workspaces can be stored anywhere on disk via rootPath.
- * Default location: ~/.craft-agent/workspaces/
+ * Default location: ~/.selection/workspaces/
  */
 
 import {
@@ -14,18 +14,16 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  cpSync,
 } from 'fs';
-import { join } from 'path';
+import { dirname, join, normalize, resolve } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import { expandPath, toPortablePath } from '../utils/paths.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
-import { CONFIG_DIR, DEFAULT_CONFIG_DIR_NAME } from '../config/paths.ts';
 import { getDefaultStatusConfig, saveStatusConfig, ensureDefaultIconFiles } from '../statuses/storage.ts';
 import { getDefaultLabelConfig, saveLabelConfig } from '../labels/storage.ts';
 import { loadConfigDefaults } from '../config/storage.ts';
-import { parsePermissionMode, DEFAULT_PERMISSION_MODES } from '../agent/mode-types.ts';
+import { parsePermissionMode, PERMISSION_MODE_ORDER } from '../agent/mode-types.ts';
 import { normalizeThinkingLevel } from '../agent/thinking-levels.ts';
 import type {
   WorkspaceConfig,
@@ -34,27 +32,15 @@ import type {
   WorkspaceSummary,
 } from './types.ts';
 
+import { CONFIG_DIR } from '../config/paths.ts';
 const DEFAULT_WORKSPACES_DIR = join(CONFIG_DIR, 'workspaces');
-
-// One-time migration: v0.13.5 always stored workspaces in ~/.craft-agent/workspaces
-// even when CRAFT_CONFIG_DIR was set. Copy on first access so the workspace list survives.
-const LEGACY_WORKSPACES_DIR = join(homedir(), DEFAULT_CONFIG_DIR_NAME, 'workspaces');
-function migrateWorkspacesIfNeeded(): void {
-  if (DEFAULT_WORKSPACES_DIR === LEGACY_WORKSPACES_DIR) return;
-  if (existsSync(DEFAULT_WORKSPACES_DIR) || !existsSync(LEGACY_WORKSPACES_DIR)) return;
-  try {
-    cpSync(LEGACY_WORKSPACES_DIR, DEFAULT_WORKSPACES_DIR, { recursive: true });
-  } catch {
-    // Best-effort: an empty workspace list is better than a crashed app.
-  }
-}
 
 // ============================================================
 // Path Utilities
 // ============================================================
 
 /**
- * Get the default workspaces directory (~/.craft-agent/workspaces/)
+ * Get the default workspaces directory (~/.selection/workspaces/)
  */
 export function getDefaultWorkspacesDir(): string {
   return DEFAULT_WORKSPACES_DIR;
@@ -64,7 +50,6 @@ export function getDefaultWorkspacesDir(): string {
  * Ensure default workspaces directory exists
  */
 export function ensureDefaultWorkspacesDir(): void {
-  migrateWorkspacesIfNeeded();
   if (!existsSync(DEFAULT_WORKSPACES_DIR)) {
     mkdirSync(DEFAULT_WORKSPACES_DIR, { recursive: true });
   }
@@ -137,7 +122,7 @@ export function loadWorkspaceConfig(rootPath: string): WorkspaceConfig | null {
 
       config.defaults.cyclablePermissionModes = normalized.length >= 2
         ? normalized
-        : [...DEFAULT_PERMISSION_MODES];
+        : [...PERMISSION_MODE_ORDER];
     }
 
     if (config.defaults && 'thinkingLevel' in config.defaults) {
@@ -255,12 +240,16 @@ export function getWorkspaceSummary(rootPath: string): WorkspaceSummary | null {
 // ============================================================
 
 /**
- * Generate URL-safe slug from name
+ * Generate filesystem-safe slug from name.
+ * Keeps Unicode letters/numbers (incl. Chinese) so workspace folders can use CJK names.
  */
 export function generateSlug(name: string): string {
   let slug = name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .trim()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^\p{L}\p{N}-]+/gu, '-')
+    .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .substring(0, 50);
 
@@ -352,7 +341,9 @@ export function createWorkspaceAtPath(
   saveStatusConfig(rootPath, getDefaultStatusConfig());
   ensureDefaultIconFiles(rootPath);
 
-  // Initialize label configuration with defaults (two nested groups + valued labels)
+  // Always seed labels with current Chinese defaults (内容 / 优先级).
+  // Overwrites any pre-existing labels/config.json so new workspaces never
+  // inherit stale English seed labels from a previous partial create.
   saveLabelConfig(rootPath, getDefaultLabelConfig());
 
   // Initialize plugin manifest for SDK integration (enables skills, commands, agents)
@@ -361,19 +352,142 @@ export function createWorkspaceAtPath(
   return config;
 }
 
+export interface DeleteWorkspaceFolderResult {
+  /** True when the folder no longer exists after the call. */
+  deleted: boolean;
+  /** True when path was already missing (not an error). */
+  alreadyGone?: boolean;
+  /** Why delete was skipped or failed. */
+  error?: string;
+  /** True when full rm failed but config.json was removed so discovery won't re-register. */
+  invalidated?: boolean;
+}
+
 /**
- * Delete a workspace folder and all its contents
+ * Normalize a workspace root path for comparison / deletion.
+ */
+export function normalizeWorkspaceRootPath(rootPath: string): string {
+  return resolve(normalize(expandPath(rootPath.trim())));
+}
+
+/**
+ * Guardrails before recursive delete. Refuses home, app config dir, the
+ * workspaces parent, filesystem roots, and non-workspace directories outside
+ * the managed workspaces location.
+ */
+export function isSafeToDeleteWorkspaceFolder(rootPath: string): { ok: boolean; reason?: string } {
+  if (!rootPath?.trim()) {
+    return { ok: false, reason: 'Empty workspace path' };
+  }
+
+  let normalized: string;
+  try {
+    normalized = normalizeWorkspaceRootPath(rootPath);
+  } catch {
+    return { ok: false, reason: 'Invalid workspace path' };
+  }
+
+  const home = resolve(homedir());
+  const configDir = resolve(CONFIG_DIR);
+  const workspacesDir = resolve(DEFAULT_WORKSPACES_DIR);
+
+  if (normalized === home) {
+    return { ok: false, reason: 'Refusing to delete home directory' };
+  }
+  if (normalized === '/' || /^[A-Za-z]:[\\/]?$/.test(normalized)) {
+    return { ok: false, reason: 'Refusing to delete filesystem root' };
+  }
+  if (normalized === configDir) {
+    return { ok: false, reason: 'Refusing to delete app config directory' };
+  }
+  if (normalized === workspacesDir) {
+    return { ok: false, reason: 'Refusing to delete workspaces root directory' };
+  }
+
+  // Managed workspaces live as direct children of ~/.selection/workspaces/
+  const parent = dirname(normalized);
+  if (parent === workspacesDir) {
+    return { ok: true };
+  }
+
+  // Custom location: only delete if it looks like a real workspace
+  if (isValidWorkspace(normalized)) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    reason: 'Path is not a managed workspace folder and has no config.json',
+  };
+}
+
+/**
+ * Delete a workspace folder and all its contents.
+ * Applies safety checks; on partial failure tries to strip config.json so
+ * startup discovery will not resurrect the workspace.
+ *
  * @param rootPath - Absolute path to workspace root folder
  */
 export function deleteWorkspaceFolder(rootPath: string): boolean {
-  if (!existsSync(rootPath)) return false;
+  return deleteWorkspaceFolderDetailed(rootPath).deleted;
+}
+
+/**
+ * Same as deleteWorkspaceFolder but returns structured diagnostics.
+ */
+export function deleteWorkspaceFolderDetailed(rootPath: string): DeleteWorkspaceFolderResult {
+  if (!rootPath?.trim()) {
+    return { deleted: false, error: 'Empty workspace path' };
+  }
+
+  let normalized: string;
+  try {
+    normalized = normalizeWorkspaceRootPath(rootPath);
+  } catch {
+    return { deleted: false, error: 'Invalid workspace path' };
+  }
+
+  if (!existsSync(normalized)) {
+    return { deleted: true, alreadyGone: true };
+  }
+
+  const safety = isSafeToDeleteWorkspaceFolder(normalized);
+  if (!safety.ok) {
+    return { deleted: false, error: safety.reason };
+  }
 
   try {
-    rmSync(rootPath, { recursive: true });
-    return true;
-  } catch {
-    return false;
+    rmSync(normalized, { recursive: true, force: true });
+    if (existsSync(normalized)) {
+      return invalidateOrphanWorkspace(normalized, 'Folder still exists after rmSync');
+    }
+    return { deleted: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return invalidateOrphanWorkspace(normalized, message);
   }
+}
+
+/**
+ * If full delete fails (file locks, permissions), remove config.json so
+ * discoverWorkspacesInDefaultLocation will not re-add the workspace on launch.
+ */
+function invalidateOrphanWorkspace(normalized: string, cause: string): DeleteWorkspaceFolderResult {
+  const configPath = join(normalized, 'config.json');
+  try {
+    if (existsSync(configPath)) {
+      rmSync(configPath, { force: true });
+      return {
+        deleted: false,
+        invalidated: true,
+        error: `${cause}; removed config.json to prevent re-discovery`,
+      };
+    }
+  } catch (invalidateErr) {
+    const invMsg = invalidateErr instanceof Error ? invalidateErr.message : String(invalidateErr);
+    return { deleted: false, error: `${cause}; also failed to invalidate: ${invMsg}` };
+  }
+  return { deleted: false, error: cause };
 }
 
 /**

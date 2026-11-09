@@ -22,13 +22,16 @@ export const KEYS = {
   collapsedSidebarItems: 'collapsed-sidebar-items',
   chatGroupingMode: 'chat-grouping-mode', // How to group chats: 'date' | 'status'
   collapsedSessionGroups: 'collapsed-session-groups', // Collapsed group keys in session list
-  collapsedSessionFamilies: 'collapsed-session-families', // Sessions whose sub-sessions are hidden (workspace-scoped via suffix)
 
-  // Focus mode
+  // Retired ⌘+. flag. Read once into immersive mode, then cleared.
   focusModeEnabled: 'focus-mode-enabled',
+
+  // Immersive mode — hides the left nav and list. Column widths stay in their own keys.
+  immersiveModeEnabled: 'immersive-mode-enabled',
 
   // Session files panel state
   sessionFilesExpandedFolders: 'session-files-expanded', // Expanded folders in session files tree (keyed by sessionId)
+  officePreviewState: 'office-preview-state', // Open file and reading position (workspace + session scoped)
 
   // Theme
   theme: 'theme',
@@ -42,8 +45,10 @@ export const KEYS = {
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',
 
-  // TurnCard expansion state (persisted across session switches)
-  turnCardExpansion: 'turncard-expansion',
+  // Only user-selected folds. Legacy entries could contain automatic expansions.
+  turnCardExpansion: 'turncard-expansion-manual-v2',
+  artifactFeedbackDrafts: 'artifact-feedback-drafts',
+  annotationFeedbackDrafts: 'annotation-feedback-drafts',
 
   // Last selected session (workspace-scoped via suffix)
   lastSelectedSessionId: 'last-selected-session-id',
@@ -53,7 +58,6 @@ export const KEYS = {
 
   // Appearance
   showConnectionIcons: 'show-connection-icons',
-  projectColorTreatment: 'project-color-treatment', // 'stripe' | 'stripe-tint'
 
   // What's New
   whatsNewLastSeenVersion: 'whats-new-last-seen-version',

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { appendRestoredInput, coerceInputText } from '../input-text'
+import { readFileSync } from 'node:fs'
+import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt, resolveComposerAfterExplicitStop, sessionHasLiveGeneration } from '../input-text'
 
 describe('coerceInputText', () => {
   it('preserves plain strings', () => {
@@ -26,6 +27,21 @@ describe('coerceInputText', () => {
   })
 })
 
+describe('resolveComposerAfterExplicitStop', () => {
+  it('keeps an empty draft empty and does not append the cancelled prompt', () => {
+    expect(resolveComposerAfterExplicitStop('')).toBe('')
+    expect(resolveComposerAfterExplicitStop(undefined)).toBe('')
+    expect(resolveComposerAfterExplicitStop('still typing')).toBe('still typing')
+    expect(resolveComposerAfterExplicitStop('still typing')).not.toBe(appendRestoredInput('still typing', 'original question'))
+  })
+
+  it('does not put the stopped prompt back into the composer', () => {
+    const source = readFileSync(new URL('../../components/app-shell/ChatDisplay.tsx', import.meta.url), 'utf8')
+    expect(source.includes('getRestorableStoppedPrompt')).toBe(false)
+    expect(source.includes('appendRestoredInput')).toBe(false)
+  })
+})
+
 describe('appendRestoredInput', () => {
   it('returns the restored text when there is no existing draft', () => {
     expect(appendRestoredInput('', 'hello')).toBe('hello')
@@ -48,5 +64,99 @@ describe('appendRestoredInput', () => {
 
   it('coerces malformed (non-string) persisted draft values defensively', () => {
     expect(appendRestoredInput({ text: 'draft' } as unknown as string, 'msg')).toBe('draft\n\nmsg')
+  })
+})
+
+describe('getRestorableStoppedPrompt', () => {
+  it('returns the latest visible prompt from the active user turn', () => {
+    expect(getRestorableStoppedPrompt([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'reply' },
+      { role: 'user', content: 'latest' },
+    ])).toBe('latest')
+  })
+
+  it('does not restore an older prompt when the active turn is a hidden continuation', () => {
+    expect(getRestorableStoppedPrompt([
+      { role: 'user', content: 'already submitted' },
+      { role: 'user', content: 'internal retry', hidden: true },
+    ])).toBe('')
+  })
+
+  it('ignores queued composer messages because the backend restores them', () => {
+    expect(getRestorableStoppedPrompt([
+      { role: 'user', content: 'active prompt' },
+      { role: 'user', content: 'queued draft', isQueued: true },
+    ])).toBe('active prompt')
+  })
+})
+
+describe('sessionHasLiveGeneration', () => {
+  it('does not let an interrupted Office mirror lock an idle session', () => {
+    const messages = [{ role: 'tool', toolUseId: 'office-child-call-1', toolStatus: 'executing' }]
+    expect(sessionHasLiveGeneration({ isProcessing: false, messages })).toBe(false)
+    expect(sessionHasLiveGeneration({ isProcessing: true, messages })).toBe(true)
+  })
+  it('treats isProcessing as live generation', () => {
+    expect(sessionHasLiveGeneration({ isProcessing: true, messages: [] })).toBe(true)
+  })
+
+  it('treats a streaming assistant body as live even if isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', isStreaming: true, isPending: true }],
+    })).toBe(true)
+  })
+
+  it('does not treat idle transcript messages as live generation', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'user', content: 'done' }, { role: 'assistant', content: 'reply' }],
+    })).toBe(false)
+  })
+
+  it('does not treat settled work-chain commentary as live after the turn stops', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'assistant', content: 'PAGE field is properly structured', isIntermediate: true },
+        { role: 'assistant', content: '已写好公式和模拟过程' },
+      ],
+    })).toBe(false)
+  })
+
+  it('treats pending commentary as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', content: '先读目录', isIntermediate: true, isPending: true }],
+    })).toBe(true)
+  })
+
+  it('treats a thinking status pill as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      currentStatus: { message: 'Thinking…' },
+      messages: [{ role: 'user', content: 'question' }],
+    })).toBe(true)
+  })
+
+  it('treats a work-chain-only executing tool as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'user', content: 'read the doc' },
+        { role: 'tool', toolStatus: 'executing', content: '' },
+      ],
+    })).toBe(true)
+  })
+
+  it('does not treat a finished background task as live generation', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'assistant', content: 'done' },
+        { role: 'tool', toolStatus: 'executing', isBackground: true, taskId: 'task-1' },
+      ],
+    })).toBe(false)
   })
 })

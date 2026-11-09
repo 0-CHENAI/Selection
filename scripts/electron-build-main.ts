@@ -4,6 +4,7 @@
  */
 
 import { spawn } from "bun";
+import { build } from "esbuild";
 import { existsSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join } from "path";
 
@@ -13,11 +14,10 @@ const OUTPUT_FILE = join(DIST_DIR, "main.cjs");
 const INTERCEPTOR_SOURCE = join(ROOT_DIR, "packages/shared/src/unified-network-interceptor.ts");
 const INTERCEPTOR_OUTPUT = join(DIST_DIR, "interceptor.cjs");
 const SESSION_TOOLS_CORE_DIR = join(ROOT_DIR, "packages/session-tools-core");
+const SESSION_SERVER_DIR = join(ROOT_DIR, "packages/session-mcp-server");
+const SESSION_SERVER_OUTPUT = join(SESSION_SERVER_DIR, "dist/index.js");
 const PI_AGENT_SERVER_DIR = join(ROOT_DIR, "packages/pi-agent-server");
 const PI_AGENT_SERVER_OUTPUT = join(PI_AGENT_SERVER_DIR, "dist/index.js");
-const WA_WORKER_DIR = join(ROOT_DIR, "packages/messaging-whatsapp-worker");
-const WA_WORKER_SOURCE = join(WA_WORKER_DIR, "src/worker.ts");
-const WA_WORKER_OUTPUT = join(WA_WORKER_DIR, "dist/worker.cjs");
 
 // Load .env file if it exists
 function loadEnvFile(): void {
@@ -47,7 +47,7 @@ function loadEnvFile(): void {
 // To enable in the future, add @sentry/esbuild-plugin. See apps/electron/CLAUDE.md.
 // NOTE: Google OAuth credentials are NOT baked into the build - users provide their own
 // via source config. See README_FOR_OSS.md for setup instructions.
-function getBuildDefines(): string[] {
+function getBuildDefines(): Record<string, string> {
   const definedVars = [
     "SLACK_OAUTH_CLIENT_ID",
     "SLACK_OAUTH_CLIENT_SECRET",
@@ -55,12 +55,14 @@ function getBuildDefines(): string[] {
     "MICROSOFT_OAUTH_CLIENT_SECRET",
     "SENTRY_ELECTRON_INGEST_URL",
     "CRAFT_DEV_RUNTIME",
+    "CRAFT_FEATURE_TASKS_ORCHESTRATE",
+    "CRAFT_SWARM_PREVIEW_BUILD",
   ];
 
-  return definedVars.map((varName) => {
+  return Object.fromEntries(definedVars.map((varName) => {
     const value = process.env[varName] || "";
-    return `--define:process.env.${varName}="${value}"`;
-  });
+    return [`process.env.${varName}`, JSON.stringify(value)];
+  }));
 }
 
 // Wait for file to stabilize (no size changes)
@@ -167,6 +169,45 @@ async function buildInterceptor(): Promise<void> {
   console.log("✅ Interceptor built successfully");
 }
 
+// Build the Session MCP Server (provides session-scoped tools like SubmitPlan for Codex sessions)
+async function buildSessionServer(): Promise<void> {
+  console.log("📋 Building Session MCP Server...");
+
+  // Ensure dist directory exists
+  const distDir = join(SESSION_SERVER_DIR, "dist");
+  if (!existsSync(distDir)) {
+    mkdirSync(distDir, { recursive: true });
+  }
+
+  const proc = spawn({
+    cmd: [
+      "bun", "build",
+      join(SESSION_SERVER_DIR, "src/index.ts"),
+      "--outfile", SESSION_SERVER_OUTPUT,
+      "--target", "node",
+      "--format", "cjs",
+    ],
+    cwd: ROOT_DIR,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0) {
+    console.error("❌ Session server build failed with exit code", exitCode);
+    process.exit(exitCode);
+  }
+
+  // Verify output exists
+  if (!existsSync(SESSION_SERVER_OUTPUT)) {
+    console.error("❌ Session server output not found at", SESSION_SERVER_OUTPUT);
+    process.exit(1);
+  }
+
+  console.log("✅ Session server built successfully");
+}
+
 // Build the Pi Agent Server (subprocess for Pi SDK sessions)
 // Optional: skips if package directory is missing (e.g., not synced to OSS).
 async function buildPiAgentServer(): Promise<void> {
@@ -187,15 +228,8 @@ async function buildPiAgentServer(): Promise<void> {
   // is ESM-only. --target=node --format=cjs leaves ESM deps as external require()
   // calls that fail at runtime since there are no node_modules relative to dist/.
   const proc = spawn({
-    cmd: [
-      "bun", "build",
-      join(PI_AGENT_SERVER_DIR, "src/index.ts"),
-      "--outfile", PI_AGENT_SERVER_OUTPUT,
-      "--target", "bun",
-      "--format", "esm",
-      "--external", "koffi",
-    ],
-    cwd: ROOT_DIR,
+    cmd: ["bun", "run", "build"],
+    cwd: PI_AGENT_SERVER_DIR,
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -216,59 +250,6 @@ async function buildPiAgentServer(): Promise<void> {
   console.log("✅ Pi agent server built successfully");
 }
 
-// Build the WhatsApp worker (Baileys-backed subprocess spawned by WhatsAppAdapter)
-async function buildWhatsAppWorker(): Promise<void> {
-  if (!existsSync(WA_WORKER_SOURCE)) {
-    console.log("⏭️  WhatsApp worker skipped (package not found)");
-    return;
-  }
-
-  console.log("📨 Building WhatsApp worker...");
-
-  const workerDistDir = join(WA_WORKER_DIR, "dist");
-  if (!existsSync(workerDistDir)) {
-    mkdirSync(workerDistDir, { recursive: true });
-  }
-
-  // Baileys is bundled INTO worker.cjs (not external) so the packaged app is
-  // self-contained. Dynamic `import('@whiskeysockets/baileys')` is resolved
-  // at bundle time because the specifier is a literal.
-  const proc = spawn({
-    cmd: [
-      "bun", "run", "esbuild",
-      WA_WORKER_SOURCE,
-      "--bundle",
-      "--platform=node",
-      "--format=cjs",
-      "--target=node20",
-      `--outfile=${WA_WORKER_OUTPUT}`,
-      "--external:electron",
-      // Baileys' runtime-optional features — wrapped in try/catch at the
-      // call site and not used by Craft Agent (we send text + documents, no
-      // link previews, no inline image processing, no terminal QR).
-      "--external:link-preview-js",
-      "--external:qrcode-terminal",
-      "--external:jimp",
-    ],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    console.error("❌ WhatsApp worker build failed with exit code", exitCode);
-    process.exit(exitCode);
-  }
-
-  if (!existsSync(WA_WORKER_OUTPUT)) {
-    console.error("❌ WhatsApp worker output not found at", WA_WORKER_OUTPUT);
-    process.exit(1);
-  }
-
-  console.log("✅ WhatsApp worker built successfully");
-}
-
 async function main(): Promise<void> {
   loadEnvFile();
 
@@ -280,56 +261,31 @@ async function main(): Promise<void> {
   // Verify session tools core exists (shared utilities for session-scoped tools)
   verifySessionToolsCore();
 
+  // Build session server (provides session-scoped tools like SubmitPlan)
+  // Depends on session-tools-core being built first
+  await buildSessionServer();
+
   // Build Pi agent server (subprocess for Pi SDK sessions)
   await buildPiAgentServer();
 
   // Build unified network interceptor (CJS bundle for Node.js --require)
   await buildInterceptor();
 
-  // Build WhatsApp worker (Baileys subprocess — optional package)
-  await buildWhatsAppWorker();
-
   const buildDefines = getBuildDefines();
 
   console.log("🔨 Building main process...");
 
-  const proc = spawn({
-    cmd: [
-      "bun", "run", "esbuild",
-      "apps/electron/src/main/index.ts",
-      "--bundle",
-      "--platform=node",
-      "--format=cjs",
-      "--outfile=apps/electron/dist/main.cjs",
-      "--external:electron",
-      // Claude Agent SDK is pure ESM (sdk.mjs) and calls `createRequire(import.meta.url)`
-      // at module init. esbuild's CJS bundling leaves the synthesized `import_meta.url`
-      // undefined for inner ESM modules, which throws ERR_INVALID_ARG_VALUE on load.
-      // Externalize so Node loads the SDK natively as ESM (with a real import.meta.url).
-      // Electron 39 ships Node 22.x which supports require() of ESM without TLA, so the
-      // bundled main.cjs's `require('@anthropic-ai/claude-agent-sdk')` works.
-      "--external:@anthropic-ai/claude-agent-sdk",
-      // Replace grammY's bundled polyfills (node-fetch@2 + abort-controller@3)
-      // with native Node globals. esbuild otherwise renames the polyfill's
-      // `class AbortSignal` to `_AbortSignal` to dodge collision with the
-      // global, which then breaks node-fetch@2's `constructor.name` check and
-      // fails every Telegram API call with a TypeError.
-      "--alias:node-fetch=./apps/electron/src/main/shims/node-fetch.cjs",
-      "--alias:abort-controller=./apps/electron/src/main/shims/abort-controller.cjs",
-      ...buildDefines,
-    ],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
+  // The API preserves JSON define values without Windows CLI quote parsing.
+  await build({
+    entryPoints: [join(ROOT_DIR, "apps/electron/src/main/index.ts")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    outfile: OUTPUT_FILE,
+    external: ["electron"],
+    define: buildDefines,
+    absWorkingDir: ROOT_DIR,
   });
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    console.error("❌ esbuild failed with exit code", exitCode);
-    process.exit(exitCode);
-  }
-
   // Wait for file to stabilize
   console.log("⏳ Waiting for file to stabilize...");
   const stable = await waitForFileStable(OUTPUT_FILE);
@@ -345,6 +301,19 @@ async function main(): Promise<void> {
 
   if (!verification.valid) {
     console.error("❌ Build verification failed:", verification.error);
+    process.exit(1);
+  }
+
+  // HEIC conversion is a static import so esbuild inlines heic-convert +
+  // libheif-js/wasm-bundle. A leftover runtime import() would miss the
+  // packaged app (electron-builder excludes node_modules).
+  const mainSource = readFileSync(OUTPUT_FILE, "utf-8");
+  if (mainSource.includes('import("heic-convert")') || mainSource.includes("import('heic-convert')")) {
+    console.error("❌ HEIC converter was left as a runtime import in main.cjs");
+    process.exit(1);
+  }
+  if (!/libheif|heic-convert/i.test(mainSource)) {
+    console.error("❌ HEIC converter was not bundled into main.cjs");
     process.exit(1);
   }
 

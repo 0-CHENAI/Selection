@@ -1,0 +1,160 @@
+{
+  "file": "defects.csv",
+  "rows": 6,
+  "columns": 7,
+  "column_list": [
+    "id",
+    "name",
+    "email",
+    "amount",
+    "unit_cost",
+    "start_date",
+    "end_date"
+  ],
+  "overall_score": 68.23,
+  "grade": "C",
+  "dimensions": {
+    "missing_values": {
+      "score": 97.62,
+      "issues": [
+        {
+          "column": "amount",
+          "missing_count": 1,
+          "missing_pct": 16.67,
+          "suggestion": "建议用中位数(11)或均值填充"
+        }
+      ]
+    },
+    "duplicates": {
+      "score": 83.33,
+      "issues": [
+        {
+          "duplicate_rows": 1,
+          "duplicate_pct": 16.67,
+          "sample_row_indices": [
+            3
+          ],
+          "suggestion": "发现 1 行完全重复（16.67%），建议使用 drop_duplicates() 去重"
+        }
+      ]
+    },
+    "type_consistency": {
+      "score": 100.0,
+      "issues": []
+    },
+    "value_range": {
+      "score": 33.33,
+      "issues": [
+        {
+          "column": "amount",
+          "outlier_count": 1,
+          "outlier_pct": 20.0,
+          "range": {
+            "min": 10.0,
+            "max": 100000.0
+          },
+          "iqr_bounds": {
+            "lower": 7.0,
+            "upper": 15.0
+          },
+          "suggestion": "1 个值超出 IQR 范围 [7, 15]，建议检查是否为录入错误或截断处理"
+        },
+        {
+          "column": "unit_cost",
+          "outlier_count": 1,
+          "outlier_pct": 16.67,
+          "range": {
+            "min": 1.2,
+            "max": 2.0
+          },
+          "iqr_bounds": {
+            "lower": 1.2,
+            "upper": 1.8
+          },
+          "suggestion": "1 个值超出 IQR 范围 [1.2, 1.8]，建议检查是否为录入错误或截断处理"
+        }
+      ]
+    },
+    "format_compliance": {
+      "score": 66.67,
+      "issues": [
+        {
+          "column": "email",
+          "detected_format": "email",
+          "invalid_count": 1,
+          "invalid_pct": 16.67,
+          "samples": [
+            "not-an-email"
+          ],
+          "suggestion": "检测到 email 格式，但有 1 个值不符合（16.67%），建议统一格式"
+        }
+      ]
+    },
+    "uniqueness": {
+      "score": 0.0,
+      "issues": [
+        {
+          "column": "id",
+          "duplicate_count": 1,
+          "duplicate_pct": 16.67,
+          "top_duplicates": {
+            "1": 2
+          },
+          "suggestion": "ID 列「id」有 1 个重复值（16.67%），建议核查数据来源或加主键约束"
+        }
+      ]
+    },
+    "whitespace": {
+      "score": 75.0,
+      "issues": [
+        {
+          "column": "name",
+          "leading_trailing_spaces": 1,
+          "empty_strings": 0,
+          "whitespace_only": 0,
+          "suggestion": "列「name」1 个值有前后空格，建议 strip() 清洗并将空字符串转为 NaN"
+        }
+      ]
+    },
+    "constant_columns": {
+      "score": 100.0,
+      "issues": []
+    },
+    "distribution_skew": {
+      "score": 100.0,
+      "issues": []
+    },
+    "column_naming": {
+      "score": 100.0,
+      "issues": []
+    },
+    "cardinality": {
+      "score": 100.0,
+      "issues": []
+    },
+    "cross_column": {
+      "score": 0.0,
+      "issues": [
+        {
+          "columns": [
+            "start_date",
+            "end_date"
+          ],
+          "violation_count": 1,
+          "violation_pct": 16.67,
+          "suggestion": "「start_date」应 ≤「end_date」，但有 1 行（16.67%）违反此约束，建议核查"
+        }
+      ]
+    }
+  },
+  "top_suggestions": [
+    "建议用中位数(11)或均值填充",
+    "发现 1 行完全重复（16.67%），建议使用 drop_duplicates() 去重",
+    "1 个值超出 IQR 范围 [7, 15]，建议检查是否为录入错误或截断处理",
+    "1 个值超出 IQR 范围 [1.2, 1.8]，建议检查是否为录入错误或截断处理",
+    "检测到 email 格式，但有 1 个值不符合（16.67%），建议统一格式",
+    "ID 列「id」有 1 个重复值（16.67%），建议核查数据来源或加主键约束",
+    "列「name」1 个值有前后空格，建议 strip() 清洗并将空字符串转为 NaN",
+    "「start_date」应 ≤「end_date」，但有 1 行（16.67%）违反此约束，建议核查"
+  ]
+}

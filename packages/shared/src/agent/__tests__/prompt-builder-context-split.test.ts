@@ -16,7 +16,7 @@
  *  3. The one-shot mode-change signal is consumed exactly once, and only by the
  *     volatile builder — never by the stable builder.
  */
-import { describe, it, expect, afterEach, setSystemTime } from 'bun:test'
+import { describe, it, expect, afterEach, jest } from 'bun:test'
 import { TestAgent, createMockBackendConfig } from './test-utils.ts'
 import { cleanupModeState, initializeModeState, setPermissionMode } from '../mode-manager.ts'
 
@@ -30,25 +30,23 @@ function makeBuilder() {
 }
 
 describe('PromptBuilder volatile/stable context split (issue #862)', () => {
-  afterEach(() => cleanupModeState(SESSION_ID))
+  afterEach(() => {
+    jest.useRealTimers()
+    cleanupModeState(SESSION_ID)
+  })
 
   it('buildContextParts equals [...volatile, ...stable] (Claude path stays byte-identical)', () => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2026-11-03T01:06:59.999Z'))
     // No pending one-shot signal → consume is a no-op → repeated calls are stable.
     cleanupModeState(SESSION_ID)
-    // The date/time block carries a millisecond ISO stamp; freeze the clock so the
-    // two builds compare equal instead of flaking when they straddle a millisecond.
-    setSystemTime(new Date('2026-03-02T10:00:00.000Z'))
-    try {
-      const builder = makeBuilder()
-      const composed = [
-        ...builder.buildVolatileContextParts(OPTS, SOURCE_BLOCK),
-        ...builder.buildStableContextParts(),
-      ]
-      const combined = builder.buildContextParts(OPTS, SOURCE_BLOCK)
-      expect(combined).toEqual(composed)
-    } finally {
-      setSystemTime()
-    }
+    const builder = makeBuilder()
+    const composed = [
+      ...builder.buildVolatileContextParts(OPTS, SOURCE_BLOCK),
+      ...builder.buildStableContextParts(),
+    ]
+    const combined = builder.buildContextParts(OPTS, SOURCE_BLOCK)
+    expect(combined).toEqual(composed)
   })
 
   it('routes session_state + sources to volatile and workspace capabilities to stable', () => {
@@ -59,13 +57,38 @@ describe('PromptBuilder volatile/stable context split (issue #862)', () => {
 
     // session_state + source ride the volatile tail
     expect(volatileText).toContain('permissionMode:')
+    expect(volatileText).toContain('dataFolderPath: /tmp/data')
     expect(volatileText).toContain(SOURCE_BLOCK)
     // workspace capabilities is stable
     expect(stableText).toContain('<workspace_capabilities>')
+    expect(stableText).toContain('<available_skills>')
+    expect(stableText).toContain('(officecli)')
 
     // The halves must not bleed into each other
     expect(volatileText).not.toContain('<workspace_capabilities>')
+    expect(volatileText).not.toContain('<available_skills>')
     expect(stableText).not.toContain('permissionMode:')
+    expect(stableText).not.toContain('/tmp/data')
+  })
+
+  it('puts the current image capability on the volatile session state', () => {
+    cleanupModeState(SESSION_ID)
+    const builder = makeBuilder()
+    const enabled = builder.buildVolatileContextParts({ ...OPTS, imageInput: true }, SOURCE_BLOCK).join('\n')
+    const unavailable = builder.buildVolatileContextParts({ ...OPTS, imageInput: false }, SOURCE_BLOCK).join('\n')
+    expect(enabled).toContain('imageInput: enabled')
+    expect(enabled).toContain('call_llm attachments')
+    expect(unavailable).toContain('imageInput: unavailable')
+    expect(unavailable).toContain('image_capability_mismatch')
+    expect(builder.buildVolatileContextParts(OPTS, SOURCE_BLOCK).join('\n')).not.toContain('imageInput:')
+  })
+
+  it('does not inject the skill catalog for mini agents', () => {
+    cleanupModeState(SESSION_ID)
+    const builder = new TestAgent(createMockBackendConfig({
+      systemPromptPreset: 'mini',
+    })).getPromptBuilder()
+    expect(builder.buildStableContextParts().join('\n')).not.toContain('<available_skills>')
   })
 
   it('consumes the one-shot mode-change signal exactly once, only on the volatile path', () => {

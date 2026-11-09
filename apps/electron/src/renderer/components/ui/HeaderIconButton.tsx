@@ -2,54 +2,148 @@
  * HeaderIconButton
  *
  * Unified icon button for panel headers (Navigator and Detail panels).
- * 28×28 ghost button (spec §4 controls), secondary icon, fill on hover/open; 36×36 in compact via
- * `.header-icon-btn`. The tooltip text doubles as the accessible name unless `aria-label` is given.
+ * Provides consistent styling for all header action buttons.
  */
 
 import * as React from 'react'
-import { forwardRef } from 'react'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
+import { forwardRef, useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { mergeRefs } from '@/lib/merge-refs'
+import {
+  placeViewportTooltip,
+  shouldShowHeaderTooltipOnFocus,
+} from './header-icon-tooltip'
 
 interface HeaderIconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Icon as React element - caller controls size/styling */
   icon: React.ReactNode
-  /** Optional tooltip text (also used as the accessible name) */
+  /** Optional tooltip text */
   tooltip?: string
 }
 
 export const HeaderIconButton = forwardRef<HTMLButtonElement, HeaderIconButtonProps>(
-  ({ icon, tooltip, className, ...props }, ref) => {
+  (
+    {
+      icon,
+      tooltip,
+      className,
+      onBlur,
+      onFocus,
+      onMouseDown,
+      onMouseEnter,
+      onMouseLeave,
+      ...props
+    },
+    ref,
+  ) => {
+    const buttonRef = useRef<HTMLButtonElement | null>(null)
+    const tooltipRef = useRef<HTMLSpanElement | null>(null)
+    const tooltipId = useId()
+    const [open, setOpen] = useState(false)
+    const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
+
+    const updatePosition = useCallback(() => {
+      const el = buttonRef.current
+      if (!el) return
+      setCoords(placeViewportTooltip(el.getBoundingClientRect(), {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }, tooltipRef.current?.getBoundingClientRect()))
+    }, [])
+
+    const show = useCallback(() => {
+      if (!tooltip) return
+      updatePosition()
+      setOpen(true)
+    }, [tooltip, updatePosition])
+
+    const hide = useCallback(() => {
+      setOpen(false)
+    }, [])
+
+    useLayoutEffect(() => {
+      if (!open || !tooltip) return
+      updatePosition()
+      const onReposition = () => updatePosition()
+      const observer = new ResizeObserver(onReposition)
+      if (tooltipRef.current) observer.observe(tooltipRef.current)
+      window.addEventListener('resize', onReposition)
+      window.addEventListener('scroll', onReposition, true)
+      return () => {
+        observer.disconnect()
+        window.removeEventListener('resize', onReposition)
+        window.removeEventListener('scroll', onReposition, true)
+      }
+    }, [open, tooltip, updatePosition])
+
     const button = (
       <button
-        ref={ref}
+        ref={mergeRefs(buttonRef, ref)}
         type="button"
-        aria-label={props['aria-label'] ?? tooltip}
+        aria-describedby={open && tooltip ? tooltipId : undefined}
         className={cn(
           "header-icon-btn inline-flex items-center justify-center",
-          "size-control shrink-0 rounded-md titlebar-no-drag",
-          "text-secondary hover:text-foreground hover:bg-fill-hover active:bg-fill-pressed",
-          "data-[state=open]:text-foreground data-[state=open]:bg-fill-hover",
-          "transition-[background-color,color] duration-micro ease-out-subtle hover:duration-instant",
-          "disabled:pointer-events-none disabled:text-disabled",
+          "h-7 w-7 shrink-0 rounded-[4px] titlebar-no-drag",
+          "text-muted-foreground hover:text-foreground hover:bg-foreground/3",
+          "data-[state=open]:text-foreground data-[state=open]:bg-foreground/3",
+          "transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "disabled:pointer-events-none disabled:opacity-50",
           className
         )}
         {...props}
+        onMouseEnter={(event) => {
+          onMouseEnter?.(event)
+          show()
+        }}
+        onMouseLeave={(event) => {
+          onMouseLeave?.(event)
+          hide()
+        }}
+        onFocus={(event) => {
+          onFocus?.(event)
+          if (shouldShowHeaderTooltipOnFocus(event.currentTarget)) show()
+        }}
+        onBlur={(event) => {
+          onBlur?.(event)
+          hide()
+        }}
+        onMouseDown={(event) => {
+          hide()
+          onMouseDown?.(event)
+        }}
       >
         {icon}
       </button>
     )
 
-    if (tooltip) {
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{tooltip}</TooltipContent>
-        </Tooltip>
-      )
+    if (!tooltip) {
+      return button
     }
 
-    return button
+    return (
+      <>
+        {button}
+        {open && coords && typeof document !== 'undefined' && createPortal(
+          <span
+            ref={tooltipRef}
+            id={tooltipId}
+            role="tooltip"
+            data-testid="header-icon-tooltip"
+            className={cn(
+              "z-tooltip pointer-events-none fixed -translate-x-1/2 w-max max-w-[calc(100vw-16px)] whitespace-normal break-words",
+              "overflow-hidden rounded-[8px] px-2.5 py-1.5 text-xs",
+              "dark bg-background/80 backdrop-blur-xl backdrop-saturate-150 border border-border/50 text-foreground shadow-modal-small",
+              "animate-in fade-in-0 duration-100",
+            )}
+            style={{ left: coords.left, top: coords.top }}
+          >
+            {tooltip}
+          </span>,
+          document.body,
+        )}
+      </>
+    )
   }
 )
 HeaderIconButton.displayName = 'HeaderIconButton'

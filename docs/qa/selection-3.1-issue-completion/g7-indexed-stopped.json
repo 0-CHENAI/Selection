@@ -1,0 +1,63 @@
+{
+  "rootId": "261010-plain-dawn",
+  "status": "stopped",
+  "elapsedMs": 992407,
+  "toolCalls": 103,
+  "workers": 3,
+  "manualPlanEdits": 0,
+  "manualOutputs": 0,
+  "inputHashesBefore": {
+    "costs.txt": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+    "draft.txt": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+    "cost.pdf": "1cce72b607d065970cd9804bdfe1135f5ae27a26007c640abc9e1af1ab0bb9d0",
+    "cost.docx": "e714eac6c1d98d2e5c08c0ebd0abe3cab3ca88c96fc8b9796ab61e48f052eaba",
+    "cost.xlsx": "f1c11e092de077d468cc3fd8e8d0a3440ec4f7f7b6ac8d20d7c8ce0e540bdfe3",
+    "cost.pptx": "7b36bd4bed7e5c529bd1c4e6df6853442a67077faf27f2af98cb8b720812d9cc"
+  },
+  "inputHashes": {
+    "costs.txt": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+    "draft.txt": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+    "cost.pdf": "1cce72b607d065970cd9804bdfe1135f5ae27a26007c640abc9e1af1ab0bb9d0",
+    "cost.docx": "e714eac6c1d98d2e5c08c0ebd0abe3cab3ca88c96fc8b9796ab61e48f052eaba",
+    "cost.xlsx": "f1c11e092de077d468cc3fd8e8d0a3440ec4f7f7b6ac8d20d7c8ce0e540bdfe3",
+    "cost.pptx": "7b36bd4bed7e5c529bd1c4e6df6853442a67077faf27f2af98cb8b720812d9cc"
+  },
+  "countedAsPass": false,
+  "stopReason": "尚未据证据归类；仅记录已停止的实际状态。",
+  "nodes": [
+    {
+      "id": "text-evidence",
+      "state": "cancelled"
+    },
+    {
+      "id": "native-doc-pdf",
+      "state": "done"
+    },
+    {
+      "id": "native-sheet-deck",
+      "state": "done"
+    },
+    {
+      "id": "initial-review",
+      "state": "cancelled"
+    },
+    {
+      "id": "append-corrections",
+      "state": "cancelled"
+    },
+    {
+      "id": "correction-review",
+      "state": "cancelled"
+    },
+    {
+      "id": "report",
+      "state": "cancelled"
+    },
+    {
+      "id": "final-review",
+      "state": "cancelled"
+    }
+  ],
+  "completedResearchReport": false,
+  "scope": "采集及冻结已有单独证据；此复杂样本没有完成最终独立审查和报告。"
+}

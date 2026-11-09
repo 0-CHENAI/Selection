@@ -38,12 +38,12 @@ export const SETTINGS_PAGES = [
   { id: 'app' as const, labelKey: 'settings.app.title', descriptionKey: 'settings.app.description' },
   { id: 'ai' as const, labelKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
   { id: 'appearance' as const, labelKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
-  { id: 'input' as const, labelKey: 'settings.input.title', descriptionKey: 'settings.input.description' },
+  { id: 'input' as const, labelKey: 'settings.app.title', descriptionKey: 'settings.app.description' },
   { id: 'workspace' as const, labelKey: 'settings.workspace.title', descriptionKey: 'settings.workspace.description' },
+  { id: 'advanced' as const, labelKey: 'settings.advanced.title', descriptionKey: 'settings.advanced.description' },
   { id: 'permissions' as const, labelKey: 'settings.permissions.title', descriptionKey: 'settings.permissions.description' },
   { id: 'labels' as const, labelKey: 'settings.labels.title', descriptionKey: 'settings.labels.description' },
   { id: 'messaging' as const, labelKey: 'settings.messaging.title', descriptionKey: 'settings.messaging.description' },
-  { id: 'server' as const, labelKey: 'settings.server.title', descriptionKey: 'settings.server.description' },
   { id: 'shortcuts' as const, labelKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
   { id: 'preferences' as const, labelKey: 'settings.preferences.title', descriptionKey: 'settings.preferences.description' },
 ] satisfies readonly SettingsPageDefinition[]
@@ -53,6 +53,21 @@ export const SETTINGS_PAGES = [
  * This replaces the manual union type in types.ts
  */
 export type SettingsSubpage = (typeof SETTINGS_PAGES)[number]['id']
+
+/**
+ * Settings pages that remain registered for type/internal compatibility but
+ * are not currently exposed or rendered through product navigation.
+ */
+export const HIDDEN_SETTINGS_SUBPAGES: readonly SettingsSubpage[] = [
+  'input',
+  'labels',
+  'permissions',
+  'messaging',
+]
+
+export function isVisibleSettingsSubpage(value: SettingsSubpage): boolean {
+  return !HIDDEN_SETTINGS_SUBPAGES.includes(value)
+}
 
 /**
  * Array of valid settings subpage IDs - for runtime validation

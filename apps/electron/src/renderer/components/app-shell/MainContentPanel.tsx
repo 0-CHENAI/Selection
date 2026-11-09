@@ -2,7 +2,7 @@
  * MainContentPanel - Right panel component for displaying content
  *
  * Renders content based on the unified NavigationState:
- * - Chats navigator: ChatPage for selected session, or empty state
+ * - Chats navigator: ChatPage for the selected session, or the same page in draft mode
  * - Sources navigator: SourceInfoPage for selected source, or empty state
  * - Settings navigator: Settings, Preferences, or Shortcuts page
  *
@@ -16,14 +16,12 @@
  */
 
 import * as React from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
-import { DetailEmptyState, SessionsEmptyState } from './DetailEmptyState'
 import { useAppShellContext } from '@/context/AppShellContext'
-import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { StoplightProvider } from '@/context/StoplightContext'
 import {
   useNavigationState,
@@ -33,20 +31,15 @@ import {
   isSkillsNavigation,
   isAutomationsNavigation,
   isProjectsNavigation,
-  isPagesNavigation,
 } from '@/contexts/NavigationContext'
-import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
+import { useSessionSelection, useIsMultiSelectActive, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
-import { extractLabelId } from '@craft-agent/shared/labels'
-import type { SessionStatusId } from '@/config/session-status-config'
 import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
+import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
 import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import ProjectInfoPage from '@/pages/ProjectInfoPage'
-import { KanbanBoardContainer } from './kanban/KanbanBoardContainer'
-import { PagesHome } from '../pages/PagesHome'
-import { PageView } from '../pages/PageView'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
 import { SendResourceToWorkspaceDialog, type SendResourceType } from './SendResourceToWorkspaceDialog'
@@ -75,12 +68,8 @@ export function MainContentPanel({
   const {
     activeWorkspaceId,
     workspaces,
-    onSessionStatusChange,
-    onArchiveSession,
-    onSessionLabelsChange,
-    sessionStatuses,
-    labels,
     onTestAutomation,
+    onSimulateMatchAutomation,
     onToggleAutomation,
     onDuplicateAutomation,
     onDeleteAutomation,
@@ -92,10 +81,8 @@ export function MainContentPanel({
 
   // Session multi-select state
   const isMultiSelectActive = useIsMultiSelectActive()
-  const selectedIds = useSelectedIds()
   const selectionCount = useSelectionCount()
   const { clearMultiSelect } = useSessionSelection()
-  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const automations = useAtomValue(automationsAtom)
 
   // Execution history for the selected automation
@@ -159,67 +146,6 @@ export function MainContentPanel({
     setSendDialogOpen(true)
   }, [])
 
-  const selectedMetas = useMemo(() => {
-    const metas: SessionMeta[] = []
-    selectedIds.forEach((id) => {
-      const meta = sessionMetaMap.get(id)
-      if (meta) metas.push(meta)
-    })
-    return metas
-  }, [selectedIds, sessionMetaMap])
-
-  const activeStatusId = useMemo((): SessionStatusId | null => {
-    if (selectedMetas.length === 0) return null
-    const first = (selectedMetas[0].sessionStatus || 'todo') as SessionStatusId
-    const allSame = selectedMetas.every(meta => (meta.sessionStatus || 'todo') === first)
-    return allSame ? first : null
-  }, [selectedMetas])
-
-  const appliedLabelIds = useMemo(() => {
-    if (selectedMetas.length === 0) return new Set<string>()
-    const toLabelSet = (meta: SessionMeta) =>
-      new Set((meta.labels || []).map(entry => extractLabelId(entry)))
-    const [first, ...rest] = selectedMetas.map(toLabelSet)
-    const intersection = new Set(first)
-    for (const labelSet of rest) {
-      for (const id of [...intersection]) {
-        if (!labelSet.has(id)) intersection.delete(id)
-      }
-    }
-    return intersection
-  }, [selectedMetas])
-
-  // Batch operations for multi-select
-  const handleBatchSetStatus = useCallback((status: SessionStatusId) => {
-    selectedIds.forEach(sessionId => {
-      onSessionStatusChange(sessionId, status)
-    })
-  }, [selectedIds, onSessionStatusChange])
-
-  const handleBatchArchive = useCallback(() => {
-    selectedIds.forEach(sessionId => {
-      onArchiveSession(sessionId)
-    })
-    clearMultiSelect()
-  }, [selectedIds, onArchiveSession, clearMultiSelect])
-
-  const handleBatchToggleLabel = useCallback((labelId: string) => {
-    if (!onSessionLabelsChange) return
-    const allHaveLabel = selectedMetas.every(meta =>
-      (meta.labels || []).some(entry => extractLabelId(entry) === labelId)
-    )
-
-    selectedMetas.forEach(meta => {
-      const labels = meta.labels || []
-      const hasLabel = labels.some(entry => extractLabelId(entry) === labelId)
-      const filtered = labels.filter(entry => extractLabelId(entry) !== labelId)
-      const nextLabels = allHaveLabel
-        ? filtered
-        : (hasLabel ? labels : [...labels, labelId])
-      onSessionLabelsChange(meta.id, nextLabels)
-    })
-  }, [selectedMetas, onSessionLabelsChange])
-
   // Wrap content with StoplightProvider so PanelHeaders auto-compensate in focused mode.
   // Also renders the Send to Workspace dialog (portal-based, so it overlays regardless of position).
   const wrapWithStoplight = (content: React.ReactNode) => (
@@ -242,7 +168,9 @@ export function MainContentPanel({
   // PanelStackContainer hides the content panel entirely. On desktop the panel still
   // mounts, so fall back to the App page so it isn't empty.
   if (isSettingsNavigation(navState)) {
-    const subpage = navState.subpage ?? 'app'
+    const subpage = navState.subpage && isVisibleSettingsSubpage(navState.subpage)
+      ? navState.subpage
+      : 'app'
     const SettingsPageComponent = getSettingsPageComponent(subpage)
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
@@ -278,7 +206,9 @@ export function MainContentPanel({
     // No source selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <DetailEmptyState message={t("sourcesList.noSourcesConfigured")} />
+        <div className="flex items-center justify-center h-full text-muted-foreground">
+          <p className="text-sm">{t("sourcesList.noSourcesConfigured")}</p>
+        </div>
       </Panel>
     )
   }
@@ -311,7 +241,9 @@ export function MainContentPanel({
     // No skill selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <DetailEmptyState message={t("skillsList.noSkillsConfigured")} />
+        <div className="flex items-center justify-center h-full text-muted-foreground">
+          <p className="text-sm">{t("skillsList.noSkillsConfigured")}</p>
+        </div>
       </Panel>
     )
   }
@@ -340,6 +272,7 @@ export function MainContentPanel({
               executions={executions}
               testResult={automationTestResults?.[automation.id]}
               onTest={onTestAutomation ? () => onTestAutomation(automation.id) : undefined}
+              onSimulateMatch={onSimulateMatchAutomation ? () => onSimulateMatchAutomation(automation.id) : undefined}
               onToggleEnabled={onToggleAutomation ? () => onToggleAutomation(automation.id) : undefined}
               onDuplicate={onDuplicateAutomation ? () => onDuplicateAutomation(automation.id) : undefined}
               onDelete={onDeleteAutomation ? () => onDeleteAutomation(automation.id) : undefined}
@@ -351,21 +284,9 @@ export function MainContentPanel({
     }
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        {/* "None configured" next to a list of automations contradicted the list */}
-        <DetailEmptyState message={automations.length > 0 ? t("automations.selectAutomation") : t("automations.noAutomationsConfigured")} />
-      </Panel>
-    )
-  }
-
-  // Pages navigator - full-width library grid, or one page's embedded render
-  if (isPagesNavigation(navState)) {
-    return wrapWithStoplight(
-      <Panel variant="grow" className={className}>
-        {navState.details ? (
-          <PageView key={navState.details.pageSlug} pageSlug={navState.details.pageSlug} />
-        ) : (
-          <PagesHome />
-        )}
+        <div className="flex items-center justify-center h-full text-muted-foreground">
+          <p className="text-sm">{t("automations.noAutomationsConfigured")}</p>
+        </div>
       </Panel>
     )
   }
@@ -382,52 +303,34 @@ export function MainContentPanel({
     }
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <DetailEmptyState message={t("projectsList.noProjectSelected")} />
+        <div className="flex items-center justify-center h-full text-muted-foreground">
+          <p className="text-sm">{t("projectsList.noProjectSelected")}</p>
+        </div>
       </Panel>
     )
   }
 
-  // Chats navigator - show chat, multi-select panel, or empty state
+  // Chats navigator - show chat, multi-select panel, or draft composer
   if (isSessionsNavigation(navState)) {
-    // Board view: full-width Kanban over all sessions (placement independent of status)
-    if (navState.viewMode === 'board') {
-      return wrapWithStoplight(
-        <Panel variant="grow" className={className}>
-          <KanbanBoardContainer />
-        </Panel>
-      )
-    }
-
     // Multi-select mode: show batch actions panel
     if (isMultiSelectActive) {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
           <MultiSelectPanel
             count={selectionCount}
-            sessionStatuses={sessionStatuses}
-            activeStatusId={activeStatusId}
-            onSetStatus={handleBatchSetStatus}
-            labels={labels}
-            appliedLabelIds={appliedLabelIds}
-            onToggleLabel={handleBatchToggleLabel}
-            onArchive={handleBatchArchive}
             onClearSelection={clearMultiSelect}
           />
         </Panel>
       )
     }
 
-    if (navState.details) {
-      return wrapWithStoplight(
-        <Panel variant="grow" className={className}>
-          <ChatPage sessionId={navState.details.sessionId} />
-        </Panel>
-      )
-    }
-    // No session selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <SessionsEmptyState hasSessions={sessionMetaMap.size > 0} />
+        <ChatPage
+          sessionId={navState.details?.sessionId ?? null}
+          pptMode={navState.filter.kind === 'ppt'}
+          officeSection={navState.filter.kind === 'ppt' ? 'ppt' : navState.filter.kind === 'office' ? navState.filter.section : undefined}
+        />
       </Panel>
     )
   }
@@ -435,8 +338,8 @@ export function MainContentPanel({
   // Fallback (should not happen with proper NavigationState)
   return wrapWithStoplight(
     <Panel variant="grow" className={className}>
-      <div className="flex items-center justify-center h-full text-tertiary">
-        <p className="text-label">{t("session.selectConversation")}</p>
+      <div className="flex items-center justify-center h-full text-muted-foreground">
+        <p className="text-sm">{t("session.selectConversation")}</p>
       </div>
     </Panel>
   )

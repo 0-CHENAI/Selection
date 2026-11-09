@@ -1,0 +1,49 @@
+{
+  "id": "academic-ink",
+  "name": "论文墨色",
+  "margin": 64,
+  "colors": {
+    "line": "#D5D0C8",
+    "signal": "#1D4ED8",
+    "good": "#1F7A4D",
+    "watch": "#8A5A12",
+    "bad": "#8E2A24",
+    "ink": "#1B2430",
+    "paper": "#F7F4EE",
+    "muted": "#5C6570",
+    "accent": "#1D4ED8",
+    "surface": "#E7EEF4",
+    "inverse": "#FFFFFF"
+  },
+  "fonts": {
+    "cjk": {
+      "mac": "Songti SC",
+      "win": "SimSun",
+      "linux": "Noto Serif CJK SC"
+    },
+    "latin": {
+      "mac": "Georgia",
+      "win": "Georgia",
+      "linux": "Georgia"
+    }
+  },
+  "type": {
+    "display": {
+      "min": 32,
+      "max": 72
+    },
+    "title": {
+      "min": 22,
+      "max": 40
+    },
+    "body": {
+      "min": 14,
+      "max": 22
+    },
+    "caption": {
+      "min": 10,
+      "max": 14
+    }
+  },
+  "source": "受研究简报示例的墨色和一处蓝色启发。不使用论文版式里的机构名。"
+}

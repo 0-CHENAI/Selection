@@ -5,18 +5,17 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
-import type { Session, SessionEvent, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
-
-/** Explicit SDK retry boundaries; keep their transport shape authoritative. */
-export type TextDiscardEvent = Extract<SessionEvent, { type: 'text_discard' }>
-export type RetryEvent = Extract<SessionEvent, { type: 'retry' }>
-export type MessagesRetractedEvent = Extract<SessionEvent, { type: 'messages_retracted' }>
+import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
+import type { AgentToolResultContent, TextStreamPhase } from '@craft-agent/core/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
  */
 export interface StreamingState {
   content: string
+  /** Missing only for renderer state created by an older application build. */
+  phase?: TextStreamPhase
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   turnId?: string
   parentToolUseId?: string
 }
@@ -34,8 +33,17 @@ export interface SessionState {
  */
 export interface TextDeltaEvent {
   type: 'text_delta'
+  answerProtocol?: 'explicit-v1'
+  answerRunId?: string
+  answerRoutingVersion?: 1
+  toolPurpose?: 'work' | 'answer-delivery'
   sessionId: string
   delta: string
+  /** Missing only for legacy senders; current backends classify every delta. */
+  phase?: TextStreamPhase
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
+  /** Provider reasoning. Never a reply, even when the phase is missing. */
+  streamKind?: 'thinking'
   turnId?: string
 }
 
@@ -44,6 +52,17 @@ export interface TextDeltaEvent {
  */
 export interface TextCompleteEvent {
   type: 'text_complete'
+  /** Explicit answer identity; absent on legacy turns. */
+  answerProtocol?: 'explicit-v1';
+  answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery';
+  answerCommitted?: boolean;
+  answerSalvaged?: boolean;
+  artifactVersions?: import('@craft-agent/core').Message['artifactVersions'];
+  /** Persisted on the originating user message before the single recovery call. */
+  phase?: import('@craft-agent/core').TextStreamPhase;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  streamKind?: 'thinking';
+
   sessionId: string
   text: string
   turnId?: string
@@ -61,6 +80,10 @@ export interface TextCompleteEvent {
  */
 export interface ToolStartEvent {
   type: 'tool_start'
+  answerProtocol?: 'explicit-v1'
+  answerRunId?: string
+  answerRoutingVersion?: 1
+  toolPurpose?: 'work' | 'answer-delivery'
   sessionId: string
   toolUseId: string
   toolName: string
@@ -80,28 +103,38 @@ export interface ToolStartEvent {
  */
 export interface ToolResultEvent {
   type: 'tool_result'
+  answerProtocol?: 'explicit-v1'
+  answerRunId?: string
+  answerRoutingVersion?: 1
+  toolPurpose?: 'work' | 'answer-delivery'
   sessionId: string
   toolUseId: string
   toolName?: string
   result: string
+  /** Live-only multimodal blocks; handlers intentionally do not persist Base64. */
+  content?: AgentToolResultContent[]
+  /** Replaces the tool_start input when the host redacted a secret (browser password fills). */
+  toolInput?: Record<string, unknown>
   isError?: boolean
   turnId?: string
   parentToolUseId?: string
   /** Timestamp from main process for consistent ordering */
   timestamp?: number
-  /** Replaces the input from tool_start (a browser_tool password fill, redacted once its result is known) */
-  toolInput?: Record<string, unknown>
 }
 
 /**
  * Complete event - agent loop finished
  */
 export interface CompleteEvent {
+  answerRunId?: string
+  answerRoutingVersion?: 1
   type: 'complete'
   sessionId: string
   tokenUsage?: Session['tokenUsage']
   /** Explicit unread flag - set by main process based on viewing state */
   hasUnread?: boolean
+  /** The current model run ended, but a managed Swarm is still awaiting aggregation. */
+  orchestrationPending?: boolean
   /**
    * WS2 keep-alive: true when the session's persistent query stays open across
    * turns (`CRAFT_KEEP_BG_AGENTS_ALIVE`). When set, the turn ending does NOT tear
@@ -146,15 +179,6 @@ export interface SourcesChangedEvent {
 }
 
 /**
- * Coding mode changed event (only before the conversation starts; see SessionManager.setSessionCodingMode)
- */
-export interface CodingModeChangedEvent {
-  type: 'coding_mode_changed'
-  sessionId: string
-  codingMode: boolean
-}
-
-/**
  * Labels changed event
  */
 export interface LabelsChangedEvent {
@@ -188,7 +212,7 @@ export interface SessionStatusChangedEvent {
 export interface SessionMetadataChangedEvent {
   type: 'session_metadata_changed'
   sessionId: string
-  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId'>>
+  changes: Partial<Pick<Session, 'ppt' | 'office' | 'pptProgress' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>>
 }
 
 /**
@@ -253,7 +277,7 @@ export interface StatusEvent {
   type: 'status'
   sessionId: string
   message: string
-  statusType?: 'compacting'
+  statusType?: 'compacting' | 'tool_arguments'
   /** Timestamp from main process for consistent ordering */
   timestamp?: number
 }
@@ -280,6 +304,8 @@ export interface InterruptedEvent {
   message?: Message
   /** Messages that were queued but not processed — should be restored to input field */
   queuedMessages?: string[]
+  /** spawn_session children still running after this session stopped (not cancelled). */
+  runningChildCount?: number
 }
 
 /**
@@ -362,6 +388,8 @@ export interface LLMConnectionChangedEvent {
   sessionId: string
   connectionSlug: string
   supportsBranching?: boolean
+  /** Present when the connection and model were changed together. */
+  model?: string | null
 }
 
 /**
@@ -387,6 +415,8 @@ export interface TaskBackgroundedEvent {
   kind?: 'workflow'
   /** Workflow run id (wf_...) — correlates workflow_agent_completed events to this chip. */
   workflowId?: string
+  /** Managed Swarm run id. Keeps its child chip visible through aggregation. */
+  orchestrationId?: string
 }
 
 /**
@@ -398,21 +428,6 @@ export interface WorkflowAgentCompletedEvent {
   sessionId: string
   workflowId: string
   agentId: string
-  turnId?: string
-}
-
-/**
- * Task activity - what a running background task is doing (live summary, step count). The chip is
- * updated in App.tsx's handleBackgroundTaskEvent; messages and session state do not change.
- */
-export interface TaskActivityEvent {
-  type: 'task_activity'
-  sessionId: string
-  taskId: string
-  toolUseId?: string
-  summary?: string
-  lastToolName?: string
-  toolUses?: number
   turnId?: string
 }
 
@@ -451,6 +466,7 @@ export interface TaskCompletedEvent {
   outputFile?: string
   summary?: string
   turnId?: string
+  orchestrationId?: string
 }
 
 /**
@@ -465,6 +481,13 @@ export interface UserMessageEvent {
   status: 'accepted' | 'queued' | 'processing'
   /** Frontend's optimistic message ID for reliable matching */
   optimisticMessageId?: string
+}
+
+/** Canonical visible queue state after an edit, delete, or reorder. */
+export interface QueueChangedEvent {
+  type: 'queue_changed'
+  sessionId: string
+  messages: Message[]
 }
 
 /**
@@ -505,6 +528,19 @@ export interface AuthRequestEvent {
   request: AuthRequest
 }
 
+export interface ClarificationRequestEvent {
+  type: 'clarification_request'
+  sessionId: string
+  message: Message
+  pause: boolean
+}
+
+export interface ClarificationResolvedEvent {
+  type: 'clarification_resolved'
+  sessionId: string
+  message: Message
+}
+
 /**
  * Auth completed event - auth request was completed (success, failure, or cancelled)
  * Updates the auth-request message status
@@ -536,19 +572,39 @@ export interface SourceActivatedEvent {
 export interface UsageUpdateEvent {
   type: 'usage_update'
   sessionId: string
-  tokenUsage: Pick<NonNullable<Session['tokenUsage']>, 'inputTokens' | 'contextWindow' | 'contextUsage'>
+  tokenUsage: NonNullable<Session['tokenUsage']>
+}
+
+export interface MessagesTruncatedEvent {
+  type: 'messages_truncated'
+  sessionId: string
+  keepThroughMessageId: string
+  runId?: string
+}
+
+export interface RegenerateStartedEvent {
+  type: 'regenerate_started'
+  sessionId: string
+  runId: string
+}
+
+export interface MessagesRestoredEvent {
+  type: 'messages_restored'
+  sessionId: string
+  messages: Message[]
+  runId: string
 }
 
 /**
  * Union of all agent events
  */
 export type AgentEvent =
-  | TextDiscardEvent
-  | MessagesRetractedEvent
-  | RetryEvent
+  | { type: 'progress_supervision'; sessionId: string; state: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView }
+  | { type: 'answer_preview'; sessionId: string; answerRunId: string; answerRoutingVersion?: 1; userMessageId: string; text: string; toolCallId: string }
   | TextDeltaEvent
   | TextCompleteEvent
   | ToolStartEvent
+  | { type: 'tool_progress'; sessionId: string; toolUseId: string; progress: NonNullable<Message['toolProgress']> }
   | ToolResultEvent
   | CompleteEvent
   | ErrorEvent
@@ -556,7 +612,6 @@ export type AgentEvent =
   | PermissionRequestEvent
   | CredentialRequestEvent
   | SourcesChangedEvent
-  | CodingModeChangedEvent
   | LabelsChangedEvent
   | ProjectIdChangedEvent
   | SessionStatusChangedEvent
@@ -582,16 +637,21 @@ export type AgentEvent =
   | ShellBackgroundedEvent
   | TaskProgressEvent
   | TaskCompletedEvent
-  | TaskActivityEvent
   | WorkflowAgentCompletedEvent
   | UserMessageEvent
+  | QueueChangedEvent
   | MessageAnnotationsUpdatedEvent
   | SessionSharedEvent
   | SessionUnsharedEvent
   | AuthRequestEvent
   | AuthCompletedEvent
+  | ClarificationRequestEvent
+  | ClarificationResolvedEvent
   | SourceActivatedEvent
   | UsageUpdateEvent
+  | RegenerateStartedEvent
+  | MessagesTruncatedEvent
+  | MessagesRestoredEvent
 
 /**
  * Side effects that need to be handled outside the pure processor
@@ -601,9 +661,9 @@ export type Effect =
   | { type: 'credential_request'; request: CredentialRequest }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
-  | { type: 'coding_mode_changed'; sessionId: string; codingMode: boolean }
   | { type: 'restore_input'; text: string }
   | { type: 'toast_error'; message: string }
+  | { type: 'toast_running_children'; count: number }
 
 /**
  * Result of processing an event

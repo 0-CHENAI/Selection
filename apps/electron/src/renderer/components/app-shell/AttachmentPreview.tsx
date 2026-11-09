@@ -1,14 +1,21 @@
 import * as React from "react"
-import { useTranslation } from "react-i18next"
 import { X, Image as ImageIcon } from "lucide-react"
 import { Spinner, FileTypeIcon, getFileTypeLabel } from "@craft-agent/ui"
 import { cn } from "@/lib/utils"
 import type { FileAttachment } from "../../../shared/types"
+import { motion, useReducedMotion } from 'motion/react'
+import { SelectedTemplate } from '@/components/ppt/SelectedTemplate'
+import { OfficeSelectedCase } from '@/components/office/OfficeSelectedCase'
+import { CARD_WIDTH, centeredOverhangBottom, centeredOverhangTop } from '@/components/ppt/geometry'
 
 // Re-export for backward compatibility
 export { FileTypeIcon, getFileTypeLabel }
 
 interface AttachmentPreviewProps {
+  pptComposerKey?: string
+  hasPptTemplate?: boolean
+  /** A Word / Excel case is attached on the Office home. */
+  hasOfficeCase?: boolean
   attachments: FileAttachment[]
   onRemove: (index: number) => void
   disabled?: boolean
@@ -18,26 +25,25 @@ interface AttachmentPreviewProps {
 /**
  * AttachmentPreview - ChatGPT-style attachment preview strip
  *
- * Shows attached files as small tiles above the text (inside the composer card):
- * - Image thumbnails for image files (64x64px)
+ * Shows attached files as small bubbles above the textarea:
+ * - Image thumbnails for image files (48x48px)
  * - Icon + filename for text/PDF/code files
  * - X button on hover to remove
  * - Horizontally scrollable when many files
  * - Loading placeholders while files are being read
  */
-export function AttachmentPreview({ attachments, onRemove, disabled, loadingCount = 0 }: AttachmentPreviewProps) {
-  if (attachments.length === 0 && loadingCount === 0) return null
+export function AttachmentPreview({ attachments, onRemove, disabled, loadingCount = 0, pptComposerKey, hasPptTemplate, hasOfficeCase }: AttachmentPreviewProps) {
+  const reduced = useReducedMotion()
+  if (attachments.length === 0 && loadingCount === 0 && !hasPptTemplate && !hasOfficeCase) return null
 
   return (
-    // Tiles start on the draft text's edge (the composer's card pad), like the toolbar's first glyph
-    <div className="flex gap-2 overflow-x-auto px-card-pad pt-2.5 pb-0.5">
+    <div data-testid="composer-attachment-row" className="flex items-end gap-2 border-b border-border/50 px-4 overflow-x-auto" style={{ paddingTop: hasPptTemplate || hasOfficeCase ? Math.max(20, Math.ceil(centeredOverhangTop(CARD_WIDTH))) : 12, paddingBottom: hasPptTemplate || hasOfficeCase ? Math.max(12, Math.ceil(centeredOverhangBottom(CARD_WIDTH)) + 2) : 12 }}>
+      {hasPptTemplate && pptComposerKey !== undefined && <SelectedTemplate composerKey={pptComposerKey} disabled={disabled} />}
+      {hasOfficeCase && pptComposerKey !== undefined && <OfficeSelectedCase composerKey={pptComposerKey} disabled={disabled} />}
       {attachments.map((attachment, index) => (
-        <AttachmentBubble
-          key={`${attachment.path}-${index}`}
-          attachment={attachment}
-          onRemove={() => onRemove(index)}
-          disabled={disabled}
-        />
+        <motion.div layout={!reduced} key={`${attachment.path}-${index}`} className="shrink-0" transition={{ duration: reduced ? 0 : .3 }}>
+          <AttachmentBubble attachment={attachment} onRemove={() => onRemove(index)} disabled={disabled} />
+        </motion.div>
       ))}
       {/* Loading placeholders */}
       {Array.from({ length: loadingCount }).map((_, i) => (
@@ -49,8 +55,8 @@ export function AttachmentPreview({ attachments, onRemove, disabled, loadingCoun
 
 function LoadingBubble() {
   return (
-    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-sunken shadow-elev-0">
-      <Spinner className="text-tertiary" />
+    <div className="h-16 w-16 rounded-[8px] bg-background shadow-minimal flex items-center justify-center shrink-0">
+      <Spinner className="text-muted-foreground" />
     </div>
   )
 }
@@ -61,43 +67,32 @@ interface AttachmentBubbleProps {
   disabled?: boolean
 }
 
-// Image MIME types Chromium can decode in an <img>. HEIC/HEIF/TIFF are absent —
-// an inline data URL for those renders as a broken image, so we fall back to the
-// PNG thumbnail the main process generates for them instead.
-const CHROMIUM_IMAGE_MIME = /^image\/(png|jpeg|gif|webp|svg\+xml|bmp|x-icon|avif)$/i
-
 function AttachmentBubble({ attachment, onRemove, disabled }: AttachmentBubbleProps) {
-  const { t } = useTranslation()
   const isImage = attachment.type === 'image'
   const hasThumbnail = !!attachment.thumbnailBase64
-  const canInlineImage = !!(isImage && attachment.base64 && CHROMIUM_IMAGE_MIME.test(attachment.mimeType))
+  const hasImageBase64 = isImage && attachment.base64
 
-  // Inline the full base64 when Chromium can render it; otherwise prefer the PNG
-  // thumbnail (e.g. HEIC/HEIF), and fall back to the file-type icon when neither exists.
-  const imageSrc = canInlineImage
+  // For images, use full base64; for docs, use Quick Look thumbnail
+  const imageSrc = hasImageBase64
     ? `data:${attachment.mimeType};base64,${attachment.base64}`
     : hasThumbnail
       ? `data:image/png;base64,${attachment.thumbnailBase64}`
       : null
 
   return (
-    <div className="group relative shrink-0 select-none pt-1.5 pr-1.5">
-      {/* Remove button - appears on hover (always visible on touch via data-touch-reveal) */}
+    <div className="relative group shrink-0 select-none">
+      {/* Remove button - appears on hover */}
       {!disabled && (
         <button
-          // Inside the composer <form>: never a submit button
-          type="button"
           onClick={onRemove}
-          aria-label={`${t('common.remove')}: ${attachment.name}`}
           data-touch-reveal="true"
           className={cn(
-            "absolute top-0 right-0 z-10",
-            // 20px dot, 24px hit area (36px on touch layouts)
-            "h-5 w-5 rounded-full before:absolute before:-inset-0.5 before:content-[''] @max-mobile/shell:before:-inset-2",
-            "bg-floating text-secondary shadow-elev-1",
+            "absolute -top-1.5 -right-1.5 z-10",
+            "h-5 w-5 rounded-full",
+            "bg-muted-foreground/90 text-background",
             "flex items-center justify-center",
-            "opacity-0 transition-opacity group-hover:opacity-100 group-hover:duration-instant group-focus-within:opacity-100",
-            "hover:text-foreground"
+            "opacity-0 group-hover:opacity-100 transition-opacity",
+            "hover:bg-muted-foreground"
           )}
         >
           <X className="h-3 w-3" />
@@ -106,20 +101,20 @@ function AttachmentBubble({ attachment, onRemove, disabled }: AttachmentBubblePr
 
       {isImage ? (
         /* IMAGE: Square thumbnail only */
-        <div className="h-16 w-16 overflow-hidden rounded-lg bg-sunken shadow-elev-0">
+        <div className="h-16 w-16 rounded-[8px] overflow-hidden bg-background shadow-minimal">
           {imageSrc ? (
             <img src={imageSrc} alt={attachment.name} className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <ImageIcon className="h-5 w-5 text-tertiary" />
+            <div className="h-full w-full flex items-center justify-center">
+              <ImageIcon className="h-5 w-5 text-muted-foreground" />
             </div>
           )}
         </div>
       ) : (
-        /* DOCUMENT: Tile with thumbnail/icon + 2-line text */
-        <div className="flex h-16 items-center gap-2.5 rounded-lg bg-sunken pl-1.5 pr-3 shadow-elev-0">
+        /* DOCUMENT: Bubble with thumbnail/icon + 2-line text */
+        <div className="h-16 flex items-center gap-2.5 rounded-[8px] bg-foreground/5 pl-1.5 pr-3">
           {/* A4-like preview */}
-          <div className="flex h-12 w-9 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-raised shadow-elev-0">
+          <div className="h-12 w-9 rounded-[6px] overflow-hidden bg-background shadow-minimal flex items-center justify-center shrink-0">
             {hasThumbnail ? (
               <img
                 src={`data:image/png;base64,${attachment.thumbnailBase64}`}
@@ -127,33 +122,20 @@ function AttachmentBubble({ attachment, onRemove, disabled }: AttachmentBubblePr
                 className="h-full w-full object-cover object-top"
               />
             ) : (
-              <FileTypeIcon type={attachment.type} mimeType={attachment.mimeType} className="h-5 w-5" />
+              <FileTypeIcon type={attachment.type} mimeType={attachment.mimeType} fileName={attachment.name} className="h-5 w-5" />
             )}
           </div>
-          {/* One-line filename that keeps its extension ("q3-planning-no….md"; wrapping broke names
-              mid-word), then the type */}
-          <div className="flex min-w-0 max-w-[132px] flex-col">
-            <FileName name={attachment.name} />
-            <span className="text-caption font-normal text-tertiary">
+          {/* 2-line filename + type */}
+          <div className="flex flex-col min-w-0 max-w-[120px]">
+            <span className="text-xs font-medium line-clamp-2 break-all" title={attachment.name}>
+              {attachment.name}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
               {getFileTypeLabel(attachment.type, attachment.mimeType, attachment.name)}
             </span>
           </div>
         </div>
       )}
     </div>
-  )
-}
-
-/** A filename on one line: the stem truncates, the extension stays visible. */
-function FileName({ name }: { name: string }) {
-  const dot = name.lastIndexOf('.')
-  const hasExtension = dot > 0 && name.length - dot <= 8
-  const stem = hasExtension ? name.slice(0, dot) : name
-  const extension = hasExtension ? name.slice(dot) : ''
-  return (
-    <span className="flex min-w-0 text-label-sm font-medium text-foreground" title={name}>
-      <span className="truncate">{stem}</span>
-      {extension && <span className="shrink-0">{extension}</span>}
-    </span>
   )
 }

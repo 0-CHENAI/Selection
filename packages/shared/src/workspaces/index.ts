@@ -11,6 +11,7 @@ export type {
   LoadedWorkspace,
   WorkspaceSummary,
 } from './types.ts';
+export type { DeleteWorkspaceFolderResult } from './storage.ts';
 
 // Storage functions
 export {
@@ -32,6 +33,9 @@ export {
   generateUniqueWorkspacePath,
   createWorkspaceAtPath,
   deleteWorkspaceFolder,
+  deleteWorkspaceFolderDetailed,
+  isSafeToDeleteWorkspaceFolder,
+  normalizeWorkspaceRootPath,
   isValidWorkspace,
   renameWorkspaceFolder,
   // Auto-discovery

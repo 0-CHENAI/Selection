@@ -5,7 +5,7 @@
  */
 
 import * as React from 'react'
-import { Copy, ExternalLink } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -15,16 +15,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { IconButton } from '@/components/ui/button'
 
 interface PairingCodeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  platform: 'telegram' | 'whatsapp' | 'lark'
+  platform: 'lark'
   code: string | null
   expiresAt: number | null
-  /** Bot username (without @) — enables the "Open bot" deep link. */
-  botUsername?: string
   /** Error text to show in place of the code (e.g., rate limit, adapter down). */
   error?: string
 }
@@ -35,7 +32,6 @@ export function PairingCodeDialog({
   platform,
   code,
   expiresAt,
-  botUsername,
   error,
 }: PairingCodeDialogProps) {
   const { t } = useTranslation()
@@ -56,9 +52,6 @@ export function PairingCodeDialog({
   const seconds = secondsLeft % 60
 
   const pairCommand = code ? `/pair ${code}` : ''
-  const botLink = botUsername && platform === 'telegram'
-    ? `https://t.me/${botUsername}`
-    : null
   const instructionsKey = `dialog.pairingCode.instructions.${platform}` as const
   const sendCommandKey = `dialog.pairingCode.sendCommand.${platform}` as const
 
@@ -80,59 +73,42 @@ export function PairingCodeDialog({
           <DialogDescription>{t(instructionsKey)}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col items-center gap-4 py-2">
+        <div className="flex flex-col items-center gap-4 py-4">
           {error ? (
-            <p className="text-label text-destructive text-center">{error}</p>
+            <p className="text-sm text-destructive text-center">{error}</p>
           ) : code ? (
             <>
-              <div className="rounded-lg bg-sunken px-6 py-4 font-mono text-display font-semibold tracking-[0.3em] tabular-nums">
+              <div className="rounded-lg bg-muted px-6 py-4 font-mono text-3xl font-bold tracking-[0.3em]">
                 {code}
               </div>
 
-              <div className="flex items-center gap-1">
-                <code className="rounded-sm bg-sunken px-2 py-1 text-mono-ui">{pairCommand}</code>
-                <IconButton
-                  size="sm"
-                  aria-label={t('common.copy')}
-                  tooltip
+              <div className="flex items-center gap-2 text-sm">
+                <code className="rounded bg-muted px-2 py-1 font-mono">{pairCommand}</code>
+                <button
+                  type="button"
                   onClick={handleCopy}
-                  icon={<Copy className="size-3.5" />}
-                />
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent"
+                  title={t('common.copy')}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
               </div>
 
-              <p className="text-center text-label text-secondary">
+              <p className="text-center text-sm text-muted-foreground">
                 {t(sendCommandKey)}
               </p>
 
-              {platform === 'whatsapp' && (
-                <p className="text-center text-label-sm text-tertiary">
-                  {t('dialog.pairingCode.whatsappSelfHint')}
-                </p>
-              )}
-
-              {botLink && (
-                <a
-                  href={botLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-label text-accent hover:underline"
-                >
-                  <ExternalLink className="size-3.5" />
-                  t.me/{botUsername}
-                </a>
-              )}
-
               {secondsLeft > 0 && (
-                <p className="text-label-sm text-tertiary tabular-nums">
+                <p className="text-xs text-muted-foreground">
                   {t('dialog.pairingCode.expires')} ({minutes}:{seconds.toString().padStart(2, '0')})
                 </p>
               )}
               {secondsLeft === 0 && expiresAt && (
-                <p className="text-label-sm text-destructive">{t('dialog.pairingCode.expired')}</p>
+                <p className="text-xs text-destructive">{t('dialog.pairingCode.expired')}</p>
               )}
             </>
           ) : (
-            <p className="text-label text-secondary">
+            <p className="text-sm text-muted-foreground">
               {t('dialog.pairingCode.generating')}
             </p>
           )}

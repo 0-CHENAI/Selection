@@ -10,5 +10,32 @@ export * from './slug.ts';
 export * from './refs.ts';
 export * from './validate.ts';
 export * from './storage.ts';
+export * from './templates.ts';
+export * from './kanban-column.ts';
+export * from './conditions.ts';
+export * from './etag.ts';
+export * from './document.ts';
+export * from './revisions.ts';
 export * from './generator-prompt.ts';
-export * from './session-context.ts';
+export * from './results.ts';
+export * from './instances.ts';
+export * from './artifacts.ts';
+export * from './sensitive.ts';
+export * from './orchestration-patch.ts';
+export * from './orchestration-decision.ts';
+export * from './node-verdict.ts';
+export * from './metrics.ts';
+export * from './critical-path.ts';
+export * from './workspace-cache.ts';
+export * from './plan.ts';
+export * from './planner.ts';
+
+export * from './research.ts';
+export * from './research-storage.ts';
+export { addResearchTemplate } from './research-template.ts';
+
+export * from './research-expansion.ts';
+export * from './task-help.ts';
+
+export * from './replay.ts';
+export * from './explain.ts';

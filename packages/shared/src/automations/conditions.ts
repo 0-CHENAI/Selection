@@ -169,6 +169,21 @@ function getTimeInTimezone(date: Date, timezone?: string): { hours: number; minu
 // State Condition
 // ============================================================================
 
+const BLOCKED_PAYLOAD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function getPayloadField(payload: Record<string, unknown>, field: string): unknown {
+  if (!field.includes('.')) {
+    return BLOCKED_PAYLOAD_KEYS.has(field) ? undefined : payload[field];
+  }
+  let current: unknown = payload;
+  for (const part of field.split('.')) {
+    if (!part || BLOCKED_PAYLOAD_KEYS.has(part)) return undefined;
+    if (current == null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
 function evaluateStateCondition(condition: StateCondition, context: ConditionContext): boolean {
   const { field } = condition;
   const { payload } = context;
@@ -182,28 +197,29 @@ function evaluateStateCondition(condition: StateCondition, context: ConditionCon
     const toKey = mapping?.to ?? field;
     const fromKey = mapping?.from ?? field;
 
-    if (hasTo && payload[toKey] !== condition.to) return false;
-    if (hasFrom && payload[fromKey] !== condition.from) return false;
+    if (hasTo && getPayloadField(payload, toKey) !== condition.to) return false;
+    if (hasFrom && getPayloadField(payload, fromKey) !== condition.from) return false;
     return true;
   }
 
-  // Handle contains (array membership)
+  const fieldValue = getPayloadField(payload, field);
+
+  // Handle contains: array membership, or substring when the field is a string
   if (condition.contains !== undefined) {
-    const arr = payload[field];
-    if (!Array.isArray(arr)) return false;
-    return arr.includes(condition.contains);
+    if (typeof fieldValue === 'string') return fieldValue.includes(condition.contains);
+    if (!Array.isArray(fieldValue)) return false;
+    return fieldValue.includes(condition.contains);
   }
 
   // Handle not_value (negation)
   if (condition.not_value !== undefined) {
-    const fieldValue = payload[field];
     if (fieldValue === undefined) return false;
     return fieldValue !== condition.not_value;
   }
 
   // Handle value (exact match)
   if (condition.value !== undefined) {
-    return payload[field] === condition.value;
+    return fieldValue === condition.value;
   }
 
   // No operator specified — fail closed

@@ -6,7 +6,7 @@
  * SessionManager completion/output seams.
  */
 export { TaskRunner } from './TaskRunner';
-export { createTaskFromSpec, finishTaskOrchestrator, resolveCreateTaskProjectId } from './create-task';
+export { createTaskFromSpec, finishTaskOrchestrator, inheritTaskExecutionDefaults, resolveCreateTaskProjectId } from './create-task';
 export type { CreateTaskFromSpecResult, TaskOrchestratorSetupResult } from './create-task';
 export type {
   ConductorSessionHost,
@@ -16,3 +16,13 @@ export type {
   RunStatus,
   NodeRunStatus,
 } from './TaskRunner';
+export { TaskControlError } from './TaskRunner';
+export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
+export {
+  rememberSubmittedDefinition,
+  takeSubmittedDefinition,
+  clearSubmittedDefinition,
+  extractYamlFromModelText,
+  resolveGeneratedYaml,
+  validateSubmittedDefinition,
+} from './submitted-definitions';

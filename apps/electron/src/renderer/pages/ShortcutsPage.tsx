@@ -9,9 +9,6 @@ import { useTranslation } from 'react-i18next'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Kbd as KeyCap } from '@/components/ui/kbd'
-import { HeaderMenu } from '@/components/ui/HeaderMenu'
-import { routes } from '@/lib/navigate'
 import { isMac } from '@/lib/platform'
 import { actionsByCategory, useActionLabel, type ActionId } from '@/actions'
 
@@ -46,13 +43,6 @@ function useComponentSpecificSections(): ShortcutSection[] {
       ],
     },
     {
-      title: t('shortcuts.agentTree'),
-      shortcuts: [
-        { keys: ['←'], description: t('shortcuts.collapseFolder') },
-        { keys: ['→'], description: t('shortcuts.expandFolder') },
-      ],
-    },
-    {
       title: t('shortcuts.chatInput'),
       shortcuts: [
         { keys: ['Enter'], description: t('shortcuts.sendMessage') },
@@ -64,7 +54,11 @@ function useComponentSpecificSections(): ShortcutSection[] {
 }
 
 function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <KeyCap className={className}>{children}</KeyCap>
+  return (
+    <kbd className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-medium font-sans bg-muted border border-border rounded ${className || ''}`}>
+      {children}
+    </kbd>
+  )
 }
 
 /**
@@ -84,11 +78,11 @@ function ActionShortcutRow({ actionId }: { actionId: ActionId }) {
 
   return (
     <div className="group flex items-center justify-between py-1.5">
-      <span className="text-label">{label}</span>
+      <span className="text-sm">{label}</span>
       <div className="flex-1 mx-3 h-px bg-[repeating-linear-gradient(90deg,currentColor_0_2px,transparent_2px_8px)] opacity-0 group-hover:opacity-15" />
       <div className="flex items-center gap-1">
         {keys.map((key, keyIndex) => (
-          <Kbd key={keyIndex}>{key}</Kbd>
+          <Kbd key={keyIndex} className="group-hover:bg-foreground/10 group-hover:border-foreground/20">{key}</Kbd>
         ))}
       </div>
     </div>
@@ -101,7 +95,7 @@ export default function ShortcutsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <PanelHeader title={t("shortcuts.title")} actions={<HeaderMenu route={routes.view.settings('shortcuts')} />} />
+      <PanelHeader title={t("shortcuts.title")} />
       <Separator />
       <ScrollArea className="flex-1">
         <div className="px-5 py-4">
@@ -109,7 +103,7 @@ export default function ShortcutsPage() {
             {/* Registry-driven sections */}
             {Object.entries(actionsByCategory).map(([category, actions]) => (
               <div key={category}>
-                <h3 className="mb-2 border-b border-subtle pb-1.5 text-label-sm font-medium text-tertiary">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 pb-1.5 border-b border-border/50">
                   {category}
                 </h3>
                 <div className="space-y-0.5">
@@ -123,7 +117,7 @@ export default function ShortcutsPage() {
             {/* Component-specific sections */}
             {componentSpecificSections.map((section) => (
               <div key={section.title}>
-                <h3 className="mb-2 border-b border-subtle pb-1.5 text-label-sm font-medium text-tertiary">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 pb-1.5 border-b border-border/50">
                   {section.title}
                 </h3>
                 <div className="space-y-0.5">
@@ -132,11 +126,11 @@ export default function ShortcutsPage() {
                       key={index}
                       className="group flex items-center justify-between py-1.5"
                     >
-                      <span className="text-label">{shortcut.description}</span>
+                      <span className="text-sm">{shortcut.description}</span>
                       <div className="flex-1 mx-3 h-px bg-[repeating-linear-gradient(90deg,currentColor_0_2px,transparent_2px_8px)] opacity-0 group-hover:opacity-15" />
                       <div className="flex items-center gap-1">
                         {shortcut.keys.map((key, keyIndex) => (
-                          <Kbd key={keyIndex}>{key}</Kbd>
+                          <Kbd key={keyIndex} className="group-hover:bg-foreground/10 group-hover:border-foreground/20">{key}</Kbd>
                         ))}
                       </div>
                     </div>

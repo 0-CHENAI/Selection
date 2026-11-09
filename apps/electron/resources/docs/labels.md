@@ -8,7 +8,7 @@ Labels are additive tags that can be applied to sessions. Unlike statuses (which
 
 ## Storage Locations
 
-- Config: `~/.craft-agent/workspaces/{id}/labels/config.json`
+- Config: `~/.selection/workspaces/{id}/labels/config.json`
 
 ## No Defaults (Regular Labels)
 
@@ -136,7 +136,7 @@ Values are inferred from the raw string at parse time:
 
 **Inference order:** ISO date check → number check → string fallback.
 
-`valueType` decides whether a label carries values at all: a label without one is presence-only (`"bug"`), so `set_session_labels` rejects a value on it, auto-label rules apply only the bare id, and a value already stored on one is dropped when the session loads. Within a valued label the parser still infers the type from the raw value. `link` is a display/affordance hint (clickable, scheme-stripped chip, opens in the browser); a link value still stores and parses as a plain string.
+The optional `valueType` in config is a hint only — the parser always infers from the raw value regardless. `link` is a display/affordance hint (clickable, scheme-stripped chip, opens in the browser); a link value still stores and parses as a plain string.
 
 ## Adding Labels
 
@@ -189,8 +189,6 @@ This validates:
 
 Auto-label rules automatically scan user messages and apply labels with extracted values. Configure regex patterns on any label to trigger automatic tagging.
 
-On a plain label (no `valueType`) a rule only applies the label itself: captures and `valueTemplate` are ignored, and the label is added once however often, and in whatever case, the pattern matches. Give the label a `valueType` to store extracted values.
-
 ### Configuration
 
 Add `autoRules` to any label in `config.json`:
@@ -222,7 +220,7 @@ Add `autoRules` to any label in `config.json`:
 |----------|------|-------------|
 | `pattern` | string | **Required.** Regex with capture groups. Uses `flags` (default: `gi`). |
 | `flags` | string | Regex flags (default: `gi` — global, case-insensitive). `g` is always enforced. |
-| `valueTemplate` | string | Template using `$1`, `$2` for capture group substitution. If omitted, uses first capture group. Valued labels only (ignored on plain labels). |
+| `valueTemplate` | string | Template using `$1`, `$2` for capture group substitution. If omitted, uses first capture group. |
 | `description` | string | Human-readable description of what this rule matches. |
 
 ### Regex Patterns
@@ -239,7 +237,7 @@ Rules use JavaScript regular expressions with capture groups:
 
 - **Global matching**: The `g` flag is always enforced, so all occurrences in a message are found
 - **Capture groups**: `$1`, `$2`, etc. are replaced with matched groups in `valueTemplate`
-- **Multiple matches**: on a valued label, "CRA-1 and CRA-2" produces two label entries
+- **Multiple matches**: "CRA-1 and CRA-2" produces two label entries on the same label
 - **Code block stripping**: Content inside fenced code blocks and inline code is ignored
 
 ### Value Normalization
@@ -259,40 +257,12 @@ Extracted values are normalized based on the label's `valueType`:
 - **Timing**: Rules are evaluated when a user message is sent (both fresh and queued messages)
 - **User messages only**: Assistant output and tool results are not scanned
 - **Code stripping**: Fenced code blocks and inline code are stripped before evaluation
-- **Deduplication**: A plain label is added once per session (older entries such as `bug::bug` count as `bug`); a valued label once per value — `string` values compare case-insensitively (`CRA-1` = `cra-1`), links, numbers and dates exactly. A label matched both with and without a value is applied once, with the value; a value invalid for the label's type (a word on a number label) applies the bare label
+- **Deduplication**: Same label+value won't be added twice to a session
 - **Match limit**: Maximum 10 matches per message (prevents label explosion from pasted data)
 - **Persistence**: Auto-applied labels are stored on the session
 - **Multiple rules**: All rules on a label are evaluated; all matches are collected
 - **Validation**: Patterns are validated at config-save time (invalid regex and ReDoS patterns are rejected)
 - **Error handling**: Invalid regex patterns are skipped at runtime (logged as warnings)
-
-### Semantic Rules (requires the Decision Model)
-
-A semantic rule is a yes/no question instead of a regex. The decision model (Jev, Settings > AI > Decision model) answers it for every user message, and the label is applied when the "yes" probability reaches the threshold. Regex cannot express "this message is about billing"; a semantic rule can.
-
-```json
-{
-  "id": "billing",
-  "name": "Billing",
-  "autoRules": [
-    { "semantic": "Is the user asking about billing, invoices or charges?", "threshold": 0.9 }
-  ]
-}
-```
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `semantic` | string | **Required.** The yes/no question, in English. Keep it specific. |
-| `threshold` | number | "Yes" probability needed to apply the label, `0 < threshold <= 1`. Default `0.9`. |
-| `value` | string | Fixed value for valued labels (`area::mobile-app`). Omitted, or on a plain label → the plain label id is applied. |
-| `description` | string | Human-readable note. |
-
-- **Inert without the decision model**: when the user has not enabled it (or disabled the `semanticLabels` feature toggle), semantic rules are validated and stored but never evaluated.
-- **Off the critical path**: regex rules run before the turn starts; semantic rules run in the background and their labels appear a moment later. Messages shorter than 20 characters ("ok", "thanks") are skipped, and so are rules whose label the session already has (no model call); a label the user removed while the judgment was in flight is not re-added. System-generated messages (source-activation retries, background nudges) are never evaluated.
-- **Exactly one kind per rule**: a rule carries either `pattern` or `semantic`, never both (validation rejects hybrids).
-- **Automations**: a semantic match fires `LabelAdd` automations like any other label change. That is why the default threshold is high — lower it only for labels that trigger nothing important.
-- **Privacy**: the message (code blocks stripped, cut to 8k characters) is sent to the configured decision provider; every call is recorded in `~/.craft-agent/logs/decisions.jsonl` without the text.
-- **CLI**: `craft-agent label auto-rule-add <id> --semantic "Is …?" [--threshold 0.9] [--value "…"]`
 
 ### Full Example
 

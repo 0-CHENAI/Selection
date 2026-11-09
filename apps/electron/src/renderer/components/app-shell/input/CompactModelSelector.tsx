@@ -1,3 +1,9 @@
+import { fastConnectionFamily } from '@craft-agent/shared/agent/fast-mode'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
+import { FastModeButton } from './FastModeButton'
+import { PromptThinkingSettings } from './PromptBarEffects'
+import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -5,86 +11,188 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Cpu,
-  Image as ImageIcon,
 } from 'lucide-react'
-import { Spinner } from '@craft-agent/ui'
 import {
   Drawer,
   DrawerTrigger,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
-  DrawerClose,
 } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
 import * as storage from '@/lib/local-storage'
 import { navigate, routes } from '@/lib/navigate'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import {
-  ANTHROPIC_MODELS,
   getModelDisplayName,
   getModelShortName,
-  getModelContextWindow,
 } from '@config/models'
 import {
-  isCompatProvider,
-  modelSupportsImages,
   resolveEffectiveConnectionSlug,
-  type LlmConnectionWithStatus,
 } from '@config/llm-connections'
 import {
-  THINKING_LEVELS,
   type ThinkingLevel,
 } from '@craft-agent/shared/agent/thinking-levels'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
-import { derivePickerMode } from './picker-mode'
+import { derivePickerMode, pickerPageShowsCurrentConnection } from './picker-mode'
 import {
+  appendMissingPickerModel,
+  chosenPickerModelId,
+  connectionPinnedModelIds,
   groupConnectionsByProvider,
+  isOpenRouterConnection,
+  isPickerModelSelected,
+  isUnavailablePickerModel,
+  pickerModelId,
+  resolvePickerModelsWithLive,
+  resolveVisiblePickerModels,
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
-import { getContextDisplay, getContextDisplayLabels, type ContextStatus } from './context-display'
-import { useModelVisionToggle } from './useModelVisionToggle'
-import { COMPOSER_CHIP } from './composer-styles'
+import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import {
+  ModelPickerEmptyResults,
+  ModelPickerOverflowHint,
+  ModelPickerSearchField,
+  pickerModelLimitCaption,
+  shouldShowPickerSearch,
+  usePickerSearchQuery,
+  useVisiblePickerModels,
+} from './ModelPickerSearch'
 
-// Bottom-sheet rows (spec §7.16): 44px touch rows, 15px names, tertiary details.
-// shrink-0: the list is height-capped (scrolls), so rows must never compress below their content
-// Rows and section labels sit on the sheet title's 16px edge: 8px container inset + 8px padding.
-const SHEET_ROW = 'flex min-h-row-touch w-full shrink-0 items-center rounded-md px-2 py-2 text-left transition-colors hover:duration-instant'
-const SHEET_SECTION = 'px-2 pt-4 pb-1 text-label-sm font-medium text-tertiary select-none'
+function CompactSwitcherModels({
+  conn,
+  liveOpenRouterModels,
+  currentModel,
+  isCurrentConnection,
+  onPick,
+}: {
+  conn: Parameters<typeof resolvePickerModelsWithLive>[0] & { slug: string }
+  liveOpenRouterModels: Parameters<typeof resolvePickerModelsWithLive>[1]
+  currentModel: string
+  isCurrentConnection: boolean
+  onPick: (connectionSlug: string, modelId: string) => void
+}) {
+  const { t } = useTranslation()
+  const [query, setQuery] = React.useState('')
+  const catalog = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const models = appendMissingPickerModel(
+    catalog,
+    isCurrentConnection ? currentModel : undefined,
+  )
+  const visibleCatalog = resolveVisiblePickerModels(models, {
+    query,
+    currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
+    pinnedIds: connectionPinnedModelIds(conn),
+  })
+  const showSearch = shouldShowPickerSearch(models.length, query)
+
+  return (
+    <div className="pl-6 flex flex-col gap-0.5">
+      {showSearch && (
+        <ModelPickerSearchField value={query} onChange={setQuery} className="px-1" />
+      )}
+      {visibleCatalog.visible.length === 0 ? (
+        <ModelPickerEmptyResults />
+      ) : (
+        visibleCatalog.visible.map(model => {
+          const modelId = pickerModelId(model)
+          const modelName = typeof model === 'string'
+            ? stripPiPrefixForDisplay(getModelShortName(model))
+            : (model.name ?? stripPiPrefixForDisplay(model.id))
+          const isSelectedModel =
+            isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+          const unavailable = isUnavailablePickerModel(catalog, modelId)
+          const limitCaption = unavailable
+            ? t('chat.modelPicker.unavailable')
+            : pickerModelLimitCaption(model, t)
+          return (
+              <button
+                key={modelId}
+                type="button"
+                onClick={() => {
+                  const next = chosenPickerModelId(
+                    modelId,
+                    isCurrentConnection ? currentModel : '',
+                    catalog,
+                  )
+                  if (next === undefined) return
+                  onPick(conn.slug, next)
+                }}
+                className={cn(
+                  'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
+                  isSelectedModel
+                    ? 'bg-foreground/5'
+                    : 'hover:bg-foreground/5',
+                )}
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium truncate">{modelName}</span>
+                  {limitCaption && (
+                    <span className={cn(
+                      'block text-xs tabular-nums',
+                      unavailable ? 'text-destructive/80' : 'text-foreground/50',
+                    )}>
+                      {limitCaption}
+                    </span>
+                  )}
+                </span>
+                {isSelectedModel && (
+                  <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
+                )}
+              </button>
+          )
+        })
+      )}
+      <ModelPickerOverflowHint
+        hiddenCount={visibleCatalog.hiddenCount}
+        searching={query.trim().length > 0}
+      />
+    </div>
+  )
+}
 
 interface CompactModelSelectorProps {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  onCloseAutoFocus?: React.ComponentProps<typeof DrawerContent>['onCloseAutoFocus']
   currentModel: string
   currentConnection?: string
   onModelChange: (model: string, connection?: string) => void
   onConnectionChange?: (connectionSlug: string) => void
+  fastMode?: boolean
+  onFastModeChange?: (enabled: boolean) => void
+  workMode?: WorkMode
+  isProcessing?: boolean
   thinkingLevel?: ThinkingLevel
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   isEmptySession?: boolean
   connectionUnavailable?: boolean
-  contextStatus?: ContextStatus
 }
 
 export function CompactModelSelector({
+  open: controlledOpen,
+  onOpenChange,
+  onCloseAutoFocus,
   currentModel,
   currentConnection,
   onModelChange,
-  onConnectionChange,
+  fastMode = false,
+  onFastModeChange,
+  workMode,
+  isProcessing = false,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
-  isEmptySession = false,
   connectionUnavailable = false,
-  contextStatus,
 }: CompactModelSelectorProps) {
   const { t } = useTranslation()
-  const [open, setOpen] = React.useState(false)
+  const [localOpen, setLocalOpen] = React.useState(false)
+  const open = controlledOpen ?? localOpen
+  const setOpen = onOpenChange ?? setLocalOpen
   const [expandedConnection, setExpandedConnection] = React.useState<string | null>(null)
 
   const appShellCtx = useOptionalAppShellContext()
   const llmConnections = appShellCtx?.llmConnections ?? []
   const workspaceDefaultConnection = appShellCtx?.workspaceDefaultLlmConnection
-
-  const toggleVision = useModelVisionToggle()
 
   const effectiveConnection = resolveEffectiveConnectionSlug(
     currentConnection,
@@ -97,43 +205,63 @@ export function CompactModelSelector({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
-  const connectionDefaultModel = React.useMemo(() => {
-    const conn = effectiveConnectionDetails
-    if (!conn) return null
-    if (!isCompatProvider(conn.providerType)) return null
-    if (conn.models && conn.models.length > 1) return null
-    return conn.defaultModel ?? null
-  }, [effectiveConnectionDetails])
+  const fastFamily = connectionUnavailable ? undefined : fastConnectionFamily(currentModel, effectiveConnectionDetails)
+  const fastSupported = fastFamily !== undefined
 
   const pickerMode = derivePickerMode({
     connectionUnavailable,
-    connectionDefaultModel,
-    isEmptySession,
     connectionCount: llmConnections.length,
   })
 
-  const availableModels = React.useMemo(() => {
+  const liveOpenRouterModels = useLiveOpenRouterModels(
+    !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
+  )
+
+  const pickerCatalog = React.useMemo(() => {
     if (connectionUnavailable) return []
-    if (!effectiveConnectionDetails) return ANTHROPIC_MODELS
-    return effectiveConnectionDetails.models || ANTHROPIC_MODELS
-  }, [effectiveConnectionDetails, connectionUnavailable])
+    return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
+  }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
+
+  const availableModels = React.useMemo(
+    () => appendMissingPickerModel(pickerCatalog, currentModel),
+    [pickerCatalog, currentModel],
+  )
+
+  const { query: modelSearchQuery, setQuery: setModelSearchQuery } = usePickerSearchQuery(open)
+  const pinnedModelIds = React.useMemo(
+    () => connectionPinnedModelIds(effectiveConnectionDetails),
+    [effectiveConnectionDetails],
+  )
+  const visibleCatalog = useVisiblePickerModels(
+    availableModels,
+    modelSearchQuery,
+    currentModel,
+    pinnedModelIds,
+  )
+  const showModelSearch = shouldShowPickerSearch(availableModels.length, modelSearchQuery)
 
   const currentModelDisplayName = React.useMemo(() => {
-    const modelToDisplay = connectionDefaultModel ?? currentModel
     const model = availableModels.find(m =>
-      typeof m === 'string' ? m === modelToDisplay : m.id === modelToDisplay,
+      isPickerModelSelected(currentModel, pickerModelId(m)),
     )
-    if (!model) return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
+    if (!model) return stripPiPrefixForDisplay(getModelDisplayName(currentModel))
     if (typeof model === 'string') return stripPiPrefixForDisplay(model)
     return model.name ?? stripPiPrefixForDisplay(model.id)
-  }, [availableModels, currentModel, connectionDefaultModel])
-
-  const thinkingDisabled = React.useMemo(() => {
-    const model = availableModels.find(
-      m => typeof m !== 'string' && m.id === currentModel,
-    )
-    return typeof model !== 'string' && model?.supportsThinking === false
   }, [availableModels, currentModel])
+
+  useThinkingCatalog()
+  const configuredThinkingModel = pickerCatalog.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+    ?? effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+  const thinkingModel: ThinkingModelRef | undefined = typeof configuredThinkingModel === 'object'
+    ? { ...configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+    : (typeof configuredThinkingModel === 'string'
+      ? { id: configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+      : (currentModel ? { id: currentModel, provider: effectiveConnectionDetails?.piAuthProvider } : undefined))
+  const thinkingCapability = modelThinkingCapability(thinkingModel)
+  const availableThinkingLevels = modelThinkingLevels(thinkingModel)
+  const thinkingUnavailable = thinkingCapability.mode === 'levels' ? undefined : thinkingCapability.mode
+
+  const thinkingDisabled = thinkingUnavailable !== undefined || availableThinkingLevels.length <= 1
 
   const connectionsByProvider = React.useMemo(
     () => groupConnectionsByProvider(llmConnections),
@@ -144,33 +272,48 @@ export function CompactModelSelector({
     !!effectiveConnectionDetails &&
     llmConnections.length > 1 &&
     storage.get(storage.KEYS.showConnectionIcons, true)
-  const contextDisplay = getContextDisplay(contextStatus, getModelContextWindow(currentModel))
-  const contextLabels = getContextDisplayLabels(contextDisplay, t)
 
-  // Reset accordion state when the drawer closes so re-open shows top-level switcher.
+  // Collapse on close; re-open on the current connection so mid-session switches stay one tap away.
   React.useEffect(() => {
-    if (!open) setExpandedConnection(null)
-  }, [open])
+    if (!open) {
+      setExpandedConnection(null)
+      return
+    }
+    if (effectiveConnection) setExpandedConnection(effectiveConnection)
+  }, [open, effectiveConnection])
 
   const handlePickFlatModel = React.useCallback(
     (modelId: string) => {
       onModelChange(modelId, effectiveConnection)
-      setOpen(false)
     },
     [onModelChange, effectiveConnection],
   )
 
   const handlePickSwitcherModel = React.useCallback(
     (connSlug: string, modelId: string) => {
-      const isCurrentConnection = effectiveConnection === connSlug
-      if (!isCurrentConnection && onConnectionChange) {
-        onConnectionChange(connSlug)
-      }
       onModelChange(modelId, connSlug)
-      setOpen(false)
     },
-    [onModelChange, onConnectionChange, effectiveConnection],
+    [onModelChange],
   )
+
+  const fastControl = onFastModeChange && fastSupported ? (
+    <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
+  ) : null
+  const thinkingControl = thinkingUnavailable === 'unsupported' || (thinkingUnavailable !== 'always-on' && availableThinkingLevels.length === 0)
+    ? null
+    : (
+      <div className="prompt-thinking-reveal"><PromptThinkingSettings
+        value={thinkingLevel}
+        levels={availableThinkingLevels}
+        workMode={workMode}
+        disabled={thinkingDisabled || !onThinkingLevelChange}
+        unavailable={thinkingUnavailable}
+        binary={thinkingCapability.binary}
+        inMenu={false}
+        headingAction={fastControl}
+        onChange={level => onThinkingLevelChange?.(level)}
+      /></div>
+    )
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
@@ -181,34 +324,31 @@ export function CompactModelSelector({
             ? t('common.unavailable')
             : `${t('common.model')}: ${currentModelDisplayName}`}
           className={cn(
-            COMPOSER_CHIP,
-            'min-w-7 shrink gap-1 pl-2.5 pr-2 @max-[26rem]/panel:px-2',
-            connectionUnavailable && 'bg-destructive-tint text-destructive hover:bg-destructive-tint hover:text-destructive',
+            'h-7 pl-2 pr-2 text-xs font-medium rounded-[6px] flex items-center gap-1.5 shadow-tinted outline-none select-none min-w-[64px] shrink',
+            connectionUnavailable
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-foreground/5 text-foreground/70',
           )}
+          style={{ '--shadow-color': 'var(--foreground-rgb)' } as React.CSSProperties}
         >
           {connectionUnavailable ? (
             <>
-              <AlertCircle className="size-3.5 shrink-0 text-destructive" />
-              <span className="min-w-0 truncate">{t('common.unavailable')}</span>
+              <AlertCircle className="h-3.5 w-3.5" />
+              <span>{t('common.unavailable')}</span>
             </>
           ) : (
             <>
               {showConnectionIcon && effectiveConnectionDetails && (
                 <ConnectionIcon connection={effectiveConnectionDetails} size={14} />
               )}
-              {/* A model glyph is clearer than an unreadable one-letter ellipsis. The full
-                  model name remains the accessible name and the sheet's selected row. */}
-              <Cpu className="size-4 shrink-0 @min-[26rem]/panel:hidden" aria-hidden />
-              <span className="truncate min-w-0 @max-[26rem]/panel:hidden">{currentModelDisplayName}</span>
-              {pickerMode !== 'locked-single' && (
-                <ChevronDown className="size-3.5 shrink-0 @max-[26rem]/panel:hidden" />
-              )}
+              <span className="truncate min-w-0">{currentModelDisplayName}</span>
+              <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
             </>
           )}
         </button>
       </DrawerTrigger>
 
-      <DrawerContent>
+      <DrawerContent onCloseAutoFocus={onCloseAutoFocus}>
         <DrawerHeader>
           <DrawerTitle>{t('common.model')}</DrawerTitle>
         </DrawerHeader>
@@ -217,11 +357,11 @@ export function CompactModelSelector({
           {/* === Models section === */}
           {pickerMode === 'unavailable' ? (
             <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
-              <AlertCircle className="size-8 text-destructive mb-2" />
-              <div className="text-copy font-medium mb-1">
+              <AlertCircle className="h-8 w-8 text-destructive mb-2" />
+              <div className="font-medium text-sm mb-1">
                 {t('chat.connectionUnavailable')}
               </div>
-              <div className="text-label text-tertiary mb-3">
+              <div className="text-xs text-muted-foreground mb-3">
                 {t('chat.connectionUnavailableDescription')}
               </div>
               <button
@@ -230,21 +370,16 @@ export function CompactModelSelector({
                   setOpen(false)
                   navigate(routes.view.settings('ai'))
                 }}
-                className="min-h-control text-label text-accent underline underline-offset-2"
+                className="text-xs underline text-foreground/70 hover:text-foreground"
               >
                 {t('chat.modelPicker.openAiSettings')}
               </button>
             </div>
-          ) : pickerMode === 'locked-single' && connectionDefaultModel ? (
-            <LockedSingleRow
-              modelId={connectionDefaultModel}
-              connection={effectiveConnectionDetails}
-              onToggleVision={toggleVision}
-            />
           ) : pickerMode === 'switcher' ? (
+            /* Same row language as desktop switcher: connection rows, then models + thinking. */
             connectionsByProvider.map(([providerName, connections]) => (
               <React.Fragment key={providerName}>
-                <div className={SHEET_SECTION}>
+                <div className="px-3 pt-3 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
                   {providerName}
                 </div>
                 {connections.map(conn => {
@@ -260,79 +395,44 @@ export function CompactModelSelector({
                           setExpandedConnection(prev => (prev === conn.slug ? null : conn.slug))
                         }
                         className={cn(
-                          SHEET_ROW,
-                          'gap-2',
-                          !isAuthenticated && 'cursor-not-allowed text-disabled',
-                          isAuthenticated && 'hover:bg-fill-hover active:bg-fill-pressed',
-                          isCurrentConnection && !isExpanded && 'bg-fill-selected',
+                          'flex items-center gap-2 w-full px-3 py-2 rounded-lg text-left transition-colors',
+                          !isAuthenticated && 'opacity-50 cursor-not-allowed',
+                          isAuthenticated && 'hover:bg-foreground/5',
+                          isCurrentConnection && !isExpanded && 'bg-foreground/5',
                         )}
                       >
                         <ConnectionIcon connection={conn} size={14} />
                         <div className="flex-1 min-w-0">
-                          <div className="text-copy font-medium truncate">{conn.name}</div>
+                          <div className="text-sm font-medium truncate">{conn.name}</div>
                           {!isAuthenticated && (
-                            <div className="text-label text-tertiary">
+                            <div className="text-xs text-muted-foreground">
                               {t('settings.ai.notAuthenticated')}
                             </div>
                           )}
                         </div>
                         {isCurrentConnection && (
-                          <Check className="size-4 text-secondary shrink-0" />
+                          <Check className="h-3 w-3 text-foreground/60 shrink-0" />
                         )}
                         {isAuthenticated && (
                           <ChevronRight
                             className={cn(
-                              'size-4 text-tertiary shrink-0 transition-transform duration-[calc(var(--spring-snap-dur)*var(--motion-scale))] ease-[var(--spring-snap)]',
+                              'h-3 w-3 opacity-60 shrink-0 transition-transform',
                               isExpanded && 'rotate-90',
                             )}
                           />
                         )}
                       </button>
                       {isAuthenticated && isExpanded && (
-                        <div className="pl-6 flex flex-col gap-0.5">
-                          {(conn.models || ANTHROPIC_MODELS).map(model => {
-                            const modelId = typeof model === 'string' ? model : model.id
-                            const modelName = typeof model === 'string'
-                              ? stripPiPrefixForDisplay(getModelShortName(model))
-                              : (model.name ?? stripPiPrefixForDisplay(model.id))
-                            const isSelectedModel =
-                              isCurrentConnection && currentModel === modelId
-                            const showVision = isCompatProvider(conn.providerType)
-                            const visionOn = showVision && modelSupportsImages(conn, modelId)
-                            return (
-                              <DrawerClose asChild key={modelId}>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePickSwitcherModel(conn.slug, modelId)}
-                                  className={cn(
-                                    SHEET_ROW,
-                                    'justify-between',
-                                    isSelectedModel
-                                      ? 'bg-fill-selected'
-                                      : 'hover:bg-fill-hover active:bg-fill-pressed',
-                                  )}
-                                >
-                                  <span className="text-copy font-medium truncate">{modelName}</span>
-                                  <div className="flex items-center gap-1 ml-3 shrink-0">
-                                    {showVision && (
-                                      <VisionToggle
-                                        visionOn={visionOn}
-                                        onToggle={(e) => {
-                                          e.preventDefault()
-                                          e.stopPropagation()
-                                          toggleVision(conn.slug, modelId, !visionOn)
-                                        }}
-                                      />
-                                    )}
-                                    {isSelectedModel && (
-                                      <Check className="size-4 text-secondary" />
-                                    )}
-                                  </div>
-                                </button>
-                              </DrawerClose>
-                            )
-                          })}
-                        </div>
+                        <>
+                          <CompactSwitcherModels
+                            conn={conn}
+                            liveOpenRouterModels={liveOpenRouterModels}
+                            currentModel={currentModel}
+                            isCurrentConnection={isCurrentConnection}
+                            onPick={handlePickSwitcherModel}
+                          />
+                          {isCurrentConnection && thinkingControl}
+                        </>
                       )}
                     </React.Fragment>
                   )
@@ -340,13 +440,24 @@ export function CompactModelSelector({
               </React.Fragment>
             ))
           ) : (
-            // 'flat' — list models of the active connection
-            availableModels.map(model => {
-              const modelId = typeof model === 'string' ? model : model.id
+            <>
+              {showModelSearch && (
+                <ModelPickerSearchField
+                  value={modelSearchQuery}
+                  onChange={setModelSearchQuery}
+                  className="px-1"
+                />
+              )}
+              {visibleCatalog.visible.length === 0 ? (
+                <ModelPickerEmptyResults />
+              ) : (
+                visibleCatalog.visible.map(model => {
+              const modelId = pickerModelId(model)
               const modelName = typeof model === 'string'
                 ? stripPiPrefixForDisplay(getModelShortName(model))
                 : (model.name ?? stripPiPrefixForDisplay(model.id))
-              const isSelected = currentModel === modelId
+              const isSelected = isPickerModelSelected(currentModel, modelId)
+              const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
               const descriptionKey =
                 typeof model !== 'string' && 'descriptionKey' in model
                   ? (model.descriptionKey as string)
@@ -356,183 +467,54 @@ export function CompactModelSelector({
                 : (typeof model !== 'string' && 'description' in model
                     ? (model.description as string)
                     : '')
-              const showVision =
-                !!effectiveConnectionDetails &&
-                isCompatProvider(effectiveConnectionDetails.providerType)
-              const visionOn =
-                showVision && modelSupportsImages(effectiveConnectionDetails!, modelId)
+              const limitCaption = pickerModelLimitCaption(model, t)
+              const secondary = unavailable
+                ? t('chat.modelPicker.unavailable')
+                : [description, limitCaption].filter(Boolean).join(' · ')
               return (
-                <DrawerClose asChild key={modelId}>
                   <button
+                    key={modelId}
                     type="button"
-                    onClick={() => handlePickFlatModel(modelId)}
+                    onClick={() => {
+                      const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
+                      if (next === undefined) return
+                      handlePickFlatModel(next)
+                    }}
                     className={cn(
-                      SHEET_ROW,
-                      'justify-between',
-                      isSelected ? 'bg-fill-selected' : 'hover:bg-fill-hover active:bg-fill-pressed',
+                      'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
+                      isSelected ? 'bg-foreground/5' : 'hover:bg-foreground/5',
                     )}
                   >
                     <div className="min-w-0">
-                      <div className="text-copy font-medium truncate">{modelName}</div>
-                      {description && (
-                        <div className="text-label text-tertiary truncate">
-                          {description}
+                      <div className="text-sm font-medium truncate">{modelName}</div>
+                      {secondary && (
+                        <div className={cn(
+                          'text-xs truncate',
+                          unavailable ? 'text-destructive/80' : 'text-foreground/50',
+                        )}>
+                          {secondary}
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 ml-3 shrink-0">
-                      {showVision && effectiveConnectionDetails && (
-                        <VisionToggle
-                          visionOn={visionOn}
-                          onToggle={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            toggleVision(
-                              effectiveConnectionDetails.slug,
-                              modelId,
-                              !visionOn,
-                            )
-                          }}
-                        />
-                      )}
-                      {isSelected && (
-                        <Check className="size-4 text-secondary" />
-                      )}
-                    </div>
+                    {isSelected && (
+                      <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
+                    )}
                   </button>
-                </DrawerClose>
               )
-            })
-          )}
-
-          {/* === Thinking section === */}
-          {THINKING_LEVELS.length > 0 && pickerMode !== 'unavailable' && (
-            <>
-              <div className={SHEET_SECTION}>
-                {t('chat.modelPicker.thinkingSection')}
-              </div>
-              {THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => {
-                const isSelected = thinkingLevel === id
-                return (
-                  <DrawerClose asChild key={id}>
-                    <button
-                      type="button"
-                      disabled={thinkingDisabled}
-                      onClick={() => onThinkingLevelChange?.(id)}
-                      className={cn(
-                        SHEET_ROW,
-                        'justify-between',
-                        thinkingDisabled && 'cursor-not-allowed text-disabled',
-                        !thinkingDisabled && isSelected && 'bg-fill-selected',
-                        !thinkingDisabled && !isSelected && 'hover:bg-fill-hover active:bg-fill-pressed',
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <div className="text-copy font-medium">{t(nameKey)}</div>
-                        <div className={cn('text-label', thinkingDisabled ? 'text-disabled' : 'text-tertiary')}>
-                          {t(descriptionKey)}
-                        </div>
-                      </div>
-                      {isSelected && (
-                        <Check className="size-4 text-secondary shrink-0 ml-3" />
-                      )}
-                    </button>
-                  </DrawerClose>
-                )
-              })}
-            </>
-          )}
-
-          {/* === Context section === */}
-          {contextDisplay.visible && (
-            <>
-              <div className={SHEET_SECTION}>
-                {t('chat.modelPicker.contextSection')}
-              </div>
-              <div className="px-2 py-2 text-label text-tertiary tabular-nums select-none">
-                <div className="flex items-center justify-between gap-3">
-                  <span>{contextLabels.window}</span>
-                  <span className="flex min-w-0 items-center gap-1.5 text-right">
-                    {contextStatus?.isCompacting && <Spinner className="h-3 w-3 shrink-0" />}
-                    <span>{contextLabels.usage}</span>
-                  </span>
-                </div>
-                {(contextLabels.percent || contextLabels.qualifier) && (
-                  <div className="mt-0.5 text-label-sm text-tertiary">
-                    {[contextLabels.percent, contextLabels.qualifier].filter(Boolean).join(' · ')}
-                  </div>
-                )}
-              </div>
+                })
+              )}
+              <ModelPickerOverflowHint
+                hiddenCount={visibleCatalog.hiddenCount}
+                searching={modelSearchQuery.trim().length > 0}
+              />
+              {thinkingControl}
             </>
           )}
         </div>
+        {fastControl && !thinkingControl && pickerPageShowsCurrentConnection(pickerMode, expandedConnection, effectiveConnection) && (
+          <div className="flex justify-end border-t border-border/40 px-3 py-2">{fastControl}</div>
+        )}
       </DrawerContent>
     </Drawer>
-  )
-}
-
-function LockedSingleRow({
-  modelId,
-  connection,
-  onToggleVision,
-}: {
-  modelId: string
-  connection: LlmConnectionWithStatus | null
-  onToggleVision: (connectionSlug: string, modelId: string, enabled: boolean) => Promise<void>
-}) {
-  const { t } = useTranslation()
-  const showVision = !!connection && isCompatProvider(connection.providerType)
-  const visionOn = !!(showVision && connection && modelSupportsImages(connection, modelId))
-  return (
-    <div className={cn(SHEET_ROW, 'justify-between select-none')}>
-      <div className="min-w-0">
-        <div className="text-copy font-medium truncate">{stripPiPrefixForDisplay(modelId)}</div>
-        <div className="text-label text-tertiary">{t('chat.connectionDefault')}</div>
-      </div>
-      <div className="flex items-center gap-1 ml-3 shrink-0">
-        {showVision && connection && (
-          <VisionToggle
-            visionOn={visionOn}
-            onToggle={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onToggleVision(connection.slug, modelId, !visionOn)
-            }}
-          />
-        )}
-        <Check className="size-4 text-secondary" />
-      </div>
-    </div>
-  )
-}
-
-function VisionToggle({
-  visionOn,
-  onToggle,
-}: {
-  visionOn: boolean
-  onToggle: (e: React.MouseEvent | React.KeyboardEvent) => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <span
-      role="button"
-      tabIndex={0}
-      aria-label={visionOn
-        ? t('chat.modelPicker.supportsImagesOn')
-        : t('chat.modelPicker.supportsImagesOff')}
-      className="inline-flex size-9 items-center justify-center rounded-md cursor-pointer hover:bg-fill-hover"
-      onClick={onToggle}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onToggle(e)
-      }}
-    >
-      <ImageIcon
-        className={cn(
-          'size-4',
-          visionOn ? 'text-foreground' : 'text-tertiary',
-        )}
-      />
-    </span>
   )
 }

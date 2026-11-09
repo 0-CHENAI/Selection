@@ -17,39 +17,33 @@ export const OVERLAY_LAYOUT = {
   modalMaxWidth: 1100,
   /** Modal max height as percentage of viewport */
   modalMaxHeightPercent: 85,
-  /** Backdrop class for modal mode (semi-transparent scrim role) */
-  modalBackdropClass: 'bg-scrim',
+  /** Backdrop class for modal mode (semi-transparent) */
+  modalBackdropClass: 'bg-black/50',
   /** Backdrop class for fullscreen mode (solid) */
   fullscreenBackdropClass: 'bg-background',
 } as const
 
 /**
- * Chat layout configuration (design spec §4/§7.4, mockup `.column` / `.tx`):
- * a 720px text column with 24px gutters (14px in compact), turns 20px apart.
- * The composer zone shares `maxWidth`, so it lines up with the transcript.
+ * Chat layout configuration
  */
 export const CHAT_LAYOUT = {
-  /** Max width for chat content area: 720px column + 2 × 24px gutters */
-  maxWidth: 'max-w-[768px]',
+  /** Max width for chat content area */
+  maxWidth: 'max-w-[840px]',
 
   /** Horizontal padding for main container */
-  containerPaddingX: 'px-6',
+  containerPaddingX: 'px-5',
 
-  /** Vertical padding for main container (clears the 32px edge fade of the scroll area) */
-  containerPaddingY: 'pt-6 pb-8',
+  /** Vertical padding for main container */
+  containerPaddingY: 'py-8',
 
   /** Combined container padding */
-  containerPadding: 'px-6 pt-6 pb-8',
+  containerPadding: 'px-5 py-8',
 
-  /** Container padding in compact layouts (compact shell ≤ 767px, popovers): the 16px panel gutter,
-   *  shared with the compact header's glyphs and the composer card, so the screen has one left edge */
-  compactContainerPadding: 'px-gutter pt-4 pb-6',
+  /** Vertical spacing between messages/turns */
+  messageSpacing: 'space-y-2.5',
 
-  /** Vertical spacing between messages/turns (20px) */
-  messageSpacing: 'flex flex-col gap-5',
-
-  /** Extra padding for user messages — none: the column rhythm separates turns */
-  userMessagePadding: '',
+  /** Extra padding for user messages (visual separation from AI responses) */
+  userMessagePadding: 'pt-4 pb-2',
 
   /** Bottom branding area padding */
   brandingPadding: 'pt-16 pb-24',
@@ -67,6 +61,13 @@ export const CHAT_CLASSES = {
 
   /** Bottom branding container */
   brandingContainer: `flex justify-center ${CHAT_LAYOUT.brandingPadding}`,
+
+  /** Draft and live composers share this column so the first send does not resize the input. */
+  composerColumn: `${CHAT_LAYOUT.maxWidth} mx-auto w-full`,
+
+  /** Leave the record-navigation gutter in place so the composer does not shift when ticks appear. */
+  recordRailGrid: 'grid flex-1 min-h-0 min-w-0 grid-cols-[2rem_minmax(0,1fr)]',
+  recordRailContent: 'col-start-2 flex min-h-0 min-w-0 flex-col',
 } as const
 
 // ============================================================================

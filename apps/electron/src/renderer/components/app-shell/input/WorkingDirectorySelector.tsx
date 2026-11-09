@@ -46,8 +46,10 @@ export interface WorkingDirectoryTriggerState {
 export interface WorkingDirectorySelectorProps {
   workingDirectory?: string
   onWorkingDirectoryChange: (path: string) => void
-  /** Session root, offered as the "Reset" target. Undefined disables reset. */
+  /** Session root used for reset. */
   sessionFolderPath?: string
+  /** Chat drafts can send 'none' before their session folder exists. */
+  allowDraftReset?: boolean
   workspaceId?: string
   /**
    * Renders the popover trigger. The returned element is wrapped in
@@ -73,6 +75,7 @@ export function WorkingDirectorySelector({
   workingDirectory,
   onWorkingDirectoryChange,
   sessionFolderPath,
+  allowDraftReset,
   workspaceId,
   renderTrigger,
   side = 'top',
@@ -108,6 +111,7 @@ export function WorkingDirectorySelector({
     workingDirectory,
     onWorkingDirectoryChange,
     sessionFolderPath,
+    allowDraftReset,
     workspaceId,
     isOpen: popoverOpen,
     onClose: closePopover,
@@ -124,10 +128,10 @@ export function WorkingDirectorySelector({
     }
   }, [popoverOpen, showFilter])
 
-  // Floating menu material (PopoverContent: popover-styled + motion-popover), 30px rows
-  const MENU_CONTAINER_STYLE = 'min-w-[200px] max-w-[400px] overflow-hidden p-0'
+  // Styles matching todo-filter-menu.tsx for consistency
+  const MENU_CONTAINER_STYLE = 'min-w-[200px] max-w-[400px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small p-0'
   const MENU_LIST_STYLE = 'max-h-[200px] overflow-y-auto p-1 [&_[cmdk-list-sizer]]:space-y-px'
-  const MENU_ITEM_STYLE = 'flex min-h-row-menu cursor-pointer select-none items-center gap-2 rounded-md px-2 text-label outline-none'
+  const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-2 rounded-[6px] px-3 py-1.5 text-[13px] outline-none'
 
   return (
     <>
@@ -139,13 +143,13 @@ export function WorkingDirectorySelector({
           <CommandPrimitive shouldFilter={showFilter}>
             {/* Filter input - only shown when more than 5 recent folders */}
             {showFilter && (
-              <div className="flex h-control-xl items-center border-b border-subtle px-3">
+              <div className="border-b border-border/50 px-3 py-2">
                 <CommandPrimitive.Input
                   ref={inputRef}
                   value={filter}
                   onValueChange={setFilter}
                   placeholder={t('chat.filterFolders')}
-                  className="w-full bg-transparent text-label outline-none placeholder:text-tertiary placeholder:select-none"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/50 placeholder:select-none"
                 />
               </div>
             )}
@@ -155,21 +159,21 @@ export function WorkingDirectorySelector({
               {hasFolder && (
                 <CommandPrimitive.Item
                   value={`current-${workingDirectory}`}
-                  className={cn(MENU_ITEM_STYLE, 'pointer-events-none bg-fill-selected')}
+                  className={cn(MENU_ITEM_STYLE, 'pointer-events-none bg-foreground/5')}
                   disabled
                 >
-                  <Icon_Folder className="h-4 w-4 shrink-0 text-secondary" />
+                  <Icon_Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="flex-1 min-w-0 truncate">
                     <span>{folderName}</span>
-                    <span className="text-tertiary ml-1.5">{formatPathForDisplay(workingDirectory, homeDir)}</span>
+                    <span className="text-muted-foreground ml-1.5">{formatPathForDisplay(workingDirectory, homeDir)}</span>
                   </span>
-                  <Check className="h-4 w-4 shrink-0 text-secondary" />
+                  <Check className="h-4 w-4 shrink-0" />
                 </CommandPrimitive.Item>
               )}
 
               {/* Separator after current folder */}
               {hasFolder && filteredRecent.length > 0 && (
-                <div className="bg-separator my-1 mx-1 h-px" />
+                <div className="h-px bg-border my-1 mx-1" />
               )}
 
               {/* Recent Directories - filterable (current directory already filtered out via filteredRecent) */}
@@ -180,19 +184,18 @@ export function WorkingDirectorySelector({
                     key={path}
                     value={`${recentFolderName} ${path}`}
                     onSelect={() => handleSelectRecent(path)}
-                    className={cn(MENU_ITEM_STYLE, 'group/item data-[selected=true]:bg-fill-hover')}
+                    className={cn(MENU_ITEM_STYLE, 'group/item data-[selected=true]:bg-foreground/5')}
                   >
-                    <Icon_Folder className="h-4 w-4 shrink-0 text-secondary" />
+                    <Icon_Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="flex-1 min-w-0 truncate">
                       <span>{recentFolderName}</span>
-                      <span className="text-tertiary ml-1.5">{formatPathForDisplay(path, homeDir)}</span>
+                      <span className="text-muted-foreground ml-1.5">{formatPathForDisplay(path, homeDir)}</span>
                     </span>
                     <button
                       type="button"
                       onClick={(e) => handleRemoveRecent(e, path)}
                       data-touch-reveal="true"
-                      aria-label={t('common.remove')}
-                      className="-mr-1 flex size-6 shrink-0 items-center justify-center rounded-sm text-tertiary opacity-0 transition-opacity group-hover/item:opacity-100 group-hover/item:duration-instant hover:bg-fill-pressed hover:text-foreground"
+                      className="shrink-0 h-3 w-3 rounded-[3px] flex items-center justify-center opacity-0 group-hover/item:opacity-100 text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-all"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -202,18 +205,18 @@ export function WorkingDirectorySelector({
 
               {/* Empty state when filtering */}
               {showFilter && (
-                <CommandPrimitive.Empty className="py-3 text-center text-label text-tertiary">
+                <CommandPrimitive.Empty className="py-3 text-center text-sm text-muted-foreground">
                   {t('chat.noFoldersFound')}
                 </CommandPrimitive.Empty>
               )}
             </CommandPrimitive.List>
 
             {/* Bottom actions - always visible, outside scrollable area */}
-            <div className="border-t border-subtle p-1">
+            <div className="border-t border-border/50 p-1">
               <button
                 type="button"
                 onClick={handleChooseFolder}
-                className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-fill-hover')}
+                className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-foreground/5')}
               >
                 {t('chat.chooseFolder')}
               </button>
@@ -221,7 +224,7 @@ export function WorkingDirectorySelector({
                 <button
                   type="button"
                   onClick={handleReset}
-                  className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-fill-hover')}
+                  className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-foreground/5')}
                 >
                   {t('common.reset')}
                 </button>

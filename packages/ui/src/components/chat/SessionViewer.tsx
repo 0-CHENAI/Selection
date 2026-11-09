@@ -14,12 +14,17 @@ import { cn } from '../../lib/utils'
 import { CHAT_LAYOUT, CHAT_CLASSES } from '../../lib/layout'
 import { PlatformProvider, type PlatformActions } from '../../context'
 import { TurnCard } from './TurnCard'
+import { ClarificationCard } from './ClarificationCard'
 import { UserMessageBubble } from './UserMessageBubble'
 import { SystemMessage } from './SystemMessage'
+import { SelectionMark } from '../SelectionMark'
 import {
   groupMessagesByTurn,
   storedToMessage,
   getAssistantTurnUiKey,
+  pendingClarificationLayout,
+  settledClarificationGroups,
+  settledClarificationMessages,
   type ActivityItem,
 } from './turn-utils'
 
@@ -49,30 +54,13 @@ export interface SessionViewerProps {
 }
 
 /**
- * CraftAgentLogo - The Craft Agent "C" logo for branding
- */
-function CraftAgentLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <g transform="translate(3.4502, 3)" fill="currentColor">
-        <path
-          d="M3.17890888,3.6 L3.17890888,0 L16,0 L16,3.6 L3.17890888,3.6 Z M9.642,7.2 L9.64218223,10.8 L0,10.8 L0,3.6 L16,3.6 L16,7.2 L9.642,7.2 Z M3.17890888,18 L3.178,14.4 L0,14.4 L0,10.8 L16,10.8 L16,18 L3.17890888,18 Z"
-          fillRule="nonzero"
-        />
-      </g>
-    </svg>
-  )
-}
-
-/**
  * SessionViewer - Read-only session transcript viewer component
  */
-export function SessionViewer({
+export function SessionViewer(props: SessionViewerProps) {
+  return <SessionViewerContent key={props.session.id} {...props} />
+}
+
+function SessionViewerContent({
   session,
   mode = 'readonly',
   platformActions = {},
@@ -91,6 +79,18 @@ export function SessionViewer({
     () => groupMessagesByTurn(session.messages.map(storedToMessage), { isSessionProcessing: false }),
     [session.messages]
   )
+  const clarificationLayout = useMemo(() => pendingClarificationLayout(turns), [turns])
+  const settledClarifications = useMemo(() => {
+    const messages = new Map<number, ReturnType<typeof settledClarificationMessages>>()
+    const hidden = new Set<number>()
+    for (const group of settledClarificationGroups(turns)) {
+      messages.set(group.anchorIndex, settledClarificationMessages(turns, group))
+      for (const index of group.clarificationIndexes) {
+        if (index !== group.anchorIndex) hidden.add(index)
+      }
+    }
+    return { messages, hidden }
+  }, [turns])
 
   // Track expanded turns (for controlled state)
   const [expandedTurns, setExpandedTurns] = useState<Set<string>>(() => {
@@ -168,6 +168,7 @@ export function SessionViewer({
                       content={turn.message.content}
                       attachments={turn.message.attachments}
                       badges={turn.message.badges}
+                      timestamp={turn.message.timestamp ?? turn.timestamp}
                       onUrlClick={platformActions.onOpenUrl}
                       onFileClick={platformActions.onOpenFile}
                     />
@@ -188,11 +189,42 @@ export function SessionViewer({
                 )
               }
 
+              if (turn.type === 'clarification') {
+                if (settledClarifications.hidden.has(index)) return null
+                const settledMessages = settledClarifications.messages.get(index)
+                if (settledMessages) {
+                  const foldKey = `clarification:${turn.message.id}`
+                  return (
+                    <div key={turn.message.id} className="mt-2">
+                      <TurnCard
+                        turnId={foldKey}
+                        activities={[]}
+                        clarifications={settledMessages}
+                        isStreaming={false}
+                        isComplete
+                        isExpanded={expandedTurns.has(foldKey)}
+                        onExpandedChange={(expanded) => handleExpandedChange(foldKey, expanded)}
+                        sessionFolderPath={sessionFolderPath}
+                      />
+                    </div>
+                  )
+                }
+                return (
+                  <div key={turn.message.id} className="mt-2">
+                    <ClarificationCard message={turn.message} interactive={false} />
+                  </div>
+                )
+              }
+
               if (turn.type === 'assistant') {
+                if (clarificationLayout?.hiddenTurnIndexes.has(index)) return null
+                const settledMessages = settledClarifications.messages.get(index)
                 const assistantUiKey = getAssistantTurnUiKey(turn, index)
                 return (
+                  <div key={assistantUiKey}>
                   <TurnCard
-                    key={assistantUiKey}
+                    clarifications={settledMessages}
+                    awaitingClarification={clarificationLayout?.statusTurnIndex === index}
                     turnId={turn.turnId}
                     activities={turn.activities}
                     response={turn.response}
@@ -219,6 +251,7 @@ export function SessionViewer({
                     sessionFolderPath={sessionFolderPath}
                     annotationInteractionMode={mode === 'readonly' ? 'tooltip-only' : 'interactive'}
                   />
+                  </div>
                 )
               }
 
@@ -227,7 +260,7 @@ export function SessionViewer({
 
             {/* Bottom branding */}
             <div className={CHAT_CLASSES.brandingContainer}>
-              <CraftAgentLogo className="size-8 text-accent/40" />
+              <SelectionMark className="w-8 h-8 opacity-40" />
             </div>
             </div>
           </div>

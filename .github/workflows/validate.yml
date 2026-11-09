@@ -1,3 +1,9 @@
+# PR / branch gate. See docs/ci.md for the required-vs-optional layout.
+#
+# Required product gate (Linux + Windows): validation-checks, tracked-tests,
+# artifact-windows, and the validate aggregator. These no longer wait on scarce
+# macOS / xcode-27 runners. Darwin confinement + Darwin-only tests run in
+# Validate macOS Native (nightly / manual), not on every PR.
 name: Validate
 
 on:
@@ -5,27 +11,51 @@ on:
   push:
     branches:
       - main
+      - test
   workflow_dispatch:
 
+# Cancel superseded PR runs. Do not cancel push-to-test/main mid-flight —
+# those runs are the post-merge record, not a rapid-iteration loop.
 concurrency:
   group: validate-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: "0"
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
+  artifact-windows:
+    name: artifact-windows
+    runs-on: windows-2025
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
+
+      - name: Verify Windows artifact delivery
+        run: bun test packages/server-core/src/reliability/artifact-versions.test.ts packages/server-core/src/reliability/conversation-artifact-versions.test.ts packages/server-core/src/reliability/artifact-delivery-review.test.ts packages/server-core/src/sessions/session-artifact-display.test.ts packages/server-core/src/sessions/artifact-restore-agent.test.ts packages/server-core/src/sessions/answer-delivery.test.ts packages/ui/src/components/chat/__tests__/response-artifacts.test.ts apps/electron/src/renderer/event-processor/handlers/__tests__/artifact-selection-updated.test.ts apps/electron/src/main/__tests__/answer-delivery-pipeline.test.ts
+
+  validation_checks:
+    name: validation-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
         with:
-          bun-version: "1.3.10"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+          install-uv: "true"
+          install-bwrap: "true"
 
       - name: Reject Windows-illegal filenames
         run: |
@@ -36,10 +66,113 @@ jobs:
             exit 1
           fi
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Linux validates vendored OfficeCLI resources/policy. Platform binary
+      # contracts stay on Windows OfficeCLI integration and nightly macOS —
+      # downloading linux-x64 here would introduce a new, unproven gate.
+      - name: Verify pinned OfficeCLI resources
+        id: validation_ready
+        run: bun scripts/sync-officecli.ts --check
 
-      - name: Run validation suite
-        run: bun run validate:ci
+      - name: Verify Linux native confinement
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun scripts/ci/probe-native-confinement.ts
+
+      # Run independent checks even if an earlier check failed, while still
+      # failing the job and skipping everything when setup did not complete.
+      - name: Typecheck all packages
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run typecheck:all
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Verify renderer startup
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:renderer-startup
+
+      - name: Run shared configuration tests
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:shared:all
+
+      - name: Run Pi agent server tests
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:pi-agent-server
+
+      - name: Run document tool tests
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:doc-tools
+
+      - name: Lint source
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run lint
+
+      - name: Check translations
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage
+
+  tracked_tests:
+    name: tracked-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
+        with:
+          install-uv: "true"
+          install-bwrap: "true"
+
+      - name: Verify Linux native confinement
+        run: bun scripts/ci/probe-native-confinement.ts
+
+      - name: Verify pinned OfficeCLI resources
+        run: bun scripts/sync-officecli.ts --check
+
+      - name: Run tracked tests
+        env:
+          TRACKED_TEST_PROCS: "4"
+        run: bash scripts/run-tracked-tests.sh --keep-going
+
+  # Preserve the existing required check name while gating on both Linux jobs.
+  validate:
+    needs: [validation_checks, tracked_tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all validation jobs to pass
+        env:
+          CHECKS_RESULT: ${{ needs.validation_checks.result }}
+          TESTS_RESULT: ${{ needs.tracked_tests.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          classify() {
+            local name="$1" result="$2"
+            case "$result" in
+              success)
+                echo "$name passed"
+                ;;
+              failure)
+                echo "::error::Product: $name failed after the job started. Open that job's logs. Treat this as a typecheck/lint/test failure unless the first steps show an infra error (install, runner, bubblewrap)."
+                fail=1
+                ;;
+              cancelled)
+                echo "::error::Infra: $name was cancelled (queue, capacity, or a newer push cancelled this run). This is not by itself a product regression. Re-run Validate."
+                fail=1
+                ;;
+              skipped)
+                echo "::error::Infra: $name was skipped, so the Validate aggregator cannot trust this run."
+                fail=1
+                ;;
+              *)
+                echo "::error::Infra: $name finished with unexpected result '$result'."
+                fail=1
+                ;;
+            esac
+          }
+          classify validation-checks "$CHECKS_RESULT"
+          classify tracked-tests "$TESTS_RESULT"
+          exit "$fail"

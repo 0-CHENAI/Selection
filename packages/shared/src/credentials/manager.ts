@@ -348,27 +348,42 @@ export class CredentialManager {
     return this.delete({ type: 'llm_api_key', connectionSlug });
   }
 
-  // ============================================================
-  // Decision Layer Credentials (Jev / System One providers)
-  // ============================================================
-
-  /**
-   * Get the API key stored for a decision provider (`decision_api_key::{provider}`).
-   * Keys reused from an LLM connection are read via getLlmApiKey instead.
-   */
-  async getDecisionApiKey(provider: string): Promise<string | null> {
-    const cred = await this.get({ type: 'decision_api_key', name: provider });
-    return cred?.value || null;
+  /** Get the optional AnySearch API key used by built-in web search. */
+  async getAnySearchApiKey(): Promise<string | null> {
+    const cred = await this.get({ type: 'anysearch_api_key' });
+    const value = cred?.value?.trim();
+    return value || null;
   }
 
-  /** Store the API key for a decision provider. */
-  async setDecisionApiKey(provider: string, apiKey: string): Promise<void> {
-    await this.set({ type: 'decision_api_key', name: provider }, { value: apiKey });
+  /** Store or clear the AnySearch API key. An empty value deletes it. */
+  async setAnySearchApiKey(apiKey: string): Promise<void> {
+    const value = apiKey.trim();
+    if (!value) {
+      await this.delete({ type: 'anysearch_api_key' });
+      return;
+    }
+    await this.set({ type: 'anysearch_api_key' }, { value });
   }
 
-  /** Delete the API key for a decision provider. Returns true if one was removed. */
-  async deleteDecisionApiKey(provider: string): Promise<boolean> {
-    return this.delete({ type: 'decision_api_key', name: provider });
+  /** Whether an AnySearch API key is stored, without returning the secret. */
+  async hasAnySearchApiKey(): Promise<boolean> {
+    return (await this.getAnySearchApiKey()) !== null;
+  }
+
+  async getSearchProviderApiKey(provider: import('../config/search-settings.ts').SearchKeyProviderId): Promise<string | null> {
+    const types = { anysearch: 'anysearch_api_key', deepseek: 'deepseek_search_api_key', tavily: 'tavily_search_api_key',
+      exa: 'exa_search_api_key', brave: 'brave_search_api_key' } as const;
+    const cred = await this.get({ type: types[provider] });
+    return cred?.value?.trim() || null;
+  }
+
+  async setSearchProviderApiKey(provider: import('../config/search-settings.ts').SearchKeyProviderId, apiKey: string): Promise<void> {
+    const types = { anysearch: 'anysearch_api_key', deepseek: 'deepseek_search_api_key', tavily: 'tavily_search_api_key',
+      exa: 'exa_search_api_key', brave: 'brave_search_api_key' } as const;
+    const id = { type: types[provider] };
+    const value = apiKey.trim();
+    if (value) await this.set(id, { value });
+    else await this.delete(id);
   }
 
   /**
@@ -567,7 +582,7 @@ export class CredentialManager {
    */
   private async hasLlmApiKeyCredential(connectionSlug: string): Promise<boolean> {
     const apiKey = await this.getLlmApiKey(connectionSlug);
-    return !!apiKey;
+    return !!apiKey?.trim();
   }
 
   /**

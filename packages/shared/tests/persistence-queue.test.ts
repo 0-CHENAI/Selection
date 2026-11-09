@@ -4,9 +4,10 @@
  * Key behavior: Writes to the same session must be serialized to prevent
  * race conditions when rapid successive flushes write to the same .tmp file.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import * as fsPromises from 'node:fs/promises';
 import { tmpdir } from 'os';
 import { SessionPersistenceQueue } from '../src/sessions/persistence-queue.ts';
 import type { StoredSession } from '../src/sessions/types.ts';
@@ -60,6 +61,25 @@ describe('SessionPersistenceQueue', () => {
     const content = readFileSync(filePath, 'utf-8');
     const header = JSON.parse(content.split('\n')[0]);
     expect(header.sdkSessionId).toBe('sdk-123');
+  });
+
+  it('preserves the previous transcript if replacement rename fails', async () => {
+    queue.enqueue(createTestSession('rename-failure', testDir, 'original-sdk'));
+    await queue.flush('rename-failure');
+    const filePath = join(testDir, 'sessions', 'rename-failure', 'session.jsonl');
+    const original = readFileSync(filePath, 'utf-8');
+    const rename = fsPromises.rename;
+    const failure = spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === filePath) throw new Error('injected rename failure');
+      return rename(from, to);
+    });
+    try {
+      queue.enqueue(createTestSession('rename-failure', testDir, 'replacement-sdk'));
+      await queue.flush('rename-failure');
+      expect(readFileSync(filePath, 'utf-8')).toBe(original);
+    } finally {
+      failure.mockRestore();
+    }
   });
 
   it('serializes concurrent flushes for the same session', async () => {

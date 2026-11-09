@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-07",
+  "version": "2026-08-22",
   "allowedBashPatterns": [
     {
       "pattern": "^ls\\b",
@@ -74,10 +74,6 @@
       "comment": "PDF read operations: extract text/pages, view info"
     },
     {
-      "pattern": "^xlsx-tool\\s+(read|info|export)\\b",
-      "comment": "Excel read operations: read cells, view info, export"
-    },
-    {
       "pattern": "^doc-diff\\b",
       "comment": "Document comparison (read-only)"
     },
@@ -86,19 +82,31 @@
       "comment": "Image read operations: view metadata/info"
     },
     {
-      "pattern": "^docx-tool\\s+(info|extract)\\b",
-      "comment": "Word read operations: view info, extract text"
-    },
-    {
-      "pattern": "^pptx-tool\\s+(info|extract)\\b",
-      "comment": "PowerPoint read operations: view info, extract text"
-    },
-    {
       "pattern": "^ical-tool\\s+(read|filter)\\b",
       "comment": "Calendar read operations: read events, filter by date"
     },
     {
-      "pattern": "^(pdf-tool|xlsx-tool|img-tool|docx-tool|pptx-tool|ical-tool)\\s*$",
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+validate\\b(?![^\\r\\n]*(?:--out(?:put)?\\b|--save(?:=|\\b)|\\bscreenshot\\b|\\brender\\b|\\bexport\\b))[^\\r\\n]*$",
+      "comment": "OfficeCLI read-only validation"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+view[ \\t]+[^\\r\\n]+[ \\t]+(?:issues|outline|text|html)(?:[ \\t]+--json)?[ \\t]*$",
+      "comment": "OfficeCLI read-only document views without render or output flags"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+(?:get|query)\\b(?![^\\r\\n]*(?:--out(?:put)?\\b|--save(?:=|\\b)|\\bscreenshot\\b|\\brender\\b|\\bexport\\b))[^\\r\\n]*$",
+      "comment": "OfficeCLI read-only get/query without output-producing options"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+load_skill[ \\t]+[a-z][a-z0-9-]*[ \\t]*$",
+      "comment": "OfficeCLI official guide inspection; no output or mutation options"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?\\s+--(help|version)\\b",
+      "comment": "OfficeCLI help and version inspection"
+    },
+    {
+      "pattern": "^(pdf-tool|img-tool|ical-tool)\\s*$",
       "comment": "CLI tools: bare invocation (prints help)"
     },
     {

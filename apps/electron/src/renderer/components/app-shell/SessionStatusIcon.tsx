@@ -29,12 +29,9 @@ export function SessionStatusIcon({ item }: SessionStatusIconProps) {
         <button
           type="button"
           className={cn(
-            // 16px glyph (spec §2.4) in a 24px button box (36px in the compact/touch shell), padded around
-            // the glyph with a matching negative margin so the row's layout doesn't change
-            "relative !size-6 -m-1 p-1 flex items-center justify-center rounded-full cursor-pointer",
-            "@max-mobile/shell:!size-9 @max-mobile/shell:-m-2.5 @max-mobile/shell:p-2.5",
-            "before:absolute before:inset-0 before:rounded-full before:content-[''] hover:before:bg-fill-hover",
-            "[&>svg]:w-full [&>svg]:h-full [&>img]:w-full [&>img]:h-full [&>span]:text-label",
+            "!h-5 !w-5 flex items-center justify-center rounded-full transition-colors cursor-pointer",
+            "hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "[&>svg]:w-full [&>svg]:h-full [&>img]:w-full [&>img]:h-full [&>span]:text-base",
           )}
           style={getStateIconStyle(status, ctx.sessionStatuses)}
           aria-haspopup="menu"

@@ -3,7 +3,7 @@
  * PR #348 review item "Block #1: Inline buttons completely bypass access
  * control".
  *
- * Telegram inline buttons are visible to every member of a supergroup
+ * Lark inline buttons are visible to every member of a supergroup
  * topic, so without this gate any non-owner can tap `bind:`, `perm:`, or
  * `plan:` callback buttons and bypass the text-side filter. The gate
  * checks workspace-owner status for `bind:` and binding-level access
@@ -45,7 +45,7 @@ function makeFakeAdapter(): FakeAdapter {
   let messageHandler: ((msg: IncomingMessage) => Promise<void>) | null = null
   const sent: string[] = []
   const adapter = {
-    platform: 'telegram' as const,
+    platform: 'lark' as const,
     capabilities: {
       messageEditing: true,
       inlineButtons: true,
@@ -65,12 +65,12 @@ function makeFakeAdapter(): FakeAdapter {
     },
     sendText: mock(async (_channelId: string, text: string) => {
       sent.push(text)
-      return { platform: 'telegram', channelId: _channelId, messageId: String(sent.length) }
+      return { platform: 'lark', channelId: _channelId, messageId: String(sent.length) }
     }),
     editMessage: async () => {},
-    sendButtons: async () => ({ platform: 'telegram' as const, channelId: '', messageId: '0' }),
+    sendButtons: async () => ({ platform: 'lark' as const, channelId: '', messageId: '0' }),
     sendTyping: async () => {},
-    sendFile: async () => ({ platform: 'telegram' as const, channelId: '', messageId: '0' }),
+    sendFile: async () => ({ platform: 'lark' as const, channelId: '', messageId: '0' }),
   } as unknown as FakeAdapter
   ;(adapter as { sent: string[] }).sent = sent
   ;(adapter as { fireButton: (press: ButtonPress) => Promise<void> }).fireButton = (press) =>
@@ -116,7 +116,7 @@ async function makeHarness(args: { workspaceConfig: MessagingConfig }): Promise<
 
 function buildPress(overrides: Partial<ButtonPress> = {}): ButtonPress {
   return {
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chat-1',
     messageId: '1',
     senderId: 'sender-A',
@@ -158,7 +158,7 @@ describe('MessagingGateway button-press access gate', () => {
       workspaceConfig: {
         enabled: true,
         platforms: {
-          telegram: {
+          lark: {
             enabled: true,
             accessMode: 'owner-only',
             owners: [{ userId: 'owner-1', addedAt: 0 }],
@@ -179,7 +179,7 @@ describe('MessagingGateway button-press access gate', () => {
       workspaceConfig: {
         enabled: true,
         platforms: {
-          telegram: {
+          lark: {
             enabled: true,
             accessMode: 'owner-only',
             owners: [{ userId: 'owner-1', addedAt: 0 }],
@@ -195,14 +195,14 @@ describe('MessagingGateway button-press access gate', () => {
     const h = await makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
     })
     // Bind a session in allow-list mode that excludes Bob.
     h.gateway.getBindingStore().bind(
       'ws-test',
       'sess-A',
-      'telegram',
+      'lark',
       'chat-1',
       undefined,
       { accessMode: 'allow-list', allowedSenderIds: ['alice'] },
@@ -230,13 +230,13 @@ describe('MessagingGateway button-press access gate', () => {
     const h = await makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
     })
     h.gateway.getBindingStore().bind(
       'ws-test',
       'sess-A',
-      'telegram',
+      'lark',
       'chat-1',
       undefined,
       { accessMode: 'allow-list', allowedSenderIds: ['alice'] },
@@ -261,7 +261,7 @@ describe('MessagingGateway button-press access gate', () => {
       workspaceConfig: {
         enabled: true,
         platforms: {
-          telegram: {
+          lark: {
             enabled: true,
             accessMode: 'owner-only',
             owners: [{ userId: 'owner-1', addedAt: 0 }],
@@ -279,13 +279,13 @@ describe('MessagingGateway button-press access gate', () => {
     const h = await makeHarness({
       workspaceConfig: {
         enabled: true,
-        platforms: { telegram: { enabled: true, accessMode: 'open' } },
+        platforms: { lark: { enabled: true, accessMode: 'open' } },
       },
     })
     const binding = h.gateway.getBindingStore().bind(
       'ws-test',
       'sess-A',
-      'telegram',
+      'lark',
       'chat-1',
       undefined,
       { accessMode: 'allow-list', allowedSenderIds: ['alice'] },
@@ -297,7 +297,7 @@ describe('MessagingGateway button-press access gate', () => {
         senderId: 'bob',
       }),
     )
-    const pending = h.gateway.getPendingStore().list('telegram')
+    const pending = h.gateway.getPendingStore().list('lark')
     expect(pending).toHaveLength(1)
     expect(pending[0]!.userId).toBe('bob')
     expect(pending[0]!.reason).toBe('not-on-binding-allowlist')

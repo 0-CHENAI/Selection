@@ -2,14 +2,14 @@
  * SystemMessage - Displays system/info/error/warning messages
  *
  * Used for displaying non-conversational messages like errors, warnings,
- * info notices, and general system messages (viewer transcripts).
+ * info notices, and general system messages. Supports different visual
+ * styles based on the message type.
  *
- * Inline markers (spec §7.7): errors sit on the destructive tint with a 2px left rule,
- * warnings and info notices on the info tint, system notes on a neutral fill. The icon
- * carries the role color; the text stays in the foreground role for contrast.
+ * Error and warning types use shadow-tinted for a softer, more polished appearance.
+ * System and info types use a simple bordered style.
  */
 
-import { CircleAlert, Info, TriangleAlert, type LucideIcon } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 
@@ -25,31 +25,39 @@ export interface SystemMessageProps {
 }
 
 // Style configuration for each message type
-const MESSAGE_STYLES: Record<SystemMessageType, { surface: string; icon: LucideIcon; iconClass: string }> = {
+// Error and warning use shadow-tinted with subtle bg, others use bordered style
+const MESSAGE_STYLES: Record<SystemMessageType, {
+  className: string
+  useTintedShadow: boolean
+  shadowColor?: string
+  bgStyle?: CSSProperties
+}> = {
   error: {
-    surface: 'bg-destructive-tint border-l-2 border-destructive',
-    icon: CircleAlert,
-    iconClass: 'text-destructive',
+    // Uses -text variant (mixed with foreground) for better text contrast
+    className: 'text-[var(--destructive-text)] shadow-tinted',
+    useTintedShadow: true,
+    shadowColor: 'var(--destructive-rgb)',
+    bgStyle: { backgroundColor: 'oklch(from var(--destructive) l c h / 0.03)' },
   },
   warning: {
-    surface: 'bg-info-tint border-l-2 border-info',
-    icon: TriangleAlert,
-    iconClass: 'text-info',
+    // Uses -text variant (mixed with foreground) for better text contrast
+    className: 'text-[var(--info-text)] shadow-tinted',
+    useTintedShadow: true,
+    shadowColor: 'var(--info-rgb)',
+    bgStyle: { backgroundColor: 'oklch(from var(--info) l c h / 0.03)' },
   },
   info: {
-    surface: 'bg-info-tint border-l-2 border-info',
-    icon: Info,
-    iconClass: 'text-info',
+    className: 'text-muted-foreground border border-muted bg-muted/30',
+    useTintedShadow: false,
   },
   system: {
-    surface: 'bg-fill-hover',
-    icon: Info,
-    iconClass: 'text-tertiary',
+    className: 'text-muted-foreground border border-muted bg-muted/30',
+    useTintedShadow: false,
   },
 }
 
 /**
- * SystemMessage - Renders a styled inline marker based on type
+ * SystemMessage - Renders a styled message bubble based on type
  */
 export function SystemMessage({
   content,
@@ -57,12 +65,18 @@ export function SystemMessage({
   className,
 }: SystemMessageProps) {
   const style = MESSAGE_STYLES[type]
-  const Icon = style.icon
 
   return (
-    <div className={cn('flex gap-2.5 rounded-md px-3 py-2.5 text-label text-foreground', style.surface, className)}>
-      <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', style.iconClass)} />
-      <div className="min-w-0 flex-1 break-words [&_.markdown-content>:first-child]:mt-0 [&_.markdown-content>:last-child]:mb-0 [&_p]:leading-5">
+    <div className={cn("px-4 py-2", className)}>
+      <div
+        className={cn("text-sm px-3 py-2 rounded-md", style.className)}
+        style={{
+          ...style.bgStyle,
+          ...(style.useTintedShadow && style.shadowColor
+            ? { '--shadow-color': style.shadowColor } as CSSProperties
+            : {}),
+        }}
+      >
         <Markdown mode="minimal">{content}</Markdown>
       </div>
     </div>

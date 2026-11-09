@@ -9,6 +9,10 @@ import { resolve } from 'path'
 // import { sentryVitePlugin } from '@sentry/vite-plugin'
 
 export default defineConfig({
+  define: {
+    'process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE': JSON.stringify(process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE ?? ''),
+    'process.env.CRAFT_SWARM_PREVIEW_BUILD': JSON.stringify(process.env.CRAFT_SWARM_PREVIEW_BUILD ?? ''),
+  },
   plugins: [
     react({
       babel: {
@@ -61,7 +65,13 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'jotai', 'pdfjs-dist'],
-    exclude: ['@craft-agent/ui'],
+    // bash-parser is Node-only (broken ESM entry deps); never pre-bundle for renderer
+    exclude: [
+      '@craft-agent/ui',
+      'bash-parser',
+      'iterable-transform-replace',
+      'transform-spread-iterable',
+    ],
     esbuildOptions: {
       supported: { 'top-level-await': true },
       target: 'esnext'

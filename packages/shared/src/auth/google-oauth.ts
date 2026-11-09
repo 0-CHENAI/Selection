@@ -25,7 +25,7 @@ export type { GoogleService };
 // Google OAuth configuration - environment variables used as fallback
 // Users can provide their own credentials via source config (preferred for OSS)
 // These env vars are only used if credentials are not provided explicitly
-// Note: Google requires client_secret for Web application clients despite PKCE support
+// Note: Google requires client_secret for Desktop apps despite PKCE support
 const GOOGLE_CLIENT_ID_ENV = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET_ENV = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 

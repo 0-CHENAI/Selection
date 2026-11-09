@@ -146,7 +146,6 @@ export interface AuthResult {
 export interface DeveloperFeedback {
   id: string;
   timestamp: string;
-  sessionId: string;
   message: string;
 }
 
@@ -175,11 +174,21 @@ export interface TextContent {
   text: string;
 }
 
+/** Image content block compatible with MCP and agent SDK tool results. */
+export interface ImageContent {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
+export type ToolContent = TextContent | ImageContent;
+
 /**
  * Standard tool result type compatible with both SDK and MCP patterns
  */
 export interface ToolResult {
-  content: TextContent[];
+  /** The first block is always text so string-only clients retain a stable envelope. */
+  content: [TextContent, ...ToolContent[]];
   /**
    * Optional structured payload for MCP clients.
    * Keep this as an object (not null) for compatibility with strict tool_result parsers.
@@ -261,7 +270,7 @@ export interface ApiSourceConfig {
   headerNames?: string[];
   queryParam?: string;
   authScheme?: string;
-  /** Headers sent with every request, merged before auth headers */
+  /** Headers sent on every request, matching the runtime API tool config. */
   defaultHeaders?: Record<string, string>;
   testEndpoint?: {
     method: 'GET' | 'POST';

@@ -14,18 +14,21 @@ export interface ConfigDefaults {
   defaults: {
     notificationsEnabled: boolean;
     colorTheme: string;
-    autoCapitalisation: boolean;
     sendMessageKey: 'enter' | 'cmd-enter';
     spellCheck: boolean;
     keepAwakeWhileRunning: boolean;
+    sharedProjectMemoryEnabled: boolean;
     richToolDescriptions: boolean;
-    extendedPromptCache: boolean;
     browserToolEnabled: boolean;
     /**
      * Allow remote agents to call `browser_tool evaluate <expression>`.
      * When false, the local dispatcher rejects with `BROWSER_REMOTE_EVALUATE_BLOCKED`.
      */
     allowRemoteEvaluate: boolean;
+    /** Show the list / new-orchestration switch and allow the board route. */
+    dagOrchestrationEnabled: boolean;
+    /** Show Swarm controls and allow spawn_session. */
+    swarmAgentsEnabled: boolean;
   };
   workspaceDefaults: {
     thinkingLevel: ThinkingLevel;

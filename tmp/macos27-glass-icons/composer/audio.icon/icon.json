@@ -1,0 +1,70 @@
+{
+  "features": [
+    "refractivity",
+    "specular-location"
+  ],
+  "fill-specializations": [
+    {
+      "value": {
+        "automatic-gradient": "extended-srgb:0.85882,0.15294,0.46667,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "automatic-gradient": "extended-srgb:0.74510,0.09412,0.36471,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "Document",
+      "lighting": "individual",
+      "layers": [
+        {
+          "name": "Page",
+          "image-name": "page.svg",
+          "glass": true,
+          "fill": {
+            "solid": "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+          }
+        },
+        {
+          "name": "Fold",
+          "image-name": "fold.svg",
+          "glass": true,
+          "fill": {
+            "solid": "extended-srgb:0.92000,0.94000,0.98000,1.00000"
+          }
+        },
+        {
+          "name": "Glyph",
+          "image-name": "glyph.svg",
+          "glass": true,
+          "fill": {
+            "solid": "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.42
+      },
+      "specular": true,
+      "specular-highlight-placement": "outside",
+      "translucency": {
+        "enabled": true,
+        "value": 0.38
+      },
+      "blur-material": 0.42,
+      "refractivity": {
+        "enabled": true,
+        "depth": 0.55,
+        "strength": 0.62
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

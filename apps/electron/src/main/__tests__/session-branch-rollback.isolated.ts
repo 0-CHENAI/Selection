@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { rmSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-const workspaceRootPath = '/tmp/ws-rollback'
+const workspaceRootPath = await mkdtemp(join(tmpdir(), 'session-branch-rollback-'))
 const workspace = {
   id: 'ws-1',
   name: 'Workspace',
@@ -15,6 +19,11 @@ let mockedProvider: 'anthropic' | 'pi' = 'anthropic'
 // Partial-mock baseline: import real modules via file paths (avoids recursive mock imports)
 const actualSharedAgentModule = await import('../../../../../packages/shared/src/agent/index.ts')
 const actualSharedAgentBackendModule = await import('../../../../../packages/shared/src/agent/backend/index.ts')
+const actualSharedConfigModule = await import('../../../../../packages/shared/src/config/index.ts')
+const actualSharedWorkspacesModule = await import('../../../../../packages/shared/src/workspaces/index.ts')
+const actualConfigDefaults = await Bun.file(
+  new URL('../../../resources/config-defaults.json', import.meta.url),
+).json()
 
 mock.module('electron', () => ({
   app: {
@@ -57,10 +66,13 @@ mock.module('../logger', () => {
 })
 
 mock.module('@craft-agent/shared/config', () => ({
+  ...actualSharedConfigModule,
   getWorkspaceByNameOrId: (id: string) => (id === workspace.id ? workspace : null),
   getWorkspaces: () => [workspace],
   loadConfigDefaults: () => ({
+    ...actualConfigDefaults,
     workspaceDefaults: {
+      ...actualConfigDefaults.workspaceDefaults,
       permissionMode: 'ask',
       thinkingLevel: 'medium',
     },
@@ -110,6 +122,7 @@ mock.module('@craft-agent/shared/config', () => ({
 }))
 
 mock.module('@craft-agent/shared/workspaces', () => ({
+  ...actualSharedWorkspacesModule,
   loadWorkspaceConfig: () => ({
     defaults: {
       permissionMode: 'ask',
@@ -224,9 +237,11 @@ mock.module('@craft-agent/shared/sessions', () => ({
     storedById.set(id, session)
     return session
   },
-  deleteSession: async (_root: string, id: string) => {
+  deleteSession: (_root: string, id: string) => {
     deletedIds.push(id)
     storedById.delete(id)
+    rmSync(join(workspaceRootPath, 'sessions', id), { recursive: true, force: true })
+    return true
   },
   updateSessionMetadata: async () => {},
   canUpdateSdkCwd: () => false,
@@ -261,7 +276,14 @@ mock.module('@craft-agent/shared/sessions', () => ({
 const { SessionManager } = await import('@craft-agent/server-core/sessions')
 
 describe('session branch rollback on preflight failure', () => {
-  beforeEach(() => {
+  afterAll(async () => {
+    await rm(workspaceRootPath, { recursive: true, force: true })
+  })
+
+  beforeEach(async () => {
+    // Branch creation now snapshots files before SDK preflight. Supply a real,
+    // isolated source directory so these tests still reach the intended failure.
+    await mkdir(join(workspaceRootPath, 'sessions', 'source-1'), { recursive: true })
     mockedProvider = 'anthropic'
     idCounter = 0
     storedById.clear()
@@ -333,6 +355,24 @@ describe('session branch rollback on preflight failure', () => {
 
     expect(deletedIds).toEqual([])
     expect(storedById.has('child-1')).toBe(false)
+  })
+
+  it('rolls back the child before SDK startup when source snapshot fails', async () => {
+    await rm(join(workspaceRootPath, 'sessions', 'source-1'), { recursive: true })
+    const manager = new SessionManager()
+    const startAgent = mock(async () => { throw new Error('SDK must not start') })
+    ;(manager as any).getOrCreateAgent = startAgent
+
+    await expect(manager.createSession('ws-1', {
+      branchFromSessionId: 'source-1',
+      branchFromMessageId: 'm1',
+    } as any)).rejects.toThrow('ENOENT')
+
+    expect(startAgent).not.toHaveBeenCalled()
+    expect(deletedIds).toEqual(['child-1'])
+    expect(storedById.has('child-1')).toBe(false)
+    expect((manager as any).sessions.has('child-1')).toBe(false)
+    await expect(readdir(join(workspaceRootPath, 'sessions', 'child-1'))).rejects.toThrow('ENOENT')
   })
 
   it('runs backend preflight for pi branches and rolls back on failure', async () => {

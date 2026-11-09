@@ -14,7 +14,6 @@
  * All calls are delegated to the agent backend's queryLlm() implementation.
  */
 
-import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 
 // Tool result type - matches what the SDK expects
@@ -25,7 +24,10 @@ type ToolResult = {
 import { readFile } from 'fs/promises';
 import { existsSync, statSync } from 'fs';
 import path from 'node:path';
-import { getModelById, getDefaultSummarizationModel, MODEL_REGISTRY } from '../config/models.ts';
+import { resolveModelImageSupportFromCatalog } from '../config/model-image-support.ts';
+import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../config/models.ts';
+import { buildAttachedImagePrompt } from '../utils/image-attachment.ts';
+import { PPT_VISUAL_QA_NO_OCR_NOTE } from './ppt-visual-qa-policy.ts';
 
 // ============================================================================
 // QUERY INTERFACES (used by agent backends to implement queryFn)
@@ -36,6 +38,9 @@ import { getModelById, getDefaultSummarizationModel, MODEL_REGISTRY } from '../c
  * The prompt includes serialized file content (attachments are pre-processed by the tool).
  */
 export interface LLMQueryRequest {
+  /** Internal isolated progress evaluation; no model fallback or business tools. */
+  purpose?: 'progress-evaluation';
+  timeoutMs?: number;
   /** Full prompt including serialized file content */
   prompt: string;
   /** Optional system prompt */
@@ -48,12 +53,27 @@ export interface LLMQueryRequest {
   temperature?: number;
   /** Structured output JSON schema — backends handle natively when possible */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Visual input for a model that supports images.
+   * Omitted when the call has no image attachments. Backends must pass these
+   * through to the model; do not drop them because the transport is Selection Backend.
+   */
+  images?: LLMQueryImage[];
+}
+
+/** One image attachment already loaded from disk. Bytes are raw base64, not a data URL. */
+export interface LLMQueryImage {
+  type: 'image';
+  data: string;
+  mimeType: string;
 }
 
 /**
  * Result from an agent-native queryFn callback.
  */
 export interface LLMQueryResult {
+  stopReason?: string;
+  costUsd?: number;
   text: string;
   model?: string;
   inputTokens?: number;
@@ -70,11 +90,16 @@ export const LLM_QUERY_TIMEOUT_MS = 120000;
 
 // ============================================================================
 // UTILITY: TIMEOUT HELPER
-// Re-exported from utils/async so the timeout helper has a single home shared
-// with the session storage layer. Kept exported here for existing importers.
+// Races a promise against a timeout, cleaning up the timer on completion
 // ============================================================================
 
-export { withTimeout } from '../utils/async.ts';
+export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer!));
+}
 
 // ============================================================================
 // CONSTANTS
@@ -154,13 +179,82 @@ export const OUTPUT_FORMATS = {
 // Validates input, processes attachments, resolves schema, builds LLMQueryRequest
 // ============================================================================
 
+export interface CallLlmImageSupport {
+  /** Connection model catalog, including per-model vision on/off and learned rejections. */
+  models?: Parameters<typeof resolveModelImageSupportFromCatalog>[0]['models'];
+  /** Connection-level image default. Explicit per-model on/off still wins. */
+  endpointSupportsImages?: boolean;
+}
+
 export interface BuildCallLlmOptions {
-  /** Backend name for error messages (e.g., "Codex", "Copilot") */
+  /**
+   * Backend name retained for callers. Image attachments are not rejected
+   * because of this name; vision is decided from the resolved model.
+   */
   backendName: string;
   /** Optional model validation hook — return undefined to reject (falls back to default), or corrected model ID */
   validateModel?: (resolvedModelId: string) => string | undefined;
   /** Session directory for resolving relative attachment paths */
   sessionPath?: string;
+  /** Current session model used when the caller omits `model` (#192). */
+  defaultModel?: string;
+  /** Catalog used to decide whether the resolved model accepts images. */
+  imageSupport?: CallLlmImageSupport;
+}
+
+/**
+ * Same decision the main chat path uses: explicit on/off, learned rejection,
+ * endpoint default, known vision table (including ORDER Laufry), then an
+ * optimistic attempt for unknown names. An empty model id is not vision-capable.
+ */
+export function callLlmModelSupportsImages(
+  modelId: string | undefined,
+  catalog?: CallLlmImageSupport,
+): boolean {
+  const id = modelId?.trim();
+  if (!id) return false;
+  return resolveModelImageSupportFromCatalog({
+    modelId: id,
+    models: catalog?.models,
+    endpointSupportsImages: catalog?.endpointSupportsImages,
+  }).supportsImages;
+}
+
+export function imageAttachmentUnsupportedMessage(index: number, modelId: string | undefined): string {
+  const model = modelId?.trim();
+  const reason = model
+    ? `Attachment ${index + 1}: Image attachments are not supported by "${model}" because vision is not enabled for this model. Use a vision-capable model, or text files only.`
+    : `Attachment ${index + 1}: Image attachments are not supported because vision is not enabled for the active model. Use a vision-capable model, or text files only.`;
+  return `${reason}\n${PPT_VISUAL_QA_NO_OCR_NOTE}`;
+}
+
+/** Images ready for session.prompt. Empty or invalid input stays omitted. */
+export function callLlmPromptImages(
+  images: LLMQueryRequest['images'],
+): Array<{ type: 'image'; data: string; mimeType: string }> | undefined {
+  if (!images?.length) return undefined;
+  const normalized = images.filter((image) =>
+    image?.type === 'image'
+    && typeof image.data === 'string'
+    && image.data.length > 0
+    && typeof image.mimeType === 'string'
+    && image.mimeType.startsWith('image/'),
+  ).map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType }));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+/**
+ * `call_llm` inherits the current session model unless the caller names another.
+ * Title generation and other utility completions keep their own mini-model path.
+ */
+export function resolveCallLlmModel(
+  requested: string | undefined,
+  sessionModel: string | undefined,
+): string | undefined {
+  const explicit = requested?.trim();
+  if (explicit) return explicit;
+  const inherited = sessionModel?.trim();
+  return inherited || undefined;
 }
 
 /**
@@ -179,8 +273,26 @@ export async function buildCallLlmRequest(
     throw new Error('Prompt is required and cannot be empty.');
   }
 
+  // Resolve known registry ids only — do not map "Opus" onto claude-opus-4-8.
+  // Unspecified call_llm inherits the current session model, not the cheap/fast tier.
+  // Vision is decided on this resolved id, not on the transport name.
+  let model = resolveCallLlmModel(
+    typeof input.model === 'string' ? input.model : undefined,
+    options.defaultModel,
+  );
+  if (model) {
+    model = resolveKnownRegistryModelId(model) ?? model
+
+    // Backend-specific model validation (e.g., Codex rejects non-OpenAI models)
+    if (options.validateModel) {
+      model = options.validateModel(model) ?? undefined;
+    }
+  }
+  const supportsImages = callLlmModelSupportsImages(model, options.imageSupport);
+
   // Process attachments
   const textParts: string[] = [];
+  const images: LLMQueryImage[] = [];
   const attachments = input.attachments as Array<string | { path: string; startLine?: number; endLine?: number }> | undefined;
 
   if (attachments?.length) {
@@ -190,9 +302,11 @@ export async function buildCallLlmRequest(
         throw new Error(result.message);
       }
       if (result.type === 'image') {
-        throw new Error(
-          `Attachment ${i + 1}: Image attachments are not supported in ${options.backendName} mode. Use text files only.`
-        );
+        const adopted = adoptCallLlmImage(result, i, model, supportsImages);
+        if (!adopted.ok) throw new Error(adopted.message);
+        images.push(adopted.image);
+        textParts.push(adopted.note);
+        continue;
       }
       if (result.type === 'text') {
         textParts.push(`<file path="${result.filename}">\n${result.content}\n</file>`);
@@ -201,22 +315,6 @@ export async function buildCallLlmRequest(
   }
 
   textParts.push(prompt);
-
-  // Resolve model against registry, with optional backend-specific validation
-  let model = input.model as string | undefined;
-  if (model) {
-    const modelDef = getModelById(model)
-      || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === model!.toLowerCase())
-      || MODEL_REGISTRY.find(m => m.name.toLowerCase() === model!.toLowerCase());
-    if (modelDef) {
-      model = modelDef.id;
-    }
-
-    // Backend-specific model validation (e.g., Codex rejects non-OpenAI models)
-    if (options.validateModel) {
-      model = options.validateModel(model) ?? undefined;
-    }
-  }
 
   // Build system prompt with structured output injection if needed
   let systemPrompt = (input.systemPrompt as string) || '';
@@ -242,6 +340,29 @@ export async function buildCallLlmRequest(
     maxTokens: input.maxTokens as number | undefined,
     temperature: input.temperature as number | undefined,
     outputSchema: schema ?? undefined,
+    ...(images.length > 0 ? { images } : {}),
+  };
+}
+
+function adoptCallLlmImage(
+  result: Extract<AttachmentResult, { type: 'image' }>,
+  index: number,
+  modelId: string | undefined,
+  supportsImages: boolean,
+): { ok: true; image: LLMQueryImage; note: string } | { ok: false; message: string } {
+  if (!supportsImages) {
+    return { ok: false, message: imageAttachmentUnsupportedMessage(index, modelId) };
+  }
+  const name = result.path.split(/[/\\]/).pop() || 'image';
+  const note = buildAttachedImagePrompt({
+    name,
+    path: result.path,
+    storedPath: result.path,
+  }) ?? `[Attached image: ${name}]\nThe image is included as visual input — look at it. Path: ${result.path}`;
+  return {
+    ok: true,
+    image: { type: 'image', data: result.base64, mimeType: result.mediaType },
+    note,
   };
 }
 
@@ -331,7 +452,7 @@ interface AttachmentInput {
 
 type AttachmentResult =
   | { type: 'text'; content: string; filename: string; bytes: number }
-  | { type: 'image'; base64: string; mediaType: string }
+  | { type: 'image'; base64: string; mediaType: string; path: string }
   | { type: 'error'; message: string };
 
 export async function processAttachment(
@@ -423,7 +544,7 @@ export async function processAttachment(
       const imageData = await readFile(filePath);
       const base64 = imageData.toString('base64');
       const mediaType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      return { type: 'image', base64, mediaType };
+      return { type: 'image', base64, mediaType, path: filePath };
     } catch (err) {
       return { type: 'error', message: `Attachment ${index + 1}: Failed to read image "${safeFilename}": ${err instanceof Error ? err.message : err}` };
     }
@@ -543,6 +664,10 @@ export interface LLMToolOptions {
   sessionId: string;
   /** Session directory for resolving relative attachment paths */
   sessionPath?: string;
+  /** Current session model used when the caller omits `model`. */
+  defaultModel?: string;
+  /** Catalog used to decide whether the resolved model accepts images. */
+  imageSupport?: CallLlmImageSupport;
   /**
    * Lazy resolver for the agent-native query callback.
    * Called at execution time to get the current callback from the session registry.
@@ -555,43 +680,16 @@ export function createLLMTool(options: LLMToolOptions) {
   // sessionId captured in closure for potential future use (logging, rate limiting per session)
   const { sessionId: _sessionId } = options;
 
-  return tool(
-    'call_llm',
-    `Invoke a secondary LLM for focused subtasks. Use for:
-- Cost optimization: use a smaller model for simple tasks (summarization, classification)
-- Structured output: JSON schema compliance via native backend support
-- Parallel processing: call multiple times in one message - all run simultaneously
-- Context isolation: process content without polluting main context
-
-Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via attachments.
-Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
-For large files (>2000 lines), use {path, startLine, endLine} to select a portion.`,
-    {
-      prompt: z.string().min(1, 'Prompt cannot be empty')
-        .describe('Instructions for the LLM'),
-
-      attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional()
-        .describe(`File paths on disk (max ${MAX_ATTACHMENTS}). NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.`),
-
-      model: z.string().optional()
-        .describe('Model ID or short name (e.g., "haiku", "sonnet"). Defaults to a fast model.'),
-
-      systemPrompt: z.string().optional()
-        .describe('Optional system prompt'),
-
-      maxTokens: z.number().int().min(1).max(64000).optional()
-        .describe('Max output tokens (1-64000). Defaults to 4096'),
-
-      temperature: z.number().min(0).max(1).optional()
-        .describe('Sampling temperature 0-1'),
-
-      outputFormat: z.enum(['summary', 'classification', 'extraction', 'analysis', 'comparison', 'validation']).optional()
-        .describe('Predefined output format'),
-
-      outputSchema: OutputSchemaParam.optional()
-        .describe('Custom JSON Schema for structured output'),
-    },
-    async (args) => {
+  const handler = async (args: {
+    prompt: string
+    attachments?: Array<string | { path: string; startLine?: number; endLine?: number }>
+    model?: string
+    systemPrompt?: string
+    maxTokens?: number
+    temperature?: number
+    outputFormat?: 'summary' | 'classification' | 'extraction' | 'analysis' | 'comparison' | 'validation'
+    outputSchema?: { type: 'object'; properties: Record<string, unknown>; required?: string[] }
+  }) => {
       // ========================================
       // VALIDATION PHASE
       // ========================================
@@ -609,23 +707,12 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
         );
       }
 
-      // --- Validate and resolve model against registry ---
+      // Known Claude ids stay as registry ids. ORDER aliases (Opus, Laufry) pass through.
       if (args.model) {
-        let modelDef = getModelById(args.model);
-        if (!modelDef) {
-          modelDef = MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === args.model!.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === args.model!.toLowerCase());
-          if (modelDef) {
-            args.model = modelDef.id;
-          } else {
-            const available = MODEL_REGISTRY.map(m => `  - ${m.id} (${m.shortName})`).join('\n');
-            return errorResponse(
-              `Unknown model: "${args.model}"\n\n` +
-              `Available models:\n${available}`
-            );
-          }
-        }
+        args.model = resolveKnownRegistryModelId(args.model) ?? args.model
       }
+      const model = resolveCallLlmModel(args.model, options.defaultModel) || getDefaultSummarizationModel();
+      const supportsImages = callLlmModelSupportsImages(model, options.imageSupport);
 
       // ========================================
       // RESOLVE QUERY FUNCTION
@@ -645,6 +732,7 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
       // ========================================
 
       const textParts: string[] = [];
+      const images: LLMQueryImage[] = [];
       let totalContentBytes = 0;
 
       if (args.attachments?.length) {
@@ -657,9 +745,11 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
           }
 
           if (result.type === 'image') {
-            return errorResponse(
-              `Attachment ${i + 1}: Image attachments are not supported. Use text files only.`
-            );
+            const adopted = adoptCallLlmImage(result, i, model, supportsImages);
+            if (!adopted.ok) return errorResponse(adopted.message);
+            images.push(adopted.image);
+            textParts.push(adopted.note);
+            continue;
           }
 
           if (result.type === 'text') {
@@ -686,7 +776,6 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
       // EXECUTE QUERY
       // ========================================
 
-      const model = args.model || getDefaultSummarizationModel();
       const schema = args.outputSchema || (args.outputFormat ? OUTPUT_FORMATS[args.outputFormat] : null);
 
       try {
@@ -697,6 +786,7 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
           maxTokens: args.maxTokens,
           temperature: args.temperature,
           outputSchema: schema ? (schema as Record<string, unknown>) : undefined,
+          ...(images.length > 0 ? { images } : {}),
         });
 
         if (!result.text && !result.warning) {
@@ -714,7 +804,10 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
         }
         throw error;
       }
-    },
-    { annotations: { readOnlyHint: true } }
-  );
+    };
+
+  return {
+    name: 'call_llm',
+    handler,
+  };
 }

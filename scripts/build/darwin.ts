@@ -3,31 +3,14 @@
  */
 
 import { $ } from 'bun';
-import { existsSync, statSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import type { Arch, BuildConfig } from './common';
 
-/**
- * Verify SDK native binary is bundled in the packaged macOS app.
- * Since SDK 0.2.113 the SDK ships a per-platform native binary instead of cli.js.
- */
-export function verifyPackagedSDK(appPath: string, _arch: Arch): void {
-  const appResourcesPath = join(appPath, 'Contents', 'Resources', 'app');
-  const binaryPath = join(
-    appResourcesPath,
-    'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary', 'claude',
-  );
-
-  if (!existsSync(binaryPath)) {
-    throw new Error(`CRITICAL: SDK native binary not bundled! Expected at: ${binaryPath}`);
-  }
-
-  const stats = statSync(binaryPath);
-  if (stats.size < 50_000_000) {
-    throw new Error(`CRITICAL: SDK native binary too small (${stats.size} bytes, expected ~210 MB)`);
-  }
-
-  console.log(`  SDK bundled: claude binary is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
+export function darwinBuilderArgs(arch: Arch): string[] {
+  // Explicit target names prevent configured target architectures from adding
+  // an unrequested second architecture to this single-architecture build.
+  return ['--mac', 'dmg', 'zip', `--${arch}`];
 }
 
 /**
@@ -39,10 +22,12 @@ export async function packageDarwin(config: BuildConfig): Promise<string> {
   console.log('Packaging app with electron-builder...');
 
   // Set up environment for electron-builder
-  process.env.CSC_IDENTITY_AUTO_DISCOVERY = 'true';
+  // CI explicitly disables identity discovery to produce unsigned test builds.
+  // Preserve that choice while keeping local/release discovery enabled by default.
+  process.env.CSC_IDENTITY_AUTO_DISCOVERY ??= 'true';
 
   // Build electron-builder arguments
-  const builderArgs = ['--mac', `--${arch}`];
+  const builderArgs = darwinBuilderArgs(arch);
 
   // Add code signing if identity is available
   if (process.env.APPLE_SIGNING_IDENTITY) {
@@ -61,15 +46,9 @@ export async function packageDarwin(config: BuildConfig): Promise<string> {
   // Run electron-builder
   await $`cd ${electronDir} && npx electron-builder ${builderArgs}`;
 
-  // Verify SDK is bundled in the .app before checking artifacts
-  const macDir = arch === 'arm64' ? 'mac-arm64' : 'mac';
-  const appPath = join(electronDir, 'release', macDir, 'Craft Agents.app');
-  console.log('Verifying SDK in packaged app...');
-  verifyPackagedSDK(appPath, arch);
-
   // Verify the DMG and ZIP were built (ZIP is used by electron-updater for auto-updates)
-  const dmgName = `Craft-Agents-${arch}.dmg`;
-  const zipName = `Craft-Agents-${arch}.zip`;
+  const dmgName = `Selection-${arch}.dmg`;
+  const zipName = `Selection-${arch}.zip`;
   const dmgPath = join(electronDir, 'release', dmgName);
   const zipPath = join(electronDir, 'release', zipName);
 

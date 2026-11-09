@@ -13,19 +13,14 @@ import { findTaskLabel } from './filter.ts';
 import type { LabelConfig, CreateLabelInput, UpdateLabelInput } from './types.ts';
 
 /**
- * Generate URL-safe slug from name. Accents are folded first ("fejlesztési" →
- * "fejlesztesi", not "fejleszt-si"), and hyphens are trimmed after the 30-char cut:
- * trimming before it left ids like `task-powershell-fejleszt-k-pz-`, which the
- * label validator rejects, blocking every later label edit in the workspace.
+ * Generate URL-safe slug from name
  */
-export function generateLabelSlug(name: string): string {
+function generateLabelSlug(name: string): string {
   return name
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .substring(0, 30)
-    .replace(/^-+|-+$/g, '');
+    .replace(/^-|-$/g, '')
+    .substring(0, 30);
 }
 
 /**

@@ -1,135 +1,135 @@
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Hand, RefreshCw, TriangleAlert } from 'lucide-react'
+import { ShieldAlert, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { PermissionRisk } from '@craft-agent/core/types'
+import { cn } from '@/lib/utils'
 import type { PermissionRequest as PermissionRequestType } from '../../../../../shared/types'
 import type { PermissionResponse } from './types'
-import {
-  DECISION_ACTION,
-  DecisionActions,
-  DecisionBody,
-  DecisionCard,
-  DecisionDetails,
-  DecisionFoot,
-  DecisionHeader,
-  DecisionPreview,
-  DecisionSpacer,
-  type DecisionTone,
-} from './DecisionCard'
 
 interface PermissionRequestProps {
   request: PermissionRequestType
   onResponse: (response: PermissionResponse) => void
-  /** When true, the composer slot (InputContainer) draws the card material and ring */
+  /** When true, removes container styling (shadow, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
+}
+
+export function canAlwaysAllowPermission(toolName: string): boolean {
+  const canonicalName = toolName.replace(/^(?:mcp__session__|session__)/, '')
+  return canonicalName !== 'send_developer_feedback'
 }
 
 /**
  * PermissionRequest - Self-contained structured input for permission approval
  *
- * Decision-card anatomy (spec §7.6): hand icon tile + "Permission required", the tool and its
- * description, decision-model risk chips (destructive ring + tile when present), the command in
- * a sunken well (scrollable), then Allow (primary) · Always Allow (secondary, only when there is
- * something to remember) · Deny (ghost).
+ * Shows:
+ * - Shield icon + "Permission Required" header
+ * - Tool name badge
+ * - Description of what the tool wants to do
+ * - Command preview (scrollable)
+ * - Action buttons: Allow, Always Allow, Deny
  */
 export function PermissionRequest({ request, onResponse, unstyled = false }: PermissionRequestProps) {
   const { t } = useTranslation()
-  // Decision-model risk badges (opt-in, informational). Literal keys keep the i18n coverage check effective.
-  const riskLabels: Record<PermissionRisk, string> = {
-    deletes: t('chat.permissionRisk.deletes'),
-    sends: t('chat.permissionRisk.sends'),
-    publishes: t('chat.permissionRisk.publishes'),
-    credentials: t('chat.permissionRisk.credentials'),
-    system: t('chat.permissionRisk.system'),
-    spends: t('chat.permissionRisk.spends'),
+  const canAlwaysAllow = canAlwaysAllowPermission(request.toolName)
+  // Prevent double-submit while parent clears the pending queue asynchronously
+  const [responded, setResponded] = useState(false)
+  const respondedRef = useRef(false)
+
+  const respond = (response: PermissionResponse) => {
+    if (respondedRef.current) return
+    respondedRef.current = true
+    setResponded(true)
+    onResponse(response)
   }
 
-  // Risks a newer server may send that this client has no label for are left out.
-  const risks = (request.risks ?? []).filter((risk) => Object.hasOwn(riskLabels, risk))
-  const canRemember = request.canRemember !== false
-  const tone: DecisionTone = risks.length > 0 ? 'danger' : 'info'
-
   const handleAllow = () => {
-    onResponse({ type: 'permission', allowed: true, alwaysAllow: false })
+    respond({ type: 'permission', allowed: true, alwaysAllow: false })
   }
 
   const handleAlwaysAllow = () => {
-    onResponse({ type: 'permission', allowed: true, alwaysAllow: true })
+    respond({ type: 'permission', allowed: true, alwaysAllow: true })
   }
 
   const handleDeny = () => {
-    onResponse({ type: 'permission', allowed: false, alwaysAllow: false })
+    respond({ type: 'permission', allowed: false, alwaysAllow: false })
   }
 
   return (
-    <DecisionCard tone={tone} standalone={!unstyled} data-tutorial="permission-banner">
+    <div
+      className={cn(
+        'overflow-hidden h-full flex flex-col bg-info/5',
+        unstyled
+          ? 'border-0'
+          : 'border border-info/30 rounded-[8px] shadow-middle'
+      )}
+      data-tutorial="permission-banner"
+    >
       {/* Content - grows to fill available space and scrolls before actions disappear */}
-      <DecisionBody>
-        <DecisionHeader
-          tone={tone}
-          icon={tone === 'danger' ? <TriangleAlert /> : <Hand />}
-          title={t('chat.permissionRequired')}
-        />
-        <DecisionDetails>
-          <p className="text-label text-secondary">
-            <span className="font-medium text-foreground">{t('chat.permissionTool')}</span>{' '}
-            <span className="font-mono text-mono-ui text-foreground">{request.toolName}</span>
+      <div className="p-4 space-y-3 flex-1 min-h-0 flex flex-col overflow-y-auto">
+        <div className="space-y-2 pb-1">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+            <ShieldAlert className="h-3.5 w-3.5 text-info" />
+            <span>{t('chat.permissionRequired')}</span>
+          </div>
+          <div className="text-xs leading-[18px] text-muted-foreground">
+            <span className="font-medium text-foreground">{t('chat.permissionToolLabel')}</span>{' '}
+            {request.toolName}
             <br />
             {request.description}
-          </p>
-          {risks.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1" title={t('chat.permissionRiskHint')}>
-              {risks.map((risk) => (
-                <span key={risk} className="inline-flex h-5 items-center rounded-full bg-destructive-tint px-2 text-label-sm font-medium text-destructive">
-                  {riskLabels[risk]}
-                </span>
-              ))}
-            </div>
-          )}
+          </div>
+        </div>
 
-          {/* Command preview */}
-          {request.command && (
-            <DecisionPreview>{request.command}</DecisionPreview>
-          )}
-        </DecisionDetails>
-      </DecisionBody>
+        {/* Command preview */}
+        {request.command && (
+          <div className="bg-foreground/5 rounded-md p-3 font-mono text-xs text-foreground/90 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+            {request.command}
+          </div>
+        )}
+      </div>
 
       {/* Action buttons */}
-      <DecisionActions>
+      <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 border-t border-border/50">
         <Button
-          variant="primary"
-          size="lg"
-          className={DECISION_ACTION}
+          size="sm"
+          variant="default"
+          className="h-7 gap-1.5"
           onClick={handleAllow}
+          disabled={responded}
           data-tutorial="permission-allow-button"
         >
+          <Check className="h-3.5 w-3.5" />
           {t('chat.permissionAllow')}
         </Button>
-        {canRemember && (
+        {canAlwaysAllow && (
           <Button
-            variant="secondary"
-            size="lg"
-            className={DECISION_ACTION}
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1.5 border border-foreground/10 hover:bg-foreground/5 active:bg-foreground/10"
             onClick={handleAlwaysAllow}
+            disabled={responded}
           >
+            <RefreshCw className="h-3.5 w-3.5" />
             {t('chat.permissionAlwaysAllow')}
           </Button>
         )}
-        <DecisionSpacer />
         <Button
+          size="sm"
           variant="ghost"
-          size="lg"
-          className={DECISION_ACTION}
+          className="h-7 gap-1.5 text-destructive hover:text-destructive border border-dashed border-destructive/50 hover:bg-destructive/10 hover:border-destructive/70 active:bg-destructive/20"
           onClick={handleDeny}
+          disabled={responded}
         >
+          <X className="h-3.5 w-3.5" />
           {t('chat.permissionDeny')}
         </Button>
-      </DecisionActions>
 
-      {/* What "Always Allow" does */}
-      {canRemember && (
-        <DecisionFoot icon={<RefreshCw />}>{t('chat.permissionAlwaysAllowTip')}</DecisionFoot>
-      )}
-    </DecisionCard>
+        {/* Tip text */}
+        {canAlwaysAllow && (
+          <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
+            {t('chat.permissionAlwaysAllowHint')}
+          </span>
+        )}
+      </div>
+    </div>
   )
 }

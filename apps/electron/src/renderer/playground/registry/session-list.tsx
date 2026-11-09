@@ -82,7 +82,7 @@ const sampleSessions: SessionMeta[] = [
   },
 ]
 
-function createMockContext(overrides: Partial<SessionListContextValue> = {}): SessionListContextValue {
+export function createMockContext(overrides: Partial<SessionListContextValue> = {}): SessionListContextValue {
   return {
     onRenameClick: () => {},
     onSessionStatusChange: () => {},

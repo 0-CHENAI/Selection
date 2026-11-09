@@ -1,3 +1,4 @@
+import type { AnnotationFeedbackStatus } from '@craft-agent/core'
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
 import { CornerDownRight } from 'lucide-react'
@@ -24,14 +25,22 @@ export interface AnnotationIslandMenuProps {
   activeView: AnnotationIslandView
   mode: AnnotationIslandMode
   draft: string
+  error?: string
+  draftSaveError?: boolean
   onDraftChange: (next: string) => void
   onOpenFollowUp: () => void
   onCancel: () => void
+  onDiscardDraft?: () => void
   onRequestBack?: () => boolean
   onRequestEdit: () => void
   onSubmit: (value: string) => void
   onSubmitAndSend?: (value: string) => void
   onDelete?: () => void
+  onOpenResult?: () => void
+  resultSalvaged?: boolean
+  feedbackStatus?: AnnotationFeedbackStatus
+  feedbackResolved?: boolean
+  onResolveFeedback?: () => Promise<unknown>
   sendMessageKey?: 'enter' | 'cmd-enter'
   transitionConfig: IslandTransitionConfig
   onExitComplete?: () => void
@@ -47,14 +56,22 @@ export function AnnotationIslandMenu({
   activeView,
   mode,
   draft,
+  error,
+  draftSaveError,
   onDraftChange,
   onOpenFollowUp,
   onCancel,
+  onDiscardDraft,
   onRequestBack,
   onRequestEdit,
   onSubmit,
   onSubmitAndSend,
   onDelete,
+  onOpenResult,
+  resultSalvaged,
+  feedbackStatus,
+  feedbackResolved,
+  onResolveFeedback,
   sendMessageKey = 'enter',
   transitionConfig,
   onExitComplete,
@@ -63,6 +80,11 @@ export function AnnotationIslandMenu({
   usePortal = true,
 }: AnnotationIslandMenuProps) {
   const { t } = useTranslation()
+  const feedbackLabels: Record<AnnotationFeedbackStatus, string> = {
+    queued: t('chat.annotationFeedbackQueued'), running: t('chat.annotationFeedbackRunning'),
+    'waiting-user': t('chat.annotationFeedbackWaitingUser'), delivered: t('chat.annotationFeedbackDelivered'),
+    failed: t('chat.annotationFeedbackFailed'), interrupted: t('chat.annotationFeedbackInterrupted'),
+  }
   const menuRef = React.useRef<HTMLDivElement>(null)
   const [activeViewSize, setActiveViewSize] = React.useState<{ width: number; height: number } | null>(null)
 
@@ -84,6 +106,8 @@ export function AnnotationIslandMenu({
 
   if (!anchor) return null
 
+  const anchorY = `clamp(12px, ${anchor.y}px, calc(100vh - 12px))`
+
   const menuNode = (
     <div
       ref={menuRef}
@@ -92,8 +116,9 @@ export function AnnotationIslandMenu({
       style={{
         zIndex,
         left: anchorX,
-        top: Math.max(36, anchor.y),
-        transform: 'translate(-50%, -100%)',
+        top: anchorY,
+        // Self-relative translation follows content height, including validation errors.
+        transform: `translate(-50%, max(-100%, calc(12px - ${anchorY})))`,
       }}
     >
       <Island
@@ -133,12 +158,19 @@ export function AnnotationIslandMenu({
           id="confirm-follow-up"
           mode={mode}
           value={draft}
+          error={error ?? (draftSaveError ? t('chat.artifactVersions.draftSaveFailed') : undefined)}
+          feedbackStatus={feedbackStatus}
+          feedbackStatusLabel={feedbackResolved ? t('chat.annotationFeedbackResolved') : feedbackStatus ? feedbackLabels[feedbackStatus] : undefined}
+          onResolveFeedback={feedbackStatus === 'delivered' && !feedbackResolved ? onResolveFeedback : undefined}
           onValueChange={onDraftChange}
           onCancel={onCancel}
+          onDiscardDraft={onDiscardDraft}
           onRequestEdit={onRequestEdit}
           onSubmit={onSubmit}
           onSubmitAndSend={onSubmitAndSend}
           onDelete={onDelete}
+          onOpenResult={onOpenResult ? () => { onCancel(); onOpenResult() } : undefined}
+          resultLabel={t(resultSalvaged ? 'chat.followUpRecoveredResult' : 'chat.followUpRevisionResult')}
           title={t('chat.followUp')}
           submitLabel={t('common.save')}
           placeholder={t('chat.annotationPlaceholder')}

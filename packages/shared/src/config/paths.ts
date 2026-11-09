@@ -1,36 +1,25 @@
 /**
- * Centralized path configuration for Craft Agent.
+ * Centralized path configuration for Selection.
  *
- * `CONFIG_DIR` is the one place that decides where the app keeps its state
- * (`~/.craft-agent` by default). Every other module joins onto it; never join
- * `homedir()` with `.craft-agent` directly (OSS #1062).
+ * Supports multi-instance development via CRAFT_CONFIG_DIR environment variable.
+ * When running from a numbered folder (e.g., craft-agents-1), the detect-instance
+ * script can set CRAFT_CONFIG_DIR to ~/.selection-1, allowing multiple instances
+ * to run simultaneously with separate configurations.
  *
- * Supports multi-instance development via the CRAFT_CONFIG_DIR environment
- * variable. When running from a numbered folder (e.g., craft-tui-agent-1), the
- * detect-instance.sh script sets CRAFT_CONFIG_DIR to ~/.craft-agent-1, allowing
- * multiple instances to run simultaneously with separate configurations.
+ * Default (non-numbered folders): ~/.selection/
+ * Instance 1 (-1 suffix): ~/.selection-1/
+ * Instance 2 (-2 suffix): ~/.selection-2/
  *
- * Default (non-numbered folders): ~/.craft-agent/
- * Instance 1 (-1 suffix): ~/.craft-agent-1/
- * Instance 2 (-2 suffix): ~/.craft-agent-2/
- *
- * Two modules re-derive this from the environment on purpose because they must
- * stay import-free: `interceptor-common.ts` (preloaded into the Pi subprocess)
- * and session-tools-core `handlers/config-validate.ts` (no dependency on shared).
+ * Legacy installs used ~/.craft-agent — set CRAFT_CONFIG_DIR=~/.craft-agent
+ * to keep using old data without moving files.
  */
 
 import { homedir } from 'os';
 import { join } from 'path';
 
-export const DEFAULT_CONFIG_DIR_NAME = '.craft-agent';
+/** Default directory name under the user home for all app data. */
+export const DEFAULT_CONFIG_DIR_NAME = '.selection';
 
-/**
- * Resolve the config directory: a non-empty CRAFT_CONFIG_DIR wins, otherwise
- * `<home>/.craft-agent`. Pure; `CONFIG_DIR` is this evaluated once at load.
- */
-export function resolveConfigDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
-  const override = env.CRAFT_CONFIG_DIR?.trim();
-  return override ? override : join(home, DEFAULT_CONFIG_DIR_NAME);
-}
-
-export const CONFIG_DIR = resolveConfigDir();
+// Allow override via environment variable for multi-instance dev / legacy paths.
+// Falls back to default ~/.selection/ for production and non-numbered dev folders.
+export const CONFIG_DIR = process.env.CRAFT_CONFIG_DIR || join(homedir(), DEFAULT_CONFIG_DIR_NAME);

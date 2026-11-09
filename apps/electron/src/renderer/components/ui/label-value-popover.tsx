@@ -2,13 +2,11 @@
  * LabelValuePopover - Popover for editing a label's typed value or removing it.
  *
  * Opens when clicking a LabelBadge. Shows:
- * - A header naming the label (its color dot + name), so the popover never reads as a stray "Remove"
- * - Value editor input adapted to the label's valueType (number/string/date/link)
+ * - Value editor input adapted to the label's valueType (number/string/date)
  * - "Remove" button to detach the label from the session
  *
  * Value changes are committed on Enter or blur; Escape cancels and closes.
- * Plain labels (no valueType) are presence-only: they show the header and the remove button. Values
- * older auto-labelling stored on them are never shown (see sessionLabelChips), so there is nothing to edit.
+ * Boolean labels (no valueType) show only the remove button.
  */
 
 import * as React from 'react'
@@ -16,7 +14,6 @@ import { useTranslation } from 'react-i18next'
 import { Trash2, CalendarDays, ExternalLink } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Calendar } from './calendar'
-import { LabelIcon } from './label-icon'
 import { cn } from '@/lib/utils'
 import { openLabelLink } from '@/lib/open-label-link'
 import { parseDate } from 'chrono-node'
@@ -38,8 +35,6 @@ export interface LabelValuePopoverProps {
   onOpenChange: (open: boolean) => void
   /** Session identifier for scoped focus restoration */
   sessionId?: string
-  /** Preferred side (chips in the chat header open downward) */
-  side?: 'top' | 'bottom'
   /** The trigger element (typically a LabelBadge) */
   children: React.ReactNode
 }
@@ -52,7 +47,6 @@ export function LabelValuePopover({
   open,
   onOpenChange,
   sessionId,
-  side = 'top',
   children,
 }: LabelValuePopoverProps) {
   const { t } = useTranslation()
@@ -93,7 +87,8 @@ export function LabelValuePopover({
     }
   }, [label.valueType])
 
-  /** Restore focus to the chat input after the popover closes, so typing can continue. */
+  /** Restore focus to chat input after popover closes.
+   *  Matches the pattern used in ActiveOptionBadges. */
   const handleCloseAutoFocus = React.useCallback((e: Event) => {
     e.preventDefault()
     window.dispatchEvent(new CustomEvent('craft:focus-input', {
@@ -171,7 +166,7 @@ export function LabelValuePopover({
         {children}
       </PopoverTrigger>
       <PopoverContent
-        side={side}
+        side="top"
         align="start"
         sideOffset={6}
         collisionPadding={12}
@@ -183,15 +178,9 @@ export function LabelValuePopover({
         // to the session button's onMouseDown handler, causing unintended session selection.
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {/* Header: which label this is. Its icon, the field text and the action icons share one 14px edge */}
-        <div className="flex min-w-0 items-center gap-2 px-3.5 pt-2.5 pb-1">
-          <LabelIcon label={label} size="sm" />
-          <span className="truncate text-label font-medium text-foreground">{label.name}</span>
-        </div>
-
         {/* Date value editor — natural language input with nested calendar popover */}
         {label.valueType === 'date' && (
-          <div className="px-1.5 py-1.5 border-b border-subtle">
+          <div className="px-1.5 py-1.5 border-b border-border/50">
             {/* Text input with calendar popover trigger on the right */}
             <div className="flex items-center gap-1">
                 <input
@@ -220,8 +209,9 @@ export function LabelValuePopover({
                   }}
                   placeholder="tomorrow, next friday..."
                   className={cn(
-                    'field-surface flex-1 h-7 rounded-md px-2 text-label',
-                    'placeholder:text-tertiary',
+                    'flex-1 h-7 px-2 text-[13px]',
+                    'bg-transparent',
+                    'text-foreground placeholder:text-foreground/30',
                     'outline-none'
                   )}
                 />
@@ -232,12 +222,13 @@ export function LabelValuePopover({
                       type="button"
                       aria-label={t('labels.selectDate')}
                       className={cn(
-                        'flex items-center justify-center size-7 rounded-md text-secondary',
-                        'hover:bg-fill-hover transition-[background-color] duration-micro ease-out-subtle cursor-pointer',
-                        calendarOpen && 'bg-fill-hover'
+                        'flex items-center justify-center w-7 h-7 rounded-[5px]',
+                        'hover:bg-foreground/5 transition-colors cursor-pointer',
+                        'outline-none',
+                        calendarOpen && 'bg-foreground/5'
                       )}
                     >
-                      <CalendarDays className="w-3.5 h-3.5" />
+                      <CalendarDays className="w-3.5 h-3.5 text-foreground/50" />
                     </button>
                   </PopoverTrigger>
                   <PopoverContent
@@ -265,16 +256,16 @@ export function LabelValuePopover({
             </div>
             {/* Show the resolved date below the input when parsing succeeds */}
             {parsedDate && (
-              <div className="px-2 text-caption text-secondary">
+              <div className="px-2 text-[11px] text-foreground/50">
                 {format(parsedDate, 'EEE, MMM d, yyyy')}
               </div>
             )}
           </div>
         )}
 
-        {/* Non-date value editor (number/string/link) */}
+        {/* Non-date value editor (number/string) */}
         {label.valueType && label.valueType !== 'date' && (
-          <div className="px-1.5 py-1.5 border-b border-subtle">
+          <div className="px-1.5 py-1.5 border-b border-border/50">
             <input
               ref={inputRef}
               type={label.valueType === 'number' ? 'number' : 'text'}
@@ -285,8 +276,9 @@ export function LabelValuePopover({
               onBlur={commitValue}
               placeholder={label.valueType === 'number' ? 'Enter number...' : label.valueType === 'link' ? 'Enter URL...' : 'Enter value...'}
               className={cn(
-                'field-surface w-full h-7 rounded-md px-2 text-label',
-                'placeholder:text-tertiary',
+                'w-full h-7 px-2 text-[13px]',
+                'bg-transparent',
+                'text-foreground placeholder:text-foreground/30',
                 'outline-none'
               )}
             />
@@ -294,7 +286,7 @@ export function LabelValuePopover({
         )}
 
         {/* Actions — "Open link" (link labels only) shown above Remove */}
-        <div className="p-1.5">
+        <div className="p-1">
           {label.valueType === 'link' && value && (
             <button
               type="button"
@@ -303,10 +295,10 @@ export function LabelValuePopover({
                 onOpenChange(false)
               }}
               className={cn(
-                'w-full flex items-center gap-2 px-2 min-h-row-menu rounded-md',
-                'text-label text-foreground',
-                'hover:bg-fill-hover focus:bg-fill-hover',
-                'cursor-pointer outline-none'
+                'w-full flex items-center gap-2 px-2 py-1.5 rounded-[4px]',
+                'text-[13px] text-foreground',
+                'hover:bg-foreground/[0.03] focus:bg-foreground/[0.03]',
+                'transition-colors cursor-pointer outline-none'
               )}
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -321,10 +313,10 @@ export function LabelValuePopover({
               onOpenChange(false)
             }}
             className={cn(
-              'w-full flex items-center gap-2 px-2 min-h-row-menu rounded-md',
-              'text-label text-destructive',
-              'hover:bg-destructive-tint focus:bg-destructive-tint',
-              'cursor-pointer outline-none'
+              'w-full flex items-center gap-2 px-2 py-1.5 rounded-[4px]',
+              'text-[13px] text-destructive',
+              'hover:bg-foreground/[0.03] focus:bg-foreground/[0.03]',
+              'transition-colors cursor-pointer outline-none'
             )}
           >
             <Trash2 className="w-3.5 h-3.5" />

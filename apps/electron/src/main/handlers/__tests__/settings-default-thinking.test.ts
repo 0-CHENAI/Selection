@@ -7,6 +7,16 @@ type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | a
 
 const getDefaultThinkingLevelMock = mock(() => 'think')
 const setDefaultThinkingLevelMock = mock((_level: string) => true)
+const getSharedProjectMemoryEnabledMock = mock(() => false)
+const setSharedProjectMemoryEnabledMock = mock((_enabled: boolean) => true)
+const getSwarmRunDetailsMock = mock((_sessionId: string, _workspaceId: string) => ({
+  orchestrationId: 'orch-1',
+  rootSessionId: 'parent',
+  coordinatorSessionId: 'parent',
+  status: 'running' as const,
+  tokensUsed: 0,
+  nodes: [],
+}))
 
 mock.module('@craft-agent/shared/config', () => ({
   getPreferencesPath: () => '/tmp/preferences.json',
@@ -17,6 +27,10 @@ mock.module('@craft-agent/shared/config', () => ({
   getWorkspaceByNameOrId: () => null,
   getDefaultThinkingLevel: getDefaultThinkingLevelMock,
   setDefaultThinkingLevel: setDefaultThinkingLevelMock,
+  getSharedProjectMemoryEnabled: getSharedProjectMemoryEnabledMock,
+  setSharedProjectMemoryEnabled: setSharedProjectMemoryEnabledMock,
+  isUnsupportedLlmConnection: () => false,
+  UNSUPPORTED_LLM_CONNECTION_MESSAGE: 'Unsupported connection',
 }))
 
 describe('settings default thinking RPC handlers', () => {
@@ -26,6 +40,9 @@ describe('settings default thinking RPC handlers', () => {
     handlers.clear()
     getDefaultThinkingLevelMock.mockClear()
     setDefaultThinkingLevelMock.mockClear()
+    getSharedProjectMemoryEnabledMock.mockClear()
+    setSharedProjectMemoryEnabledMock.mockClear()
+    getSwarmRunDetailsMock.mockClear()
 
     const server: RpcServer = {
       handle(channel, handler) {
@@ -40,7 +57,7 @@ describe('settings default thinking RPC handlers', () => {
     }
 
     const deps: HandlerDeps = {
-      sessionManager: {} as HandlerDeps['sessionManager'],
+      sessionManager: { getSwarmRunDetails: getSwarmRunDetailsMock } as unknown as HandlerDeps['sessionManager'],
       platform: {
         appRootPath: '',
         resourcesPath: '',
@@ -97,5 +114,35 @@ describe('settings default thinking RPC handlers', () => {
 
     await expect(setHandler!({ clientId: 'client-1' }, 'ultra')).rejects.toThrow('Invalid thinking level')
     expect(setDefaultThinkingLevelMock).not.toHaveBeenCalled()
+  })
+
+  it('returns and persists the shared project memory setting', async () => {
+    const getHandler = handlers.get(RPC_CHANNELS.settings.GET_SHARED_PROJECT_MEMORY_ENABLED)
+    const setHandler = handlers.get(RPC_CHANNELS.settings.SET_SHARED_PROJECT_MEMORY_ENABLED)
+    expect(getHandler).toBeTruthy()
+    expect(setHandler).toBeTruthy()
+
+    expect(await getHandler!({ clientId: 'client-1' })).toBe(false)
+    expect(await setHandler!({ clientId: 'client-1' }, true)).toEqual({ success: true })
+    expect(getSharedProjectMemoryEnabledMock).toHaveBeenCalledTimes(1)
+    expect(setSharedProjectMemoryEnabledMock).toHaveBeenCalledWith(true)
+  })
+
+  it('rejects non-boolean shared project memory values', async () => {
+    const setHandler = handlers.get(RPC_CHANNELS.settings.SET_SHARED_PROJECT_MEMORY_ENABLED)
+
+    await expect(setHandler!({ clientId: 'client-1' }, 'true')).rejects.toThrow('must be a boolean')
+    expect(setSharedProjectMemoryEnabledMock).not.toHaveBeenCalled()
+  })
+
+  it('returns typed Swarm run details for a coordinator session', async () => {
+    const handler = handlers.get(RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS)
+    expect(handler).toBeTruthy()
+
+    expect(await handler!({ clientId: 'client-1' }, 'parent', 'workspace-1')).toMatchObject({
+      orchestrationId: 'orch-1',
+      coordinatorSessionId: 'parent',
+    })
+    expect(getSwarmRunDetailsMock).toHaveBeenCalledWith('parent', 'workspace-1')
   })
 })

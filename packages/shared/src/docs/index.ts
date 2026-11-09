@@ -4,16 +4,17 @@
  * Provides access to built-in documentation that Claude can reference
  * when performing configuration tasks (sources, agents, permissions, etc.).
  *
- * Docs are stored at ~/.craft-agent/docs/ and synced from bundled assets.
+ * Docs are stored at ~/.selection/docs/ and synced from bundled assets.
  * Source content lives in apps/electron/resources/docs/*.md for easier editing.
  */
 
 import { join } from 'path';
+import { homedir } from 'os';
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { getBundledAssetsDir } from '../utils/paths.ts';
 import { debug } from '../utils/debug.ts';
-import { CONFIG_DIR } from '../config/paths.ts';
 
+import { CONFIG_DIR } from '../config/paths.ts';
 const DOCS_DIR = join(CONFIG_DIR, 'docs');
 
 // Track if docs have been initialized this session (prevents re-init on hot reload)
@@ -93,7 +94,7 @@ export function getDocPath(filename: string): string {
 // IMPORTANT: This is intentionally a human-readable, non-instance-aware path.
 // Do NOT use APP_ROOT for real filesystem reads/writes.
 // For runtime filesystem paths, use CONFIG_DIR from config/paths.ts.
-export const APP_ROOT = '~/.craft-agent';
+export const APP_ROOT = '~/.selection';
 
 /**
  * Documentation file references for use in error messages and tool descriptions.
@@ -111,7 +112,6 @@ export const DOC_REFS = {
   automations: `${APP_ROOT}/docs/automations.md`,
   hooks: `${APP_ROOT}/docs/automations.md`,
   tasks: `${APP_ROOT}/docs/automations.md`,
-  pages: `${APP_ROOT}/docs/pages.md`,
   mermaid: `${APP_ROOT}/docs/mermaid.md`,
   dataTables: `${APP_ROOT}/docs/data-tables.md`,
   htmlPreview: `${APP_ROOT}/docs/html-preview.md`,
@@ -120,7 +120,6 @@ export const DOC_REFS = {
   markdownPreview: `${APP_ROOT}/docs/markdown-preview.md`,
   llmTool: `${APP_ROOT}/docs/llm-tool.md`,
   browserTools: `${APP_ROOT}/docs/browser-tools.md`,
-  decisions: `${APP_ROOT}/docs/decisions.md`,
   craftCli: `${APP_ROOT}/docs/craft-cli.md`,
   docsDir: `${APP_ROOT}/docs/`,
 } as const;

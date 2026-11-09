@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @craft-agent/server — standalone headless Craft Agent server.
+ * @craft-agent/server — standalone headless Selection server.
  *
  * Usage:
  *   CRAFT_SERVER_TOKEN=<secret> bun run packages/server/src/index.ts
@@ -21,11 +21,10 @@
  *   CRAFT_WEBUI_PASSWORD       — optional shorter password for web login (falls back to CRAFT_SERVER_TOKEN)
  *   CRAFT_WEBUI_SECURE_COOKIE  — optional true/false override for the session cookie Secure flag
  *   CRAFT_WEBUI_WS_URL         — optional browser-facing ws:// or wss:// URL returned by /api/config
- *   CRAFT_MESSAGING_WA_WORKER  — absolute path to worker.cjs (default: packages/messaging-whatsapp-worker/dist/worker.cjs)
- *   CRAFT_MESSAGING_NODE_BIN   — Node binary used to spawn the WhatsApp worker (default: node)
  */
 
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { readFileSync, existsSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
 import { enableDebug } from '@craft-agent/shared/utils/debug'
@@ -34,7 +33,6 @@ import { validateSession, createWebuiHandler, nodeHttpAdapter } from '@craft-age
 import type { WebuiHandler } from '@craft-agent/server-core/webui'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { getWorkspaces } from '@craft-agent/shared/config'
-import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@craft-agent/messaging-gateway'
 
 // --generate-token: print a crypto-random token and exit
@@ -43,11 +41,12 @@ if (process.argv.includes('--generate-token')) {
   process.exit(0)
 }
 import type { WsRpcTlsOptions } from '@craft-agent/server-core/transport'
-import { registerCoreRpcHandlers, cleanupRpcClientResources } from '@craft-agent/server-core/handlers/rpc'
+import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@craft-agent/server-core/handlers/rpc'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@craft-agent/server-core/sessions'
 import { initModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
 import type { HandlerDeps } from '@craft-agent/server-core/handlers'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 process.env.CRAFT_IS_PACKAGED ??= 'false'
 
@@ -151,14 +150,6 @@ if (webuiEnabled && serverToken) {
   webuiNodeHandler = nodeHttpAdapter(webuiHandler.fetch)
 }
 
-// Resolve WhatsApp worker paths up-front so the helper + Docker env stay in sync.
-// The worker is a Node subprocess — Bun cannot run it directly — so we must
-// pass an explicit `nodeBin` (Electron defaults nodeBin to process.execPath
-// which is correct there but wrong under Bun).
-const waWorkerEntry = process.env.CRAFT_MESSAGING_WA_WORKER
-  ?? join(bundledAssetsRoot, 'packages', 'messaging-whatsapp-worker', 'dist', 'worker.cjs')
-const waNodeBin = process.env.CRAFT_MESSAGING_NODE_BIN ?? 'node'
-
 // Built inside createHandlerDeps (needs sessionManager), populated with the WS
 // publisher after bootstrapServer resolves.
 let messagingHandle: MessagingBootstrapHandle | null = null
@@ -212,12 +203,6 @@ const instance = await (async () => {
           credentialManager: getCredentialManager(),
           getMessagingDir: (wsId: string) =>
             join(CONFIG_DIR, 'workspaces', wsId, 'messaging'),
-          // Headless has no legacy messaging dir — workspaces start clean.
-          whatsapp: {
-            workerEntry: waWorkerEntry,
-            nodeBin: waNodeBin,
-            pairingMode: 'qr',
-          },
         })
         return {
           sessionManager,
@@ -246,7 +231,7 @@ const instance = await (async () => {
           sessionManager.cleanup()
         }
       },
-      cleanupClientResources: cleanupRpcClientResources,
+      cleanupClientResources: cleanupSessionFileWatchForClient,
     })
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
@@ -260,7 +245,7 @@ const instance = await (async () => {
 // runs on the remote server.
 // ---------------------------------------------------------------------------
 // CRAFT_DISABLE_MESSAGING lets a dev/test server share a config dir with a live app
-// without both processes fighting over the same Telegram/WhatsApp connections (409s).
+// without both processes opening the same messaging connection.
 const messagingDisabled = process.env.CRAFT_DISABLE_MESSAGING === 'true' || process.env.CRAFT_DISABLE_MESSAGING === '1'
 if (messagingHandle !== null && !messagingDisabled) {
   const handle: MessagingBootstrapHandle = messagingHandle

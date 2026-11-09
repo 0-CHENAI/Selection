@@ -1,3 +1,9 @@
+import { answerPreviewContext } from './answer-preview-context.ts';
+import { AnswerArgumentStream } from './answer-argument-stream.ts';
+import { beginRequestDiagnostic } from './request-diagnostics.ts';
+import { fetchWithModelRequestSlot } from './model-request-gate.ts';
+import { observeSseResponse } from './sse-diagnostics.ts';
+import { streamTrace } from './stream-trace.ts';
 /**
  * Unified fetch interceptor for all AI API requests (Anthropic + OpenAI format).
  *
@@ -21,12 +27,9 @@
 // Shared infrastructure (toolMetadataStore, error capture, logging, config)
 import {
   DEBUG,
-  DEBUG_FULL_BODIES,
-  MAX_LOGGED_BODY_CHARS,
   debugLog,
   isRichToolDescriptionsEnabled,
-  isExtendedPromptCacheEnabled,
-  is1MContextEnabled,
+  supportsRichToolMetadataForModel,
   setStoredError,
   toolMetadataStore,
   displayNameSchema,
@@ -34,6 +37,7 @@ import {
 } from './interceptor-common.ts';
 import { FEATURE_FLAGS } from './feature-flags.ts';
 import { resolveRequestContext } from './interceptor-request-utils.ts';
+import { isOfficialAnthropicApiUrl } from './config/anthropic-api-host.ts';
 
 // Type alias for fetch's HeadersInit
 type HeadersInitType = Headers | Record<string, string> | string[][];
@@ -292,9 +296,8 @@ export function sanitizeEmptyTextCacheControl(body: Record<string, unknown>): nu
 /**
  * Strip explicit TTL from all ephemeral cache_control blocks.
  *
- * When extendedPromptCache is disabled, the SDK may still send ttl: "1h"
- * natively (via prompt-caching-scope beta). This function removes the ttl
- * field so blocks fall back to the API default (5 min).
+ * The SDK may still send ttl: "1h" natively (via prompt-caching-scope beta).
+ * This function removes the ttl field so blocks fall back to the API default (5 min).
  *
  * Walks tools, system, message content, and top-level cache_control. The
  * Anthropic API processes blocks in order `tools → system → messages` and
@@ -347,83 +350,17 @@ function stripPromptCacheTtl(body: Record<string, unknown>): number {
   }
 
   if (stripped > 0) {
-    debugLog(`[Anthropic] Stripped TTL from ${stripped} cache_control block(s) (extendedPromptCache=false)`);
+    debugLog(`[Anthropic] Stripped TTL from ${stripped} cache_control block(s)`);
   }
   return stripped;
 }
 
 /**
- * Upgrade all cache_control blocks from 5m (default) to 1h TTL.
- * Only active when extendedPromptCache is enabled in config.
- * When disabled, actively strips any SDK-injected TTL so blocks
- * fall back to the API default (5 min).
- *
- * Walks tools, system prompt blocks, message content blocks, and the
- * top-level cache_control field (auto-caching mode). Only upgrades blocks
- * with type: "ephemeral" — leaves other types untouched.
- *
- * The tools walk is required for correctness, not just completeness: the
- * Anthropic API processes blocks in order `tools → system → messages` and
- * rejects requests where a 1h cache_control block appears after a 5m one.
- * If we upgrade only system+messages, a 5m block on a tool (added by the
- * SDK or user) ahead of a 1h block on system produces a 400 with message
- * "a ttl='1h' cache_control block must not come after a ttl='5m' cache_control block."
- *
- * Exported for focused unit tests.
+ * Never opt into Anthropic's 1h prompt-cache TTL. Keep the strip helper
+ * exported under the historical name so existing tests still import it.
  */
 export function upgradePromptCacheTtl(body: Record<string, unknown>): number {
-  if (!isExtendedPromptCacheEnabled()) return stripPromptCacheTtl(body);
-
-  let upgraded = 0;
-
-  // Upgrade tool cache_control (must run first — tools is processed before
-  // system, and a stale 5m block here would invalidate any later 1h upgrade).
-  const tools = body.tools as Array<Record<string, unknown>> | undefined;
-  if (Array.isArray(tools)) {
-    for (const tool of tools) {
-      if (tool.cache_control && (tool.cache_control as Record<string, unknown>).type === 'ephemeral') {
-        (tool.cache_control as Record<string, unknown>).ttl = '1h';
-        upgraded++;
-      }
-    }
-  }
-
-  // Upgrade system prompt cache_control
-  const system = body.system as Array<Record<string, unknown>> | undefined;
-  if (Array.isArray(system)) {
-    for (const block of system) {
-      if (block.cache_control && (block.cache_control as Record<string, unknown>).type === 'ephemeral') {
-        (block.cache_control as Record<string, unknown>).ttl = '1h';
-        upgraded++;
-      }
-    }
-  }
-
-  // Upgrade message content cache_control
-  const messages = body.messages as Array<{ content?: unknown }> | undefined;
-  if (messages) {
-    for (const message of messages) {
-      if (!Array.isArray(message.content)) continue;
-      for (const block of message.content as Array<Record<string, unknown>>) {
-        if (block.cache_control && (block.cache_control as Record<string, unknown>).type === 'ephemeral') {
-          (block.cache_control as Record<string, unknown>).ttl = '1h';
-          upgraded++;
-        }
-      }
-    }
-  }
-
-  // Upgrade top-level cache_control (auto-caching mode)
-  const topLevel = body.cache_control as Record<string, unknown> | undefined;
-  if (topLevel?.type === 'ephemeral') {
-    topLevel.ttl = '1h';
-    upgraded++;
-  }
-
-  if (upgraded > 0) {
-    debugLog(`[Anthropic] Upgraded ${upgraded} cache_control block(s) to 1h TTL`);
-  }
-  return upgraded;
+  return stripPromptCacheTtl(body);
 }
 
 /**
@@ -456,6 +393,70 @@ function appendBetaHeader(headers: HeadersInitType | undefined, beta: string): R
   return headerObj;
 }
 
+const ANTHROPIC_API_VERSION = '2023-06-01';
+
+function headerNames(headers: Record<string, string>, target: string): string[] {
+  return Object.keys(headers).filter(name => name.toLowerCase() === target);
+}
+
+function bearerToken(value: string | undefined): string | undefined {
+  const match = /^Bearer\s+(\S+)/i.exec(value ?? '');
+  return match?.[1];
+}
+
+/**
+ * Choose Anthropic Messages auth from the host.
+ *
+ * api.anthropic.com accepts `x-api-key` plus `anthropic-version` and must not
+ * also receive `Authorization: Bearer`. Third-party Anthropic Messages
+ * gateways (MiniMax, GLM, DeepSeek, Qwen, and a custom Kimi-style Messages
+ * host) document Bearer and can reject `x-api-key`, so that header is removed
+ * when Bearer is already present. Official Kimi Code is Chat Completions at
+ * `/v1/chat/completions` as of Pi 1.3.0 and does not pass through this
+ * function. Header values are not logged.
+ */
+function isAnthropicMessagesRequest(url: string): boolean {
+  if (isOfficialAnthropicApiUrl(url)) return true;
+  try {
+    return new URL(url).pathname.toLowerCase().includes('/messages');
+  } catch {
+    return false;
+  }
+}
+
+export function preferAnthropicBearerAuth(
+  url: string,
+  headers: Record<string, string>,
+): Record<string, string> {
+  // The Anthropic adapter also sees unrelated POSTs while that model is active.
+  // Leave those headers alone.
+  if (!isAnthropicMessagesRequest(url)) return headers;
+  if (isOfficialAnthropicApiUrl(url)) return officialAnthropicApiKeyHeaders(headers);
+  const authorization = headerNames(headers, 'authorization')
+    .map(name => headers[name])
+    .find(value => bearerToken(value));
+  const apiKeyNames = headerNames(headers, 'x-api-key').filter(name => headers[name]?.trim());
+  if (!authorization || apiKeyNames.length === 0) return headers;
+  const next = { ...headers };
+  for (const name of apiKeyNames) delete next[name];
+  return next;
+}
+
+function officialAnthropicApiKeyHeaders(headers: Record<string, string>): Record<string, string> {
+  const next = { ...headers };
+  const apiKeyName = headerNames(next, 'x-api-key').find(name => next[name]?.trim());
+  const apiKey = apiKeyName
+    ? next[apiKeyName]!.trim()
+    : bearerToken(headerNames(next, 'authorization').map(name => next[name]).find(Boolean));
+  for (const name of headerNames(next, 'authorization')) delete next[name];
+  for (const name of headerNames(next, 'x-api-key')) delete next[name];
+  if (apiKey) next['x-api-key'] = apiKey;
+  if (headerNames(next, 'anthropic-version').length === 0) {
+    next['anthropic-version'] = ANTHROPIC_API_VERSION;
+  }
+  return next;
+}
+
 /**
  * Remove a beta value from the anthropic-beta header, preserving other values.
  */
@@ -484,26 +485,323 @@ interface TrackedToolBlock {
   id: string;
   name: string;
   index: number;
-  bufferedJson: string;
+  /** Argument fragments. Joined once when the block is emitted. */
+  jsonParts: string[];
 }
 
-const SSE_EVENT_RE = /^event:\s*(.+)$/;
-const SSE_DATA_RE = /^data:\s*(.+)$/;
+const SSE_LINE_BREAK = /\r\n|\n|\r/;
+/** Synthetic block indexes stay far above Anthropic's 0-based content indexes. */
+const SYNTHETIC_BLOCK_INDEX_BASE = 1_000_000;
+const DEFAULT_MAX_SSE_BUFFER_CHARS = 32 * 1024 * 1024;
+
+/**
+ * End index of the object that starts at `start` (`{`), or -1 if it is cut off.
+ * Braces inside strings do not count.
+ */
+function scanJsonObjectEnd(input: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < input.length; i++) {
+    const char = input[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (char === '\\') {
+        escape = true;
+        continue;
+      }
+      if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth++;
+    else if (char === '}') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split a buffer into top-level JSON objects.
+ * Pretty-printed Anthropic data stays one object. Some gateways frame
+ * `data:{...}\\ndata:{...}` with no blank line. Official Kimi Code no longer
+ * uses this path (Chat Completions since Pi 1.3.0); custom Anthropic-compatible
+ * hosts still do. `JSON.parse` would otherwise reject the joined objects.
+ */
+function splitTopLevelJsonObjects(input: string): { objects: string[]; rest: string } | null {
+  const objects: string[] = [];
+  let index = 0;
+  const skipSpace = () => {
+    while (index < input.length && /\s/.test(input.charAt(index))) index++;
+  };
+  skipSpace();
+  if (index >= input.length || input.charAt(index) !== '{') return null;
+
+  while (index < input.length) {
+    skipSpace();
+    if (index >= input.length) break;
+    if (input.charAt(index) !== '{') return { objects, rest: input.slice(index) };
+    const end = scanJsonObjectEnd(input, index);
+    if (end < 0) return { objects, rest: input.slice(index) };
+    const slice = input.slice(index, end);
+    try {
+      const parsed = JSON.parse(slice) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return objects.length > 0 ? { objects, rest: input.slice(index) } : null;
+      }
+    } catch {
+      return objects.length > 0 ? { objects, rest: input.slice(index) } : null;
+    }
+    objects.push(slice);
+    index = end;
+  }
+  return objects.length > 0 ? { objects, rest: '' } : null;
+}
+
+/** Observe decoded previews without changing the SDK tool-call stream. */
+function createAnswerPreviewEmitter() {
+  const previewObserver = answerPreviewContext.getStore();
+  const previews = new Map<string, { decoder: AnswerArgumentStream; offset: number; text: string; sentAt: number }>();
+  function previewCall(tc: { id: string; name: string; arguments: string }, force = false): void {
+    if (!previewObserver || !/^(?:mcp__session__|session__)?submit_answer$/.test(tc.name)) return;
+    let state = previews.get(tc.id);
+    if (!state) {
+      state = { decoder: new AnswerArgumentStream(), offset: 0, text: '', sentAt: 0 };
+      previews.set(tc.id, state);
+    }
+    const text = state.decoder.push(tc.arguments.slice(state.offset));
+    state.offset = tc.arguments.length;
+    if (text !== state.text && (force || !text || Date.now() - state.sentAt >= 50)) {
+      state.text = text;
+      state.sentAt = Date.now();
+      // Preview failures must never affect SDK parsing or tool execution.
+      try { previewObserver({ toolCallId: tc.id, text }); } catch { /* best effort */ }
+    }
+  }
+
+  return previewCall;
+}
 
 /**
  * Creates a TransformStream that intercepts Anthropic SSE events,
  * buffers tool_use input deltas, extracts _intent/_displayName into the metadata
  * store, and re-emits clean events without those fields.
  */
-export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+export function createAnthropicSseStrippingStream(options?: {
+  /** Cap for one SSE line or one event payload, in UTF-16 code units. */
+  maxBufferChars?: number;
+}): TransformStream<Uint8Array, Uint8Array> {
+  const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
+  const maxBufferChars = options?.maxBufferChars ?? DEFAULT_MAX_SSE_BUFFER_CHARS;
 
   const trackedBlocks = new Map<number, TrackedToolBlock>();
+  /**
+   * Pi only appends a delta when that index still belongs to an open block of
+   * the same kind. Third-party Anthropic Messages endpoints (MiniMax, GLM,
+   * DeepSeek, Qwen, and other gateways, including a Kimi-style Messages host)
+   * sometimes continue after content_block_stop, reuse a thinking index for
+   * text, or name the block `reasoning`. Official Kimi Code is Chat Completions
+   * as of Pi 1.3.0 and does not hit this Anthropic framer. Those deltas would
+   * otherwise disappear while the socket stays open. Ping, errors, usage, and
+   * unknown events are forwarded unchanged.
+   *
+   * Some of those gateways also frame each event as `data:{json}` plus a
+   * single LF and no blank line. Holding every data line until a blank line
+   * glues those objects into one payload, `JSON.parse` fails, and the reply
+   * is dropped. A finished JSON object is therefore its own event.
+   */
+  const openBlockKinds = new Map<number, 'text' | 'thinking' | 'tool' | 'other'>();
+  const recoveredTextIndexes = new Map<number, number>();
+  const recoveredThinkingIndexes = new Map<number, number>();
+  const syntheticIndexes = new Set<number>();
+  const pendingToolStops: Array<{ block: TrackedToolBlock; index: number; dataStr: string }> = [];
+  let nextRecoveredIndex = SYNTHETIC_BLOCK_INDEX_BASE;
   let lineBuffer = '';
-  let currentEventType = '';
-  let currentData = '';
+  let heldCarriageReturn = false;
+  let stripBom = true;
+  let eventName = '';
+  let dataLines: string[] = [];
+  let dataChars = 0;
   let eventCount = 0;
+  let overflowed = false;
+
+  function blockKind(type: string | undefined): 'text' | 'thinking' | 'tool' | 'other' {
+    if (type === 'text') return 'text';
+    if (type === 'thinking' || type === 'redacted_thinking' || type === 'reasoning' || type === 'reasoning_content') return 'thinking';
+    if (type === 'tool_use') return 'tool';
+    return 'other';
+  }
+
+  function rememberBlock(index: number, type: string | undefined): void {
+    recoveredTextIndexes.delete(index);
+    recoveredThinkingIndexes.delete(index);
+    openBlockKinds.set(index, blockKind(type));
+  }
+
+  function firstString(...values: unknown[]): string | undefined {
+    for (const value of values) {
+      if (typeof value === 'string') return value;
+    }
+    return undefined;
+  }
+
+  /** Accept numeric indexes and decimal strings. Pi compares indexes with ===. */
+  function readIndex(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
+    if (typeof value === 'string' && /^\d+$/.test(value)) {
+      const parsed = Number(value);
+      if (Number.isSafeInteger(parsed)) return parsed;
+    }
+    return undefined;
+  }
+
+  function allocateSyntheticIndex(): number {
+    while (
+      openBlockKinds.has(nextRecoveredIndex)
+      || trackedBlocks.has(nextRecoveredIndex)
+      || syntheticIndexes.has(nextRecoveredIndex)
+    ) {
+      nextRecoveredIndex++;
+    }
+    const index = nextRecoveredIndex++;
+    syntheticIndexes.add(index);
+    return index;
+  }
+
+  function closeSynthetic(index: number, controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (!syntheticIndexes.delete(index)) return;
+    for (const aliases of [recoveredTextIndexes, recoveredThinkingIndexes]) {
+      for (const [source, target] of aliases) {
+        if (target === index) aliases.delete(source);
+      }
+    }
+    if (!openBlockKinds.delete(index)) return;
+    emitSseEvent('content_block_stop', JSON.stringify({
+      type: 'content_block_stop',
+      index,
+    }), controller);
+  }
+
+  function closeRecoveredAliases(sourceIndex: number, controller: TransformStreamDefaultController<Uint8Array>): void {
+    for (const aliases of [recoveredTextIndexes, recoveredThinkingIndexes]) {
+      const target = aliases.get(sourceIndex);
+      if (target !== undefined) closeSynthetic(target, controller);
+    }
+  }
+
+  function closeAllSynthetic(controller: TransformStreamDefaultController<Uint8Array>): void {
+    for (const index of [...syntheticIndexes]) closeSynthetic(index, controller);
+  }
+
+  /**
+   * Map gateway aliases onto the delta types Pi's Anthropic parser accepts.
+   * Always include a string field: Pi appends with `+=`, and a missing field
+   * becomes the literal text "undefined".
+   */
+  function canonicalDelta(delta: Record<string, unknown>): Record<string, unknown> | undefined {
+    const type = delta.type;
+    if (type === 'text') {
+      return { type: 'text_delta', text: firstString(delta.text, delta.content) ?? '' };
+    }
+    if (type === 'thinking') {
+      return { type: 'thinking_delta', thinking: firstString(delta.thinking, delta.text, delta.content) ?? '' };
+    }
+    if (type === 'signature') {
+      return { type: 'signature_delta', signature: firstString(delta.signature) ?? '' };
+    }
+    if (type === 'reasoning_delta' || type === 'reasoning') {
+      return {
+        type: 'thinking_delta',
+        thinking: firstString(delta.thinking, delta.reasoning, delta.reasoning_content, delta.text, delta.content) ?? '',
+      };
+    }
+    return undefined;
+  }
+
+  function recoverOrphanDelta(
+    data: Record<string, unknown>,
+    kind: 'text' | 'thinking',
+    controller: TransformStreamDefaultController<Uint8Array>,
+  ): boolean {
+    const delta = data.delta as { type?: string; text?: string; thinking?: string; signature?: string } | undefined;
+    const index = readIndex(data.index);
+    // A missing index must not attach to whatever block happens to be 0.
+    const source = index ?? -1;
+    if (index !== undefined && openBlockKinds.get(index) === kind) return false;
+    const isText = kind === 'text' && delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0;
+    const isThinkingDelta = kind === 'thinking' && delta?.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0;
+    const isSignature = kind === 'thinking' && delta?.type === 'signature_delta' && typeof delta.signature === 'string';
+    const aliases = kind === 'text' ? recoveredTextIndexes : recoveredThinkingIndexes;
+    const existing = aliases.get(source);
+    const hasOpenAlias = existing !== undefined && openBlockKinds.get(existing) === kind;
+    if (isSignature && delta.signature!.length === 0 && !hasOpenAlias) return false;
+    if (!isText && !isThinkingDelta && !isSignature) return false;
+
+    const target = hasOpenAlias ? existing! : allocateSyntheticIndex();
+    if (!hasOpenAlias) {
+      aliases.set(source, target);
+      openBlockKinds.set(target, kind);
+      emitSseEvent('content_block_start', JSON.stringify({
+        type: 'content_block_start',
+        index: target,
+        content_block: kind === 'text'
+          ? { type: 'text', text: '' }
+          : { type: 'thinking', thinking: '', signature: '' },
+      }), controller);
+    }
+    emitSseEvent('content_block_delta', JSON.stringify({
+      ...data,
+      type: typeof data.type === 'string' ? data.type : 'content_block_delta',
+      index: target,
+    }), controller);
+    return true;
+  }
+
+  function toolArguments(block: TrackedToolBlock): string {
+    return block.jsonParts.join('');
+  }
+
+  function flushPendingToolStops(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (pendingToolStops.length === 0) return;
+    const pending = pendingToolStops.splice(0);
+    for (const item of pending) {
+      openBlockKinds.delete(item.index);
+      emitBufferedBlock(item.block, item.index, controller);
+      emitSseEvent('content_block_stop', item.dataStr, controller);
+    }
+  }
+
+  function previewToolArguments(block: TrackedToolBlock): void {
+    // Joining is only needed for the answer preview. Other tool streams can be
+    // megabytes of file contents, and joining on every delta is quadratic.
+    if (!/^(?:mcp__session__|session__)?submit_answer$/.test(block.name)) return;
+    previewCall({ id: block.id, name: block.name, arguments: toolArguments(block) });
+  }
+
+  function absorbLateToolDelta(index: number | undefined, partialJson: string | undefined): boolean {
+    if (index === undefined) return false;
+    const pending = pendingToolStops.find(item => item.index === index);
+    if (!pending) return false;
+    const fragment = typeof partialJson === 'string' ? partialJson : '';
+    pending.block.jsonParts.push(fragment);
+    previewToolArguments(pending.block);
+    return true;
+  }
+
+  function finishOpenBlocks(controller: TransformStreamDefaultController<Uint8Array>): void {
+    closeAllSynthetic(controller);
+    flushPendingToolStops(controller);
+  }
 
   function processEvent(eventType: string, dataStr: string, controller: TransformStreamDefaultController<Uint8Array>): void {
     eventCount++;
@@ -511,46 +809,149 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     try {
       data = JSON.parse(dataStr);
     } catch {
-      emitSseEvent(eventType, dataStr, controller);
-      return;
-    }
-
-    if (eventType === 'content_block_start') {
-      const contentBlock = data.content_block as { type?: string; id?: string; name?: string } | undefined;
-      if (contentBlock?.type === 'tool_use' && contentBlock.id && contentBlock.name != null) {
-        const index = data.index as number;
-        trackedBlocks.set(index, {
-          id: contentBlock.id,
-          name: contentBlock.name,
-          index,
-          bufferedJson: '',
-        });
+      if (eventType === 'message_delta' || eventType === 'message_stop' || eventType === 'error') {
+        finishOpenBlocks(controller);
       }
       emitSseEvent(eventType, dataStr, controller);
       return;
     }
 
     if (eventType === 'content_block_delta') {
-      const index = data.index as number;
-      const delta = data.delta as { type?: string; partial_json?: string } | undefined;
-
-      if (delta?.type === 'input_json_delta' && trackedBlocks.has(index)) {
-        const block = trackedBlocks.get(index)!;
-        block.bufferedJson += delta.partial_json ?? '';
+      const earlyDelta = data.delta as { type?: string; partial_json?: string } | undefined;
+      if (earlyDelta?.type === 'input_json_delta' && absorbLateToolDelta(readIndex(data.index), earlyDelta.partial_json)) {
         return;
       }
+    }
+    flushPendingToolStops(controller);
+
+    if (eventType === 'message_delta' || eventType === 'message_stop' || eventType === 'error') {
+      closeAllSynthetic(controller);
       emitSseEvent(eventType, dataStr, controller);
       return;
     }
 
-    if (eventType === 'content_block_stop') {
-      const index = data.index as number;
-      const block = trackedBlocks.get(index);
+    if (eventType === 'content_block_start') {
+      const contentBlock = data.content_block as {
+        type?: string;
+        id?: string;
+        name?: string;
+        thinking?: unknown;
+        reasoning?: unknown;
+        text?: unknown;
+        signature?: unknown;
+      } | undefined;
+      const reasoningAlias = contentBlock?.type === 'reasoning' || contentBlock?.type === 'reasoning_content';
+      const normalizedType = reasoningAlias ? 'thinking' : contentBlock?.type;
+      let startData: Record<string, unknown> = data;
+      if (reasoningAlias && contentBlock) {
+        startData = {
+          ...data,
+          content_block: {
+            type: 'thinking',
+            thinking: firstString(contentBlock.thinking, contentBlock.reasoning, contentBlock.text) ?? '',
+            signature: firstString(contentBlock.signature) ?? '',
+          },
+        };
+      }
+      const index = readIndex(data.index);
+      if (index !== undefined) {
+        if (syntheticIndexes.has(index)) closeSynthetic(index, controller);
+        closeRecoveredAliases(index, controller);
+        rememberBlock(index, normalizedType);
+        startData = startData === data && data.index === index ? data : { ...startData, index };
+      }
+      if (contentBlock?.type === 'tool_use' && contentBlock.id && contentBlock.name != null && index !== undefined) {
+        trackedBlocks.set(index, {
+          id: contentBlock.id,
+          name: contentBlock.name,
+          index,
+          jsonParts: [],
+        });
+      }
+      // Pi stores content_block_start text/thinking but only emits text_start /
+      // thinking_start. Selection forwards text_delta, so a gateway that puts
+      // the first tokens on the start event would not stream them. Move a
+      // non-empty seed into a delta and leave the start block empty. Official
+      // Anthropic sends "" here and stays byte-identical.
+      const started = (startData.content_block && typeof startData.content_block === 'object'
+        ? startData.content_block
+        : undefined) as { type?: string; text?: unknown; thinking?: unknown } | undefined;
+      const seedText = index !== undefined && started?.type === 'text' ? firstString(started.text) : undefined;
+      const seedThinking = index !== undefined && started?.type === 'thinking' ? firstString(started.thinking) : undefined;
+      if (seedText || seedThinking) {
+        startData = {
+          ...startData,
+          content_block: {
+            ...started,
+            ...(seedText ? { text: '' } : {}),
+            ...(seedThinking ? { thinking: '' } : {}),
+          },
+        };
+      }
+      const unchanged = startData === data;
+      emitSseEvent(eventType, unchanged ? dataStr : JSON.stringify(startData), controller);
+      if (seedText) {
+        emitSseEvent('content_block_delta', JSON.stringify({
+          type: 'content_block_delta',
+          index,
+          delta: { type: 'text_delta', text: seedText },
+        }), controller);
+      }
+      if (seedThinking) {
+        emitSseEvent('content_block_delta', JSON.stringify({
+          type: 'content_block_delta',
+          index,
+          delta: { type: 'thinking_delta', thinking: seedThinking },
+        }), controller);
+      }
+      return;
+    }
 
-      if (block) {
+    if (eventType === 'content_block_delta') {
+      const rawDelta = data.delta;
+      const normalizedDelta = rawDelta && typeof rawDelta === 'object'
+        ? canonicalDelta(rawDelta as Record<string, unknown>)
+        : undefined;
+      const index = readIndex(data.index);
+      const payload: Record<string, unknown> = normalizedDelta ? { ...data, delta: normalizedDelta } : { ...data };
+      if (index !== undefined) payload.index = index;
+      const delta = payload.delta as { type?: string; partial_json?: string } | undefined;
+
+      if (recoverOrphanDelta(payload, 'text', controller)) return;
+      if (recoverOrphanDelta(payload, 'thinking', controller)) return;
+
+      if (delta?.type === 'input_json_delta' && index !== undefined && trackedBlocks.has(index)) {
+        const block = trackedBlocks.get(index)!;
+        const fragment = typeof delta.partial_json === 'string' ? delta.partial_json : '';
+        block.jsonParts.push(fragment);
+        previewToolArguments(block);
+        return;
+      }
+      const rewritten = normalizedDelta !== undefined || (index !== undefined && data.index !== index);
+      emitSseEvent(eventType, rewritten ? JSON.stringify(payload) : dataStr, controller);
+      return;
+    }
+
+    if (eventType === 'content_block_stop') {
+      const index = readIndex(data.index);
+      if (index !== undefined && syntheticIndexes.has(index)) {
+        closeSynthetic(index, controller);
+        return;
+      }
+      if (index !== undefined) {
+        closeRecoveredAliases(index, controller);
+        openBlockKinds.delete(index);
+      }
+      const block = index === undefined ? undefined : trackedBlocks.get(index);
+      if (block && index !== undefined) {
         trackedBlocks.delete(index);
-        emitBufferedBlock(block, index, controller);
-        emitSseEvent(eventType, dataStr, controller);
+        // Hold the stop so argument deltas that arrive after it still join
+        // the same tool call. A well-formed stream flushes on the next event.
+        pendingToolStops.push({
+          block,
+          index,
+          dataStr: data.index === index ? dataStr : JSON.stringify({ ...data, index }),
+        });
         return;
       }
       emitSseEvent(eventType, dataStr, controller);
@@ -565,12 +966,13 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     index: number,
     controller: TransformStreamDefaultController<Uint8Array>,
   ): void {
-    if (!block.bufferedJson) {
+    const bufferedJson = toolArguments(block);
+    if (!bufferedJson) {
       return;
     }
 
     try {
-      const parsed = JSON.parse(block.bufferedJson);
+      const parsed = JSON.parse(bufferedJson);
 
       captureMetadataFromInput(block.id, block.name, parsed);
       delete parsed._intent;
@@ -589,7 +991,7 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
       emitSseEvent('content_block_delta', JSON.stringify(deltaEvent), controller);
     } catch {
       debugLog(`[SSE Strip] Failed to parse buffered JSON for ${block.name} (${block.id}), stripping via regex`);
-      const stripped = stripMetadataFieldsFromRawJson(block.bufferedJson);
+      const stripped = stripMetadataFieldsFromRawJson(bufferedJson);
       const deltaEvent = {
         type: 'content_block_delta',
         index,
@@ -607,78 +1009,201 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     dataStr: string,
     controller: TransformStreamDefaultController<Uint8Array>,
   ): void {
-    const sseText = `event: ${eventType}\ndata: ${dataStr}\n\n`;
-    controller.enqueue(encoder.encode(sseText));
+    if (eventType === 'content_block_delta') {
+      try {
+        const parsed = JSON.parse(dataStr) as { delta?: { type?: unknown; text?: unknown; thinking?: unknown } };
+        const delta = parsed?.delta;
+        const chars = typeof delta?.text === 'string' ? delta.text.length
+          : typeof delta?.thinking === 'string' ? delta.thinking.length : 0;
+        streamTrace('interceptor', { event: typeof delta?.type === 'string' ? delta.type : eventType, chars });
+      } catch { /* A trace must not change the frame. */ }
+    }
+    // A raw newline inside one data line splits the SSE frame. Spec joins
+    // repeated data fields with LF, so split them back out.
+    const data = dataStr.split('\n').map(line => `data: ${line}`).join('\n');
+    controller.enqueue(encoder.encode(`event: ${eventType}\n${data}\n\n`));
+  }
+
+  function failOverflow(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (overflowed) return;
+    overflowed = true;
+    lineBuffer = '';
+    heldCarriageReturn = false;
+    eventName = '';
+    dataLines = [];
+    dataChars = 0;
+    trackedBlocks.clear();
+    pendingToolStops.length = 0;
+    // The discarded bytes can contain tool arguments or user text. Do not echo them.
+    processEvent('error', JSON.stringify({
+      type: 'error',
+      error: { type: 'api_error', message: 'SSE event exceeded the maximum size' },
+    }), controller);
+  }
+
+  function takeData(): string {
+    const data = dataLines.join('\n');
+    dataLines = [];
+    dataChars = 0;
+    return data;
+  }
+
+  function inferEventName(data: string): string {
+    if (!data) return '';
+    try {
+      const parsed = JSON.parse(data) as { type?: unknown };
+      return typeof parsed.type === 'string' ? parsed.type : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Some gateways end the stream with `event: message_stop` and no data line.
+   * Dropping that event makes Pi report that the stream ended before message_stop.
+   * Only these terminal/keepalive names are valid without a JSON body.
+   */
+  function emptyEventData(type: string): string {
+    if (type === 'message_stop' || type === 'ping') return JSON.stringify({ type });
+    if (type === 'error') {
+      return JSON.stringify({
+        type: 'error',
+        error: { type: 'api_error', message: 'The upstream stream reported an error.' },
+      });
+    }
+    return '';
+  }
+
+  function dataBufferIsComplete(): boolean {
+    if (dataLines.length === 0) return false;
+    const split = splitTopLevelJsonObjects(dataLines.join('\n'));
+    return !!split && split.objects.length > 0 && split.rest.trim() === '';
+  }
+
+  function dispatchEvent(controller: TransformStreamDefaultController<Uint8Array>): void {
+    const data = takeData();
+    const name = eventName;
+    eventName = '';
+    const split = data ? splitTopLevelJsonObjects(data) : null;
+    // One object keeps the original payload so a normal Anthropic frame stays
+    // byte-identical. Several objects are separate events (a Kimi-style
+    // Anthropic gateway omits the blank line, so they would otherwise be
+    // joined and discarded). Official Kimi Code is Chat Completions.
+    if (split && split.objects.length > 1 && split.rest.trim() === '') {
+      for (let i = 0; i < split.objects.length; i++) {
+        const object = split.objects[i];
+        if (!object) continue;
+        const type = (i === 0 && name) || inferEventName(object);
+        if (!type) continue;
+        processEvent(type, object, controller);
+      }
+      return;
+    }
+    const type = name || inferEventName(data);
+    if (!type) return;
+    const payload = data || emptyEventData(type);
+    if (!payload) return;
+    processEvent(type, payload, controller);
+  }
+
+  function acceptSseLine(line: string, controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (overflowed) return;
+    if (stripBom) {
+      stripBom = false;
+      if (line.charCodeAt(0) === 0xfeff) line = line.slice(1);
+    }
+    if (line === '') {
+      if (eventName || dataLines.length > 0) dispatchEvent(controller);
+      return;
+    }
+    if (line.startsWith(':')) return;
+
+    const colon = line.indexOf(':');
+    const field = colon === -1 ? line : line.slice(0, colon);
+    let value = colon === -1 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+
+    if (field === 'event') {
+      // A Kimi-style Anthropic gateway sometimes omits the blank line. A new event field after data
+      // ends the previous event. A second event field before any data only
+      // replaces the name, which matches the SSE spec.
+      if (dataLines.length > 0) dispatchEvent(controller);
+      eventName = value;
+      return;
+    }
+    if (field === 'data') {
+      const nextChars = dataChars + value.length + (dataLines.length > 0 ? 1 : 0);
+      if (nextChars > maxBufferChars) {
+        failOverflow(controller);
+        return;
+      }
+      dataChars = nextChars;
+      dataLines.push(value);
+      // Release a finished object before the next network chunk. Waiting for
+      // a blank line drops single-LF frames and, when a later frame
+      // does end a group, paints that whole group at once.
+      if (dataBufferIsComplete()) dispatchEvent(controller);
+    }
+  }
+
+  function consumeText(text: string, controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (overflowed || !text && !heldCarriageReturn) return;
+    let input = heldCarriageReturn ? `\r${text}` : text;
+    heldCarriageReturn = false;
+    if (input.endsWith('\r')) {
+      heldCarriageReturn = true;
+      input = input.slice(0, -1);
+    }
+    if (!input) return;
+    const parts = input.split(SSE_LINE_BREAK);
+    lineBuffer += parts[0] ?? '';
+    if (lineBuffer.length > maxBufferChars) {
+      failOverflow(controller);
+      return;
+    }
+    for (let i = 1; i < parts.length; i++) {
+      acceptSseLine(lineBuffer, controller);
+      if (overflowed) return;
+      lineBuffer = parts[i] ?? '';
+      if (lineBuffer.length > maxBufferChars) {
+        failOverflow(controller);
+        return;
+      }
+    }
+  }
+
+  function finishStream(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (heldCarriageReturn) {
+      acceptSseLine(lineBuffer, controller);
+      lineBuffer = '';
+      heldCarriageReturn = false;
+    } else if (lineBuffer) {
+      acceptSseLine(lineBuffer, controller);
+      lineBuffer = '';
+    }
+    if (!overflowed && (eventName || dataLines.length > 0)) dispatchEvent(controller);
+    if (!overflowed) {
+      finishOpenBlocks(controller);
+      for (const [index, block] of trackedBlocks) {
+        emitBufferedBlock(block, index, controller);
+        emitSseEvent('content_block_stop', JSON.stringify({ type: 'content_block_stop', index }), controller);
+      }
+    }
+    trackedBlocks.clear();
+    lineBuffer = '';
+    debugLog(`[SSE] Stream flush complete. Total events processed: ${eventCount}`);
   }
 
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      const text = lineBuffer + decoder.decode(chunk, { stream: true });
-      const lines = text.split('\n');
-      lineBuffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-
-        if (trimmed === '') {
-          if (currentEventType && currentData) {
-            processEvent(currentEventType, currentData, controller);
-          }
-          currentEventType = '';
-          currentData = '';
-          continue;
-        }
-
-        const eventMatch = trimmed.match(SSE_EVENT_RE);
-        if (eventMatch) {
-          currentEventType = eventMatch[1]!.trim();
-          continue;
-        }
-
-        const dataMatch = trimmed.match(SSE_DATA_RE);
-        if (dataMatch) {
-          currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
-          continue;
-        }
-      }
+      streamTrace('net-read', { bytes: chunk.byteLength });
+      if (overflowed) return;
+      consumeText(decoder.decode(chunk, { stream: true }), controller);
     },
 
     flush(controller) {
-      if (lineBuffer.trim()) {
-        const lines = lineBuffer.split('\n');
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed === '') {
-            if (currentEventType && currentData) {
-              processEvent(currentEventType, currentData, controller);
-            }
-            currentEventType = '';
-            currentData = '';
-            continue;
-          }
-          const eventMatch = trimmed.match(SSE_EVENT_RE);
-          if (eventMatch) {
-            currentEventType = eventMatch[1]!.trim();
-            continue;
-          }
-          const dataMatch = trimmed.match(SSE_DATA_RE);
-          if (dataMatch) {
-            currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
-          }
-        }
-
-        if (currentEventType && currentData) {
-          processEvent(currentEventType, currentData, controller);
-        }
-      }
-
-      for (const [index, block] of trackedBlocks) {
-        emitBufferedBlock(block, index, controller);
-      }
-      trackedBlocks.clear();
-      lineBuffer = '';
-      debugLog(`[SSE] Stream flush complete. Total events processed: ${eventCount}`);
+      if (!overflowed) consumeText(decoder.decode(), controller);
+      finishStream(controller);
     },
   });
 }
@@ -704,14 +1229,17 @@ const anthropicAdapter: ApiAdapter = {
       return body;
     }
 
-    const richDescriptions = isRichToolDescriptionsEnabled();
+    const metadataCompatible = supportsRichToolMetadataForModel(
+      typeof body.model === 'string' ? body.model : undefined,
+    );
+    const richDescriptions = metadataCompatible && isRichToolDescriptionsEnabled();
     let modifiedCount = 0;
     for (const tool of tools) {
       // MCP tools always get metadata regardless of the feature flag — they're
       // lower-volume than built-in tools and the metadata drives source-specific
       // UI (tool intents, display names in the sidebar).
       const isMcpTool = tool.name?.startsWith('mcp__');
-      if (!richDescriptions && !isMcpTool) {
+      if (!metadataCompatible || (!richDescriptions && !isMcpTool)) {
         continue;
       }
 
@@ -722,10 +1250,11 @@ const anthropicAdapter: ApiAdapter = {
       const updatedSchema = injectMetadataIntoToolSchema(tool.input_schema);
       tool.input_schema.properties = updatedSchema.properties;
       tool.input_schema.required = updatedSchema.required;
-      // Anthropic requires additionalProperties: false on all object-type schemas.
-      // _intent and _displayName are declared in properties above, so they satisfy
-      // this constraint and must NOT be treated as additional/unknown fields.
-      (tool.input_schema as Record<string, unknown>).additionalProperties = false;
+      // External MCP servers may set additionalProperties: false which would
+      // cause the API to reject _intent/_displayName in tool inputs.
+      if ((tool.input_schema as Record<string, unknown>).additionalProperties === false) {
+        delete (tool.input_schema as Record<string, unknown>).additionalProperties;
+      }
       modifiedCount++;
     }
 
@@ -787,20 +1316,20 @@ const anthropicAdapter: ApiAdapter = {
 
   stripsSseMetadata: true,
 
-  modifyRequest(_url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
+  modifyRequest(url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
     sanitizeEmptyTextCacheControl(body);
     upgradePromptCacheTtl(body);
 
-    // Strip SDK-injected 1M context beta when setting disables it.
-    // The SDK adds this header automatically for Opus/Sonnet 4.6 models,
-    // but the user may want 200K context to conserve usage limits.
-    if (!is1MContextEnabled()) {
-      debugLog('[Anthropic] Stripping context-1m beta header (enable1MContext=false)');
-      init = {
-        ...init,
-        headers: stripBetaHeader(init?.headers as HeadersInitType | undefined, 'context-1m-2025-08-07'),
-      };
-    }
+    // Official Anthropic 1M beta is not used. Strip it if an SDK injects it.
+    debugLog('[Anthropic] Stripping context-1m beta header');
+    const headers = preferAnthropicBearerAuth(
+      url,
+      stripBetaHeader(init?.headers as HeadersInitType | undefined, 'context-1m-2025-08-07'),
+    );
+    init = {
+      ...init,
+      headers,
+    };
 
     const fastMode = shouldEnableFastMode(body.model);
     if (fastMode) {
@@ -856,6 +1385,7 @@ interface TrackedToolCall {
  *   are emitted just before the original `[DONE]` / `finish_reason` event.
  */
 export function createOpenAiSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
@@ -1102,6 +1632,7 @@ export function createOpenAiSseStrippingStream(): TransformStream<Uint8Array, Ui
     // Suppress all upstream tool_call delta payloads. Consolidated events
     // are emitted on flush.
     if (handledToolCalls) {
+      for (const call of trackedCalls.values()) previewCall(call);
       return;
     }
 
@@ -1180,7 +1711,10 @@ const openAiAdapter: ApiAdapter = {
       return body;
     }
 
-    const richDescriptions = isRichToolDescriptionsEnabled();
+    const metadataCompatible = supportsRichToolMetadataForModel(
+      typeof body.model === 'string' ? body.model : undefined,
+    );
+    const richDescriptions = metadataCompatible && isRichToolDescriptionsEnabled();
     let modifiedCount = 0;
 
     for (const tool of tools) {
@@ -1190,7 +1724,7 @@ const openAiAdapter: ApiAdapter = {
       // lower-volume than built-in tools and the metadata drives source-specific
       // UI (tool intents, display names in the sidebar).
       const isMcpTool = tool.function.name?.startsWith('mcp__');
-      if (!richDescriptions && !isMcpTool) {
+      if (!metadataCompatible || (!richDescriptions && !isMcpTool)) {
         continue;
       }
 
@@ -1291,9 +1825,11 @@ const openAiAdapter: ApiAdapter = {
  * - response.output_item.done (item.type === 'function_call')
  */
 export function createOpenAiResponsesSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let lineBuffer = '';
+  const previewCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
   function emitSseLine(dataStr: string, controller: TransformStreamDefaultController<Uint8Array>): void {
     if (DEBUG_SSE_RAW) debugLog(`[SSE RAW OUT openai-responses] ${dataStr.slice(0, 4000)}`);
@@ -1316,9 +1852,28 @@ export function createOpenAiResponsesSseStrippingStream(): TransformStream<Uint8
     }
 
     const eventType = data.type;
+    if (eventType === 'response.output_item.added') {
+      const item = data.item as { type?: string; call_id?: string; name?: string } | undefined;
+      const index = data.output_index;
+      if (typeof index === 'number' && item?.type === 'function_call'
+        && typeof item.call_id === 'string' && typeof item.name === 'string') {
+        previewCalls.set(index, { id: item.call_id, name: item.name, arguments: '' });
+      }
+    } else if (eventType === 'response.function_call_arguments.delta') {
+      const call = previewCalls.get(data.output_index as number);
+      if (call && typeof data.delta === 'string') {
+        call.arguments += data.delta;
+        previewCall(call);
+      }
+    }
     if (eventType === 'response.function_call_arguments.done') {
       const callId = typeof data.call_id === 'string' ? data.call_id : undefined;
       const argsStr = typeof data.arguments === 'string' ? data.arguments : undefined;
+      const call = previewCalls.get(data.output_index as number);
+      if (call && call.id === callId && argsStr?.startsWith(call.arguments)) {
+        call.arguments = argsStr;
+        previewCall(call, true);
+      }
       if (callId && argsStr) {
         try {
           const parsed = JSON.parse(argsStr) as Record<string, unknown>;
@@ -1343,6 +1898,7 @@ export function createOpenAiResponsesSseStrippingStream(): TransformStream<Uint8
       } | undefined;
 
       if (item?.type === 'function_call' && typeof item.arguments === 'string') {
+        previewCalls.delete(data.output_index as number);
         const toolId = typeof item.call_id === 'string' ? item.call_id : undefined;
         const toolName = typeof item.name === 'string' ? item.name : 'response:function_call';
         if (toolId) {
@@ -1414,14 +1970,17 @@ const openAiResponsesAdapter: ApiAdapter = {
 
     if (!tools || !Array.isArray(tools)) return body;
 
-    const richDescriptions = isRichToolDescriptionsEnabled();
+    const metadataCompatible = supportsRichToolMetadataForModel(
+      typeof body.model === 'string' ? body.model : undefined,
+    );
+    const richDescriptions = metadataCompatible && isRichToolDescriptionsEnabled();
     let modifiedCount = 0;
 
     for (const tool of tools) {
       if (tool.type !== 'function' || !tool.parameters) continue;
 
       const isMcpTool = tool.name?.startsWith('mcp__');
-      if (!richDescriptions && !isMcpTool) continue;
+      if (!metadataCompatible || (!richDescriptions && !isMcpTool)) continue;
 
       const params = tool.parameters;
       const updatedSchema = injectMetadataIntoToolSchema(params);
@@ -1519,6 +2078,24 @@ const openAiResponsesAdapter: ApiAdapter = {
  * Mutates `body.messages` in place. Logs structured info if anything was
  * dropped. Exported for focused unit tests.
  */
+/**
+ * Pi sends reasoning-model system prompts as `role: "developer"`. Compatible
+ * gateways only accept `system` and reject the request with
+ * "Unexpected message role." Rewrite every outgoing instruction role before
+ * the body is validated or sent.
+ */
+export function rewriteDeveloperRolesToSystem(body: Record<string, unknown>): void {
+  for (const key of ['messages', 'input'] as const) {
+    const entries = body[key];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (entry && typeof entry === 'object' && (entry as { role?: unknown }).role === 'developer') {
+        (entry as { role: string }).role = 'system';
+      }
+    }
+  }
+}
+
 export function sanitizeOpenAiHistoryInPlace(body: Record<string, unknown>): {
   droppedToolCalls: number;
   droppedToolResults: number;
@@ -1947,14 +2524,9 @@ function headersToCurl(headers: HeadersInitType | undefined): string {
 }
 
 /**
- * Format a fetch request as a cURL command.
- *
- * Request bodies are replaced by a size placeholder unless `fullBodies` is set —
- * they carry user prompts, tool arguments and base64 image payloads, and logging
- * them in full is what let this log grow into the tens of GiB (OSS #1033). Opt in
- * with `CRAFT_DEBUG_FULL_BODIES=1`.
+ * Format a fetch request as a cURL command
  */
-export function toCurl(url: string, init?: RequestInit, fullBodies: boolean = DEBUG_FULL_BODIES): string {
+function toCurl(url: string, init?: RequestInit): string {
   const method = init?.method?.toUpperCase() ?? 'GET';
   const headers = headersToCurl(init?.headers as HeadersInitType | undefined);
 
@@ -1963,16 +2535,8 @@ export function toCurl(url: string, init?: RequestInit, fullBodies: boolean = DE
     curl += ` \\\n  ${headers}`;
   }
   if (init?.body && typeof init.body === 'string') {
-    const body = init.body;
-    if (fullBodies) {
-      const truncated = body.length > MAX_LOGGED_BODY_CHARS;
-      const shown = truncated ? body.slice(0, MAX_LOGGED_BODY_CHARS) : body;
-      const escapedBody = shown.replace(/'/g, "'\\''");
-      const marker = truncated ? `... [BODY TRUNCATED: ${body.length} chars total]` : '';
-      curl += ` \\\n  -d '${escapedBody}${marker}'`;
-    } else {
-      curl += ` \\\n  -d '[REQUEST BODY OMITTED: ${body.length} chars]'`;
-    }
+    const escapedBody = init.body.replace(/'/g, "'\\''");
+    curl += ` \\\n  -d '${escapedBody}'`;
   }
   curl += ` \\\n  '${url}'`;
 
@@ -2126,7 +2690,7 @@ function synthesizeMalformedBodyResponse(
     error: {
       type: 'invalid_request_error',
       code: err.code,
-      message: `Craft Agents blocked an outgoing request that the API would reject: ${err.detail}. ` +
+      message: `Selection blocked an outgoing request that the API would reject: ${err.detail}. ` +
         `This typically indicates a streaming-reassembly bug in the upstream endpoint or a stale ` +
         `tool history. Try starting a new session or switching to a different model/endpoint.`,
       param: 'tool_calls',
@@ -2137,7 +2701,7 @@ function synthesizeMalformedBodyResponse(
 
   setStoredError({
     status: 400,
-    statusText: 'Bad Request (blocked by Craft Agents)',
+    statusText: 'Bad Request (blocked by Selection)',
     message: err.detail,
     timestamp: Date.now(),
   });
@@ -2160,6 +2724,14 @@ function synthesizeMalformedBodyResponse(
 
 const originalFetch = globalThis.fetch.bind(globalThis);
 
+/** Ask intermediaries not to gzip a live SSE body. Compression buffers tokens. */
+function withIdentityEncoding(init: RequestInit, body: string): RequestInit {
+  if (!/"stream"\s*:\s*true/.test(body)) return init;
+  const headers = new Headers(init.headers ?? undefined);
+  headers.set('accept-encoding', 'identity');
+  return { ...init, headers };
+}
+
 async function interceptedFetch(
   input: string | URL | Request,
   init?: RequestInit
@@ -2179,6 +2751,8 @@ async function interceptedFetch(
     debugLog(toCurl(url, init));
   }
 
+  const diagnostic = beginRequestDiagnostic();
+  let requestSent = false;
   // Find matching adapter for this URL
   const adapter = findAdapter(url);
 
@@ -2190,6 +2764,7 @@ async function interceptedFetch(
       const { bodyStr, normalizedInit } = await resolveRequestContext(input, init);
       if (bodyStr) {
         let parsed = JSON.parse(bodyStr);
+        rewriteDeveloperRolesToSystem(parsed);
 
         // Add _intent and _displayName to all tool schemas
         parsed = adapter.addMetadataToTools(parsed);
@@ -2223,11 +2798,11 @@ async function interceptedFetch(
 
         const proxy = getProxyForUrl(url);
         const finalBody = JSON.stringify(parsed);
-        const finalInit = {
+        const finalInit = withIdentityEncoding({
           ...modifiedInit,
           body: finalBody,
           ...(proxy ? { proxy } : {}),
-        };
+        }, finalBody);
 
         // Cache a sanitized request summary for the 400-empty-body diagnostic
         // pathway in captureApiError. Plain-text bodies (sensitive arguments)
@@ -2235,14 +2810,20 @@ async function interceptedFetch(
         rememberLastOutgoingRequest(url, parsed, adapter);
 
         debugLog(`[${adapter.name}] Intercepted request to ${url}`);
-        const response = await originalFetch(url, finalInit);
+        requestSent = true;
+        const response = await fetchWithModelRequestSlot(originalFetch, url, finalInit);
+        diagnostic({ phase: response.status >= 400 ? 'http-error' : 'headers', httpStatus: response.status, requestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') });
 
         // Process SSE response through adapter's stream processor
         const contentType = response.headers.get('content-type') ?? '';
         if (contentType.includes('text/event-stream') && response.body) {
           debugLog(`[${adapter.name}] Creating SSE processor (${adapter.stripsSseMetadata ? 'strip' : 'capture'})`);
           const processor = adapter.createSseProcessor();
-          const processedBody = response.body.pipeThrough(processor);
+          const observed = observeSseResponse(response, startTime, event => {
+            diagnostic(event);
+            debugLog('[SSE diagnostic]', event);
+          });
+          const processedBody = observed.body!.pipeThrough(processor);
           const processedResponse = new Response(processedBody, {
             status: response.status,
             statusText: response.statusText,
@@ -2265,14 +2846,24 @@ async function interceptedFetch(
         return logResponse(response, url, startTime, adapter);
       }
     } catch (e) {
+      if (requestSent) {
+        diagnostic({ phase: 'transport-error' });
+        throw e; // Never replay an already dispatched request from the modification fallback.
+      }
       debugLog(`[${adapter?.name}] FETCH modification failed:`, e);
     }
   }
 
   const proxy = getProxyForUrl(url);
   const proxyInit = proxy ? { ...init, proxy } : init;
-  const response = await originalFetch(input, proxyInit);
-  return logResponse(response, url, startTime);
+  try {
+    const response = await fetchWithModelRequestSlot(originalFetch, input, proxyInit);
+    diagnostic({ phase: response.status >= 400 ? 'http-error' : 'headers', httpStatus: response.status, requestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') });
+    return await logResponse(response, url, startTime);
+  } catch (error) {
+    diagnostic({ phase: 'transport-error' });
+    throw error;
+  }
 }
 
 // Create proxy to handle both function calls and static properties (e.g., fetch.preconnect in Bun)

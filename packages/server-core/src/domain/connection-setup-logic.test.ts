@@ -4,12 +4,45 @@ import {
   isLoopbackBaseUrl,
   setupTestRequiresApiKey,
   resolveCustomEndpointSetup,
+  persistableLlmSetupCredential,
   createBuiltInConnection,
-  API_KEY_MASK,
-  maskApiKey,
-  isMaskedApiKey,
-  resolveSetupTestApiKey,
+  validateModelList,
+  splitModelIdList,
+  piAuthProviderDisplayName,
+  resolveChatGptOAuthDisplayName,
 } from './connection-setup-logic'
+
+describe('resolveChatGptOAuthDisplayName', () => {
+  const connection = {
+    name: 'ChatGPT',
+    providerType: 'pi' as const,
+    authType: 'oauth' as const,
+    piAuthProvider: 'openai-codex',
+  }
+
+  it('shows the plan from ChatGPT OAuth claims', () => {
+    expect(resolveChatGptOAuthDisplayName(connection, 'Pro')).toBe('ChatGPT Pro')
+    expect(resolveChatGptOAuthDisplayName(connection, 'Plus')).toBe('ChatGPT Plus')
+    expect(resolveChatGptOAuthDisplayName({ ...connection, name: 'ChatGPT Plus / Pro' }, 'Pro')).toBe('ChatGPT Pro')
+    expect(resolveChatGptOAuthDisplayName({ ...connection, name: 'ChatGPT Pro' }, 'Plus')).toBe('ChatGPT Plus')
+  })
+
+  it('keeps fallback and user-defined connection names intact', () => {
+    expect(resolveChatGptOAuthDisplayName(connection)).toBe('ChatGPT')
+    expect(resolveChatGptOAuthDisplayName({ ...connection, name: 'Work account' }, 'Pro')).toBe('Work account')
+  })
+})
+
+describe('piAuthProviderDisplayName', () => {
+  it('labels both Moonshot API regions', () => {
+    expect(piAuthProviderDisplayName('moonshotai')).toBe('Moonshot AI')
+    expect(piAuthProviderDisplayName('moonshotai-cn')).toBe('Moonshot AI (CN)')
+  })
+
+  it('labels DeepSeek, which the old setup map omitted', () => {
+    expect(piAuthProviderDisplayName('deepseek')).toBe('DeepSeek')
+  })
+})
 
 describe('validateSetupTestInput', () => {
   it('rejects pi custom endpoint tests without piAuthProvider', () => {
@@ -20,7 +53,7 @@ describe('validateSetupTestInput', () => {
 
     expect(result.valid).toBe(false)
     if (!result.valid) {
-      expect(result.error).toContain('requires selecting a provider preset')
+      expect(result.error).toContain('OpenAI Compatible or Anthropic Compatible')
     }
   })
 
@@ -29,6 +62,33 @@ describe('validateSetupTestInput', () => {
       provider: 'pi',
       baseUrl: 'https://example.com/v1',
       piAuthProvider: 'openai',
+    })).toEqual({ valid: true })
+  })
+
+  it('rejects leftover Anthropic provider and Pi+Anthropic auth without a custom URL', () => {
+    expect(validateSetupTestInput({
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+    }).valid).toBe(false)
+    expect(validateSetupTestInput({
+      provider: 'pi',
+      piAuthProvider: 'anthropic',
+    }).valid).toBe(false)
+  })
+
+  it('allows an Anthropic Messages custom endpoint test', () => {
+    expect(validateSetupTestInput({
+      provider: 'pi',
+      baseUrl: 'https://api.minimaxi.com/anthropic',
+      piAuthProvider: 'anthropic',
+    })).toEqual({ valid: true })
+  })
+
+  it('allows an official Anthropic API host when the custom endpoint speaks Anthropic Messages', () => {
+    expect(validateSetupTestInput({
+      provider: 'pi',
+      baseUrl: 'https://api.anthropic.com/v1',
+      piAuthProvider: 'anthropic',
     })).toEqual({ valid: true })
   })
 })
@@ -77,7 +137,7 @@ describe('resolveCustomEndpointSetup', () => {
     expect(result.name).toBeUndefined()
   })
 
-  it('uses the anthropic provider hint for anthropic-messages protocol', () => {
+  it('keeps Anthropic Messages custom endpoints on the Anthropic auth hint', () => {
     const result = resolveCustomEndpointSetup({
       baseUrl: 'http://127.0.0.1:8080',
       credential: 'sk-ant-local',
@@ -113,100 +173,110 @@ describe('resolveCustomEndpointSetup', () => {
       customEndpointApi: 'openai-completions',
     })).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'openai' })
   })
+
+  it('treats whitespace-only credential as missing (not keyed)', () => {
+    expect(resolveCustomEndpointSetup({
+      baseUrl: 'http://localhost:11434/v1',
+      credential: '   ',
+      customEndpointApi: 'openai-completions',
+    })).toEqual({ authType: 'none', name: 'Local Model' })
+  })
+
+  it('keeps a keyed loopback connection keyed when the form omits the API key', () => {
+    expect(resolveCustomEndpointSetup({
+      baseUrl: 'http://127.0.0.1:11111/v1',
+      credential: undefined,
+      customEndpointApi: 'openai-completions',
+      preserveExistingCredential: true,
+    })).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'openai' })
+  })
 })
 
 // New connections must persist a per-provider midStreamBehavior default so the
 // per-connection submenu in Settings → AI shows a checkmark on the right item
 // out of the box (no read-time fallback needed for fresh connections).
 describe('createBuiltInConnection seeds midStreamBehavior', () => {
-  it("Anthropic API key → 'queue' (Claude's emulated steer is fragile)", () => {
-    const conn = createBuiltInConnection('anthropic-api')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.midStreamBehavior).toBe('queue')
+  it('rejects leftover Anthropic built-in slugs', () => {
+    expect(() => createBuiltInConnection('anthropic-api')).toThrow('Unknown built-in connection slug')
+    expect(() => createBuiltInConnection('claude-max')).toThrow('Unknown built-in connection slug')
   })
 
-  it("Claude Max OAuth → 'queue' (still uses Claude SDK)", () => {
-    const conn = createBuiltInConnection('claude-max')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.midStreamBehavior).toBe('queue')
-  })
-
-  it("ChatGPT Plus → 'steer' (Pi backend, native polite steer)", () => {
+  it("ChatGPT OAuth → 'queue' so composer Enter does not interrupt", () => {
     const conn = createBuiltInConnection('chatgpt-plus')
+    expect(conn.name).toBe('ChatGPT')
     expect(conn.providerType).toBe('pi')
-    expect(conn.midStreamBehavior).toBe('steer')
+    expect(conn.midStreamBehavior).toBe('queue')
   })
 
-  it("Pi API key (Craft Agents Backend) → 'steer'", () => {
+  it('starts Copilot without a static model list before the policy fetch', () => {
+    const conn = createBuiltInConnection('github-copilot')
+    expect(conn.authType).toBe('oauth')
+    expect(conn.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(conn.models).toEqual([])
+    expect(conn.defaultModel).toBe('')
+  })
+
+  it("Pi API key (Selection Backend) → 'queue'", () => {
     const conn = createBuiltInConnection('pi-api-key')
     expect(conn.providerType).toBe('pi')
-    expect(conn.midStreamBehavior).toBe('steer')
+    expect(conn.midStreamBehavior).toBe('queue')
   })
 
-  it("anthropic-api with custom endpoint becomes pi_compat → 'steer'", () => {
-    const conn = createBuiltInConnection('anthropic-api', 'http://localhost:11434/v1')
-    expect(conn.providerType).toBe('pi_compat')
-    expect(conn.midStreamBehavior).toBe('steer')
+  it('Kimi Code → Pi OAuth on the kimi-coding provider', () => {
+    const conn = createBuiltInConnection('kimi-code')
+    expect(conn.name).toBe('Kimi Code')
+    expect(conn.providerType).toBe('pi')
+    expect(conn.authType).toBe('oauth')
+    expect(conn.piAuthProvider).toBe('kimi-coding')
+  })
+
+  it('derived Kimi Code slugs reuse the template', () => {
+    const conn = createBuiltInConnection('kimi-code-2')
+    expect(conn.piAuthProvider).toBe('kimi-coding')
+    expect(conn.name).toBe('Kimi Code 2')
+  })
+
+  it('SuperGrok → Pi OAuth on the xAI provider', () => {
+    const conn = createBuiltInConnection('supergrok')
+    expect(conn.name).toBe('SuperGrok / X Premium')
+    expect(conn.providerType).toBe('pi')
+    expect(conn.authType).toBe('oauth')
+    expect(conn.piAuthProvider).toBe('xai')
+  })
+
+  it('derived SuperGrok slugs reuse the template', () => {
+    const conn = createBuiltInConnection('supergrok-2')
+    expect(conn.piAuthProvider).toBe('xai')
+    expect(conn.name).toBe('SuperGrok / X Premium 2')
+  })
+
+})
+
+describe('persistableLlmSetupCredential', () => {
+  it('returns a trimmed real key', () => {
+    expect(persistableLlmSetupCredential('  sk-live  ')).toBe('sk-live')
+  })
+
+  it('rejects empty, whitespace, and masked placeholders so existing keys stay put', () => {
+    expect(persistableLlmSetupCredential(undefined)).toBeNull()
+    expect(persistableLlmSetupCredential('')).toBeNull()
+    expect(persistableLlmSetupCredential('   ')).toBeNull()
+    expect(persistableLlmSetupCredential('sk-••••••••abcd')).toBeNull()
   })
 })
 
-describe('API key masking for the edit form', () => {
-  it('masks long keys keeping the provider prefix and the last four characters', () => {
-    expect(maskApiKey('sk-ant-api03-abcdefghijklmnop')).toBe(`sk-ant-${API_KEY_MASK}mnop`)
+describe('validateModelList multi-select defaults', () => {
+  it('splits joined model lists', () => {
+    expect(splitModelIdList('Opus, Laufry')).toEqual(['Opus', 'Laufry'])
+    expect(splitModelIdList('Opus，Laufry')).toEqual(['Opus', 'Laufry'])
   })
 
-  it('masks short keys completely', () => {
-    expect(maskApiKey('short-key')).toBe(API_KEY_MASK)
-  })
-
-  it('recognizes masked values and nothing else', () => {
-    expect(isMaskedApiKey(maskApiKey('sk-ant-api03-abcdefghijklmnop'))).toBe(true)
-    expect(isMaskedApiKey(API_KEY_MASK)).toBe(true)
-    expect(isMaskedApiKey('sk-ant-api03-abcdefghijklmnop')).toBe(false)
-    expect(isMaskedApiKey('')).toBe(false)
-    expect(isMaskedApiKey(undefined)).toBe(false)
-    expect(isMaskedApiKey(null)).toBe(false)
-  })
-})
-
-// Regression for OSS #1048 (PR #1049 by Code-MonkeyZhang): editing a connection
-// and clicking Test sent the masked placeholder as the API key.
-describe('resolveSetupTestApiKey', () => {
-  const STORED = 'sk-ant-stored-key-0000000000'
-  let lookups: string[] = []
-  const store = async (slug: string) => {
-    lookups.push(slug)
-    return slug === 'anthropic' ? STORED : null
-  }
-
-  it('uses a typed key as-is and never consults the store', async () => {
-    lookups = []
-    const result = await resolveSetupTestApiKey({ apiKey: '  sk-new-key  ', connectionSlug: 'anthropic', allowEmptyApiKey: false }, store)
-    expect(result).toEqual({ ok: true, apiKey: 'sk-new-key', source: 'input' })
-    expect(lookups).toEqual([])
-  })
-
-  it('resolves the masked placeholder to the stored key of the edited connection', async () => {
-    lookups = []
-    const result = await resolveSetupTestApiKey({ apiKey: maskApiKey(STORED), connectionSlug: 'anthropic', allowEmptyApiKey: false }, store)
-    expect(result).toEqual({ ok: true, apiKey: STORED, source: 'stored' })
-    expect(lookups).toEqual(['anthropic'])
-  })
-
-  it('asks for the key when the placeholder arrives without a connection slug', async () => {
-    const result = await resolveSetupTestApiKey({ apiKey: API_KEY_MASK, allowEmptyApiKey: false }, store)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toContain('Re-enter the API key')
-  })
-
-  it('asks for the key when nothing is stored for the slug', async () => {
-    const result = await resolveSetupTestApiKey({ apiKey: API_KEY_MASK, connectionSlug: 'missing', allowEmptyApiKey: true }, store)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toContain('No API key is stored')
-  })
-
-  it('requires a key for remote endpoints and allows none for loopback', async () => {
-    expect(await resolveSetupTestApiKey({ apiKey: '', allowEmptyApiKey: false }, store)).toEqual({ ok: false, error: 'API key is required' })
-    expect(await resolveSetupTestApiKey({ apiKey: undefined, allowEmptyApiKey: true }, store)).toEqual({ ok: true, apiKey: '', source: 'input' })
+  it('resolves a joined default to the first model that exists in the list', () => {
+    const result = validateModelList(
+      ['Opus', 'Laufry'],
+      'Opus, Laufry',
+    )
+    expect(result.valid).toBe(true)
+    expect(result.resolvedDefaultModel).toBe('Opus')
   })
 })

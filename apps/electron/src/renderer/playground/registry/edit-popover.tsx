@@ -230,7 +230,6 @@ function CompactChatPreview({
               onModelChange={setModel}
               compactMode={true}
               placeholder={placeholder}
-              emptyStateLabel="Edit preview"
             />
           </div>
 

@@ -1,8 +1,8 @@
+import { CompletionUnreadMark, SessionRunningMark } from './CompletionUnreadMark'
 import type { LucideIcon } from "lucide-react"
 import * as React from "react"
-import { motion, type Variants } from "motion/react"
+import { AnimatePresence, motion, type Variants } from "motion/react"
 import { ChevronRight } from "lucide-react"
-import { TWEEN } from "@craft-agent/ui/motion"
 
 import { cn } from "@/lib/utils"
 import {
@@ -62,8 +62,10 @@ export interface SortableConfig {
 export interface LinkItem {
   id: string            // Unique ID for navigation (e.g., 'nav:allSessions')
   title: string
+  hasUnread?: boolean
+  isProcessing?: boolean
   label?: string        // Optional badge (e.g., count)
-  icon: LucideIcon | React.ReactNode  // LucideIcon or custom React element
+  icon: LucideIcon | React.ComponentType<{ className?: string; style?: React.CSSProperties }> | React.ReactNode  // LucideIcon, custom component, or element
   iconColor?: string    // Optional color class for the icon
   /** Whether the icon responds to color (uses currentColor). Default true for Lucide icons. */
   iconColorable?: boolean
@@ -84,6 +86,8 @@ export interface LinkItem {
   sortable?: SortableConfig
   // Optional element rendered after the title (e.g., label type icon), revealed on hover
   afterTitle?: React.ReactNode
+  /** Independent controls rendered beside the navigation button. */
+  actions?: React.ReactNode
 }
 
 export interface SeparatorItem {
@@ -91,22 +95,10 @@ export interface SeparatorItem {
   type: 'separator'
 }
 
-/** A quiet group heading (e.g. "Workspace") — not focusable, not part of keyboard navigation. */
-export interface SectionItem {
-  id: string
-  type: 'section'
-  title: string
-}
-
-export type SidebarItem = LinkItem | SeparatorItem | SectionItem
+export type SidebarItem = LinkItem | SeparatorItem
 
 export const isSeparatorItem = (item: SidebarItem): item is SeparatorItem =>
   'type' in item && item.type === 'separator'
-
-export const isSectionItem = (item: SidebarItem): item is SectionItem =>
-  'type' in item && item.type === 'section'
-
-const isLinkItem = (item: SidebarItem): item is LinkItem => !('type' in item)
 
 interface LeftSidebarProps {
   isCollapsed: boolean
@@ -121,93 +113,135 @@ interface LeftSidebarProps {
   focusedItemId?: string | null
   /** Whether this is a nested sidebar (child of expandable item) */
   isNested?: boolean
-  /** Nesting depth (0 = top level). Nested rows indent their content, never their fill. */
-  depth?: number
-  /** Extra classes for the outer wrapper (e.g. the pinned footer drops the top padding) */
-  className?: string
 }
 
-/**
- * Layout grid: a row's glyph sits on the sidebar gutter (8px nav inset + 8px row padding = 16px).
- * A child row indents by one glyph step (16px glyph + 8px gap) so its glyph lands on the parent's
- * label edge. The fill stays full width at every depth.
- */
-const SIDEBAR_ROW_PADDING = 8
-const SIDEBAR_INDENT = 24
-
-/** Children of an expanded item fade in, the first few staggered (spec §6.1: 25ms × ≤ 6 on first reveal). */
-const STAGGER_LIMIT = 6
-const STAGGER_SECONDS = 0.025
+// Stagger animation for child items
+const containerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.025,
+      delayChildren: 0.01,
+    },
+  },
+  exit: {
+    opacity: 0,
+    transition: {
+      staggerChildren: 0.015,
+      staggerDirection: -1,
+    },
+  },
+}
 
 const itemVariants: Variants = {
-  hidden: { opacity: 0, y: -4 },
-  visible: (index: number) => ({
+  hidden: { opacity: 0, x: -8 },
+  visible: {
     opacity: 1,
-    y: 0,
-    transition: { ...TWEEN.fast, delay: Math.min(index, STAGGER_LIMIT) * STAGGER_SECONDS },
-  }),
+    x: 0,
+    transition: { duration: 0.15, ease: 'easeOut' },
+  },
+  exit: {
+    opacity: 0,
+    x: -8,
+    transition: { duration: 0.1, ease: 'easeIn' },
+  },
 }
 
 /**
- * LeftSidebar - Vertical list of navigation rows (spec §7.1: 28px rows on the navigator canvas).
+ * LeftSidebar - Vertical list of navigation buttons with icons
  *
- * Navigation is managed by the parent component (AppShell) for unified sidebar keyboard
- * navigation. This component just renders the items.
+ * Navigation is managed by the parent component (Chat.tsx) for unified
+ * sidebar keyboard navigation. This component just renders the items.
  *
- * Row anatomy: 16px icon (tertiary; the row's text color when selected) · label (13px, secondary;
- * primary when selected) · count (12px, tertiary). Selection is a fill, never weight.
+ * Styling matches agent items in the sidebar for consistency:
+ * - py-[7px] px-2 text-[13px] rounded-md
+ * - Icon: h-3.5 w-3.5
+ *
+ * Link variants:
+ * - "default": Highlighted style (used for active/selected items)
+ * - "ghost": Subtle style (used for inactive items)
  *
  * Expandable items:
  * - Show a chevron toggle on hover (replaces icon position)
- * - Children appear in one layout change (no height animation) and fade in, staggered
+ * - Children are rendered with animated expand/collapse
+ * - Nested items have left indentation with vertical line
  *
  * Drag-and-drop:
- * - Expandable items can opt-in to sortable (flat) DnD
+ * - Expandable items can opt-in to sortable (flat) or sortableTree (hierarchical) DnD
  * - Uses @dnd-kit with DragOverlay portaled to document.body (no clipping)
+ * - Two-phase drop animation: overlay fades out, ghost fades in
  */
-export function LeftSidebar({ links, isCollapsed: _isCollapsed, getItemProps, focusedItemId, isNested, depth = 0, className }: LeftSidebarProps) {
-  let linkIndex = -1
+export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, isNested }: LeftSidebarProps) {
+  // For nested sidebars, wrap in motion container for stagger effect
+  const NavWrapper = isNested ? motion.nav : 'nav'
+  const navProps = isNested ? {
+    variants: containerVariants,
+    initial: 'hidden',
+    animate: 'visible',
+    exit: 'exit',
+  } : {}
+
   return (
-    <div className={cn("flex flex-col select-none", !isNested && "py-1", className)}>
-      <nav
-        className={cn("grid gap-px", !isNested && "px-2")}
+    <div className={cn("flex flex-col select-none", !isNested && "py-1")}>
+      <NavWrapper
+        className={cn(
+          "grid gap-0.5",
+          isNested ? "pl-5 pr-0 relative" : "px-2"
+        )}
+        role="navigation"
         aria-label={isNested ? "Sub navigation" : "Main navigation"}
+        {...navProps}
       >
+        {/* Vertical line for nested items - 4px left of chevron center */}
+        {isNested && (
+          <div
+            className="absolute left-[13px] top-1 bottom-1 w-px bg-foreground/10"
+            aria-hidden="true"
+          />
+        )}
         {links.map((item) => {
+          // Handle separator items
           if (isSeparatorItem(item)) {
-            // Dividers start where their rows' glyphs start (indented with nested rows)
             return (
-              <div key={item.id} className="py-1.5 pr-2" style={{ paddingLeft: SIDEBAR_ROW_PADDING + depth * SIDEBAR_INDENT }} aria-hidden="true">
-                <div className="h-px bg-separator" />
+              <div key={item.id} className="py-1 px-2" aria-hidden="true">
+                <div className="h-px bg-foreground/5" />
               </div>
             )
           }
 
-          if (isSectionItem(item)) {
-            return (
-              <div
-                key={item.id}
-                className="flex h-row-sidebar items-center px-2 mt-3 text-label-sm font-medium text-tertiary"
-              >
-                {item.title}
-              </div>
-            )
-          }
-
-          linkIndex += 1
           const link = item
           const itemProps = getItemProps?.(link.id)
+          const isFocused = focusedItemId === link.id
 
-          const buttonElement = (
+          // Button element shared by both expandable and non-expandable items
+          const navigationButton = (
             <SidebarButton
               link={link}
               itemProps={itemProps}
-              depth={depth}
             />
           )
+          const buttonElement = link.actions ? (
+            <div className="group/project-row relative">
+              {React.cloneElement(navigationButton, { className: 'pr-9' })}
+              {(link.isProcessing || link.hasUnread) && (
+                <span className="pointer-events-none absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center gap-1 opacity-100 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none group-hover/project-row:scale-90 group-hover/project-row:opacity-0 group-focus-within/project-row:scale-90 group-focus-within/project-row:opacity-0 group-has-[[data-state=open]]/project-row:opacity-0">
+                  {link.isProcessing ? <SessionRunningMark /> : <CompletionUnreadMark />}
+                </span>
+              )}
+              <div
+                className="absolute right-1 top-1/2 -translate-y-1/2"
+                onKeyDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {link.actions}
+              </div>
+            </div>
+          ) : navigationButton
 
+          // Determine which expanded content to render (sortable vs regular)
           const expandedContent = link.expandable && link.items && link.expanded
-            ? renderExpandedContent(link, getItemProps, focusedItemId, depth + 1)
+            ? renderExpandedContent(link, getItemProps, focusedItemId, isNested)
             : null
 
           // Wrap with context menu if configured, scoped to button only.
@@ -246,19 +280,29 @@ export function LeftSidebar({ links, isCollapsed: _isCollapsed, getItemProps, fo
               ) : (
                 buttonElement
               )}
-              {/* Expandable subitems — outside context menu scope so only the clicked button
-                * gets data-state="open". The layout changes once; the rows themselves fade in. */}
-              {expandedContent && (
-                <div className={cn("mt-px", isNested ? "mb-1" : "mb-1.5")}>
-                  {expandedContent}
-                </div>
+              {/* Expandable subitems — outside context menu scope so only the
+                * clicked button gets data-state="open", not nested children */}
+              {link.expandable && link.items && (
+                <AnimatePresence initial={false}>
+                  {link.expanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0, marginTop: 0, marginBottom: 0 }}
+                      animate={{ height: 'auto', opacity: 1, marginTop: 2, marginBottom: isNested ? 4 : 8 }}
+                      exit={{ height: 0, opacity: 0, marginTop: 0, marginBottom: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      className="overflow-hidden"
+                    >
+                      {expandedContent}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               )}
             </div>
           )
 
-          // Nested items fade in on first reveal (staggered, capped)
+          // For nested items, wrap in motion.div for stagger animation
           return isNested ? (
-            <motion.div key={link.id} variants={itemVariants} initial="hidden" animate="visible" custom={linkIndex}>
+            <motion.div key={link.id} variants={itemVariants}>
               {content}
             </motion.div>
           ) : (
@@ -267,21 +311,21 @@ export function LeftSidebar({ links, isCollapsed: _isCollapsed, getItemProps, fo
             </React.Fragment>
           )
         })}
-      </nav>
+      </NavWrapper>
     </div>
   )
 }
 
 // ============================================================
 // Expanded Content Renderer
-// Chooses between sortable or regular nested sidebar
+// Chooses between sortable, sortableTree, or regular nested sidebar
 // ============================================================
 
 function renderExpandedContent(
   link: LinkItem,
   getItemProps: LeftSidebarProps['getItemProps'],
   focusedItemId: string | null | undefined,
-  depth: number,
+  isNested: boolean | undefined
 ): React.ReactNode {
   // Flat sortable (e.g., statuses): wrap items in SortableList
   if (link.sortable && link.items) {
@@ -289,7 +333,7 @@ function renderExpandedContent(
     const separatorIndex = link.items.findIndex(isSeparatorItem)
     const sortableItems = separatorIndex >= 0 ? link.items.slice(0, separatorIndex) : link.items
     const trailingItems = separatorIndex >= 0
-      ? link.items.slice(separatorIndex + 1).filter(isLinkItem)
+      ? link.items.slice(separatorIndex + 1).filter((item): item is LinkItem => !isSeparatorItem(item))
       : []
 
     return (
@@ -299,7 +343,6 @@ function renderExpandedContent(
         getItemProps={getItemProps}
         focusedItemId={focusedItemId}
         trailingItems={trailingItems.length > 0 ? trailingItems : undefined}
-        depth={depth}
       />
     )
   }
@@ -309,7 +352,6 @@ function renderExpandedContent(
     <LeftSidebar
       isCollapsed={false}
       isNested={true}
-      depth={depth}
       getItemProps={getItemProps}
       focusedItemId={focusedItemId}
       links={link.items!}
@@ -328,12 +370,11 @@ interface SortableStatusListProps {
   focusedItemId: string | null | undefined
   /** Non-sortable items rendered after the sortable list (e.g., Flagged, Archived) */
   trailingItems?: LinkItem[]
-  depth: number
 }
 
-function SortableStatusList({ items, onReorder, getItemProps, focusedItemId: _focusedItemId, trailingItems, depth }: SortableStatusListProps) {
+function SortableStatusList({ items, onReorder, getItemProps, focusedItemId, trailingItems }: SortableStatusListProps) {
   // Filter to LinkItems only (separators don't participate in DnD)
-  const linkItems = items.filter(isLinkItem)
+  const linkItems = items.filter((item): item is LinkItem => !isSeparatorItem(item))
 
   // Map to SortableItemData format (needs `id` field)
   const sortableItems: (LinkItem & SortableItemData)[] = linkItems.map(item => ({
@@ -353,79 +394,82 @@ function SortableStatusList({ items, onReorder, getItemProps, focusedItemId: _fo
 
   return (
     <div className="flex flex-col select-none">
-      <SortableList
-        items={sortableItems}
-        onReorder={handleReorder}
-        className="grid gap-px"
-        renderItem={(item) => (
-          <div className="group/section">
-            {item.contextMenu ? (
-              <ContextMenu modal={true}>
-                <ContextMenuTrigger asChild>
-                  <SidebarButton
-                    link={item}
-                    itemProps={getItemProps?.(item.id)}
-                    depth={depth}
-                  />
-                </ContextMenuTrigger>
-                <StyledContextMenuContent>
-                  <ContextMenuProvider>
-                    <SidebarMenu
-                      type={item.contextMenu.type}
-                      statusId={item.contextMenu.statusId}
-                      labelId={item.contextMenu.labelId}
-                      onConfigureStatuses={item.contextMenu.onConfigureStatuses}
-                      onMarkAllRead={item.contextMenu.onMarkAllRead}
-                      onConfigureLabels={item.contextMenu.onConfigureLabels}
-                      onAddLabel={item.contextMenu.onAddLabel}
-                      onDeleteLabel={item.contextMenu.onDeleteLabel}
-                      onAddSource={item.contextMenu.onAddSource}
-                      onAddSkill={item.contextMenu.onAddSkill}
-                      onAddAutomation={item.contextMenu.onAddAutomation}
-                      sourceType={item.contextMenu.sourceType}
-                      onConfigureViews={item.contextMenu.onConfigureViews}
-                      viewId={item.contextMenu.viewId}
-                      onDeleteView={item.contextMenu.onDeleteView}
+      <div className="pl-5 pr-0 relative">
+        {/* Vertical line for nested items */}
+        <div
+          className="absolute left-[13px] top-1 bottom-1 w-px bg-foreground/10"
+          aria-hidden="true"
+        />
+        <SortableList
+          items={sortableItems}
+          onReorder={handleReorder}
+          className="grid gap-0.5"
+          renderItem={(item) => (
+            <div className="group/section">
+              {item.contextMenu ? (
+                <ContextMenu modal={true}>
+                  <ContextMenuTrigger asChild>
+                    <SidebarButton
+                      link={item}
+                      itemProps={getItemProps?.(item.id)}
                     />
-                  </ContextMenuProvider>
-                </StyledContextMenuContent>
-              </ContextMenu>
-            ) : (
-              <SidebarButton
-                link={item}
-                itemProps={getItemProps?.(item.id)}
-                depth={depth}
-              />
-            )}
-          </div>
-        )}
-        renderOverlay={(item) => (
-          <SidebarButton
-            link={item}
-            isOverlay={true}
-            depth={depth}
-          />
-        )}
-      />
-      {/* Non-sortable trailing items (e.g., Flagged, Archived) */}
-      {trailingItems && trailingItems.length > 0 && (
-        <>
-          <div className="py-1.5 pr-2" style={{ paddingLeft: SIDEBAR_ROW_PADDING + depth * SIDEBAR_INDENT }} aria-hidden="true">
-            <div className="h-px bg-separator" />
-          </div>
-          <div className="grid gap-px">
-            {trailingItems.map(item => (
-              <div key={item.id} className="group/section">
+                  </ContextMenuTrigger>
+                  <StyledContextMenuContent>
+                    <ContextMenuProvider>
+                      <SidebarMenu
+                        type={item.contextMenu.type}
+                        statusId={item.contextMenu.statusId}
+                        labelId={item.contextMenu.labelId}
+                        onConfigureStatuses={item.contextMenu.onConfigureStatuses}
+                        onMarkAllRead={item.contextMenu.onMarkAllRead}
+                        onConfigureLabels={item.contextMenu.onConfigureLabels}
+                        onAddLabel={item.contextMenu.onAddLabel}
+                        onDeleteLabel={item.contextMenu.onDeleteLabel}
+                        onAddSource={item.contextMenu.onAddSource}
+                        onAddSkill={item.contextMenu.onAddSkill}
+                        onAddAutomation={item.contextMenu.onAddAutomation}
+                        sourceType={item.contextMenu.sourceType}
+                        onConfigureViews={item.contextMenu.onConfigureViews}
+                        viewId={item.contextMenu.viewId}
+                        onDeleteView={item.contextMenu.onDeleteView}
+                      />
+                    </ContextMenuProvider>
+                  </StyledContextMenuContent>
+                </ContextMenu>
+              ) : (
                 <SidebarButton
                   link={item}
                   itemProps={getItemProps?.(item.id)}
-                  depth={depth}
                 />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+              )}
+            </div>
+          )}
+          renderOverlay={(item) => (
+            <SidebarButton
+              link={item}
+              isOverlay={true}
+            />
+          )}
+        />
+        {/* Non-sortable trailing items (e.g., Flagged, Archived) */}
+        {trailingItems && trailingItems.length > 0 && (
+          <>
+            <div className="my-1 ml-2" aria-hidden="true">
+              <div className="h-px bg-foreground/5" />
+            </div>
+            <div className="grid gap-0.5">
+              {trailingItems.map(item => (
+                <div key={item.id} className="group/section">
+                  <SidebarButton
+                    link={item}
+                    itemProps={getItemProps?.(item.id)}
+                  />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -443,15 +487,12 @@ interface SidebarButtonProps {
   }
   /** True when rendering inside the DragOverlay (floating clone) */
   isOverlay?: boolean
-  /** Nesting depth: indents the row's content (not its fill) by one glyph step per level */
-  depth?: number
 }
 
 // forwardRef is required so Radix's ContextMenuTrigger (asChild) can attach its ref
 // and pass props like data-state="open" directly onto this button element.
 const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & React.ButtonHTMLAttributes<HTMLButtonElement>>(
-  ({ link, itemProps, isOverlay, depth = 0, className: extraClassName, style, ...radixProps }, forwardedRef) => {
-    const isSelected = link.variant === "default"
+  ({ link, itemProps, isOverlay, className: extraClassName, ...radixProps }, forwardedRef) => {
     return (
       <button
         {...(isOverlay ? {} : (() => {
@@ -469,33 +510,30 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
         }}
         onClick={isOverlay ? undefined : link.onClick}
         data-tutorial={link.dataTutorial}
-        aria-current={isSelected ? "page" : undefined}
-        style={{ ...style, paddingLeft: SIDEBAR_ROW_PADDING + depth * SIDEBAR_INDENT }}
         className={cn(
-          // 28px row (24px for `compact` items), 13px label; the focus ring sits inside the
-          // scrolling sidebar so it isn't clipped.
-          "group flex w-full items-center gap-2 rounded-sm pr-2 text-label text-left select-none -outline-offset-2",
-          link.compact ? "h-control-sm" : "h-row-sidebar",
-          // Hover-in instant, hover-out 100ms
-          "transition-[background-color,color] duration-micro ease-out-subtle hover:duration-instant",
-          isSelected
-            ? "bg-fill-selected text-foreground"
+          "group flex w-full items-center gap-2 rounded-[6px] text-[13px] select-none outline-none",
+          "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+          // Compact mode: 4px less total height (py-[3px] vs py-[5px])
+          link.compact ? "py-[3px]" : "py-[5px]",
+          "px-2",
+          link.variant === "default"
+            ? "bg-foreground/[0.07]"
             // Highlight on hover, context menu open (data-state), or EditPopover active (data-edit-active)
-            : "text-secondary hover:bg-fill-hover hover:text-foreground data-[state=open]:bg-fill-hover data-[edit-active=true]:bg-fill-hover",
+            : "hover:bg-sidebar-hover data-[state=open]:bg-sidebar-hover data-[edit-active=true]:bg-sidebar-hover",
           extraClassName,
         )}
       >
         {/* Icon container with hover toggle for expandable items */}
-        <span className="relative size-4 shrink-0 flex items-center justify-center">
+        <span className="relative h-3.5 w-3.5 shrink-0 flex items-center justify-center">
           {link.expandable && !isOverlay ? (
             <>
               {/* Main icon - hidden on hover */}
-              <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-micro group-hover:opacity-0 group-hover:duration-instant">
+              <span className="absolute inset-0 flex items-center justify-center group-hover:opacity-0 transition-opacity duration-150">
                 {renderIcon(link)}
               </span>
               {/* Toggle chevron - shown on hover. data-no-dnd prevents drag activation on click. */}
               <span
-                className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-micro group-hover:opacity-100 group-hover:duration-instant cursor-pointer"
+                className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 cursor-pointer"
                 data-no-dnd="true"
                 data-touch-reveal="true"
                 onClick={(e) => {
@@ -505,7 +543,7 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
               >
                 <ChevronRight
                   className={cn(
-                    "size-3.5 text-tertiary transition-transform duration-[var(--spring-snap-dur)] ease-[var(--spring-snap)]",
+                    "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
                     link.expanded && "rotate-90"
                   )}
                 />
@@ -515,17 +553,18 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
             renderIcon(link)
           )}
         </span>
-        {/* One line: long names (e.g. page titles) end in "…", the full name shows on hover */}
-        <span className="min-w-0 flex-1 truncate" title={link.title}>{link.title}</span>
-        {/* After-title element: type indicator icon, right-aligned before the count, revealed on hover */}
+        {link.actions ? <span className="min-w-0 truncate">{link.title}</span> : link.title}
+        {/* After-title element: type indicator icon, right-aligned before count badge, revealed on hover */}
         {link.afterTitle && (
-          <span data-touch-reveal="true" className="shrink-0 opacity-0 transition-opacity duration-micro group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100">
+          <span data-touch-reveal="true" className="ml-auto opacity-0 group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100 transition-opacity">
             {link.afterTitle}
           </span>
         )}
-        {/* Count — quiet (12px tertiary, tabular); an empty row shows none rather than a column of 0s */}
-        {link.label && link.label !== '0' && (
-          <span className="shrink-0 text-label-sm text-tertiary tabular-nums">
+        {/* Label Badge: Shows count or status on the right, revealed on section hover */}
+        {!link.actions && link.isProcessing && <SessionRunningMark />}
+        {!link.actions && link.hasUnread && <CompletionUnreadMark />}
+        {link.label && (
+          <span data-touch-reveal="true" className={cn(link.afterTitle ? 'ml-0' : 'ml-auto', 'text-xs text-foreground/30 opacity-0 group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100 transition-opacity')}>
             {link.label}
           </span>
         )}
@@ -536,13 +575,13 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
 
 /**
  * Helper to render icon - either component (function/forwardRef) or React element.
- * Colors are applied via inline style (resolved CSS color strings from EntityColor); icons without
- * their own color use the tertiary text role, or the row's text color when the row is selected.
+ * Colors are always applied via inline style (resolved CSS color strings from EntityColor).
  */
 function renderIcon(link: LinkItem) {
   const isComponent = typeof link.icon === 'function' ||
     (typeof link.icon === 'object' && link.icon !== null && 'render' in link.icon)
-  const defaultColor = link.variant === 'default' ? 'var(--text)' : 'var(--text-tertiary)'
+  // Default color for items without explicit iconColor (foreground at 60% opacity)
+  const defaultColor = 'color-mix(in oklch, var(--foreground) 60%, transparent)'
 
   // Lucide components are always colorable; ReactNode icons check iconColorable
   // Default to true for backwards compatibility (most icons are colorable)
@@ -553,7 +592,7 @@ function renderIcon(link: LinkItem) {
     const Icon = link.icon as React.ComponentType<{ className?: string; style?: React.CSSProperties }>
     return (
       <Icon
-        className="size-4 shrink-0"
+        className="h-3.5 w-3.5 shrink-0"
         style={colorStyle}
       />
     )
@@ -570,7 +609,7 @@ function renderIcon(link: LinkItem) {
     : iconElement
   return (
     <span
-      className="size-4 shrink-0 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
+      className="h-3.5 w-3.5 shrink-0 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
       style={colorStyle}
     >
       {bareIcon}

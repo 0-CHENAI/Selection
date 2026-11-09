@@ -1,72 +1,136 @@
 import * as React from 'react'
-import { useState, useCallback, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Key, KeyRound, User, Lock, Eye, EyeOff, CheckCircle2, ShieldCheck, XCircle, type LucideIcon } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { Key, User, Lock, Eye, EyeOff, CheckCircle2, XCircle, type LucideIcon } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import type { Message, CredentialResponse } from '../../../shared/types'
-import type { AuthRequestType } from '@craft-agent/core/types'
+import type { AuthRequestType, AuthStatus } from '@craft-agent/core/types'
 import { validateBasicAuthCredentials, getPasswordValue, getPasswordLabel, getPasswordPlaceholder } from '@/utils/auth-validation'
-import {
-  DECISION_ACTION,
-  DecisionActions,
-  DecisionBody,
-  DecisionCard,
-  DecisionDetails,
-  DecisionFoot,
-  DecisionHeader,
-} from '@/components/app-shell/input/structured/DecisionCard'
 
 // ============================================================================
 // Primitives
 // ============================================================================
 
-/** Outcome tones (spec §2.4): role tint + solved text, plus a distinct icon so it is never color alone. */
-type AuthOutcomeTone = 'success' | 'error' | 'muted'
+type AuthCardVariant = 'default' | 'success' | 'error' | 'muted'
 
-const OUTCOME_STYLES: Record<AuthOutcomeTone, { container: string; icon: string; title: string }> = {
-  success: { container: 'bg-success-tint', icon: 'text-success', title: 'text-success' },
-  error: { container: 'bg-destructive-tint', icon: 'text-destructive', title: 'text-destructive' },
-  muted: { container: 'bg-fill-hover', icon: 'text-tertiary', title: 'text-secondary' },
+// Variant styles - bg colors are animated via Framer Motion, text via CSS transition
+const VARIANT_STYLES: Record<AuthCardVariant, { bg: string; textClass: string; shadowColor?: string }> = {
+  default: { bg: 'var(--background)', textClass: 'text-foreground shadow-minimal' },
+  success: { bg: 'oklch(from var(--success) l c h / 0.03)', textClass: 'text-[var(--success-text)] shadow-tinted', shadowColor: 'var(--success-rgb)' },
+  error: { bg: 'oklch(from var(--destructive) l c h / 0.03)', textClass: 'text-[var(--destructive-text)] shadow-tinted', shadowColor: 'var(--destructive-rgb)' },
+  muted: { bg: 'var(--foreground-3)', textClass: 'text-foreground/70 shadow-minimal' },
 }
 
-/** Field chrome shared by every credential input: icon inset, reveal toggle on the right. */
-const FIELD_LABEL = 'text-label-sm text-secondary'
-const FIELD_ICON = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-tertiary'
-const REVEAL_BUTTON = 'absolute right-3 top-1/2 -translate-y-1/2 text-tertiary transition-colors hover:text-foreground hover:duration-instant'
-
-/** A finished auth request: quiet tinted card with icon, title and up to two detail lines. */
-function AuthOutcome({
-  tone,
-  icon: Icon,
-  title,
-  subtitle,
-  subtitleSecondary,
-  className,
-}: {
-  tone: AuthOutcomeTone
-  icon: LucideIcon
+interface AuthCardHeaderProps {
+  icon?: LucideIcon
+  iconClassName?: string
   title: string
+  titleSuffix?: string
   subtitle?: string
   subtitleSecondary?: string
-  className?: string
-}) {
-  const style = OUTCOME_STYLES[tone]
+  description?: string
+}
+
+function AuthCardHeader({
+  icon: Icon,
+  iconClassName,
+  title,
+  titleSuffix,
+  subtitle,
+  subtitleSecondary,
+  description,
+}: AuthCardHeaderProps) {
   return (
-    <div className={cn('flex gap-2.5 rounded-lg py-2.5 pl-3.5 pr-4 select-none', style.container, className)}>
-      <Icon className={cn('mt-0.5 size-4 shrink-0', style.icon)} />
-      <div className="min-w-0 flex-1">
-        <div className={cn('text-label font-medium', style.title)}>{title}</div>
+    <div className="flex gap-3">
+      {/* Icon aligned to first line of text (optional) */}
+      {Icon && <Icon className={cn('h-4 w-4 shrink-0 mt-0.5', iconClassName)} />}
+      <div className="flex-1 min-w-0">
+        {/* Title inherits container text color */}
+        <div className="text-sm font-medium leading-5">
+          {title}
+          {titleSuffix && (
+            <span className="text-xs text-muted-foreground ml-2">({titleSuffix})</span>
+          )}
+        </div>
+        {/* Subtitles use 50% opacity of inherited color */}
         {subtitle && (
-          <div className="mt-0.5 text-label-sm text-secondary">{subtitle}</div>
+          <div className="text-xs mt-0.5 opacity-50">
+            {subtitle}
+          </div>
         )}
         {subtitleSecondary && (
-          <div className="mt-0.5 text-label-sm text-secondary">{subtitleSecondary}</div>
+          <div className="text-xs mt-0.5 opacity-50">
+            {subtitleSecondary}
+          </div>
+        )}
+        {description && (
+          <p className="text-xs text-muted-foreground mt-1">{description}</p>
         )}
       </div>
+    </div>
+  )
+}
+
+interface AuthCardActionsProps {
+  primary: {
+    label: string
+    icon?: LucideIcon
+    onClick: () => void
+    disabled?: boolean
+    loading?: boolean
+    dataTutorial?: string
+  }
+  secondary?: {
+    label: string
+    icon?: LucideIcon
+    onClick: () => void
+    disabled?: boolean
+  }
+  hint?: string
+}
+
+function AuthCardActions({ primary, secondary, hint }: AuthCardActionsProps) {
+  const PrimaryIcon = primary.icon
+  const SecondaryIcon = secondary?.icon
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 border-t border-border/50">
+      <Button
+        size="sm"
+        variant="default"
+        className="h-7 gap-1.5"
+        onClick={primary.onClick}
+        disabled={primary.disabled}
+        data-tutorial={primary.dataTutorial}
+      >
+        {primary.loading ? (
+          <Spinner className="text-[10px]" />
+        ) : PrimaryIcon ? (
+          <PrimaryIcon className="h-3.5 w-3.5" />
+        ) : null}
+        {primary.label}
+      </Button>
+      {secondary && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1.5 text-muted-foreground hover:text-foreground"
+          onClick={secondary.onClick}
+          disabled={secondary.disabled}
+        >
+          {SecondaryIcon && <SecondaryIcon className="h-3.5 w-3.5" />}
+          {secondary.label}
+        </Button>
+      )}
+      {hint && (
+        <>
+          <div className="flex-1" />
+          <span className="text-[10px] text-muted-foreground">{hint}</span>
+        </>
+      )}
     </div>
   )
 }
@@ -99,7 +163,6 @@ interface AuthRequestCardProps {
  * - failed: Show error state
  */
 export function AuthRequestCard({ message, onRespondToCredential, sessionId, isInteractive = true }: AuthRequestCardProps) {
-  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -197,11 +260,8 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
     }
   }, [isValid, handleSubmit, handleCancel])
 
-  // Restarting supersedes the running attempt; only the latest one may end the spinner
-  const oauthAttemptRef = useRef(0)
-  const startOAuth = useCallback(async (restart: boolean) => {
-    // Client-driven OAuth: callback server runs locally, server owns tokens. If another
-    // session is already signing in to this source, this waits for that sign-in instead.
+  const handleOAuthClick = useCallback(async () => {
+    // Client-driven OAuth: callback server runs locally, server owns tokens
     if (!authRequestId || !authSourceSlug) {
       console.warn('[AuthRequestCard] handleOAuthClick bailed: missing', {
         authRequestId: authRequestId ?? 'MISSING',
@@ -210,14 +270,12 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
       })
       return
     }
-    const attempt = ++oauthAttemptRef.current
     setIsSubmitting(true)
     try {
       const result = await window.electronAPI.performOAuth({
         sourceSlug: authSourceSlug,
         sessionId,
         authRequestId,
-        restart,
       })
       if (!result.success) {
         console.warn('[AuthRequestCard] performOAuth returned failure:', result.error)
@@ -225,12 +283,9 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
     } catch (error) {
       console.error('[AuthRequestCard] performOAuth threw:', error)
     } finally {
-      if (oauthAttemptRef.current === attempt) setIsSubmitting(false)
+      setIsSubmitting(false)
     }
   }, [sessionId, authRequestId, authSourceSlug])
-  const handleOAuthClick = useCallback(() => startOAuth(false), [startOAuth])
-  // The browser sign-in was closed or lost: replace it with a fresh one
-  const handleRestartOAuth = useCallback(() => startOAuth(true), [startOAuth])
 
   // Get field labels
   const credentialLabel = authLabels?.credential ||
@@ -240,122 +295,140 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
   const passwordLabel = getPasswordLabel(basePasswordLabel, passwordRequired)
   const passwordPlaceholder = getPasswordPlaceholder(basePasswordLabel, passwordRequired)
 
-  // Card title per auth type (each language orders name and type itself)
-  const getAuthTitle = (type: AuthRequestType | undefined) => {
-    const name = authSourceName ?? ''
+  // Get auth type label
+  const getAuthTypeLabel = (type: AuthRequestType | undefined) => {
     switch (type) {
       case 'oauth':
-        return t('chat.authCard.titleOAuth', { name })
+        return 'OAuth'
       case 'oauth-google':
-        return t('chat.authCard.titleGoogle', { name })
+        return 'Google Sign-In'
       case 'oauth-slack':
-        return t('chat.authCard.titleSlack', { name })
+        return 'Slack Sign-In'
       case 'oauth-microsoft':
-        return t('chat.authCard.titleMicrosoft', { name })
+        return 'Microsoft Sign-In'
       case 'credential':
       default:
-        return t('chat.authCard.titleCredential', { name })
+        return 'Authentication'
     }
   }
 
-  // Provider shown on the OAuth sign-in button (brand names stay untranslated)
-  const getSignInProvider = (type: AuthRequestType | undefined) => {
-    switch (type) {
-      case 'oauth-google':
-        return 'Google'
-      case 'oauth-slack':
-        return 'Slack'
-      case 'oauth-microsoft':
-        return 'Microsoft'
-      default:
-        return 'OAuth'
-    }
-  }
+  const authTypeLabel = getAuthTypeLabel(authRequestType)
 
-  // Determine the outcome tone for finished requests
-  const outcomeTone: AuthOutcomeTone | null =
+  // Determine variant based on status
+  const variant: AuthCardVariant =
     authStatus === 'completed' ? 'success' :
     authStatus === 'cancelled' ? 'muted' :
     authStatus === 'failed' ? 'error' :
-    null
+    'default'
 
-  const outcomeTitle =
-    authStatus === 'completed' ? t('chat.authCard.connected', { name: authSourceName ?? '' }) :
-    authStatus === 'cancelled' ? t('chat.authCard.cancelled', { name: authSourceName ?? '' }) :
-    t('chat.authCard.failed', { name: authSourceName ?? '' })
-
-  // Every pending card has actions: the credential form, the OAuth sign-in button, or
-  // (while the browser sign-in runs) a way to restart it
+  // Determine if we need action bar (pending states with forms/buttons)
+  // Show actions when: pending credential form, OR pending OAuth that hasn't started yet
   const isOAuth = authRequestType && authRequestType !== 'credential'
-  const hasActions = authStatus === 'pending'
+  const hasActions = authStatus === 'pending' && (
+    !isOAuth || !isSubmitting
+  )
+
+  const { bg: variantBg, textClass: variantTextClass, shadowColor } = VARIANT_STYLES[variant]
 
   // Compact card view for non-interactive terminal states (after user sends message)
-  if (!isInteractive && authStatus !== 'pending' && outcomeTone) {
+  if (!isInteractive && authStatus !== 'pending') {
+    const StatusIcon = authStatus === 'completed' ? CheckCircle2 : XCircle
+    const title =
+      authStatus === 'completed' ? `${authSourceName} Connected` :
+      authStatus === 'cancelled' ? `${authSourceName} Cancelled` :
+      `${authSourceName} Failed`
     const subtitle =
-      authStatus === 'completed' && authEmail ? t('chat.authCard.signedInAs', { email: authEmail }) :
+      authStatus === 'completed' && authEmail ? `Signed in as ${authEmail}` :
       authStatus === 'failed' && authError ? authError :
       undefined
 
     return (
-      <AuthOutcome
-        tone={outcomeTone}
-        icon={authStatus === 'completed' ? CheckCircle2 : XCircle}
-        title={outcomeTitle}
-        subtitle={subtitle}
-        className="w-fit"
-      />
-    )
-  }
-
-  // Finished request that is still the latest message: same outcome card, full width
-  if (outcomeTone) {
-    return (
-      <AuthOutcome
-        tone={outcomeTone}
-        icon={authStatus === 'completed' ? CheckCircle2 : XCircle}
-        title={outcomeTitle}
-        subtitle={
-          authStatus === 'completed' ? (authEmail ? t('chat.authCard.signedInAs', { email: authEmail }) : undefined) :
-          authStatus === 'failed' ? (authError || undefined) :
-          undefined
-        }
-        subtitleSecondary={authStatus === 'completed' && authWorkspace ? t('chat.authCard.workspace', { workspace: authWorkspace }) : undefined}
-      />
-    )
-  }
-
-  // Render the header based on the pending state
-  const renderContent = () => {
-    // OAuth authenticating state (waiting for browser)
-    if (isOAuth && isSubmitting) {
-      return (
-        <>
-          <DecisionHeader
-            tone="info"
-            icon={<Spinner className="text-label-sm" />}
-            title={t('chat.authCard.authenticating', { name: authSourceName ?? '' })}
+      <div
+        className={cn('rounded-[8px] overflow-hidden w-fit select-none', variantTextClass)}
+        style={{
+          backgroundColor: variantBg,
+          ...(shadowColor ? { '--shadow-color': shadowColor } as React.CSSProperties : {})
+        }}
+      >
+        <div className="pl-4 pr-5 py-3">
+          <AuthCardHeader
+            icon={StatusIcon}
+            title={title}
+            subtitle={subtitle}
           />
-          <DecisionDetails>
-            <p className="text-label text-secondary">{t('chat.authCard.completeInBrowser')}</p>
-          </DecisionDetails>
-        </>
+        </div>
+      </div>
+    )
+  }
+
+  // Render inner content based on state
+  const renderContent = () => {
+    // Completed state
+    if (authStatus === 'completed') {
+      return (
+        <AuthCardHeader
+          icon={CheckCircle2}
+          title={`${authSourceName} Connected`}
+          subtitle={authEmail ? `Signed in as ${authEmail}` : undefined}
+          subtitleSecondary={authWorkspace ? `Workspace: ${authWorkspace}` : undefined}
+        />
       )
     }
 
-    // OAuth pending state (button) or credential form header
-    return (
-      <>
-        <DecisionHeader
-          tone="info"
-          icon={isOAuth ? <KeyRound /> : <Key />}
-          title={getAuthTitle(authRequestType)}
+    // Cancelled state
+    if (authStatus === 'cancelled') {
+      return (
+        <AuthCardHeader
+          icon={XCircle}
+          title={`${authSourceName} Cancelled`}
         />
-        {authDescription && (
-          <DecisionDetails>
-            <p className="text-label text-secondary">{authDescription}</p>
-          </DecisionDetails>
-        )}
-      </>
+      )
+    }
+
+    // Failed state
+    if (authStatus === 'failed') {
+      return (
+        <AuthCardHeader
+          icon={XCircle}
+          title={`${authSourceName} Failed`}
+          subtitle={authError || undefined}
+        />
+      )
+    }
+
+    // OAuth authenticating state (waiting for browser)
+    if (isOAuth && isSubmitting) {
+      return (
+        <div className="flex gap-3">
+          <Spinner className="text-[10px] shrink-0 mt-1" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium leading-5">
+              {`${authSourceName} Authenticating...`}
+            </div>
+            <div className="text-xs mt-0.5 opacity-50">
+              Complete authentication in your browser
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // OAuth pending state (button)
+    if (isOAuth) {
+      return (
+        <AuthCardHeader
+          title={`${authSourceName} ${authTypeLabel}`}
+          description={authDescription || undefined}
+        />
+      )
+    }
+
+    // Credential input form - just the header part
+    return (
+      <AuthCardHeader
+        title={`${authSourceName} Authentication`}
+        description={authDescription || undefined}
+      />
     )
   }
 
@@ -364,17 +437,16 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
     if (authStatus !== 'pending' || isOAuth) return null
 
     return (
-      <DecisionDetails>
-      <div className="mt-2 space-y-3">
+      <div className="space-y-3">
         {isBasicAuth ? (
           <>
             {/* Username field */}
             <div className="space-y-1.5">
-              <Label htmlFor={`auth-username-${authRequestId}`} className={FIELD_LABEL}>
+              <Label htmlFor={`auth-username-${authRequestId}`} className="text-xs">
                 {usernameLabel}
               </Label>
               <div className="relative">
-                <User className={FIELD_ICON} />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id={`auth-username-${authRequestId}`}
                   name="username"
@@ -392,11 +464,11 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
             </div>
             {/* Password field */}
             <div className="space-y-1.5">
-              <Label htmlFor={`auth-password-${authRequestId}`} className={FIELD_LABEL}>
+              <Label htmlFor={`auth-password-${authRequestId}`} className="text-xs">
                 {passwordLabel}
               </Label>
               <div className="relative">
-                <Lock className={FIELD_ICON} />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id={`auth-password-${authRequestId}`}
                   name="password"
@@ -412,8 +484,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className={REVEAL_BUTTON}
-                  aria-label={showPassword ? t('chat.credentials.hideValue') : t('chat.credentials.showValue')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -426,11 +497,11 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
           <>
             {authHeaderNames.map((headerName, index) => (
               <div key={headerName} className="space-y-1.5">
-                <Label htmlFor={`auth-header-${authRequestId}-${index}`} className={FIELD_LABEL}>
+                <Label htmlFor={`auth-header-${authRequestId}-${index}`} className="text-xs">
                   {headerName}
                 </Label>
                 <div className="relative">
-                  <Key className={FIELD_ICON} />
+                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id={`auth-header-${authRequestId}-${index}`}
                     name={headerName}
@@ -450,8 +521,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className={REVEAL_BUTTON}
-                    aria-label={showPassword ? t('chat.credentials.hideValue') : t('chat.credentials.showValue')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -463,16 +533,16 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
         ) : (
           /* Single credential field (API key, bearer token) */
           <div className="space-y-1.5">
-            <Label htmlFor={`auth-value-${authRequestId}`} className={FIELD_LABEL}>
+            <Label htmlFor={`auth-value-${authRequestId}`} className="text-xs">
               {credentialLabel}
               {authCredentialMode === 'header' && authHeaderName && (
-                <span className="ml-1 font-normal text-tertiary">
+                <span className="text-muted-foreground ml-1">
                   ({authHeaderName})
                 </span>
               )}
             </Label>
             <div className="relative">
-              <Key className={FIELD_ICON} />
+              <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 id={`auth-value-${authRequestId}`}
                 name="credential"
@@ -489,8 +559,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className={REVEAL_BUTTON}
-                aria-label={showPassword ? t('chat.credentials.hideValue') : t('chat.credentials.showValue')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 tabIndex={-1}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -501,12 +570,11 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
 
         {/* Hint */}
         {authHint && (
-          <p className="text-label-sm text-tertiary">
+          <p className="text-[11px] text-muted-foreground">
             {authHint}
           </p>
         )}
       </div>
-      </DecisionDetails>
     )
   }
 
@@ -514,75 +582,39 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
   const renderActions = () => {
     if (!hasActions) return null
 
-    // OAuth in progress - the browser sign-in may have been closed or lost
-    if (isOAuth && isSubmitting) {
-      return (
-        <DecisionActions>
-          <Button
-            size="lg"
-            variant="ghost"
-            className={DECISION_ACTION}
-            onClick={handleRestartOAuth}
-          >
-            {t('chat.authCard.restartSignIn')}
-          </Button>
-        </DecisionActions>
-      )
-    }
-
     // OAuth pending - sign in button
     if (isOAuth) {
       return (
-        <DecisionActions>
-          <Button
-            size="lg"
-            variant="primary"
-            className={DECISION_ACTION}
-            onClick={handleOAuthClick}
-            data-tutorial="oauth-sign-in-button"
-          >
-            {t('chat.authCard.signInWith', { provider: getSignInProvider(authRequestType) })}
-          </Button>
-          <Button
-            size="lg"
-            variant="ghost"
-            className={DECISION_ACTION}
-            onClick={handleCancel}
-          >
-            {t('common.cancel')}
-          </Button>
-        </DecisionActions>
+        <AuthCardActions
+          primary={{
+            label: `Sign in with ${authTypeLabel.replace(' Sign-In', '')}`,
+            onClick: handleOAuthClick,
+            dataTutorial: 'oauth-sign-in-button',
+          }}
+          secondary={{
+            label: 'Cancel',
+            onClick: handleCancel,
+          }}
+        />
       )
     }
 
-    // Credential form - save button
+    // Credential form - save button (uses type="submit" inside form)
     return (
-      <>
-        <DecisionActions>
-          <Button
-            size="lg"
-            variant="primary"
-            className={DECISION_ACTION}
-            onClick={handleSubmit}
-            disabled={!isValid || isSubmitting}
-          >
-            {isSubmitting && <Spinner className="text-label-sm" />}
-            {isSubmitting ? t('common.saving') : t('common.save')}
-          </Button>
-          <Button
-            // The credential form's Cancel must not also submit the typed credential
-            type="button"
-            size="lg"
-            variant="ghost"
-            className={DECISION_ACTION}
-            onClick={handleCancel}
-            disabled={isSubmitting}
-          >
-            {t('common.cancel')}
-          </Button>
-        </DecisionActions>
-        <DecisionFoot icon={<ShieldCheck />}>{t('chat.authCard.encryptedAtRest')}</DecisionFoot>
-      </>
+      <AuthCardActions
+        primary={{
+          label: isSubmitting ? 'Saving...' : 'Save',
+          onClick: handleSubmit,
+          disabled: !isValid || isSubmitting,
+          loading: isSubmitting,
+        }}
+        secondary={{
+          label: 'Cancel',
+          onClick: handleCancel,
+          disabled: isSubmitting,
+        }}
+        hint="Credentials are encrypted at rest"
+      />
     )
   }
 
@@ -591,17 +623,28 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
 
   const cardContent = (
     <>
-      <DecisionBody className={cn('overflow-visible', !hasActions && 'pb-3.5')}>
+      <div
+        className={cn(
+          hasActions ? 'p-4' : 'px-4 py-3',
+          !isOAuth && authStatus === 'pending' && 'space-y-4'
+        )}
+      >
         {renderContent()}
         {renderCredentialFields()}
-      </DecisionBody>
+      </div>
 
       {hasActions && renderActions()}
     </>
   )
 
   return (
-    <DecisionCard tone="info" standalone>
+    <div
+      className={cn('rounded-[8px] overflow-hidden', variantTextClass)}
+      style={{
+        backgroundColor: variantBg,
+        ...(shadowColor ? { '--shadow-color': shadowColor } as React.CSSProperties : {})
+      }}
+    >
       {/* Form wrapper enables password manager (1Password) detection and autofill.
           action points to the source URL for domain-based credential matching. */}
       {isCredentialForm ? (
@@ -615,7 +658,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
       ) : (
         cardContent
       )}
-    </DecisionCard>
+    </div>
   )
 }
 

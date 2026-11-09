@@ -6,8 +6,9 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { SettingsPage, SettingsSection, SettingsCard, SettingsRow } from '@/components/settings'
-import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { PanelHeader } from '@/components/app-shell/PanelHeader'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { SettingsSection, SettingsCard, SettingsRow } from '@/components/settings'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { isMac } from '@/lib/platform'
 import { actionsByCategory, useActionLabel, type ActionId } from '@/actions'
@@ -58,8 +59,13 @@ function useComponentSpecificSections(): ShortcutSection[] {
   ]
 }
 
-/** Single-line key rows are denser than setting rows (44px instead of 56px). */
-const SHORTCUT_ROW_CLASS = 'min-h-11 py-2'
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-medium font-sans bg-muted border border-border rounded">
+      {children}
+    </kbd>
+  )
+}
 
 /**
  * Renders a shortcut row for an action from the registry
@@ -82,8 +88,8 @@ const ACTION_LABEL_KEYS: Partial<Record<ActionId, string>> = {
   'nav.goForward': 'shortcuts.action.goForward',
   'nav.goBackAlt': 'shortcuts.action.goBack',
   'nav.goForwardAlt': 'shortcuts.action.goForward',
-  'view.toggleSidebar': 'shortcuts.action.toggleSidebar',
-  'view.toggleFocusMode': 'shortcuts.action.toggleFocusMode',
+  'view.toggleSidebar': 'shortcuts.action.immersiveMode',
+  'view.toggleFocusMode': 'shortcuts.action.immersiveMode',
   'navigator.selectAll': 'shortcuts.action.selectAll',
   'navigator.clearSelection': 'shortcuts.action.clearSelection',
   'panel.focusNext': 'shortcuts.action.focusNextPanel',
@@ -92,6 +98,11 @@ const ACTION_LABEL_KEYS: Partial<Record<ActionId, string>> = {
   'chat.cyclePermissionMode': 'shortcuts.action.cyclePermissionMode',
   'chat.nextSearchMatch': 'shortcuts.action.nextSearchMatch',
   'chat.prevSearchMatch': 'shortcuts.action.prevSearchMatch',
+}
+
+const ACTION_DESCRIPTION_KEYS: Partial<Record<ActionId, string>> = {
+  'view.toggleSidebar': 'shortcuts.action.immersiveMode.description',
+  'view.toggleFocusMode': 'shortcuts.action.immersiveMode.description',
 }
 
 function ActionShortcutRow({ actionId }: { actionId: ActionId }) {
@@ -108,12 +119,15 @@ function ActionShortcutRow({ actionId }: { actionId: ActionId }) {
     : hotkey.split('+')
 
   return (
-    <SettingsRow label={ACTION_LABEL_KEYS[actionId] ? t(ACTION_LABEL_KEYS[actionId]!) : label} className={SHORTCUT_ROW_CLASS}>
-      <KbdGroup>
+    <SettingsRow
+      label={ACTION_LABEL_KEYS[actionId] ? t(ACTION_LABEL_KEYS[actionId]!) : label}
+      description={ACTION_DESCRIPTION_KEYS[actionId] ? t(ACTION_DESCRIPTION_KEYS[actionId]!) : undefined}
+    >
+      <div className="flex items-center gap-1">
         {keys.map((key, keyIndex) => (
           <Kbd key={keyIndex}>{key}</Kbd>
         ))}
-      </KbdGroup>
+      </div>
     </SettingsRow>
   )
 }
@@ -122,34 +136,41 @@ export default function ShortcutsPage() {
   const { t } = useTranslation()
   const componentSpecificSections = useComponentSpecificSections()
   return (
-    <SettingsPage title={t("settings.shortcuts.title")} description={t("settings.shortcuts.description")}>
-      {/* Registry-driven sections */}
-      {Object.entries(actionsByCategory).map(([category, actions]) => (
-        <SettingsSection key={category} title={t(`shortcuts.category.${category.toLowerCase()}`)}>
-          <SettingsCard>
-            {actions.map(action => (
-              <ActionShortcutRow key={action.id} actionId={action.id as ActionId} />
-            ))}
-          </SettingsCard>
-        </SettingsSection>
-      ))}
-
-      {/* Component-specific sections */}
-      {componentSpecificSections.map((section) => (
-        <SettingsSection key={section.title} title={section.title}>
-          <SettingsCard>
-            {section.shortcuts.map((shortcut, index) => (
-              <SettingsRow key={index} label={shortcut.description} className={SHORTCUT_ROW_CLASS}>
-                <KbdGroup>
-                  {shortcut.keys.map((key, keyIndex) => (
-                    <Kbd key={keyIndex}>{key}</Kbd>
+    <div className="h-full flex flex-col">
+      <PanelHeader title={t("settings.shortcuts.title")} />
+      <div className="flex-1 min-h-0 mask-fade-y">
+        <ScrollArea className="h-full">
+          <div className="px-5 py-7 max-w-3xl mx-auto space-y-8">
+            {/* Registry-driven sections */}
+            {Object.entries(actionsByCategory).map(([category, actions]) => (
+              <SettingsSection key={category} title={t(`shortcuts.category.${category.toLowerCase()}`)}>
+                <SettingsCard>
+                  {actions.map(action => (
+                    <ActionShortcutRow key={action.id} actionId={action.id as ActionId} />
                   ))}
-                </KbdGroup>
-              </SettingsRow>
+                </SettingsCard>
+              </SettingsSection>
             ))}
-          </SettingsCard>
-        </SettingsSection>
-      ))}
-    </SettingsPage>
+
+            {/* Component-specific sections */}
+            {componentSpecificSections.map((section) => (
+              <SettingsSection key={section.title} title={section.title}>
+                <SettingsCard>
+                  {section.shortcuts.map((shortcut, index) => (
+                    <SettingsRow key={index} label={shortcut.description}>
+                      <div className="flex items-center gap-1">
+                        {shortcut.keys.map((key, keyIndex) => (
+                          <Kbd key={keyIndex}>{key}</Kbd>
+                        ))}
+                      </div>
+                    </SettingsRow>
+                  ))}
+                </SettingsCard>
+              </SettingsSection>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
   )
 }

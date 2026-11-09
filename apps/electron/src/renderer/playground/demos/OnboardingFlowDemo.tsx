@@ -9,7 +9,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { ensureMockElectronAPI } from '../mock-utils'
 import { WelcomeStep } from '@/components/onboarding/WelcomeStep'
-import { ProviderSelectStep, type ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
+import { ProviderSelectStep, ORDER_OPENAI_BASE_URL, type ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
 import { CredentialsStep } from '@/components/onboarding/CredentialsStep'
 import { LocalModelStep } from '@/components/onboarding/LocalModelStep'
 import { CompletionStep } from '@/components/onboarding/CompletionStep'
@@ -20,9 +20,7 @@ type DemoStep = 'welcome' | 'provider-select' | 'credentials' | 'local-model' | 
 
 /** Map ProviderChoice → ApiSetupMethod for the credentials step */
 const CHOICE_TO_METHOD: Record<Exclude<ProviderChoice, 'local'>, ApiSetupMethod> = {
-  claude: 'claude_oauth',
-  chatgpt: 'pi_chatgpt_oauth',
-  copilot: 'pi_copilot_oauth',
+  order: 'pi_api_key',
   api_key: 'pi_api_key',
 }
 
@@ -173,7 +171,12 @@ export function OnboardingFlowDemo() {
             isWaitingForCode={false}
             onSubmitAuthCode={() => simulateOAuthSuccess()}
             onCancelOAuth={handleBack}
-            copilotDeviceCode={
+            editInitialValues={providerChoice === 'order' ? {
+              activePreset: 'order-openai',
+              baseUrl: ORDER_OPENAI_BASE_URL,
+              customApi: 'openai-completions',
+            } : undefined}
+            oauthDeviceCode={
               method === 'pi_copilot_oauth' && credStatus === 'validating'
                 ? { userCode: 'DEMO-1234', verificationUri: 'https://github.com/login/device' }
                 : undefined

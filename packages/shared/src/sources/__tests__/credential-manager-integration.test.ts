@@ -240,6 +240,76 @@ describe('getApiCredential basic auth parsing', () => {
   });
 });
 
+describe('getApiCredential header JSON shapes', () => {
+  let credManager: SourceCredentialManager;
+
+  beforeEach(() => {
+    credManager = new SourceCredentialManager();
+  });
+
+  test('single headerName with a wrapped object returns the bare value', async () => {
+    const key = 'AIzaSy' + 'k'.repeat(33);
+    const source = createMockSource({
+      api: {
+        baseUrl: 'https://generativelanguage.googleapis.com/',
+        authType: 'header',
+        headerName: 'x-goog-api-key',
+      },
+    });
+    const loadSpy = spyOn(credManager, 'load').mockResolvedValue({
+      value: JSON.stringify({ 'x-goog-api-key': key }),
+    });
+
+    expect(await credManager.getApiCredential(source)).toBe(key);
+    loadSpy.mockRestore();
+  });
+
+  test('a different object key is kept as a header map', async () => {
+    const source = createMockSource({
+      api: {
+        baseUrl: 'https://api.example.com/',
+        authType: 'header',
+        headerName: 'X-API-Key',
+      },
+    });
+    const stored = JSON.stringify({ 'x-goog-api-key': 'live' });
+    const loadSpy = spyOn(credManager, 'load').mockResolvedValue({ value: stored });
+
+    expect(await credManager.getApiCredential(source)).toEqual({ 'x-goog-api-key': 'live' });
+    loadSpy.mockRestore();
+  });
+
+  test('service-account JSON stays a raw string', async () => {
+    const serviceAccount = JSON.stringify({
+      type: 'service_account',
+      private_key: '-----BEGIN PRIVATE KEY-----\nMIIEv...\n-----END PRIVATE KEY-----\n',
+    });
+    const source = createMockSource({
+      api: {
+        baseUrl: 'https://api.example.com/',
+        authType: 'header',
+        headerName: 'X-API-Key',
+      },
+    });
+    const loadSpy = spyOn(credManager, 'load').mockResolvedValue({ value: serviceAccount });
+
+    expect(await credManager.getApiCredential(source)).toBe(serviceAccount);
+    loadSpy.mockRestore();
+  });
+
+  test('bearer and query credentials are never parsed as header maps', async () => {
+    const wrapped = JSON.stringify({ 'x-goog-api-key': 'live' });
+    for (const authType of ['bearer', 'query'] as const) {
+      const source = createMockSource({
+        api: { baseUrl: 'https://api.example.com/', authType },
+      });
+      const loadSpy = spyOn(credManager, 'load').mockResolvedValue({ value: wrapped });
+      expect(await credManager.getApiCredential(source)).toBe(wrapped);
+      loadSpy.mockRestore();
+    }
+  });
+});
+
 describe('isMultiHeaderCredential type guard', () => {
   test('correctly identifies MultiHeaderCredential', () => {
     const multiHeader: MultiHeaderCredential = {

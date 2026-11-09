@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * craft-cli — Terminal client for Craft Agent server.
+ * craft-cli — Terminal client for Selection server.
  *
- * Connects over WebSocket (ws:// or wss://) to a running Craft Agent server
+ * Connects over WebSocket (ws:// or wss://) to a running Selection server
  * and provides commands for listing resources, managing sessions, sending
  * messages with real-time streaming, and validating server health.
  */
@@ -29,8 +29,6 @@ export interface CliArgs {
   mode: string
   outputFormat: string
   noCleanup: boolean
-  /** Start the `run` session in coding mode (lean coding prompt + session tools) */
-  coding: boolean
   noSpinner: boolean
   verbose: boolean
   serverEntry?: string
@@ -57,7 +55,6 @@ export function parseArgs(argv: string[]): CliArgs {
   let mode = ''
   let outputFormat = 'text'
   let noCleanup = false
-  let coding = false
   let noSpinner = false
   let verbose = false
   let serverEntry: string | undefined
@@ -102,9 +99,6 @@ export function parseArgs(argv: string[]): CliArgs {
         break
       case '--no-cleanup':
         noCleanup = true
-        break
-      case '--coding':
-        coding = true
         break
       case '--disable-spinner':
       case '--no-spinner':
@@ -155,12 +149,12 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!url) url = process.env.CRAFT_SERVER_URL ?? ''
   if (!token) token = process.env.CRAFT_SERVER_TOKEN ?? ''
   if (!tlsCa) tlsCa = process.env.CRAFT_TLS_CA
-  if (!provider) provider = process.env.LLM_PROVIDER ?? 'anthropic'
+  if (!provider) provider = process.env.LLM_PROVIDER ?? 'openai'
   if (!model) model = process.env.LLM_MODEL ?? ''
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
 
-  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, coding, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
+  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +399,7 @@ async function readPrompt(words: string[], restArgs?: string[]): Promise<string>
  * Subscribe to session events, send the message, stream output, wait for completion.
  * Returns the exit code (0 = success, 1 = error, 130 = interrupted).
  */
-export async function sendAndStream(
+async function sendAndStream(
   client: CliRpcClient,
   sessionId: string,
   message: string,
@@ -427,14 +421,6 @@ export async function sendAndStream(
       case 'text_delta':
         if (!streamJson) process.stdout.write(ev.delta as string)
         break
-      case 'text_discard':
-        // Plain terminal output cannot be retracted. Delimit the discarded
-        // partial so a retried answer never appears to be its continuation.
-        if (!streamJson) process.stdout.write('\n[incomplete response discarded]\n')
-        break
-      case 'retry':
-        if (!streamJson && ev.phase === 'backoff') process.stdout.write(`[${ev.message}]\n`)
-        break
       case 'tool_start':
         if (!streamJson) process.stdout.write(`\n[tool: ${ev.toolName}${ev.toolIntent ? ` — ${ev.toolIntent}` : ''}]\n`)
         break
@@ -449,17 +435,13 @@ export async function sendAndStream(
         }
         break
       }
-      case 'typed_error':
-      case 'error': {
-        if (!streamJson) {
-          const detail = ev.error as { title?: string; message?: string } | undefined
-          err(typeof ev.error === 'string' ? ev.error : [detail?.title, detail?.message].filter(Boolean).join(': '))
-        }
+      case 'error':
+        if (!streamJson) err(String(ev.error))
         exitCode = 1
         finished = true
         break
-      }
       case 'complete':
+        if (ev.orchestrationPending === true) break
         if (!streamJson) process.stdout.write('\n')
         finished = true
         break
@@ -574,7 +556,7 @@ export function resolveApiKey(provider: string, explicit: string): string {
 }
 
 export function shouldSetupLlmConnection(existingConnectionCount: number, args: Pick<CliArgs, 'provider' | 'baseUrl'>): boolean {
-  return existingConnectionCount === 0 || !!args.baseUrl || args.provider !== 'anthropic'
+  return existingConnectionCount === 0 || !!args.baseUrl || args.provider !== 'openai'
 }
 
 async function setupLlmConnection(
@@ -582,6 +564,11 @@ async function setupLlmConnection(
   args: CliArgs,
 ): Promise<{ connectionSlug: string }> {
   const { provider, baseUrl } = args
+  if (provider === 'anthropic') {
+    throw new Error(
+      'Anthropic is no longer supported. Use --provider openai (or another Selection Backend provider), and --base-url for OpenAI Compatible endpoints.',
+    )
+  }
   const key = resolveApiKey(provider, args.apiKey)
   const connectionSlug = `${provider}-cli`
 
@@ -597,12 +584,9 @@ async function setupLlmConnection(
     authType = 'api_key_with_endpoint'
     setupPayload.baseUrl = baseUrl
     setupPayload.customEndpoint = {
-      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      api: 'openai-completions',
     }
-    setupPayload.defaultModel = provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'
-  } else if (provider === 'anthropic') {
-    providerType = 'anthropic'
-    authType = 'api_key'
+    setupPayload.defaultModel = 'gpt-4o'
   } else if (provider === 'amazon-bedrock') {
     // Bedrock uses IAM credentials, not a single API key
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID
@@ -711,10 +695,6 @@ async function cmdRun(args: CliArgs): Promise<void> {
     const session = (await client.invoke('sessions:create', workspaceId, {
       permissionMode: args.mode || 'allow-all',
       enabledSourceSlugs: args.sources.length > 0 ? args.sources : undefined,
-      // `craft run` cannot answer permission prompts (sendAndStream ignores them).
-      unattended: true,
-      // Only when asked: omitting it lets the workspace default apply
-      ...(args.coding ? { codingMode: true } : {}),
     })) as { id: string }
     sessionId = session.id
 
@@ -842,7 +822,7 @@ export interface ValidateContext {
   baseUrl?: string
   /** API key override (from --api-key) */
   apiKey?: string
-  /** Provider hint (from --provider, default 'anthropic') */
+  /** Provider hint (from --provider, default 'openai') */
   provider?: string
   workspaceId?: string
   workspaceRootPath?: string
@@ -1098,7 +1078,10 @@ export function getValidateSteps(): ValidateStep[] {
 
         // Custom endpoint: always create/update when --base-url is provided
         if (ctx.baseUrl) {
-          const provider = ctx.provider || 'anthropic'
+          const provider = ctx.provider || 'openai'
+          if (provider === 'anthropic') {
+            return '0 connections (Anthropic is no longer supported)'
+          }
           let key = ''
           try {
             key = resolveApiKey(provider, ctx.apiKey || '')
@@ -1106,7 +1089,6 @@ export function getValidateSteps(): ValidateStep[] {
             return `0 connections (${error instanceof Error ? error.message : 'missing API key'})`
           }
           const slug = `${provider}-cli`
-          const isAnthropicApi = provider === 'anthropic'
           await client.invoke('LLM_Connection:save', {
             slug,
             name: `${getProviderDisplayName(provider)} (Custom Endpoint)`,
@@ -1118,8 +1100,8 @@ export function getValidateSteps(): ValidateStep[] {
             slug,
             credential: key,
             baseUrl: ctx.baseUrl,
-            customEndpoint: { api: isAnthropicApi ? 'anthropic-messages' : 'openai-completions' },
-            defaultModel: isAnthropicApi ? 'claude-sonnet-4-6' : 'gpt-4o',
+            customEndpoint: { api: 'openai-completions' },
+            defaultModel: 'gpt-4o',
           }) as { success: boolean; error?: string }
           if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
           await client.invoke('LLM_Connection:setDefault', slug)
@@ -1156,7 +1138,10 @@ export function getValidateSteps(): ValidateStep[] {
           return `${r?.length ?? 0} existing + Bedrock IAM (${region})`
         }
 
-        const provider = ctx.provider || 'anthropic'
+        const provider = ctx.provider || 'openai'
+        if (provider === 'anthropic') {
+          return '0 connections (Anthropic is no longer supported)'
+        }
         if (!shouldSetupLlmConnection(r?.length ?? 0, { provider, baseUrl: ctx.baseUrl ?? '' })) {
           return `${r.length} connections`
         }
@@ -1168,7 +1153,7 @@ export function getValidateSteps(): ValidateStep[] {
           return `0 connections (${error instanceof Error ? error.message : 'missing API key'})`
         }
         const slug = `${provider}-cli`
-        const providerType = provider === 'anthropic' ? 'anthropic' : 'pi'
+        const providerType = 'pi'
         const authType = 'api_key'
         await client.invoke('LLM_Connection:save', {
           slug,
@@ -1177,9 +1162,7 @@ export function getValidateSteps(): ValidateStep[] {
           authType,
           createdAt: Date.now(),
         })
-        const setupPayload = provider === 'anthropic'
-          ? { slug, credential: key }
-          : { slug, credential: key, piAuthProvider: provider }
+        const setupPayload = { slug, credential: key, piAuthProvider: provider }
         const result = await client.invoke('settings:setupLlmConnection', setupPayload) as { success: boolean; error?: string }
         if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
         await client.invoke('LLM_Connection:setDefault', slug)
@@ -1802,10 +1785,6 @@ export async function runValidation(
             bufferedPrompt = clean.length > 100 ? clean.slice(0, 100) + '…' : clean
             break
           }
-          case 'text_discard':
-            accText = ''
-            textFlushed = false
-            break
           // Agent text — stop spinner, show header + prompt + text
           case 'text_delta':
             ensureHeader()
@@ -1918,7 +1897,7 @@ export async function runValidation(
 // ---------------------------------------------------------------------------
 
 function printHelp(): void {
-  process.stdout.write(`craft-cli — Terminal client for Craft Agent server
+  process.stdout.write(`craft-cli — Terminal client for Selection server
 
 Usage: craft-cli [options] <command> [args...]
 
@@ -1931,8 +1910,8 @@ Connection:
   --json                 Raw JSON output for scripting
 
 LLM Configuration (for 'run' command):
-  --provider <name>      LLM provider (default: anthropic, or $LLM_PROVIDER)
-                         Supported: anthropic, openai, google, openrouter, groq, mistral, deepseek, xai, ...
+  --provider <name>      LLM provider (default: openai, or $LLM_PROVIDER)
+                         Supported: openai, google, openrouter, groq, mistral, deepseek, xai, ...
   --model <id>           Model to use (or $LLM_MODEL)
   --api-key <key>        API key (or $LLM_API_KEY, or provider-specific e.g. $OPENAI_API_KEY)
   --base-url <url>       Custom API endpoint (or $LLM_BASE_URL)
@@ -1944,7 +1923,6 @@ Commands:
                          --mode <mode>       Permission mode (default: allow-all)
                          --output-format     text or stream-json (default: text)
                          --no-cleanup        Keep session after completion
-                         --coding            Coding mode: lean coding prompt and tools
                          --server-entry      Path to server/index.ts
   ping                   Verify connectivity (clientId + latency)
   health                 Check credential store health
