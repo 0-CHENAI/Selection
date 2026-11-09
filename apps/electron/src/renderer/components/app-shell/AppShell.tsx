@@ -1,3 +1,4 @@
+import { sessionCompletionAttention } from '@/utils/session-completion-attention'
 import { recoverMissingSession } from '@/lib/recover-missing-session'
 import { clipboardFiles } from '@/lib/clipboard-files'
 import * as React from "react"
@@ -1236,6 +1237,8 @@ function AppShellContent({
   // NavigationContext cannot see that local filter when it auto-selects a chat.
   // Select a project-bound session explicitly, or suppress auto-selection when
   // the project is empty so an unrelated global chat cannot remain on the right.
+  const completionAttention = useMemo(() => sessionCompletionAttention(activeSessionMetas), [activeSessionMetas])
+
   const handleJumpToProjectSessions = useCallback((projectId: string, sessionId?: string, newPanel?: boolean) => {
     setHistoryScope(serializeProjectHistoryScope([projectId]))
     setViewFiltersMap(prev => ({
@@ -2136,6 +2139,7 @@ function AppShellContent({
                   links={prepareOrdinarySessionSidebarLinks([
                     {
                       id: "nav:allSessions",
+                      hasUnread: completionAttention.ordinary,
                       title: t("sidebar.allSessions"),
                       label: String(workspaceSessionMetas.filter(session => !session.projectId).length),
                       icon: Inbox,
@@ -2250,6 +2254,8 @@ function AppShellContent({
                       },
                       items: projects.map(p => ({
                         id: `nav:projects:${p.config.id}`,
+                        hasUnread: completionAttention.projects.has(p.config.id),
+                        isProcessing: completionAttention.runningProjects.has(p.config.id),
                         title: p.config.name,
                         icon: FolderKanban,
                         // Highlight when on allSessions view AND filter includes this project (the jump-to state)
@@ -2481,6 +2487,8 @@ function AppShellContent({
               /* Projects List */
               <ProjectsListPanel
                 projects={projects}
+                unreadProjectIds={completionAttention.projects}
+                runningProjectIds={completionAttention.runningProjects}
                 workspaceId={activeWorkspaceId}
                 onProjectClick={(slug) => navigate(routes.view.projects(slug))}
                 onAddProject={openAddProject}

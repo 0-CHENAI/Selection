@@ -65,7 +65,7 @@ export function ProjectFolderActions({ project, workspaceId }: {
             type="button"
             aria-label={t('projectsList.folderActions', { name: project.config.name })}
             data-touch-reveal="true"
-            className="flex h-6 w-6 items-center justify-center rounded-[6px] text-foreground/50 opacity-0 hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover/project-row:opacity-100 group-focus-within/project-row:opacity-100 data-[state=open]:opacity-100"
+            className="flex h-6 w-6 items-center justify-center rounded-[6px] text-foreground/50 opacity-0 scale-90 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none group-hover/project-row:scale-100 group-focus-within/project-row:scale-100 data-[state=open]:scale-100 hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover/project-row:opacity-100 group-focus-within/project-row:opacity-100 data-[state=open]:opacity-100"
           >
             <MoreHorizontal className="h-4 w-4" />
           </button>

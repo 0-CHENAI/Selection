@@ -1,3 +1,4 @@
+import { CompletionUnreadMark, SessionRunningMark } from './CompletionUnreadMark'
 import type { LucideIcon } from "lucide-react"
 import * as React from "react"
 import { AnimatePresence, motion, type Variants } from "motion/react"
@@ -61,6 +62,8 @@ export interface SortableConfig {
 export interface LinkItem {
   id: string            // Unique ID for navigation (e.g., 'nav:allSessions')
   title: string
+  hasUnread?: boolean
+  isProcessing?: boolean
   label?: string        // Optional badge (e.g., count)
   icon: LucideIcon | React.ComponentType<{ className?: string; style?: React.CSSProperties }> | React.ReactNode  // LucideIcon, custom component, or element
   iconColor?: string    // Optional color class for the icon
@@ -221,6 +224,11 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
           const buttonElement = link.actions ? (
             <div className="group/project-row relative">
               {React.cloneElement(navigationButton, { className: 'pr-9' })}
+              {(link.isProcessing || link.hasUnread) && (
+                <span className="pointer-events-none absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center gap-1 opacity-100 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none group-hover/project-row:scale-90 group-hover/project-row:opacity-0 group-focus-within/project-row:scale-90 group-focus-within/project-row:opacity-0 group-has-[[data-state=open]]/project-row:opacity-0">
+                  {link.isProcessing ? <SessionRunningMark /> : <CompletionUnreadMark />}
+                </span>
+              )}
               <div
                 className="absolute right-1 top-1/2 -translate-y-1/2"
                 onKeyDown={(event) => event.stopPropagation()}
@@ -553,6 +561,8 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
           </span>
         )}
         {/* Label Badge: Shows count or status on the right, revealed on section hover */}
+        {!link.actions && link.isProcessing && <SessionRunningMark />}
+        {!link.actions && link.hasUnread && <CompletionUnreadMark />}
         {link.label && (
           <span data-touch-reveal="true" className={cn(link.afterTitle ? 'ml-0' : 'ml-auto', 'text-xs text-foreground/30 opacity-0 group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100 transition-opacity')}>
             {link.label}

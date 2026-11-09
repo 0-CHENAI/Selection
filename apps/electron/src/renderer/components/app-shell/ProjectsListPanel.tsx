@@ -1,3 +1,4 @@
+import { CompletionUnreadMark, SessionRunningMark } from './CompletionUnreadMark'
 import { confirmAction } from '@/lib/confirmation'
 /**
  * ProjectsListPanel
@@ -31,6 +32,8 @@ export interface ProjectsListPanelProps {
   /** Jump to All Sessions filtered by this project's id. */
   onJumpToSessions?: (projectId: string) => void
   selectedProjectSlug?: string | null
+  unreadProjectIds?: ReadonlySet<string>
+  runningProjectIds?: ReadonlySet<string>
   className?: string
 }
 
@@ -41,6 +44,8 @@ export function ProjectsListPanel({
   onAddProject,
   onJumpToSessions,
   selectedProjectSlug,
+  unreadProjectIds,
+  runningProjectIds,
   className,
 }: ProjectsListPanelProps) {
   const { t } = useTranslation()
@@ -90,6 +95,8 @@ export function ProjectsListPanel({
               <ProjectRow
                 key={project.config.slug}
                 project={project}
+                hasUnread={unreadProjectIds?.has(project.config.id)}
+                isProcessing={runningProjectIds?.has(project.config.id)}
                 isSelected={selectedProjectSlug === project.config.slug}
                 isFirst={index === 0}
                 onClick={() => onProjectClick(project.config.slug)}
@@ -105,6 +112,8 @@ export function ProjectsListPanel({
 }
 
 interface ProjectRowProps {
+  hasUnread?: boolean
+  isProcessing?: boolean
   project: LoadedProject
   isSelected: boolean
   isFirst: boolean
@@ -113,7 +122,7 @@ interface ProjectRowProps {
   onJumpToSessions?: () => void
 }
 
-function ProjectRow({ project, isSelected, isFirst, onClick, onDelete, onJumpToSessions }: ProjectRowProps) {
+function ProjectRow({ hasUnread, isProcessing, project, isSelected, isFirst, onClick, onDelete, onJumpToSessions }: ProjectRowProps) {
   const config = project.config
   const subtitle = config.description?.trim() || config.workingDirectory || ''
 
@@ -130,6 +139,7 @@ function ProjectRow({ project, isSelected, isFirst, onClick, onDelete, onJumpToS
             }}
             icon={<FolderKanban className="h-3.5 w-3.5 text-foreground/60" />}
             title={config.name}
+            trailing={hasUnread || isProcessing ? <span className="inline-flex items-center gap-1.5">{isProcessing && <SessionRunningMark />}{hasUnread && <CompletionUnreadMark />}</span> : undefined}
             subtitle={subtitle}
           />
         </div>
