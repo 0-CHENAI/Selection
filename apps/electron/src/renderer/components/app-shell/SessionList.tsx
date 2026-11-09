@@ -433,12 +433,20 @@ export function SessionList({
       ;(projects ?? []).forEach((p, index) => projectOrder.set(p.id, index))
       const projectNameById = new Map<string, string>()
       ;(projects ?? []).forEach(p => projectNameById.set(p.id, p.name))
+      const projectGroupKey = (projectId: string | undefined) => {
+        const resolved = projectId && projectNameById.has(projectId) ? projectId : null
+        return { resolved, key: resolved ? `project-${resolved}` : 'project-__none__' }
+      }
+      // Family views already bubble nested unread, so a collapsed project group
+      // can still show the same accent mark the parent session row uses.
+      const unreadProjectGroupKeys = new Set<string>()
+      for (const { view } of families) {
+        if (view.hasUnread) unreadProjectGroupKeys.add(projectGroupKey(view.projectId).key)
+      }
 
       const groupsByKey = new Map<string, { rows: SessionListRow[], projectId: string | null }>()
       for (const row of rows) {
-        const rawProjectId = row.groupItem.projectId
-        const resolvedProjectId = rawProjectId && projectNameById.has(rawProjectId) ? rawProjectId : null
-        const key = resolvedProjectId ? `project-${resolvedProjectId}` : 'project-__none__'
+        const { resolved: resolvedProjectId, key } = projectGroupKey(row.groupItem.projectId)
         if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], projectId: resolvedProjectId })
         groupsByKey.get(key)!.rows.push(row)
       }
@@ -464,6 +472,8 @@ export function SessionList({
           label,
           items: groupRows,
           collapsible: true,
+          hasUnread: unreadProjectGroupKeys.has(key),
+          unreadLabel: t('session.unreadIndicator'),
           ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
         })
       }
@@ -888,6 +898,7 @@ export function SessionList({
               depth={row.depth}
               guides={row.guides}
               inheritedLabels={row.parent?.labels}
+              nestedAttention={row.nested}
               subSessions={row.descendantCount > 0
                 ? { count: row.descendantCount, collapsed: row.collapsed, onToggle: () => toggleFamily(row) }
                 : undefined}

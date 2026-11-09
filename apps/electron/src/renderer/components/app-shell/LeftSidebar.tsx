@@ -84,6 +84,10 @@ export interface LinkItem {
   sortable?: SortableConfig
   // Optional element rendered after the title (e.g., label type icon), revealed on hover
   afterTitle?: React.ReactNode
+  /** Accent unread mark (same signal as workspace switcher / session rows) */
+  hasUnread?: boolean
+  /** Accessible name for `hasUnread` */
+  unreadLabel?: string
 }
 
 export interface SeparatorItem {
@@ -521,6 +525,12 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
         {link.afterTitle && (
           <span data-touch-reveal="true" className="shrink-0 opacity-0 transition-opacity duration-micro group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100">
             {link.afterTitle}
+          </span>
+        )}
+        {link.hasUnread && (
+          <span className="shrink-0 inline-flex items-center" title={link.unreadLabel}>
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-accent-solid" />
+            {link.unreadLabel && <span className="sr-only">{link.unreadLabel}</span>}
           </span>
         )}
         {/* Count — quiet (12px tertiary, tabular); an empty row shows none rather than a column of 0s */}

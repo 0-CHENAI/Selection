@@ -8,6 +8,14 @@ import type { TreeGuide } from '../components/ui/entity-row'
  * a family is never split across groups or pages.
  */
 
+/** Unread / run signals of the sessions nested under a row (any depth). */
+export interface NestedAttention {
+  hasUnread: boolean
+  isProcessing: boolean
+  lastMessageAt: number
+  lastMessageRole?: SessionMeta['lastMessageRole']
+}
+
 /** One row of the session list */
 export interface SessionListRow {
   item: SessionMeta
@@ -23,6 +31,8 @@ export interface SessionListRow {
   parent?: SessionMeta
   /** Tree lines of the levels above this row, one per level (`depth` of them) */
   guides: TreeGuide[]
+  /** Signals from sessions nested under this row; omitted when it has none */
+  nested?: NestedAttention
 }
 
 export interface SessionFamilyMember {
@@ -44,6 +54,93 @@ export interface SessionFamily {
 /** The session `meta` nests under in the list, if any */
 export function listParentId(meta: Pick<SessionMeta, 'parentSessionId' | 'branchFromSessionId'>): string | undefined {
   return meta.parentSessionId ?? meta.branchFromSessionId
+}
+
+type ListParentFields = Pick<SessionMeta, 'parentSessionId' | 'branchFromSessionId'>
+
+/**
+ * Sessions `meta` nests under in the list, nearest first. Walks `parentSessionId` then
+ * `branchFromSessionId` through `byId`. Stops at a missing parent, a loop, or a self-parent.
+ */
+export function listAncestorIds(
+  meta: ListParentFields,
+  byId: ReadonlyMap<string, ListParentFields>,
+): string[] {
+  const ancestors: string[] = []
+  const seen = new Set<string>()
+  let id = listParentId(meta)
+  while (id && !seen.has(id)) {
+    seen.add(id)
+    ancestors.push(id)
+    const parent = byId.get(id)
+    if (!parent) break
+    id = listParentId(parent)
+  }
+  return ancestors
+}
+
+/** Unread / run signals of the members nested under `members[index]`. */
+export function nestedAttentionOf(members: readonly SessionFamilyMember[], index: number): NestedAttention {
+  const count = members[index]?.descendantCount ?? 0
+  let hasUnread = false
+  let isProcessing = false
+  let lastMessageAt = 0
+  let lastMessageRole: SessionMeta['lastMessageRole']
+  const last = Math.min(index + count, members.length - 1)
+  for (let i = index + 1; i <= last; i++) {
+    const descendant = members[i].item
+    hasUnread ||= descendant.hasUnread === true
+    isProcessing ||= descendant.isProcessing === true
+    const at = descendant.lastMessageAt || 0
+    if (at >= lastMessageAt) {
+      lastMessageAt = at
+      lastMessageRole = descendant.lastMessageRole
+    }
+  }
+  return { hasUnread, isProcessing, lastMessageAt, lastMessageRole }
+}
+
+/**
+ * What a session-list row should show: unread always includes nested unread (the parent is how you
+ * notice a folded or below-the-fold sub-session). Working / failed / latest activity of descendants
+ * overlay the parent only while it is collapsed, so an expanded family still lets each child speak
+ * for itself.
+ */
+export function visibleRowAttention(
+  item: Pick<SessionMeta, 'hasUnread' | 'isProcessing' | 'lastMessageAt' | 'lastMessageRole'>,
+  nested: NestedAttention | undefined,
+  collapsed: boolean,
+): NestedAttention {
+  const own: NestedAttention = {
+    hasUnread: item.hasUnread === true,
+    isProcessing: item.isProcessing === true,
+    lastMessageAt: item.lastMessageAt || 0,
+    lastMessageRole: item.lastMessageRole,
+  }
+  if (!nested) return own
+  const hasUnread = own.hasUnread || nested.hasUnread
+  if (!collapsed) return { ...own, hasUnread }
+  const lastMessageAt = Math.max(own.lastMessageAt, nested.lastMessageAt)
+  const lastMessageRole = (own.lastMessageAt >= nested.lastMessageAt ? own.lastMessageRole : nested.lastMessageRole)
+    ?? own.lastMessageRole
+  return {
+    hasUnread,
+    isProcessing: own.isProcessing || nested.isProcessing,
+    lastMessageAt,
+    lastMessageRole,
+  }
+}
+
+/** Project ids that currently have an unread (possibly nested) session. */
+export function unreadProjectIds(
+  sessions: Iterable<Pick<SessionMeta, 'projectId' | 'hasUnread' | 'hidden' | 'isArchived'>>,
+): Set<string> {
+  const ids = new Set<string>()
+  for (const session of sessions) {
+    if (session.hidden || session.isArchived) continue
+    if (session.hasUnread && session.projectId) ids.add(session.projectId)
+  }
+  return ids
 }
 
 /** A row outside any family (search results) */
@@ -132,7 +229,8 @@ export function flattenFamilies(families: readonly SessionFamily[], collapsed: R
       const { item, depth, descendantCount } = members[i]
       const isCollapsed = descendantCount > 0 && collapsed.has(item.id)
       path.length = depth
-      rows.push({ item, depth, descendantCount, collapsed: isCollapsed, groupItem: view, parent: path[depth - 1], guides: [] })
+      const nested = descendantCount > 0 ? nestedAttentionOf(members, i) : undefined
+      rows.push({ item, depth, descendantCount, collapsed: isCollapsed, groupItem: view, parent: path[depth - 1], guides: [], nested })
       path.push(item)
       if (isCollapsed) i += descendantCount
     }

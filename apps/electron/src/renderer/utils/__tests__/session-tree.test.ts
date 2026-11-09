@@ -4,7 +4,11 @@ import {
   ancestorIds,
   buildSessionFamilies,
   flattenFamilies,
+  listAncestorIds,
   listParentId,
+  nestedAttentionOf,
+  unreadProjectIds,
+  visibleRowAttention,
   type SessionFamily,
 } from '../session-tree'
 
@@ -199,5 +203,106 @@ describe('ancestorIds', () => {
 
   it('tells a session missing from the families apart from a root', () => {
     expect(ancestorIds(families, 'unknown')).toBeUndefined()
+  })
+})
+
+describe('listAncestorIds', () => {
+  it('walks spawn/task parents then branch sources, and stops at a missing parent', () => {
+    const byId = new Map([
+      ['child', session('child', { parentSessionId: 'step' })],
+      ['step', session('step', { parentSessionId: 'task' })],
+      ['task', session('task')],
+      ['branch', session('branch', { branchFromSessionId: 'child' })],
+    ])
+
+    expect(listAncestorIds(byId.get('branch')!, byId)).toEqual(['child', 'step', 'task'])
+    expect(listAncestorIds(session('orphan', { parentSessionId: 'gone' }), byId)).toEqual(['gone'])
+    expect(listAncestorIds(session('root'), byId)).toEqual([])
+  })
+
+  it('breaks a parent loop', () => {
+    const byId = new Map([
+      ['a', session('a', { parentSessionId: 'b' })],
+      ['b', session('b', { parentSessionId: 'a' })],
+    ])
+    expect(listAncestorIds(byId.get('a')!, byId)).toEqual(['b', 'a'])
+  })
+})
+
+describe('nestedAttentionOf / flattenFamilies nested', () => {
+  it('aggregates unread, processing and newest activity of descendants', () => {
+    const [family] = buildSessionFamilies([
+      session('root', { lastMessageAt: 10 }),
+      session('a', { parentSessionId: 'root', createdAt: 1, lastMessageAt: 20, isProcessing: true }),
+      session('a1', { parentSessionId: 'a', createdAt: 2, lastMessageAt: 50, hasUnread: true, lastMessageRole: 'assistant' }),
+      session('b', { parentSessionId: 'root', createdAt: 3, lastMessageAt: 15, lastMessageRole: 'error' }),
+    ])
+
+    expect(nestedAttentionOf(family.members, 0)).toMatchObject({
+      hasUnread: true, isProcessing: true, lastMessageAt: 50, lastMessageRole: 'assistant',
+    })
+    expect(nestedAttentionOf(family.members, 1)).toMatchObject({
+      hasUnread: true, isProcessing: false, lastMessageAt: 50,
+    })
+    expect(nestedAttentionOf(family.members, 3)).toMatchObject({ hasUnread: false, isProcessing: false, lastMessageAt: 0 })
+  })
+
+  it('keeps nested signals on a collapsed parent whose children are hidden', () => {
+    const [family] = buildSessionFamilies([
+      session('root'),
+      session('child', { parentSessionId: 'root', hasUnread: true, isProcessing: true, lastMessageAt: 9 }),
+    ])
+    const [row] = flattenFamilies([family], new Set(['root']))
+
+    expect(row).toMatchObject({ item: { id: 'root' }, collapsed: true, descendantCount: 1 })
+    expect(row.nested).toEqual({
+      hasUnread: true, isProcessing: true, lastMessageAt: 9, lastMessageRole: undefined,
+    })
+  })
+
+  it('attaches nested signals on an expanded parent too', () => {
+    const [family] = buildSessionFamilies([
+      session('root'),
+      session('child', { parentSessionId: 'root', hasUnread: true, lastMessageAt: 4 }),
+    ])
+    const [row] = flattenFamilies([family], new Set())
+    expect(row.collapsed).toBe(false)
+    expect(row.nested).toMatchObject({ hasUnread: true, lastMessageAt: 4 })
+  })
+})
+
+describe('visibleRowAttention', () => {
+  const parent = session('parent', { lastMessageAt: 10, lastMessageRole: 'user' })
+  const nested = { hasUnread: true, isProcessing: true, lastMessageAt: 40, lastMessageRole: 'error' as const }
+
+  it('always surfaces nested unread, even while the family is expanded', () => {
+    expect(visibleRowAttention(parent, nested, false)).toMatchObject({
+      hasUnread: true, isProcessing: false, lastMessageAt: 10, lastMessageRole: 'user',
+    })
+  })
+
+  it('overlays nested working/failed/activity onto a collapsed parent', () => {
+    expect(visibleRowAttention(parent, nested, true)).toEqual({
+      hasUnread: true, isProcessing: true, lastMessageAt: 40, lastMessageRole: 'error',
+    })
+  })
+
+  it('leaves a row with no nested sessions unchanged', () => {
+    const unread = session('solo', { hasUnread: true, lastMessageAt: 3 })
+    expect(visibleRowAttention(unread, undefined, true)).toEqual({
+      hasUnread: true, isProcessing: false, lastMessageAt: 3, lastMessageRole: undefined,
+    })
+  })
+})
+
+describe('unreadProjectIds', () => {
+  it('collects project ids of active unread sessions, including nested children', () => {
+    expect(unreadProjectIds([
+      session('parent', { projectId: 'p1' }),
+      session('child', { parentSessionId: 'parent', projectId: 'p1', hasUnread: true }),
+      session('other', { projectId: 'p2', hasUnread: true, isArchived: true }),
+      session('hidden', { projectId: 'p3', hasUnread: true, hidden: true }),
+      session('plain', { hasUnread: true }),
+    ])).toEqual(new Set(['p1']))
   })
 })

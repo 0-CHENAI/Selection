@@ -86,6 +86,7 @@ import { useAction, useActionLabel } from "@/actions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
 import { getSessionTitle } from "@/utils/session"
+import { unreadProjectIds } from "@/utils/session-tree"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
@@ -1205,6 +1206,7 @@ function AppShellContent({
   const isMetaDone = (s: SessionMeta) => s.sessionStatus === 'done' || s.sessionStatus === 'cancelled'
   const flaggedCount = activeSessionMetas.filter(s => s.isFlagged).length
   const archivedCount = workspaceSessionMetas.filter(s => s.isArchived).length
+  const unreadProjects = useMemo(() => unreadProjectIds(activeSessionMetas), [activeSessionMetas])
 
   // Compute session counts per label (cumulative: parent includes descendants).
   // Flatten the tree for iteration, use the tree for descendant lookups.
@@ -2261,6 +2263,8 @@ function AppShellContent({
       expandable: projects.length > 0,
       expanded: isExpanded('nav:projects'),
       onToggle: () => toggleExpanded('nav:projects'),
+      hasUnread: unreadProjects.size > 0,
+      unreadLabel: t("session.unreadIndicator"),
       contextMenu: {
         type: 'projects' as const,
         onAddProject: openAddProject,
@@ -2272,6 +2276,8 @@ function AppShellContent({
         // Highlight when on allSessions view AND filter includes this project (the jump-to state)
         variant: (sessionFilter?.kind === 'allSessions' && projectFilter.get(p.config.id) === 'include') ? "default" as const : "ghost" as const,
         onClick: () => handleJumpToProjectSessions(p.config.id),
+        hasUnread: unreadProjects.has(p.config.id),
+        unreadLabel: t("session.unreadIndicator"),
       })),
     },
     {
@@ -2576,6 +2582,7 @@ function AppShellContent({
                 onAddProject={openAddProject}
                 onJumpToSessions={handleJumpToProjectSessions}
                 selectedProjectSlug={isProjectsNavigation(navState) ? navState.details?.projectSlug ?? null : null}
+                unreadProjectIds={unreadProjects}
               />
             )}
             {isAutomationsNavigation(navState) && (
