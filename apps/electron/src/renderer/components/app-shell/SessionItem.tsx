@@ -14,7 +14,8 @@ import { SessionBadges, chipButtonProps } from "./SessionBadges"
 import { SessionProjectColorWrapper } from "./SessionProjectColorWrapper"
 import { hasTransferTargets } from "./transfer-targets"
 import { useProjectColorTreatment } from "@/hooks/useProjectColorTreatment"
-import { getSessionTitle, getSessionPreviewText, highlightMatch, hasUnreadMeta, formatShortAge } from "@/utils/session"
+import { getSessionTitle, getSessionPreviewText, highlightMatch, formatShortAge } from "@/utils/session"
+import { visibleRowAttention, type NestedAttention } from "@/utils/session-tree"
 import { useSessionListContext } from "@/context/SessionListContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { navigate, routes } from "@/lib/navigate"
@@ -56,14 +57,18 @@ export interface SessionItemProps {
   inheritedLabels?: readonly string[]
   /** The sessions nested under this row, when it has any */
   subSessions?: { count: number; collapsed: boolean; onToggle: () => void }
+  /** Unread / run signals of those nested sessions (from the session tree) */
+  nestedAttention?: NestedAttention
 }
 
 /**
  * One session row (design spec §2.4 "one slot, one meaning", §7.2):
  * - leading glyph = the user's workflow status (click to change it)
- * - title (600 when unread) · age (unread: led by an 8px accent dot, age in accent)
+ * - title (600 when unread) · age (unread: led by an 8px accent dot, age in accent).
+ *   Unread includes a nested sub-session, so a parent still shows the mark when a child finishes.
  * - subtitle = run state with its own shape and color (needs you · working · failed · plan ready),
- *   else the labels (chips tinted with each label's color), else the session preview (top level only)
+ *   else the labels (chips tinted with each label's color), else the session preview (top level only).
+ *   A collapsed parent also shows a nested child's working/failed/plan and latest activity.
  * - sub-sessions: a parent's subtitle line leads with their toggle, under the glyph, where the tree line to
  *   its nested rows starts; a nested row leaves out the labels its parent shows
  */
@@ -80,6 +85,7 @@ export function SessionItem({
   guides,
   inheritedLabels,
   subSessions,
+  nestedAttention,
 }: SessionItemProps) {
   const { t } = useTranslation()
   const ctx = useSessionListContext()
@@ -100,19 +106,22 @@ export function SessionItem({
     return ctx.flatLabels.some(l => l.id === labelId)
   }))
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
-  const isUnread = hasUnreadMeta(item)
+  const rowAttention = visibleRowAttention(item, nestedAttention, subSessions?.collapsed === true)
+  const isUnread = rowAttention.hasUnread
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
   // Run state owns the subtitle line; attention states win (spec §2.4).
+  // A collapsed parent also shows a nested child's working/failed/plan, so a
+  // folded family still tells you a sub-session finished or needs you.
   const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = hasPendingPrompt
     ? 'needs-you'
-    : item.isProcessing
+    : rowAttention.isProcessing
       ? 'working'
-      : item.lastMessageRole === 'error'
+      : rowAttention.lastMessageRole === 'error'
         ? 'failed'
-        : item.lastMessageRole === 'plan'
+        : rowAttention.lastMessageRole === 'plan'
           ? 'plan'
           : null
   const needsAttention = runState === 'needs-you' || runState === 'failed'
@@ -339,8 +348,8 @@ export function SessionItem({
           <span className="sr-only">{t("session.unreadIndicator")}</span>
           {item.isFlagged ? (
             <Flag className="size-3.5 text-info" aria-label={t("sidebar.flagged")} />
-          ) : item.lastMessageAt ? (
-            formatShortAge(item.lastMessageAt)
+          ) : rowAttention.lastMessageAt ? (
+            formatShortAge(rowAttention.lastMessageAt)
           ) : null}
         </span>
       ) : hasMatch ? (
@@ -352,9 +361,9 @@ export function SessionItem({
         </span>
       ) : item.isFlagged ? (
         <Flag className="size-3.5 text-info" aria-label={t("sidebar.flagged")} />
-      ) : item.lastMessageAt ? (
+      ) : rowAttention.lastMessageAt ? (
         <span>
-          {formatShortAge(item.lastMessageAt)}
+          {formatShortAge(rowAttention.lastMessageAt)}
         </span>
       ) : undefined}
     />

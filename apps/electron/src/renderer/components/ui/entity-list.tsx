@@ -38,6 +38,10 @@ export interface EntityListGroup<T> {
   collapsible?: boolean
   /** Number of hidden items when collapsed. Present on collapsed placeholder groups (items will be []). */
   collapsedCount?: number
+  /** Accent mark on the header (e.g. a project group with an unread nested session) */
+  hasUnread?: boolean
+  /** Accessible name for `hasUnread` (the dot is otherwise visual-only) */
+  unreadLabel?: string
 }
 
 export interface EntityListProps<T> {
@@ -102,6 +106,8 @@ function CollapsibleGroupHeader({
   label,
   isCollapsed,
   itemCount,
+  hasUnread,
+  unreadLabel,
   onToggle,
   onCollapseAll,
   onExpandAll,
@@ -109,6 +115,8 @@ function CollapsibleGroupHeader({
   label: string
   isCollapsed: boolean
   itemCount: number
+  hasUnread?: boolean
+  unreadLabel?: string
   onToggle: () => void
   onCollapseAll?: () => void
   onExpandAll?: () => void
@@ -129,6 +137,12 @@ function CollapsibleGroupHeader({
           <span className="relative text-label-sm font-medium text-tertiary truncate">
             {label}{isCollapsed && <span className="tabular-nums"> · {itemCount}</span>}
           </span>
+          {hasUnread && (
+            <span className="relative inline-flex items-center shrink-0" title={unreadLabel}>
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-accent-solid" />
+              {unreadLabel && <span className="sr-only">{unreadLabel}</span>}
+            </span>
+          )}
           <ChevronRight
             aria-hidden="true"
             className={cn(
@@ -212,6 +226,8 @@ export function EntityList<T>({
                           label={group.label}
                           isCollapsed={!!isCollapsed}
                           itemCount={isCollapsed ? (group.collapsedCount ?? 0) : group.items.length}
+                          hasUnread={group.hasUnread}
+                          unreadLabel={group.unreadLabel}
                           onToggle={() => onToggleCollapse(group.key)}
                           onCollapseAll={onCollapseAll}
                           onExpandAll={onExpandAll}

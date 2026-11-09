@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **A nested session's completion shows on its parent and project** — When a sub-session finished, only that nested row was marked unread. Folded under its parent, grouped under a project, or while you were still in the parent chat, the completion was easy to miss. The parent row now shows the same unread dot as the child (and, while folded, the child's working or failed state and latest activity). A project with unread sessions — including nested ones — gets the accent mark on the Projects list, the sidebar, and a collapsed project group. If you are looking at the parent chat, the existing background-finished chip also appears for that nested completion, even when the chip preference is off.
+
 ## Bug Fixes
 
 - **Automation docs match what runs** — The automations guide the agent follows, and the automations page on the website, still described the removed `command` action and listed agent events such as `PreToolUse` and `Stop`, which never run actions. The agent could set up automations that silently did nothing. Both now list only the events that trigger automations and document webhook and script actions; scripts are the way to run your own code when an event fires. Fixes [#1117](https://github.com/craft-ai-agents/craft-agents-oss/issues/1117).

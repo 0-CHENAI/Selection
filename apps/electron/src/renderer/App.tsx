@@ -60,6 +60,8 @@ import {
 } from '@/atoms/background-finished'
 import { visibleSessionIdsAtom } from '@/atoms/panel-stack'
 import { getSessionTitle } from '@/utils/session'
+import { listAncestorIds } from '@/utils/session-tree'
+import { shouldAnnounceBackgroundFinish } from '@/utils/background-finish-announce'
 import { extractBadges } from '@/lib/mentions'
 import { getDefaultStore } from 'jotai'
 import {
@@ -1062,10 +1064,17 @@ export default function App() {
             // session (one not shown in any open panel) finishes, queue a chip
             // above the chat. The OS notification above is suppressed while the
             // window is focused, so the chip is the only completion signal then.
-            if (
-              store.get(showBackgroundFinishedChipAtom) &&
-              !store.get(visibleSessionIdsAtom).has(sessionId)
-            ) {
+            // Nested sub-sessions of a session that *is* on screen also announce
+            // here — even if the chip preference is off — because the child is
+            // not in a panel and the parent/project list used to stay silent.
+            const visibleSessionIds = store.get(visibleSessionIdsAtom)
+            if (shouldAnnounceBackgroundFinish({
+              sessionId,
+              hidden: updatedSession.hidden,
+              chipPreference: store.get(showBackgroundFinishedChipAtom),
+              visibleSessionIds,
+              ancestorIds: listAncestorIds(updatedSession, store.get(sessionMetaMapAtom)),
+            })) {
               store.set(pushBackgroundFinishedAtom, {
                 sessionId,
                 title: getSessionTitle(updatedSession),

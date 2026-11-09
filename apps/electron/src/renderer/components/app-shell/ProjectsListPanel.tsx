@@ -30,6 +30,8 @@ export interface ProjectsListPanelProps {
   /** Jump to All Sessions filtered by this project's id. */
   onJumpToSessions?: (projectId: string) => void
   selectedProjectSlug?: string | null
+  /** Project ids that currently have an unread session (including nested sub-sessions) */
+  unreadProjectIds?: ReadonlySet<string>
   className?: string
 }
 
@@ -40,6 +42,7 @@ export function ProjectsListPanel({
   onAddProject,
   onJumpToSessions,
   selectedProjectSlug,
+  unreadProjectIds,
   className,
 }: ProjectsListPanelProps) {
   const { t } = useTranslation()
@@ -94,6 +97,7 @@ export function ProjectsListPanel({
                 onClick={() => onProjectClick(project.config.slug)}
                 onDelete={() => handleDelete(project)}
                 onJumpToSessions={onJumpToSessions ? () => onJumpToSessions(project.config.id) : undefined}
+                hasUnread={unreadProjectIds?.has(project.config.id) === true}
               />
             ))}
           </div>
@@ -110,9 +114,11 @@ interface ProjectRowProps {
   onClick: () => void
   onDelete: () => void
   onJumpToSessions?: () => void
+  hasUnread?: boolean
 }
 
-function ProjectRow({ project, isSelected, isFirst, onClick, onDelete, onJumpToSessions }: ProjectRowProps) {
+function ProjectRow({ project, isSelected, isFirst, onClick, onDelete, onJumpToSessions, hasUnread }: ProjectRowProps) {
+  const { t } = useTranslation()
   const config = project.config
   const subtitle = config.description?.trim() || config.workingDirectory || ''
 
@@ -130,6 +136,12 @@ function ProjectRow({ project, isSelected, isFirst, onClick, onDelete, onJumpToS
             icon={<FolderKanban className="h-3.5 w-3.5 text-foreground/60" />}
             title={config.name}
             subtitle={subtitle}
+            titleTrailing={hasUnread ? (
+              <span className="inline-flex items-center" title={t('session.unreadIndicator')}>
+                <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-accent-solid" />
+                <span className="sr-only">{t('session.unreadIndicator')}</span>
+              </span>
+            ) : undefined}
           />
         </div>
       </ContextMenuTrigger>
