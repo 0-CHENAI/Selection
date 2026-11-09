@@ -1594,6 +1594,7 @@
   "session.searchUnavailable": "Suche nicht verfügbar",
   "session.selectConversation": "Wähle eine Unterhaltung aus, um loszulegen",
   "session.unreadGroup": "Ungelesen ({{count}})",
+  "session.unreadIndicator": "Ungelesene Aktualisierungen",
   "session.workMode": "Work mode",
   "session.workModeFixed": "Work mode is fixed after the first message",
   "session.workModeNeedsReview": "Execution ownership needs review. New delegation is blocked; existing records and permissions are preserved.",

@@ -1594,6 +1594,7 @@
   "session.searchUnavailable": "A keresés nem érhető el",
   "session.selectConversation": "Válassz egy beszélgetést a kezdéshez",
   "session.unreadGroup": "Olvasatlan ({{count}})",
+  "session.unreadIndicator": "Olvasatlan frissítések",
   "session.workMode": "Work mode",
   "session.workModeFixed": "Work mode is fixed after the first message",
   "session.workModeNeedsReview": "Execution ownership needs review. New delegation is blocked; existing records and permissions are preserved.",

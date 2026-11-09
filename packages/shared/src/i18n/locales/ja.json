@@ -1594,6 +1594,7 @@
   "session.searchUnavailable": "検索は利用できません",
   "session.selectConversation": "会話を選択して開始",
   "session.unreadGroup": "未読 ({{count}})",
+  "session.unreadIndicator": "未読の更新があります",
   "session.workMode": "Work mode",
   "session.workModeFixed": "Work mode is fixed after the first message",
   "session.workModeNeedsReview": "Execution ownership needs review. New delegation is blocked; existing records and permissions are preserved.",
