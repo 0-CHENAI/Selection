@@ -46,6 +46,8 @@ export {
   UserMessageBubble,
   formatUserMessageTime,
   ClarificationCard,
+  ClarificationDetailsOverlay,
+  ClarificationFoldDetails,
   ClarificationSummary,
   SystemMessage,
   withTaskMessagePresentation,

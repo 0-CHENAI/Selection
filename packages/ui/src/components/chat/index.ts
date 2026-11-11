@@ -53,7 +53,15 @@ export { InlineExecution, mapToolEventToActivity, type InlineExecutionProps, typ
 export { TurnCardActionsMenu, type TurnCardActionsMenuProps } from './TurnCardActionsMenu'
 export { SessionViewer, type SessionViewerProps, type SessionViewerMode } from './SessionViewer'
 export { UserMessageBubble, formatUserMessageTime, type UserMessageBubbleProps } from './UserMessageBubble'
-export { ClarificationCard, ClarificationSummary, type ClarificationCardProps, type ClarificationSummaryProps, type ClarificationResponse } from './ClarificationCard'
+export {
+  ClarificationCard,
+  ClarificationDetailsOverlay,
+  ClarificationFoldDetails,
+  ClarificationSummary,
+  type ClarificationCardProps,
+  type ClarificationSummaryProps,
+  type ClarificationResponse,
+} from './ClarificationCard'
 export { SystemMessage, type SystemMessageProps, type SystemMessageType } from './SystemMessage'
 export { withTaskMessagePresentation } from './task-message-presentation'
 

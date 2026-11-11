@@ -221,7 +221,11 @@ interface ChatDisplayProps {
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
   onRespondToCredential?: (sessionId: string, requestId: string, response: CredentialResponse) => void
-  onRespondToClarification?: (sessionId: string, requestId: string, response: { skipped: boolean; optionIds: string[]; text: string }) => void
+  onRespondToClarification?: (
+    sessionId: string,
+    requestId: string,
+    response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput,
+  ) => void
   // Thinking level (session-level setting)
   /** Current thinking level ('off', 'think', 'max') */
   fastMode?: boolean

@@ -13,7 +13,7 @@ let ClarificationCard: typeof import('../ClarificationCard').ClarificationCard
 let ClarificationDetailsOverlay: typeof import('../ClarificationCard').ClarificationDetailsOverlay
 let ClarificationFoldDetails: typeof import('../ClarificationCard').ClarificationFoldDetails
 let clarificationBriefTitle: typeof import('../ClarificationCard').clarificationBriefTitle
-let clarificationNoteLayout: typeof import('../ClarificationCard').clarificationNoteLayout
+let clarificationOutcomeCounts: typeof import('../ClarificationCard').clarificationOutcomeCounts
 let clarificationSummaryLabel: typeof import('../ClarificationCard').clarificationSummaryLabel
 let TurnCard: typeof import('../TurnCard').TurnCard
 
@@ -23,7 +23,7 @@ beforeAll(async () => {
   ClarificationDetailsOverlay = module.ClarificationDetailsOverlay
   ClarificationFoldDetails = module.ClarificationFoldDetails
   clarificationBriefTitle = module.clarificationBriefTitle
-  clarificationNoteLayout = module.clarificationNoteLayout
+  clarificationOutcomeCounts = module.clarificationOutcomeCounts
   clarificationSummaryLabel = module.clarificationSummaryLabel
   TurnCard = (await import('../TurnCard')).TurnCard
 })
@@ -36,18 +36,21 @@ await i18n.use(initReactI18next).init({
       translation: {
         'chat.clarificationAnswered_one': '{{count}} 个问题已澄清',
         'chat.clarificationAnswered_other': '{{count}} 个问题已澄清',
+        'chat.clarificationAnsweredShort': '已回答',
         'chat.clarificationContinue': '继续',
-        'chat.clarificationFreeText': '补充说明',
+        'chat.clarificationDismiss': '关闭',
         'chat.clarificationFreeTextPlaceholder': '直接写下答案，或补充你的选择',
-        'chat.clarificationMultiHint': '可多选，也可以直接填写，或两者一起',
-        'chat.clarificationSingleHint': '选择一项，也可以直接填写，或两者一起',
+        'chat.clarificationRecorded': '已记录你的回答。',
         'chat.clarificationSkip': '跳过',
         'chat.clarificationSkipped': '已跳过，按当前理解继续',
         'chat.clarificationSkippedCount_one': '{{count}} 个问题已跳过',
         'chat.clarificationSkippedCount_other': '{{count}} 个问题已跳过',
+        'chat.clarificationSkippedShort': '已跳过',
+        'chat.clarificationStep': '第 {{current}} 题，共 {{total}} 题：{{title}}',
+        'chat.clarificationStepAnswered': '（已回答）',
+        'chat.clarificationStepSkipped': '（未回答）',
+        'chat.clarificationSubmit': '提交',
         'chat.clarificationSummaryMixed': '{{answered}} 个问题已澄清，{{skipped}} 个已跳过',
-        'chat.clarificationTextHint': '写下答案，或跳过',
-        'chat.clarificationTitle': '需要确认',
         'chat.clarificationYourAnswer': '你的回答',
         'chat.processing.thinking': '思考中…',
         'turnCard.responding': '正在回复',
@@ -78,10 +81,52 @@ function card(overrides: Partial<NonNullable<Message['clarification']>> = {}): M
   }
 }
 
+const previewQuestions = [
+  {
+    id: 'audience',
+    question: '这份报告主要给谁看？',
+    selection: 'single' as const,
+    options: [
+      { id: 'exec', label: '管理层，用于决策评审' },
+      { id: 'team', label: '业务团队，用于落地执行' },
+      { id: 'client', label: '外部客户，用于正式汇报' },
+    ],
+  },
+  {
+    id: 'years',
+    question: '这次需要覆盖哪些年份？',
+    selection: 'multi' as const,
+    options: [{ id: '2024', label: '2024' }, { id: '2025', label: '2025' }, { id: '2026', label: '2026' }],
+  },
+  {
+    id: 'form',
+    question: '交付形式更倾向哪种？',
+    selection: 'single' as const,
+    options: [
+      { id: 'slides', label: '幻灯片汇报' },
+      { id: 'doc', label: '书面报告' },
+      { id: 'both', label: '两者都要' },
+    ],
+  },
+]
+
+function batch(overrides: Partial<NonNullable<Message['clarification']>> = {}): Message {
+  return card({
+    question: previewQuestions[0]!.question,
+    selection: 'single',
+    options: previewQuestions[0]!.options,
+    questions: previewQuestions,
+    round: 3,
+    ...overrides,
+  })
+}
+
 function render(props: ComponentProps<typeof ClarificationCard>) {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <ClarificationCard {...props} />
+      <TooltipProvider>
+        <ClarificationCard {...props} />
+      </TooltipProvider>
     </I18nextProvider>,
   )
 }
@@ -126,54 +171,124 @@ function renderFold(messages: Message[], expanded: boolean) {
 }
 
 describe('clarification card', () => {
-  it('shows choices and a free-text field together, with skip, and is not an answer card', () => {
+  it('shows Motif question-card chrome: radios or checkboxes, a single-line note, skip, and submit', () => {
     const html = render({ message: card(), interactive: true })
     expect(html).toContain('data-clarification-card')
+    expect(html).toContain('rounded-2xl')
+    expect(html).toContain('bg-card')
     expect(html).not.toContain('data-response-card')
     expect(html).toContain('data-clarification-options')
     expect(html).toContain('data-clarification-option="2024"')
-    expect(html).toContain('data-clarification-option="2025"')
+    expect(html).toContain('role="checkbox"')
     expect(html).toContain('data-clarification-text')
-    expect(html).toContain('补充说明')
     expect(html).toContain('直接写下答案，或补充你的选择')
-    const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? ''
-    expect(textarea).toContain('data-clarification-text')
-    expect(textarea).toContain('overflow-hidden')
-    expect(textarea).not.toContain('border-border')
-    expect(textarea).not.toContain('resize-y')
-    expect(html).toContain('data-clarification-note-fade="off"')
+    expect(html).toContain('<input')
+    expect(html).toContain('h-10')
+    expect(html).toContain('rounded-xl')
+    expect(html).not.toContain('<textarea')
     expect(html).toContain('data-clarification-skip')
     expect(html).toContain('跳过')
-    expect(html).toContain('disabled')
-    expect(html).toContain('继续')
+    expect(html).toContain('提交')
+    expect(html).toContain('data-clarification-submit')
+    expect(html).toContain('data-clarification-dismiss')
+    expect(html).toContain('rounded-full')
   })
 
   it('keeps the text field when there are no choices', () => {
     const html = render({ message: card({ options: [], selection: 'single' }), interactive: true })
     expect(html).toContain('data-clarification-text')
     expect(html).not.toContain('data-clarification-options')
-    expect(html).toContain('写下答案，或跳过')
   })
 
-  it('caps the note at five lines and fades only the scrolled-away top', () => {
-    const line = 20
-    const pad = 16
-    const min = line * 2 + pad
-    const max = line * 5 + pad
-    expect(clarificationNoteLayout(min, 0)).toEqual({ height: min, overflows: false, fadeTop: false })
-    expect(clarificationNoteLayout(line * 4 + pad, 0)).toEqual({ height: line * 4 + pad, overflows: false, fadeTop: false })
-    expect(clarificationNoteLayout(line * 8 + pad, 0)).toEqual({ height: max, overflows: true, fadeTop: false })
-    expect(clarificationNoteLayout(line * 8 + pad, 24)).toEqual({ height: max, overflows: true, fadeTop: true })
+  it('walks a batch one step at a time with skip, continue, and an always-enabled submit', () => {
+    const first = render({ message: batch(), interactive: true })
+    expect(first).toContain('data-clarification-question-count="3"')
+    expect(first).toContain('data-clarification-step="0"')
+    expect(first).toContain('这份报告主要给谁看？')
+    expect(first).toContain('role="radio"')
+    expect(first).toContain('继续')
+    expect(first).not.toContain('data-clarification-submit')
+    expect(first).toContain('data-clarification-step-bar="audience"')
+    expect(first).toContain('data-clarification-step-bar="years"')
+    expect(first).toContain('data-clarification-bar-state="current"')
+    const unansweredContinue = first.match(/data-clarification-continue[\s\S]*?>/)?.[0] ?? ''
+    expect(unansweredContinue).toMatch(/(?:^|\s)disabled(?:=""|(?=\s|>))/)
+
+    const answeredFirst = render({
+      message: batch({
+        questions: [
+          { ...previewQuestions[0]!, selectedOptionIds: ['team'] },
+          previewQuestions[1]!,
+          previewQuestions[2]!,
+        ],
+      }),
+      interactive: true,
+    })
+    const answeredContinue = answeredFirst.match(/data-clarification-continue[\s\S]*?>/)?.[0] ?? ''
+    expect(answeredContinue).not.toMatch(/(?:^|\s)disabled(?:=""|(?=\s|>))/)
+
+    const second = render({ message: batch(), interactive: true, initialStep: 1 })
+    expect(second).toContain('data-clarification-step="1"')
+    expect(second).toContain('这次需要覆盖哪些年份？')
+    expect(second).toContain('role="checkbox"')
+    expect(second).toContain('继续')
+
+    const last = render({ message: batch(), interactive: true, initialStep: 2 })
+    expect(last).toContain('data-clarification-step="2"')
+    expect(last).toContain('交付形式更倾向哪种？')
+    expect(last).toContain('data-clarification-skip')
+    expect(last).toContain('提交')
+    expect(last).toContain('data-clarification-submit')
+    expect(last).toContain('data-clarification-bar-state="skipped"')
+    const submit = last.match(/data-clarification-submit[\s\S]*?>/)?.[0] ?? ''
+    expect(submit.length).toBeGreaterThan(0)
+    expect(submit.includes('disabled')).toBe(false)
   })
 
-  it('does not render an answered or skipped clarification as its own card', () => {
-    for (const status of ['answered', 'skipped'] as const) {
-      const html = render({ message: card({ status, selectedOptionIds: ['2024'], text: '只要表格' }), interactive: true })
-      expect(html).not.toContain('data-clarification-card')
-      expect(html).not.toContain('data-clarification-summary')
-      expect(html).not.toContain('data-clarification-text')
-      expect(html).not.toContain('data-clarification-skip=""')
-    }
+  it('collapses an answered batch like Motif and keeps one process-fold row for the whole card', () => {
+    const settled = batch({
+      status: 'answered',
+      questions: [
+        { ...previewQuestions[0]!, status: 'answered', selectedOptionIds: ['team'] },
+        { ...previewQuestions[1]!, status: 'skipped', selectedOptionIds: [], text: '' },
+        { ...previewQuestions[2]!, status: 'answered', selectedOptionIds: ['doc'] },
+      ],
+    })
+    const html = render({ message: settled, interactive: true })
+    expect(html).toContain('data-clarification-card')
+    expect(html).toContain('data-clarification-status="answered"')
+    expect(html).toContain('已记录你的回答。')
+    expect(html).toContain('交付形式更倾向哪种？')
+    expect(html).not.toContain('data-clarification-options')
+    expect(html).not.toContain('data-clarification-skip=""')
+
+    expect(clarificationOutcomeCounts([settled])).toEqual({ answered: 2, skipped: 1 })
+    const translate = i18n.t.bind(i18n)
+    expect(clarificationSummaryLabel({ answered: 2, skipped: 1 }, translate)).toBe('2 个问题已澄清，1 个已跳过')
+
+    settled.timestamp = 3
+    const collapsed = renderFold([settled], false)
+    expect(collapsed).toContain('data-clarification-folded')
+    expect(collapsed).toContain('data-clarification-status="mixed"')
+    expect(collapsed).toContain('2 个问题已澄清，1 个已跳过')
+    expect(collapsed).not.toContain('data-clarification-row')
+    expect(collapsed).not.toContain('已记录你的回答')
+
+    const open = renderFold([settled], true)
+    expect(open.match(/data-clarification-row/g)?.length).toBe(1)
+    expect(open).toContain('2 个问题已澄清，1 个已跳过')
+    expect(open).not.toContain('这份报告主要给谁看')
+    expect(open).not.toContain('data-clarification-detail')
+
+    const popup = renderPopup(settled)
+    expect(popup).toContain('data-clarification-popup')
+    expect(popup).toContain('这份报告主要给谁看')
+    expect(popup).toContain('这次需要覆盖哪些年份')
+    expect(popup).toContain('交付形式更倾向哪种')
+    expect(popup).toContain('已回答')
+    expect(popup).toContain('已跳过，按当前理解继续')
+    expect(popup).toContain('data-clarification-option="team"')
+    expect(popup).toContain('书面报告')
   })
 
   it('keeps the settled status in the process-fold brief title and a status row in the chain', () => {
