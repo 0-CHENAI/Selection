@@ -122,6 +122,60 @@ test('soft cap allows one critical extra and then refuses', () => {
   }
 })
 
+test('a batch of questions counts against the cap and stores every step', async () => {
+  const { manager, internal, root, worker, sent } = setup()
+  try {
+    const batch = {
+      question: '这份报告主要给谁看？',
+      ambiguity: 'scope' as const,
+      selection: 'single' as const,
+      options: [{ id: 'team', label: '业务团队' }],
+      questions: [
+        {
+          id: 'audience',
+          question: '这份报告主要给谁看？',
+          selection: 'single' as const,
+          options: [{ id: 'team', label: '业务团队' }, { id: 'exec', label: '管理层' }],
+        },
+        {
+          id: 'years',
+          question: '这次需要覆盖哪些年份？',
+          selection: 'multi' as const,
+          options: [{ id: '2025', label: '2025' }, { id: '2026', label: '2026' }],
+        },
+        {
+          id: 'form',
+          question: '交付形式更倾向哪种？',
+          selection: 'single' as const,
+          options: [{ id: 'doc', label: '书面报告' }],
+        },
+      ],
+    }
+    const gate = internal.beginClarification(worker, batch)
+    expect(gate).toMatchObject({ accepted: true, round: 3 })
+    if (!gate.accepted) return
+    expect(worker.messages.at(-1)?.clarification?.questions).toHaveLength(3)
+    expect(await manager.respondToClarification(root.id, gate.requestId, {
+      answers: [
+        { questionId: 'audience', skipped: false, optionIds: ['team'] },
+        { questionId: 'years', skipped: true },
+        { questionId: 'form', skipped: false, optionIds: ['doc'] },
+      ],
+    })).toBe(true)
+    const settled = worker.messages.find(message => message.clarification?.requestId === gate.requestId)?.clarification
+    expect(settled?.status).toBe('answered')
+    expect(settled?.questions?.map(item => item.status)).toEqual(['answered', 'skipped', 'answered'])
+    expect(sent[0]?.message).toContain('[years] SKIPPED')
+    expect(sent[0]?.message).toContain('业务团队')
+    const blocked = internal.beginClarification(worker, ask)
+    expect(blocked.accepted).toBe(false)
+    const extra = internal.beginClarification(worker, { ...ask, critical: true })
+    expect(extra).toMatchObject({ accepted: true, round: 4 })
+  } finally {
+    manager.cleanup()
+  }
+})
+
 test('a failed continuation restores the card unless the answer was already stored', async () => {
   const { manager, internal, root, worker } = setup()
   try {

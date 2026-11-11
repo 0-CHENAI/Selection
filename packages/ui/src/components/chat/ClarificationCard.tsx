@@ -1,55 +1,90 @@
 import * as React from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import { ArrowUpRight, MessageCircleQuestionMark } from 'lucide-react'
-import type { Message } from '@craft-agent/core/types'
-import { canSubmitClarification, toggleClarificationSelection } from '@craft-agent/shared/agent/clarification'
+import { ArrowUpRight, Check, MessageCircleQuestionMark, X } from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
+import type { ClarificationQuestionState, Message } from '@craft-agent/core/types'
+import {
+  canSubmitClarification,
+  clarificationQuestions,
+  toggleClarificationSelection,
+} from '@craft-agent/shared/agent/clarification'
 import { cn } from '../../lib/utils'
 import { ContentFrame } from '../overlay/ContentFrame'
 import { PreviewOverlay } from '../overlay/PreviewOverlay'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../tooltip'
 
-const NOTE_LINE_PX = 20
-const NOTE_PAD_PX = 16
-const NOTE_MIN_LINES = 2
-const NOTE_MAX_LINES = 5
+const EASE_OUT = [0.23, 1, 0.32, 1] as const
+const SPRING_SWAP = { damping: 30, mass: 0.55, stiffness: 460 } as const
+const BAR_REST_WIDTH = 8
+const BAR_CURRENT_WIDTH = 16
+const BAR_HOVER_WIDTH = 20
 
-export function clarificationNoteLayout(
-  scrollHeight: number,
-  scrollTop: number,
-  metrics: { line?: number; pad?: number } = {},
-) {
-  const line = metrics.line && metrics.line > 0 ? metrics.line : NOTE_LINE_PX
-  const pad = metrics.pad != null && metrics.pad >= 0 ? metrics.pad : NOTE_PAD_PX
-  const min = line * NOTE_MIN_LINES + pad
-  const max = line * NOTE_MAX_LINES + pad
-  const height = Math.min(Math.max(scrollHeight, min), max)
-  const overflows = scrollHeight > max + 1
-  return { height, overflows, fadeTop: overflows && scrollTop > 1 }
+type LocalAnswer = { selected: string[]; custom: string }
+
+const EMPTY_ANSWER: LocalAnswer = { selected: [], custom: '' }
+
+export interface ClarificationQuestionAnswer {
+  questionId: string
+  skipped: boolean
+  optionIds: string[]
+  text: string
 }
 
 export interface ClarificationResponse {
   skipped: boolean
   optionIds: string[]
   text: string
+  answers: ClarificationQuestionAnswer[]
 }
 
 export interface ClarificationCardProps {
   message: Message
   interactive?: boolean
   onRespond?: (response: ClarificationResponse) => void
+  /** Playground and tests: start on a later step. */
+  initialStep?: number
 }
 
 export interface ClarificationSummaryProps {
   messages: readonly Message[]
 }
 
+function isAnswered(answer: LocalAnswer): boolean {
+  return canSubmitClarification({ skipped: false, optionIds: answer.selected, text: answer.custom })
+}
+
+function answersFromState(data: NonNullable<Message['clarification']>): Record<string, LocalAnswer> {
+  const next: Record<string, LocalAnswer> = {}
+  for (const question of clarificationQuestions(data)) {
+    next[question.id] = {
+      selected: question.selectedOptionIds ?? [],
+      custom: question.text ?? '',
+    }
+  }
+  return next
+}
+
+function questionStatus(
+  question: ClarificationQuestionState,
+  batchStatus: NonNullable<Message['clarification']>['status'],
+): 'answered' | 'skipped' | 'pending' {
+  if (question.status === 'answered' || question.status === 'skipped' || question.status === 'pending') return question.status
+  if (batchStatus === 'answered' || batchStatus === 'skipped') return batchStatus
+  return 'pending'
+}
+
 export function clarificationOutcomeCounts(messages: readonly Message[]): { answered: number; skipped: number } {
   let answered = 0
   let skipped = 0
   for (const message of messages) {
-    const status = message.clarification?.status
-    if (status === 'answered') answered += 1
-    else if (status === 'skipped') skipped += 1
+    const data = message.clarification
+    if (!data) continue
+    for (const question of clarificationQuestions(data)) {
+      const status = questionStatus(question, data.status)
+      if (status === 'answered') answered += 1
+      else if (status === 'skipped') skipped += 1
+    }
   }
   return { answered, skipped }
 }
@@ -97,9 +132,30 @@ function settledClarificationMessages(messages: readonly Message[]): Message[] {
 
 /** Status line for one settled clarification. The fold header keeps the multi-count copy. */
 export function clarificationRowLabel(message: Message, t: TFunction): string {
-  const status = message.clarification?.status
-  if (status === 'skipped') return clarificationSummaryLabel({ answered: 0, skipped: 1 }, t)
-  return clarificationSummaryLabel({ answered: 1, skipped: 0 }, t)
+  return clarificationSummaryLabel(clarificationOutcomeCounts([message]), t)
+}
+
+function buildResponse(
+  questions: readonly ClarificationQuestionState[],
+  answers: Record<string, LocalAnswer>,
+): ClarificationResponse {
+  const items = questions.map(question => {
+    const answer = answers[question.id] ?? EMPTY_ANSWER
+    const skipped = !isAnswered(answer)
+    return {
+      questionId: question.id,
+      skipped,
+      optionIds: skipped ? [] : answer.selected,
+      text: skipped ? '' : answer.custom.trim(),
+    }
+  })
+  const first = items[0]
+  return {
+    skipped: items.every(item => item.skipped),
+    optionIds: first && !first.skipped ? first.optionIds : [],
+    text: first && !first.skipped ? first.text : '',
+    answers: items,
+  }
 }
 
 /**
@@ -116,11 +172,19 @@ export function ClarificationFoldDetails({
 }) {
   const settled = settledClarificationMessages(messages)
   if (settled.length === 0) return null
-  const markStatus = showStatus ?? settled.length > 1
+  const questionCount = settled.reduce((sum, message) => (
+    message.clarification ? sum + clarificationQuestions(message.clarification).length : sum
+  ), 0)
+  const markStatus = showStatus ?? questionCount > 1
   return (
-    <div data-clarification-fold="" className="flex flex-col gap-3 py-1">
-      {settled.map(message => (
-        <ClarificationDetail key={message.id} message={message} showStatus={markStatus} />
+    <div data-clarification-fold="" className="flex flex-col">
+      {settled.map((message, index) => (
+        <ClarificationDetail
+          key={message.id}
+          message={message}
+          showStatus={markStatus}
+          leadingDivider={index > 0}
+        />
       ))}
     </div>
   )
@@ -140,13 +204,14 @@ export function ClarificationChainRow({ message }: { message: Message }) {
   const [open, setOpen] = React.useState(false)
   const status = message.clarification?.status
   if (status !== 'answered' && status !== 'skipped') return null
-  const label = clarificationRowLabel(message, t)
+  const counts = clarificationOutcomeCounts([message])
+  const label = clarificationSummaryLabel(counts, t)
   return (
     <>
       <button
         type="button"
         data-clarification-row=""
-        data-clarification-status={status}
+        data-clarification-status={clarificationSummaryStatus(counts)}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
@@ -168,7 +233,7 @@ export function ClarificationChainRow({ message }: { message: Message }) {
   )
 }
 
-/** Detail popup for one settled clarification. Matches the other step preview overlays. */
+/** Detail popup for one settled clarification batch. Matches the other step preview overlays. */
 export function ClarificationDetailsOverlay({
   message,
   isOpen,
@@ -202,26 +267,41 @@ export function ClarificationDetailsOverlay({
   )
 }
 
-function ClarificationDetail({ message, showStatus }: { message: Message; showStatus: boolean }) {
+function QuestionDetail({
+  question,
+  batchStatus,
+  showStatus,
+  divider,
+}: {
+  question: ClarificationQuestionState
+  batchStatus: NonNullable<Message['clarification']>['status']
+  showStatus: boolean
+  divider: boolean
+}) {
   const { t, i18n } = useTranslation()
-  const data = message.clarification
-  if (!data || (data.status !== 'answered' && data.status !== 'skipped')) return null
-  const selected = new Set(data.selectedOptionIds ?? [])
-  const labels = data.options.filter(option => selected.has(option.id)).map(option => option.label)
-  const skipped = data.status === 'skipped'
-  const answerText = data.text?.trim()
+  const status = questionStatus(question, batchStatus)
+  if (status !== 'answered' && status !== 'skipped') return null
+  const selected = new Set(question.selectedOptionIds ?? [])
+  const labels = question.options.filter(option => selected.has(option.id)).map(option => option.label)
+  const skipped = status === 'skipped'
+  const answerText = question.text?.trim()
   const joined = labels.join(i18n.language?.startsWith('zh') ? '、' : ', ')
   return (
-    <div data-clarification-detail="" data-clarification-status={data.status}>
+    <div
+      data-clarification-detail=""
+      data-clarification-question={question.id}
+      data-clarification-status={status}
+      className={cn(divider && 'mt-4 border-t border-border pt-4')}
+    >
       {showStatus && (
         <p className="text-xs text-muted-foreground">
-          {clarificationSummaryLabel(skipped ? { answered: 0, skipped: 1 } : { answered: 1, skipped: 0 }, t)}
+          {skipped ? t('chat.clarificationSkippedShort') : t('chat.clarificationAnsweredShort')}
         </p>
       )}
-      <h3 className={cn('text-sm font-medium text-foreground', showStatus && 'mt-1')}>{data.question}</h3>
-      {data.options.length > 0 && (
+      <h3 className={cn('text-sm font-medium text-foreground', showStatus && 'mt-1')}>{question.question}</h3>
+      {question.options.length > 0 && (
         <ul data-clarification-options="" className="mt-3 flex flex-col gap-2">
-          {data.options.map(option => {
+          {question.options.map(option => {
             const chosen = selected.has(option.id)
             return (
               <li
@@ -240,11 +320,11 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
         </ul>
       )}
       {skipped ? (
-        <p data-clarification-skipped="" className="mt-3 rounded-[10px] bg-foreground/[0.04] px-3 py-2 text-sm text-foreground">
+        <p data-clarification-skipped="" className="mt-3 text-sm text-foreground">
           {t('chat.clarificationSkipped')}
         </p>
       ) : (labels.length > 0 || answerText) && (
-        <div data-clarification-answer="" className="mt-3 rounded-[10px] bg-foreground/[0.04] px-3 py-2 text-sm text-foreground">
+        <div data-clarification-answer="" className="mt-3 text-sm text-foreground">
           <p className="text-xs text-muted-foreground">{t('chat.clarificationYourAnswer')}</p>
           {labels.length > 0 && <p className="mt-1">{joined}</p>}
           {answerText && <p className="mt-1 whitespace-pre-wrap">{answerText}</p>}
@@ -254,166 +334,415 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
   )
 }
 
-/**
- * One clarification card: choices and a free-text field together.
- * This is not the final answer card.
- */
-export function ClarificationCard({ message, interactive = false, onRespond }: ClarificationCardProps) {
-  const status = message.clarification?.status
-  // Answered and skipped clarifications live in the process fold, not a second card.
-  if (status === 'answered' || status === 'skipped') return null
-  return <PendingClarificationCard message={message} interactive={interactive} onRespond={onRespond} />
+function ClarificationDetail({
+  message,
+  showStatus,
+  leadingDivider = false,
+}: {
+  message: Message
+  showStatus: boolean
+  leadingDivider?: boolean
+}) {
+  const data = message.clarification
+  if (!data || (data.status !== 'answered' && data.status !== 'skipped')) return null
+  const questions = clarificationQuestions(data)
+  return (
+    <div className={cn(leadingDivider && 'mt-4 border-t border-border pt-4')}>
+      {questions.map((question, index) => (
+        <QuestionDetail
+          key={question.id}
+          question={question}
+          batchStatus={data.status}
+          showStatus={showStatus}
+          divider={index > 0}
+        />
+      ))}
+    </div>
+  )
 }
 
-function PendingClarificationCard({ message, interactive = false, onRespond }: ClarificationCardProps) {
+function MotifRadio({ checked, disabled }: { checked: boolean; disabled?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'grid size-4 shrink-0 place-items-center rounded-full border border-foreground text-foreground',
+        disabled && 'opacity-50',
+      )}
+    >
+      {checked ? <span className="size-2 rounded-full bg-foreground" /> : null}
+    </span>
+  )
+}
+
+function MotifCheckbox({ checked, disabled }: { checked: boolean; disabled?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'grid size-4 shrink-0 place-items-center rounded-[4px] border border-foreground text-background',
+        checked && 'bg-foreground',
+        disabled && 'opacity-50',
+      )}
+    >
+      {checked ? <Check className="size-3" strokeWidth={3} /> : null}
+    </span>
+  )
+}
+
+function QuestionOptions({
+  question,
+  answer,
+  disabled,
+  onChange,
+}: {
+  question: ClarificationQuestionState
+  answer: LocalAnswer
+  disabled: boolean
+  onChange: (answer: LocalAnswer) => void
+}) {
   const { t } = useTranslation()
-  const data = message.clarification
-  const [selected, setSelected] = React.useState<string[]>(data?.selectedOptionIds ?? [])
-  const [text, setText] = React.useState(data?.text ?? '')
-  if (!data || data.status !== 'pending') return null
-  const canEdit = interactive
-  const hint = data.options.length === 0
-    ? t('chat.clarificationTextHint')
-    : data.selection === 'multi' ? t('chat.clarificationMultiHint') : t('chat.clarificationSingleHint')
-  const submitEnabled = canSubmitClarification({ skipped: false, optionIds: selected, text })
+  const multi = question.selection === 'multi'
+  const custom = answer.custom ?? ''
 
   return (
-    <section
-      data-clarification-card=""
-      data-clarification-status={data.status}
-      data-clarification-selection={data.selection}
-      className="rounded-xl border border-border bg-background px-4 py-3 text-foreground"
-    >
-      <p className="text-xs text-muted-foreground">{t('chat.clarificationTitle')}</p>
-      <h3 className="mt-1 text-sm font-medium text-foreground">{data.question}</h3>
-      <p className="mt-2 text-xs text-muted-foreground">{hint}</p>
-      {data.options.length > 0 && (
-        <div data-clarification-options="" className="mt-3 flex flex-col gap-2">
-          {data.options.map(option => {
-            const checked = selected.includes(option.id)
+    <div>
+      {question.options.length > 0 && (
+        <div data-clarification-options="" className="flex flex-col gap-0.5" role={multi ? 'group' : 'radiogroup'}>
+          {question.options.map(option => {
+            const checked = answer.selected.includes(option.id)
             return (
               <button
                 key={option.id}
                 type="button"
-                aria-pressed={checked}
+                role={multi ? 'checkbox' : 'radio'}
+                aria-checked={checked}
                 data-clarification-option={option.id}
-                disabled={!canEdit}
-                onClick={() => setSelected(current => toggleClarificationSelection(data.selection, current, option.id))}
+                disabled={disabled}
+                onClick={() => onChange({
+                  custom: answer.custom,
+                  selected: toggleClarificationSelection(question.selection, answer.selected, option.id),
+                })}
                 className={cn(
-                  'rounded-lg border px-3 py-2 text-left text-sm text-foreground',
-                  checked ? 'border-foreground bg-foreground/5' : 'border-border bg-background hover:bg-muted',
+                  'flex min-h-9 w-full items-center gap-3 rounded-lg px-1.5 py-1 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-foreground/5',
                 )}
               >
-                {option.label}
+                {multi ? <MotifCheckbox checked={checked} disabled={disabled} /> : <MotifRadio checked={checked} disabled={disabled} />}
+                <span className={cn('select-none', disabled && 'opacity-60')}>{option.label}</span>
               </button>
             )
           })}
         </div>
       )}
-      <div className="mt-3">
-        <label className="block text-xs text-muted-foreground" htmlFor={`clarification-${message.id}`}>
-          {t('chat.clarificationFreeText')}
-        </label>
-        <ClarificationNoteField
-          id={`clarification-${message.id}`}
-          value={text}
-          readOnly={!canEdit}
-          placeholder={t('chat.clarificationFreeTextPlaceholder')}
-          onChange={setText}
-        />
+      <input
+        value={custom}
+        disabled={disabled}
+        data-clarification-text=""
+        placeholder={t('chat.clarificationFreeTextPlaceholder')}
+        onChange={event => onChange({ custom: event.target.value, selected: answer.selected })}
+        className={cn(
+          'flex h-10 w-full rounded-xl border border-input bg-transparent px-3 text-sm outline-none',
+          'placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          question.options.length > 0 && 'mt-1.5',
+        )}
+      />
+    </div>
+  )
+}
+
+function barTone({
+  answered,
+  current,
+  hovered,
+  skipped,
+}: {
+  answered: boolean
+  current: boolean
+  hovered: boolean
+  skipped: boolean
+}) {
+  if (skipped) return 'bg-warning'
+  if (current) return 'bg-foreground'
+  if (hovered) return answered ? 'bg-foreground' : 'bg-foreground/45'
+  return answered ? 'bg-foreground/55' : 'bg-foreground/20'
+}
+
+function stepBarState(answered: boolean, skipped: boolean, current: boolean): string {
+  if (current) return 'current'
+  if (skipped) return 'skipped'
+  if (answered) return 'answered'
+  return 'upcoming'
+}
+
+function StepBars({
+  current,
+  questions,
+  answers,
+  onSelect,
+  t,
+}: {
+  current: number
+  questions: ClarificationQuestionState[]
+  answers: Record<string, LocalAnswer>
+  onSelect: (index: number) => void
+  t: TFunction
+}) {
+  const reduce = useReducedMotion() ?? false
+  const [hovered, setHovered] = React.useState<string | null>(null)
+
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1" data-clarification-steps="">
+      {questions.map((question, index) => {
+        const answered = isAnswered(answers[question.id] ?? EMPTY_ANSWER)
+        const skipped = index < current && !answered
+        const width = hovered === question.id && !reduce
+          ? BAR_HOVER_WIDTH
+          : index === current
+            ? BAR_CURRENT_WIDTH
+            : BAR_REST_WIDTH
+        const status = answered
+          ? t('chat.clarificationStepAnswered')
+          : skipped
+            ? t('chat.clarificationStepSkipped')
+            : ''
+        const ariaLabel = `${t('chat.clarificationStep', { current: index + 1, total: questions.length, title: question.question })}${status}`
+
+        return (
+          <Tooltip key={question.id} delayDuration={150}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                data-clarification-step-bar={question.id}
+                data-clarification-bar-state={stepBarState(answered, skipped, index === current)}
+                aria-label={ariaLabel}
+                aria-current={index === current ? 'step' : undefined}
+                onClick={() => onSelect(index)}
+                onPointerEnter={() => setHovered(question.id)}
+                onPointerLeave={() => setHovered(null)}
+                onFocus={() => setHovered(question.id)}
+                onBlur={() => setHovered(null)}
+                className="flex h-4 cursor-pointer items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <motion.span
+                  initial={false}
+                  animate={{ width }}
+                  transition={reduce ? { duration: 0 } : SPRING_SWAP}
+                  className={cn(
+                    'h-1 rounded-full transition-colors duration-200',
+                    barTone({
+                      answered,
+                      current: index === current,
+                      hovered: hovered === question.id && !reduce,
+                      skipped,
+                    }),
+                  )}
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{question.question}</TooltipContent>
+          </Tooltip>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * One clarification card: Motif Question Card layout, with Selection's
+ * multi-select, coexisting notes, and submit-with-skips behavior.
+ */
+export function ClarificationCard({
+  message,
+  interactive = false,
+  onRespond,
+  initialStep = 0,
+}: ClarificationCardProps) {
+  const data = message.clarification
+  if (!data) return null
+  if (data.status === 'answered' || data.status === 'skipped') {
+    return <AnsweredClarificationCard message={message} />
+  }
+  if (data.status !== 'pending') return null
+  return (
+    <PendingClarificationCard
+      message={message}
+      interactive={interactive}
+      onRespond={onRespond}
+      initialStep={initialStep}
+    />
+  )
+}
+
+function AnsweredClarificationCard({ message }: { message: Message }) {
+  const { t } = useTranslation()
+  const data = message.clarification
+  if (!data) return null
+  const questions = clarificationQuestions(data)
+  const current = questions[questions.length - 1]
+  return (
+    <section
+      data-clarification-card=""
+      data-clarification-status={data.status}
+      data-clarification-question-count={questions.length}
+      className="w-full overflow-hidden rounded-2xl border border-border bg-card p-4 text-sm text-foreground"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">{current?.question ?? data.question}</p>
+        <span className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground" aria-hidden="true">
+          <X className="size-3.5" />
+        </span>
       </div>
-      {canEdit && (
-        <div className="mt-3 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            data-clarification-skip=""
-            onClick={() => onRespond?.({ skipped: true, optionIds: [], text: '' })}
-            className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {t('chat.clarificationSkip')}
-          </button>
-          <button
-            type="button"
-            data-clarification-continue=""
-            disabled={!submitEnabled}
-            onClick={() => onRespond?.({ skipped: false, optionIds: selected, text: text.trim() })}
-            className="rounded-lg bg-foreground px-3 py-1.5 text-sm text-background disabled:opacity-40"
-          >
-            {t('chat.clarificationContinue')}
-          </button>
-        </div>
-      )}
+      <p data-clarification-result="" className="mt-2 text-sm text-muted-foreground">
+        {t('chat.clarificationRecorded')}
+      </p>
     </section>
   )
 }
 
-function ClarificationNoteField({
-  id,
-  value,
-  readOnly,
-  placeholder,
-  onChange,
-}: {
-  id: string
-  value: string
-  readOnly: boolean
-  placeholder: string
-  onChange: (value: string) => void
-}) {
-  const ref = React.useRef<HTMLTextAreaElement>(null)
-  const [layout, setLayout] = React.useState(() => clarificationNoteLayout(0, 0))
+function PendingClarificationCard({
+  message,
+  interactive = false,
+  onRespond,
+  initialStep = 0,
+}: ClarificationCardProps) {
+  const { t } = useTranslation()
+  const data = message.clarification
+  const questions = data ? clarificationQuestions(data) : []
+  const [answers, setAnswers] = React.useState<Record<string, LocalAnswer>>(() => (
+    data ? answersFromState(data) : {}
+  ))
+  const [step, setStep] = React.useState(() => Math.min(Math.max(0, initialStep), Math.max(0, questions.length - 1)))
+  const previousStep = React.useRef(step)
+  const reduce = useReducedMotion() ?? false
 
-  const measure = React.useCallback(() => {
-    const element = ref.current
-    if (!element) return
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
-    const pinBottom = distanceFromBottom < 8
-    const computed = getComputedStyle(element)
-    const line = Number.parseFloat(computed.lineHeight)
-    const pad = Number.parseFloat(computed.paddingTop) + Number.parseFloat(computed.paddingBottom)
-    element.style.height = 'auto'
-    const fullHeight = element.scrollHeight
-    const measured = { line: Number.isFinite(line) ? line : undefined, pad: Number.isFinite(pad) ? pad : undefined }
-    element.style.height = `${clarificationNoteLayout(fullHeight, element.scrollTop, measured).height}px`
-    if (pinBottom && element.scrollTop + element.clientHeight < element.scrollHeight - 1) {
-      element.scrollTop = element.scrollHeight
+  React.useEffect(() => {
+    previousStep.current = step
+  }, [step])
+
+  if (!data || data.status !== 'pending') return null
+  const currentStep = Math.min(Math.max(0, step), Math.max(0, questions.length - 1))
+  const question = questions[currentStep]
+  const currentAnswer = question ? (answers[question.id] ?? EMPTY_ANSWER) : EMPTY_ANSWER
+  const lastStep = currentStep === questions.length - 1
+  const canEdit = interactive
+  const currentAnswered = isAnswered(currentAnswer)
+  const canContinue = lastStep || currentAnswered
+  const slide = reduce || currentStep === previousStep.current
+    ? 0
+    : currentStep > previousStep.current ? 1 : -1
+
+  const updateCurrentAnswer = (next: LocalAnswer) => {
+    if (!question) return
+    setAnswers(current => ({ ...current, [question.id]: next }))
+  }
+
+  const submit = (nextAnswers = answers) => {
+    if (!canEdit) return
+    onRespond?.(buildResponse(questions, nextAnswers))
+  }
+
+  const skipCurrent = () => {
+    if (!canEdit || !question) return
+    const nextAnswers = { ...answers, [question.id]: EMPTY_ANSWER }
+    setAnswers(nextAnswers)
+    if (!lastStep) {
+      setStep(currentStep + 1)
+      return
     }
-    const next = clarificationNoteLayout(fullHeight, element.scrollTop, measured)
-    setLayout(current => (
-      current.height === next.height && current.overflows === next.overflows && current.fadeTop === next.fadeTop
-        ? current
-        : next
-    ))
-  }, [])
+    submit(nextAnswers)
+  }
 
-  React.useLayoutEffect(() => {
-    measure()
-  }, [measure, value])
+  const continueOrSubmit = () => {
+    if (!canEdit) return
+    if (!lastStep) {
+      if (!currentAnswered) return
+      setStep(currentStep + 1)
+      return
+    }
+    submit()
+  }
 
   return (
-    <div className="relative mt-1.5 rounded-[10px] bg-foreground/[0.04] focus-within:ring-1 focus-within:ring-foreground/15">
-      <textarea
-        ref={ref}
-        id={id}
-        data-clarification-text=""
-        data-clarification-note-fade={layout.fadeTop ? 'on' : 'off'}
-        value={value}
-        rows={NOTE_MIN_LINES}
-        readOnly={readOnly}
-        placeholder={placeholder}
-        onChange={event => onChange(event.target.value)}
-        onScroll={measure}
-        style={{
-          height: layout.height,
-          scrollbarWidth: layout.overflows ? 'thin' : undefined,
-          maskImage: layout.fadeTop ? 'linear-gradient(to bottom, transparent 0, #000 1.75rem, #000 100%)' : undefined,
-          WebkitMaskImage: layout.fadeTop ? 'linear-gradient(to bottom, transparent 0, #000 1.75rem, #000 100%)' : undefined,
-        }}
-        className={cn(
-          'block w-full resize-none bg-transparent px-3 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/75',
-          layout.overflows ? 'overflow-y-auto' : 'overflow-hidden',
-        )}
-      />
-    </div>
+    <TooltipProvider delayDuration={150}>
+      <section
+        data-clarification-card=""
+        data-clarification-status={data.status}
+        data-clarification-selection={question?.selection ?? data.selection}
+        data-clarification-step={currentStep}
+        data-clarification-question-count={questions.length}
+        className="w-full overflow-hidden rounded-2xl border border-border bg-card p-4 text-sm text-foreground"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <p className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">{question?.question ?? data.question}</p>
+          {canEdit && (
+            <button
+              type="button"
+              data-clarification-dismiss=""
+              aria-label={t('chat.clarificationDismiss')}
+              onClick={() => submit()}
+              className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+
+        {question ? (
+          <motion.div
+            key={question.id}
+            initial={{ opacity: 0, x: 8 * slide }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: EASE_OUT }}
+            className="mt-3"
+          >
+            <QuestionOptions
+              question={question}
+              answer={currentAnswer}
+              disabled={!canEdit}
+              onChange={updateCurrentAnswer}
+            />
+          </motion.div>
+        ) : null}
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <StepBars
+            answers={answers}
+            current={currentStep}
+            onSelect={setStep}
+            questions={questions}
+            t={t}
+          />
+          {canEdit && (
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                data-clarification-skip=""
+                onClick={skipCurrent}
+                className="inline-flex h-8 items-center justify-center rounded-full bg-foreground/5 px-3 text-xs font-medium text-foreground hover:bg-foreground/10"
+              >
+                {t('chat.clarificationSkip')}
+              </button>
+              <button
+                type="button"
+                data-clarification-continue={lastStep ? undefined : ''}
+                data-clarification-submit={lastStep ? '' : undefined}
+                disabled={!canContinue}
+                onClick={continueOrSubmit}
+                className={cn(
+                  'inline-flex h-8 items-center justify-center rounded-full px-3 text-xs font-medium',
+                  lastStep || currentAnswered
+                    ? 'bg-foreground text-background hover:bg-foreground/90'
+                    : 'cursor-not-allowed bg-foreground/10 text-muted-foreground',
+                )}
+              >
+                {lastStep ? t('chat.clarificationSubmit') : t('chat.clarificationContinue')}
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+    </TooltipProvider>
   )
 }

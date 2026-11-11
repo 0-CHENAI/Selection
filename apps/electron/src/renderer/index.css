@@ -103,6 +103,7 @@
   --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
   --destructive-rgb: 180, 60, 50;           /* RGB for shadow-tinted */
+  --warning: oklch(0.666 0.179 58.318);     /* amber - skipped clarification steps */
 
   /* === SHADOW OPACITY (light mode = subtle, dark mode = stronger) === */
   --shadow-border-opacity: 0.08;            /* Border ring opacity */
@@ -274,6 +275,7 @@
   --success-rgb: 50, 140, 80;               /* RGB for shadow-tinted */
   --destructive: oklch(0.65 0.22 28);        /* brighter red in dark */
   --destructive-rgb: 200, 70, 60;            /* RGB for shadow-tinted */
+  --warning: oklch(0.828 0.189 84.429);      /* amber - skipped clarification steps */
 
   /* === SHADOW OPACITY (stronger in dark mode for visibility) === */
   --shadow-border-opacity: 0.15;
@@ -496,6 +498,7 @@ html[data-font="inter"] {
   --color-permission-ask: var(--permission-ask);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
 
   /* === MIX VARIANTS (solid interpolation) === */
   --color-foreground-1\.5: var(--foreground-1\.5);

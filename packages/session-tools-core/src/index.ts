@@ -9,7 +9,8 @@
 
 // Types
 export { UpdateTaskListSchema, TaskListItemSchema, taskListAllowed } from './handlers/update-task-list.ts';
-export type { ClarificationAsk, ClarificationGate, ClarificationOption } from './clarification.ts';
+export type { ClarificationAsk, ClarificationGate, ClarificationOption, ClarificationQuestion } from './clarification.ts';
+export { normalizeClarificationAsk } from './clarification.ts';
 export type { TaskListItem } from './handlers/update-task-list.ts';
 export type { OfficeToolName } from './handlers/office-template.ts';
 export type { PptToolName } from './handlers/ppt-tools.ts';

@@ -6,6 +6,7 @@ import { taskRailComponents } from './task-rail'
 import { taskCardComponents } from './task-card'
 import { turnCardModesComponents } from './turn-card-modes'
 import { messagesComponents } from './messages'
+import { clarificationCardComponents } from './clarification-card'
 import { inputComponents } from './input'
 import { slashCommandComponents } from './slash-command'
 import { markdownComponents } from './markdown'
@@ -51,6 +52,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...turnCardModesComponents,
   ...fullscreenOverlayComponents,
   ...messagesComponents,
+  ...clarificationCardComponents,
   ...inputComponents,
   ...toastsComponents,
   ...slashCommandComponents,

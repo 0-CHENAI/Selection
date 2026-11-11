@@ -15,7 +15,7 @@ import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, H
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
 import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, executionWorkMode, resolveTurnWorkMode, MODE_SWITCH_HANDOVER_DISABLED, type WorkModeMetadata, type WorkMode } from '@craft-agent/shared/sessions/work-mode'
-import { buildClarificationState, clarificationContinuation, countClarificationRounds, decideClarification, hasPendingOriginClarification, normalizeClarificationResponse, type ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
+import { applyClarificationAnswers, buildClarificationState, clarificationContinuation, countClarificationQuestionItems, countClarificationRounds, decideClarification, hasPendingOriginClarification, normalizeClarificationResponse, type ClarificationResponseInput, type NormalizedClarificationAnswer } from '@craft-agent/shared/agent/clarification'
 import type { ClarificationAsk } from '@craft-agent/session-tools-core'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
@@ -13553,7 +13553,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     const origin = this.sessions.get(ask.originSessionId)
     if (!origin || origin.deleting) {
-      this.settleClarification(requestId, { skipped: true, optionIds: [], text: '' })
+      this.settleClarification(requestId, { skipped: true, optionIds: [], text: '', answers: [] })
       return false
     }
     const previous = this.snapshotClarification(requestId)
@@ -13563,6 +13563,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       skipped: normalized.skipped,
       labels: normalized.labels,
       text: normalized.text,
+      answers: normalized.answers,
     })
     try {
       await this.sendMessage(origin.id, continuation, undefined, undefined, { hidden: true })
@@ -13582,7 +13583,13 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         reason: 'A clarification card is already waiting for the user. Stop this turn. Do not call clarify again until they answer or skip.',
       }
     }
-    const decision = decideClarification(countClarificationRounds(managed.messages), ask.critical === true)
+    const incoming = countClarificationQuestionItems({
+      question: ask.question,
+      selection: ask.selection,
+      options: ask.options,
+      questions: ask.questions,
+    })
+    const decision = decideClarification(countClarificationRounds(managed.messages), ask.critical === true, incoming)
     if (!decision.allow) return { accepted: false, reason: decision.reason }
     const requestId = `clarify-${generateMessageId()}`
     const state = buildClarificationState(ask, { requestId, round: decision.round, originSessionId: managed.id })
@@ -13663,17 +13670,17 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     for (const managed of sessions) this.persistSession(managed)
   }
 
-  private settleClarification(requestId: string, result: { skipped: boolean; optionIds: string[]; text: string }): void {
+  private settleClarification(requestId: string, result: { skipped: boolean; optionIds: string[]; text: string; answers?: readonly NormalizedClarificationAnswer[] }): void {
     for (const managed of this.sessions.values()) {
       let changed = false
       for (const message of managed.messages) {
         if (message.clarification?.requestId !== requestId || message.clarification.status !== 'pending') continue
-        message.clarification = {
-          ...message.clarification,
-          status: result.skipped ? 'skipped' : 'answered',
-          selectedOptionIds: result.optionIds,
+        message.clarification = applyClarificationAnswers(message.clarification, {
+          skipped: result.skipped,
+          optionIds: result.optionIds,
           text: result.text,
-        }
+          answers: result.answers ?? [],
+        })
         changed = true
         this.sendEvent({ type: 'clarification_resolved', sessionId: managed.id, message }, managed.workspace.id)
       }

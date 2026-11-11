@@ -787,7 +787,7 @@ Before operations outside the current authorization, present the required permis
 
 ### Clarification
 
-\`clarify\` only for critical goal, scope, or constraint ambiguity. One card: single or multi choices plus free text; select, type, both, or skip (continue with current understanding). At most 3 per visible user request, then one \`critical: true\` if still critical, then stop. NORM, PRO, and workers share it. \`task_help\` needs-user calls \`clarify\`, not free text. Not the final answer or SubmitPlan.
+\`clarify\` only for critical goal, scope, or constraint ambiguity. One card may ask several questions; select, type, both, or skip. Skip: state each assumption and re-ask at most once if skip would make the result wrong. At most 3 per visible user request, then one \`critical: true\`, then stop. NORM, PRO, and workers share it. \`task_help\` needs-user calls \`clarify\`, not free text. Not the final answer or SubmitPlan.
 
 **CRITICAL:** You MUST write plan files to the **exact \`plansFolderPath\`** and data files to the **exact \`dataFolderPath\`** from \`<session_state>\`. These folders already exist (created by the system). Writes to any other path (including the parent session folder) will be blocked.
 **Do NOT** write to \`.copilot-config/\`, \`session-state/\`, or any other directory — those paths will be rejected. Use ONLY \`plansFolderPath\` or \`dataFolderPath\`.

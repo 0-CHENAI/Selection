@@ -229,6 +229,31 @@ test('a pending clarification does not fold into the settled summary', () => {
   expect(anchorClarificationWorkStatus(turns, new Map([[1, 'waiting']])).get(1)).toBe('waiting')
 })
 
+test('a multi-question batch is still one clarification turn', () => {
+  const batch: Message = {
+    ...clarification,
+    clarification: {
+      ...clarification.clarification!,
+      question: '这份报告主要给谁看？',
+      questions: [
+        { id: 'audience', question: '这份报告主要给谁看？', selection: 'single', options: [] },
+        { id: 'years', question: '这次需要覆盖哪些年份？', selection: 'multi', options: [] },
+        { id: 'form', question: '交付形式更倾向哪种？', selection: 'single', options: [] },
+      ],
+      status: 'answered',
+    },
+  }
+  const turns = groupMessagesByTurn([user, clarifyTool, batch, answer], { isSessionProcessing: false })
+  const groups = settledClarificationGroups(turns)
+  expect(groups).toHaveLength(1)
+  expect(groups[0]?.clarificationIndexes).toHaveLength(1)
+  const entries = interleaveSettledClarifications(
+    [{ id: 'early', type: 'tool', status: 'completed', timestamp: 1 }],
+    [batch],
+  )
+  expect(entries.filter(entry => entry.kind === 'clarification')).toHaveLength(1)
+})
+
 test('a pending card from an earlier request does not restyle the current turn', () => {
   const turns = groupMessagesByTurn([
     user,

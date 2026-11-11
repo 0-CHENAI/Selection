@@ -51,6 +51,7 @@ export type {
   ClarificationAmbiguity,
   ClarificationSelectionMode,
   ClarificationStatus,
+  ClarificationQuestionState,
   ClarificationState,
   TokenUsage,
   AgentEventUsage,

@@ -43,6 +43,7 @@
   --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
   --destructive-rgb: 180, 60, 50;           /* RGB for shadow-tinted */
+  --warning: oklch(0.666 0.179 58.318);     /* amber - skipped clarification steps */
   --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
   --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
 
@@ -162,6 +163,7 @@
   --success: oklch(0.60 0.17 145);           /* green */
   --destructive: oklch(0.70 0.19 22);        /* brighter red in dark */
   --destructive-rgb: 200, 80, 70;            /* RGB for shadow-tinted */
+  --warning: oklch(0.828 0.189 84.429);      /* amber - skipped clarification steps */
   --info-rgb: 200, 140, 60;                  /* RGB for shadow-tinted */
   --success-rgb: 50, 140, 80;                /* RGB for shadow-tinted */
 
@@ -231,6 +233,7 @@ html[data-font="inter"] {
   --color-info: var(--info);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
 
   /* === MIX VARIANTS (solid interpolation) === */
   --color-foreground-2: var(--foreground-2);

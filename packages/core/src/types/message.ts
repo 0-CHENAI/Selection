@@ -338,10 +338,27 @@ export type ClarificationAmbiguity = 'goal' | 'scope' | 'constraints';
 export type ClarificationSelectionMode = 'single' | 'multi';
 export type ClarificationStatus = 'pending' | 'answered' | 'skipped';
 
+/** One step inside a clarification card. */
+export interface ClarificationQuestionState {
+  id: string;
+  question: string;
+  selection: ClarificationSelectionMode;
+  options: Array<{ id: string; label: string }>;
+  status?: ClarificationStatus;
+  selectedOptionIds?: string[];
+  text?: string;
+}
+
 /** One clarification card. Not a final answer. */
 export interface ClarificationState {
   requestId: string;
   question: string;
+  /**
+   * Step-by-step questions for one clarify call. Absent on sessions saved
+   * before multi-question cards; readers treat the top-level question as a
+   * single step.
+   */
+  questions?: ClarificationQuestionState[];
   ambiguity: ClarificationAmbiguity;
   selection: ClarificationSelectionMode;
   options: Array<{ id: string; label: string }>;
