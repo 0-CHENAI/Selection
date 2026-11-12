@@ -18,6 +18,7 @@ import {
   createStickyScrollFollow,
   readScrollMetrics,
   isAtBottom,
+  stepSmoothDamp,
   type ScrollMetrics,
 } from '../ChatDisplay.scroll-to-bottom'
 
@@ -29,22 +30,24 @@ describe('virtual history preserves reader intent and streaming', () => {
     const viewport = { scrollTop: atBottom ? 4600 : 1000, scrollHeight: 5000, clientHeight: 400 }
     const stickyRef = { current: sticky }
     let updates = 0
+    let resumes = 0
     const scope = {
       scrollViewportRef: { current: viewport }, readScrollMetrics, isAtBottom,
       ignoreScrollUnstickUntilRef: { current: 0 }, isStickToBottomRef: stickyRef, shouldApplyUserScroll,
       applyStickState: () => { updates++; stickyRef.current = isAtBottom(viewport) },
+      stickyFollowRef: { current: { resize() { resumes++ } } },
     }
     new Function(...Object.keys(scope), body!)(...Object.values(scope))
-    return { sticky: stickyRef.current, updates }
+    return { sticky: stickyRef.current, updates, resumes }
   }
   test('layout growth alone cannot release the sticky bottom', () => {
-    expect(scroll(true, false)).toEqual({ sticky: true, updates: 0 })
+    expect(scroll(true, false)).toEqual({ sticky: true, updates: 0, resumes: 0 })
   })
   test('reader scrolling away keeps control of the full history', () => {
-    expect(scroll(false, false)).toEqual({ sticky: false, updates: 1 })
+    expect(scroll(false, false)).toEqual({ sticky: false, updates: 1, resumes: 0 })
   })
   test('returning to the actual bottom resumes following', () => {
-    expect(scroll(false, true)).toEqual({ sticky: true, updates: 1 })
+    expect(scroll(false, true)).toEqual({ sticky: true, updates: 1, resumes: 1 })
   })
 })
 
@@ -62,12 +65,16 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     expect(wheelBody).toBeDefined()
     const sticky = { current: true }
     let unlocks = 0
-    const wheel = new Function('event', 'isStickToBottomRef', 'cancelProgrammaticLock', wheelBody!)
-    wheel({ deltaY: 20 }, sticky, () => unlocks++)
+    let cancelled = 0
+    const stickyFollowRef = { current: { cancel() { cancelled++ } } }
+    const wheel = new Function('event', 'isStickToBottomRef', 'cancelProgrammaticLock', 'stickyFollowRef', wheelBody!)
+    wheel({ deltaY: 20 }, sticky, () => unlocks++, stickyFollowRef)
     expect(sticky.current).toBe(true)
-    wheel({ deltaY: -1 }, sticky, () => unlocks++)
+    expect(cancelled).toBe(1)
+    wheel({ deltaY: -1 }, sticky, () => unlocks++, stickyFollowRef)
     expect(sticky.current).toBe(false)
     expect(unlocks).toBe(2)
+    expect(cancelled).toBe(2)
   })
 
   test('resize follows until reader pauses, including when the panel loses focus', () => {
@@ -118,7 +125,7 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     expect(history).toContain('shouldMeasureVirtualScrollMargin')
   })
 
-  test('a queued follow does not read layout for another streaming resize', () => {
+  test('follow frames write scrollTop from a cached target without rereading scrollHeight', () => {
     let reads = 0
     const viewport = {
       scrollTop: 560,
@@ -136,14 +143,20 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     const afterSchedule = reads
     expect(afterSchedule).toBeGreaterThan(0)
     expect(next).toBeTypeOf('function')
-    follow.resize()
+    next!(16.67)
     expect(reads).toBe(afterSchedule)
+    follow.resize()
+    expect(reads).toBeGreaterThan(afterSchedule)
+    const afterSecondResize = reads
+    next!(33.34)
+    expect(reads).toBe(afterSecondResize)
     follow.dispose()
   })
 
   test('uses one follow controller without translating the transcript', () => {
     expect(source).toContain('follow.resize()')
     expect(source).toContain('follow.dispose()')
+    expect(source).toContain('stickyFollowRef.current?.cancel()')
     expect(source).not.toContain('applyFollowPaintTransform')
     expect(source).toContain('stickyFollowRef.current.resize(resolved)')
   })
@@ -173,7 +186,7 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     follow.dispose()
   })
 
-  test('the next frame follows growth that arrived after the last resize', () => {
+  test('follow frames use the ResizeObserver target, not a per-frame scrollHeight read', () => {
     let nextFrame: FrameRequestCallback | undefined
     const viewport = { scrollTop: 1190, scrollHeight: 2000, clientHeight: 800 }
     const follow = createStickyScrollFollow(viewport, {
@@ -182,28 +195,122 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
       cancelFrame: () => { nextFrame = undefined },
     })
     follow.resize()
-    viewport.scrollHeight = 4000
     nextFrame!(16.67)
-    expect(viewport.scrollTop).toBeGreaterThan(1200)
+    const afterFirst = viewport.scrollTop
+    expect(afterFirst).toBeGreaterThan(1190)
+    expect(afterFirst).toBeLessThan(1200)
+    viewport.scrollHeight = 4000
+    nextFrame!(33.34)
+    expect(viewport.scrollTop).toBeLessThan(afterFirst + 20)
+    follow.resize()
+    nextFrame!(50)
+    expect(viewport.scrollTop).toBeGreaterThan(afterFirst)
     follow.dispose()
   })
 
-  test('reduced motion and viewport-sized bursts snap without scheduling work', () => {
+  test('reduced motion snaps without scheduling work', () => {
     let scheduled = 0
-    let reduced = true
     const viewport = { scrollTop: 500, scrollHeight: 1200, clientHeight: 600 }
     const follow = createStickyScrollFollow(viewport, {
-      sticky: () => true, reduceMotion: () => reduced,
+      sticky: () => true, reduceMotion: () => true,
       requestFrame: () => { scheduled++; return 1 }, cancelFrame: () => {},
     })
     follow.resize()
     expect(viewport.scrollTop).toBe(600)
-    reduced = false
-    viewport.scrollHeight += 2000
-    follow.resize()
-    expect(viewport.scrollTop).toBe(2600)
     expect(scheduled).toBe(0)
     follow.dispose()
+  })
+
+  test('viewport-sized streaming bursts ease instead of snapping', () => {
+    let nextFrame: FrameRequestCallback | undefined
+    const viewport = { scrollTop: 500, scrollHeight: 1200, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined },
+    })
+    viewport.scrollHeight += 2000
+    follow.resize()
+    expect(nextFrame).toBeTypeOf('function')
+    expect(viewport.scrollTop).toBe(500)
+    nextFrame!(16.67)
+    expect(viewport.scrollTop).toBeGreaterThan(500)
+    expect(viewport.scrollTop).toBeLessThan(2600)
+    follow.dispose()
+  })
+
+  test('bursty line growth keeps one follow instead of staircase snaps', () => {
+    let now = 0
+    let nextFrame: FrameRequestCallback | undefined
+    const viewport = { scrollTop: 920, scrollHeight: 1200, clientHeight: 280 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined },
+    })
+    const samples: number[] = []
+    const tick = (ms: number) => {
+      now += ms
+      nextFrame!(now)
+      samples.push(viewport.scrollTop)
+    }
+    follow.resize()
+    for (let burst = 0; burst < 6; burst++) {
+      viewport.scrollHeight += 24
+      follow.resize()
+      tick(16.67)
+      tick(16.67)
+      tick(16.67)
+      const target = viewport.scrollHeight - viewport.clientHeight
+      expect(viewport.scrollTop).toBeLessThan(target)
+    }
+    for (let i = 1; i < samples.length; i++) {
+      expect(samples[i]).toBeGreaterThanOrEqual(samples[i - 1])
+      expect(samples[i] - samples[i - 1]).toBeLessThan(28)
+    }
+    follow.dispose()
+  })
+
+  test('cancel drops the follow frame immediately and resize resumes it', () => {
+    let nextFrame: FrameRequestCallback | undefined
+    let cancelled = 0
+    const viewport = { scrollTop: 500, scrollHeight: 1200, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined; cancelled++ },
+    })
+    follow.resize()
+    expect(nextFrame).toBeTypeOf('function')
+    follow.cancel()
+    expect(nextFrame).toBeUndefined()
+    expect(cancelled).toBe(1)
+    const frozen = viewport.scrollTop
+    viewport.scrollHeight += 80
+    follow.resize()
+    expect(nextFrame).toBeTypeOf('function')
+    nextFrame!(16.67)
+    expect(viewport.scrollTop).toBeGreaterThan(frozen)
+    follow.dispose()
+  })
+})
+
+describe('stepSmoothDamp', () => {
+  test('approaches without overshooting and is frame-rate independent', () => {
+    let position = 0
+    let velocity = 0
+    for (let i = 0; i < 8; i++) {
+      const next = stepSmoothDamp(position, 24, velocity, 0.016)
+      expect(next.position).toBeGreaterThanOrEqual(position)
+      expect(next.position).toBeLessThanOrEqual(24)
+      position = next.position
+      velocity = next.velocity
+    }
+    expect(position).toBeGreaterThan(8)
+    const coarse = stepSmoothDamp(0, 24, 0, 0.032)
+    const a = stepSmoothDamp(0, 24, 0, 0.016)
+    const b = stepSmoothDamp(a.position, 24, a.velocity, 0.016)
+    expect(Math.abs(coarse.position - b.position)).toBeLessThan(1.5)
   })
 })
 

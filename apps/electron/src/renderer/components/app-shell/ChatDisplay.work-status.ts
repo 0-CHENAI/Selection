@@ -1,6 +1,23 @@
 import type { Turn } from '@craft-agent/ui'
 import { isCancelledTurnMarker } from '@craft-agent/shared/sessions/cancelled-turn'
 
+/** Format elapsed time: "45s" under a minute, "1:02" for 1+ minutes. */
+export function formatWorkElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+/** Fixed tabular slot so 9s → 10s and 59s → 1:00 never shift the header. */
+export const WORK_ELAPSED_SLOT_CLASS = 'ml-1 inline-block w-[5ch] shrink-0 tabular-nums text-muted-foreground/60'
+
+/**
+ * Collapsed TurnCard work header is h-8. Reserve that row in the tail
+ * processing indicator so the first assistant card does not jump.
+ */
+export const TAIL_WORK_CHROME_RESERVE_CLASS = 'h-8 shrink-0'
+
 export interface WorkTiming {
   startTime: number
   endTime: number

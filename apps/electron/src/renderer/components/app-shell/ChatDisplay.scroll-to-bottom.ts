@@ -50,10 +50,17 @@ export function snapStickyViewportToBottom(
   return true
 }
 
-/** One display frame. Longer dt after a hitch reads as a dropped-frame jump. */
-export const STICKY_FOLLOW_MAX_DT_MS = 24
-/** Track the bottom every frame. 220ms felt like a low-fps slide. */
+/** Cap dt so a hitch does not jump the viewport. ~2 frames at 60Hz. */
+export const STICKY_FOLLOW_MAX_DT_MS = 32
+/** @deprecated SmoothDamp `smoothTime` replaced the exponential tau. */
 export const STICKY_FOLLOW_MS = 80
+/**
+ * Unity-style SmoothDamp time. ~140ms to the bulk of a wrap, overlapping
+ * 34–119ms stream bursts instead of settling into a staircase.
+ */
+export const STICKY_FOLLOW_SMOOTH_TIME_S = 0.14
+export const STICKY_FOLLOW_SETTLE_PX = 0.35
+export const STICKY_FOLLOW_SETTLE_VELOCITY = 12
 /** Same spring as dsh-smooth-stream: visual lag lives on a compositor layer. */
 export const FOLLOW_SPRING_STIFFNESS = 130
 export const FOLLOW_SPRING_DAMPING = 24
@@ -69,6 +76,38 @@ export type FollowPaintState = {
 }
 
 /**
+ * Critically damped SmoothDamp (Unity Game Programming Gems). Frame-rate
+ * independent, no overshoot. `smoothTime` is seconds to approach the target.
+ */
+export function stepSmoothDamp(
+  current: number,
+  target: number,
+  currentVelocity: number,
+  dtSeconds: number,
+  smoothTime = STICKY_FOLLOW_SMOOTH_TIME_S,
+): { position: number; velocity: number } {
+  const omega = 2 / Math.max(0.0001, smoothTime)
+  const dt = Math.max(0, dtSeconds)
+  if (dt === 0) return { position: current, velocity: currentVelocity }
+  const x = omega * dt
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x)
+  const change = current - target
+  const temp = (currentVelocity + omega * change) * dt
+  let velocity = (currentVelocity - omega * temp) * exp
+  let position = target + (change + temp) * exp
+  if ((target > current) === (position > target)) {
+    position = target
+    velocity = 0
+  }
+  return { position, velocity }
+}
+
+function followSettled(position: number, target: number, velocity: number): boolean {
+  return Math.abs(target - position) < STICKY_FOLLOW_SETTLE_PX
+    && Math.abs(velocity) < STICKY_FOLLOW_SETTLE_VELOCITY
+}
+
+/**
  * Ease toward the true bottom while content grows. Returns whether another
  * animation frame is needed. Prefer a cached `target` so the rAF loop only writes.
  */
@@ -78,16 +117,17 @@ export function followStickyViewportToBottom(
 ): boolean {
   if (options.focused && !options.sticky) return false
   const target = options.target ?? Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-  const distance = target - viewport.scrollTop
-  if (options.reduceMotion || Math.abs(distance) < 0.75) {
+  if (options.reduceMotion) {
     viewport.scrollTop = target
     return false
   }
-  viewport.scrollTop += distance * (1 - Math.exp(-options.elapsedMs / STICKY_FOLLOW_MS))
-  if (Math.abs(target - viewport.scrollTop) < 0.75) {
+  const dt = Math.min(STICKY_FOLLOW_MAX_DT_MS, Math.max(0, options.elapsedMs)) / 1000
+  const next = stepSmoothDamp(viewport.scrollTop, target, 0, dt)
+  if (followSettled(next.position, target, next.velocity)) {
     viewport.scrollTop = target
     return false
   }
+  viewport.scrollTop = next.position
   return true
 }
 
@@ -102,55 +142,105 @@ export function createStickyScrollFollow(
   },
 ) {
   const request = options.requestFrame ?? requestAnimationFrame
-  const cancel = options.cancelFrame ?? cancelAnimationFrame
+  const cancelFn = options.cancelFrame ?? cancelAnimationFrame
   let frame: number | undefined
   let target = 0
+  let position: number | undefined
+  let velocity = 0
   let lastTime: number | undefined
   let disposed = false
-  let manualSmooth = false
-  const stop = () => {
-    if (frame != null) cancel(frame)
+
+  const stopFrame = () => {
+    if (frame != null) cancelFn(frame)
     frame = undefined
     lastTime = undefined
-    manualSmooth = false
   }
+
+  const cacheTarget = () => {
+    target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+  }
+
+  const write = (next: number) => {
+    position = next
+    viewport.scrollTop = next
+  }
+
+  const snap = () => {
+    stopFrame()
+    velocity = 0
+    write(target)
+  }
+
   const follow = (time: number) => {
     frame = undefined
-    if (disposed || !options.sticky()) { stop(); return }
-    const elapsedMs = lastTime == null ? 16.67 : Math.min(STICKY_FOLLOW_MAX_DT_MS, Math.max(0, time - lastTime))
-    lastTime = time
-    // A middle-row regenerate grows the transcript without another resize event.
-    target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-    if (!manualSmooth && Math.abs(target - viewport.scrollTop) > viewport.clientHeight) {
-      viewport.scrollTop = target
-      lastTime = undefined
-      manualSmooth = false
+    if (disposed || !options.sticky()) {
+      stopFrame()
+      position = undefined
+      velocity = 0
       return
     }
-    const more = followStickyViewportToBottom(viewport, {
-      focused: true, sticky: true, reduceMotion: options.reduceMotion(), elapsedMs, target,
-    })
-    if (more) frame = request(follow)
-    else { lastTime = undefined; manualSmooth = false }
+    if (options.reduceMotion()) {
+      cacheTarget()
+      snap()
+      return
+    }
+    const elapsedMs = lastTime == null ? 16.67 : Math.min(STICKY_FOLLOW_MAX_DT_MS, Math.max(0, time - lastTime))
+    lastTime = time
+    if (position == null) position = viewport.scrollTop
+    const next = stepSmoothDamp(position, target, velocity, elapsedMs / 1000)
+    velocity = next.velocity
+    if (followSettled(next.position, target, velocity)) {
+      snap()
+      return
+    }
+    write(next.position)
+    frame = request(follow)
   }
+
+  const ensureRunning = () => {
+    if (disposed || frame != null) return
+    frame = request(follow)
+  }
+
   return {
     resize(behavior?: ScrollBehavior) {
-      if (disposed || !options.sticky()) { stop(); return }
-      if (behavior === 'smooth') manualSmooth = true
-      // Streaming growth often notifies twice before the frame runs (commit +
-      // ResizeObserver). The queued frame already reads scrollHeight; reading
-      // it here forces a layout of the live row on every token.
-      if (frame != null && behavior !== 'instant' && behavior !== 'auto' && !options.reduceMotion() && !manualSmooth) return
-      // Geometry is read once per resize, not on every animation frame.
-      target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-      if (options.reduceMotion() || behavior === 'instant' || behavior === 'auto' || (
-        !manualSmooth && Math.abs(target - viewport.scrollTop) > viewport.clientHeight
-      )) {
-        stop()
-        viewport.scrollTop = target
-      } else if (frame == null) frame = request(follow)
+      if (disposed) return
+      cacheTarget()
+      if (!options.sticky()) {
+        stopFrame()
+        position = undefined
+        velocity = 0
+        return
+      }
+      if (options.reduceMotion() || behavior === 'instant' || behavior === 'auto') {
+        snap()
+        return
+      }
+      if (position == null) {
+        position = viewport.scrollTop
+        velocity = 0
+      }
+      ensureRunning()
     },
-    dispose() { disposed = true; stop() },
+    /** Composer height animation: keep the pin without a scrollHeight read. */
+    nudge(delta: number) {
+      if (!Number.isFinite(delta) || delta === 0) return
+      if (position != null) position += delta
+      target = Math.max(0, target + delta)
+      viewport.scrollTop += delta
+    },
+    /** Drop the rAF immediately so a wheel/touch/key does not fight follow. */
+    cancel() {
+      stopFrame()
+      position = undefined
+      velocity = 0
+    },
+    dispose() {
+      disposed = true
+      stopFrame()
+      position = undefined
+      velocity = 0
+    },
   }
 }
 

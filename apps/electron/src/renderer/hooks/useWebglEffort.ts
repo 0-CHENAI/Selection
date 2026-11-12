@@ -1,12 +1,21 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { VERT, FRAG_SIM, FRAG_BLUR, FRAG_COMP } from '@/components/app-shell/input/effort-webgl-shaders'
 import { effortThemeFallback, readEffortShaderTheme, stepEffortShaderTheme, type EffortShaderTheme, type EffortThemeBlend } from '@/components/app-shell/input/effort-theme'
+import {
+  attachPromptFxGate,
+  createPromptFxClock,
+  decorativeLayerDpr,
+  promptFxShouldLoop,
+  promptFxSyncClock,
+  type PromptFxCssBox,
+} from '@/components/app-shell/input/prompt-fx-runtime'
 
 type Target = { framebuffer: WebGLFramebuffer; texture: WebGLTexture }
 
 /**
  * Reduced motion draws one settled field and does not schedule another frame.
- * Motion keeps a single requestAnimationFrame chain.
+ * Motion keeps a single requestAnimationFrame chain while the field is allowed
+ * to animate.
  */
 export function effortFramePlan(reducedMotion: boolean): { steps: number; loop: boolean } {
   return reducedMotion ? { steps: 32, loop: false } : { steps: 1, loop: true }
@@ -15,11 +24,16 @@ export function effortFramePlan(reducedMotion: boolean): { steps: number; loop: 
 /**
  * The flame loop already runs while motion is allowed. A color blend still
  * asks for frames if that loop is idle. Reduced motion never adds a loop:
- * the theme snaps inside the one settled draw.
+ * the theme snaps inside the one settled draw. Hidden / offscreen canvases
+ * freeze on the last frame without dropping the visible 60fps field.
  */
-export function effortPaintPlan(reducedMotion: boolean, colorSettled: boolean): { steps: number; loop: boolean } {
+export function effortPaintPlan(
+  reducedMotion: boolean,
+  colorSettled: boolean,
+  animate = true,
+): { steps: number; loop: boolean } {
   const plan = effortFramePlan(reducedMotion)
-  if (reducedMotion) return { steps: plan.steps, loop: false }
+  if (reducedMotion || !animate) return { steps: plan.steps, loop: false }
   return { steps: plan.steps, loop: plan.loop || !colorSettled }
 }
 
@@ -44,8 +58,11 @@ export function mountWebglEffort(
   let disposed = false
   let startedAt: number | null = null
   let colorBlend: EffortThemeBlend | null = null
+  let themeTarget: EffortShaderTheme | null = null
+  let themeDirty = true
   let themeObserver: MutationObserver | null = null
-  let resizeObserver: ResizeObserver | null = null
+  let disposeGate = () => {}
+  const clock = createPromptFxClock()
 
   function destroyTargets() {
     for (const target of targets) {
@@ -59,7 +76,8 @@ export function mountWebglEffort(
     disposed = true
     cancelAnimationFrame(frame)
     frame = 0
-    resizeObserver?.disconnect()
+    disposeGate()
+    disposeGate = () => {}
     themeObserver?.disconnect()
     // A lost context already released these handles. Deleting them after
     // restoration would submit objects owned by the previous context.
@@ -176,6 +194,21 @@ export function mountWebglEffort(
     let columns = 83
     const rows = 6
     let origin = 1
+    let cssWidth = 0
+    let gateState = {
+      visible: true,
+      intersecting: true,
+      displayed: true,
+    }
+
+    function currentGate() {
+      return {
+        reducedMotion: motion.matches,
+        visible: gateState.visible,
+        intersecting: gateState.intersecting,
+        displayed: gateState.displayed && width > 1 && height > 1,
+      }
+    }
 
     function currentTheme(): EffortShaderTheme {
       const dark = document.documentElement?.classList.contains('dark') ?? false
@@ -207,17 +240,26 @@ export function mountWebglEffort(
       gl!.uniform1f(uniforms.backdrop, theme.backdrop)
     }
 
-    function render(now: number) {
+    function render(wall: number) {
       frame = 0
-      if (disposed || !width || !height || document.hidden || contextInvalidated || gl!.isContextLost()) return
+      if (disposed || !width || !height || contextInvalidated || gl!.isContextLost()) return
+      const animate = promptFxShouldLoop(currentGate())
+      const now = promptFxSyncClock(clock, animate, wall)
+      if (!animate && !motion.matches) return
       // Computed colors snap. Uniforms ease toward them so an open menu follows
       // light, dark, and PRO without popping. Reduced motion snaps.
-      const stepped = stepEffortShaderTheme(colorBlend, currentTheme(), now, motion.matches)
+      // Re-read used values only when the document theme or work mode changes;
+      // idle frames were paying getComputedStyle on every vsync.
+      if (themeDirty || !themeTarget) {
+        themeTarget = currentTheme()
+        themeDirty = false
+      }
+      const stepped = stepEffortShaderTheme(colorBlend, themeTarget, now, motion.matches)
       colorBlend = stepped.blend
+      const plan = effortPaintPlan(motion.matches, stepped.settled, animate)
       applyTheme(stepped.theme)
       // Freeze both phase and fill for reduced motion, without a RAF loop.
       startedAt ??= now
-      const plan = effortPaintPlan(motion.matches, stepped.settled)
       const elapsed = motion.matches ? 5 : (now - startedAt) / 1000
       gl!.bindVertexArray(vertexArray)
       gl!.viewport(0, 0, width, height)
@@ -268,28 +310,57 @@ export function mountWebglEffort(
       if (!disposed && plan.loop) frame = requestAnimationFrame(render)
     }
 
+    function schedule() {
+      if (disposed || contextInvalidated || gl!.isContextLost()) return
+      if (!promptFxShouldLoop(currentGate())) {
+        cancelAnimationFrame(frame)
+        frame = 0
+        promptFxSyncClock(clock, false, performance.now())
+        return
+      }
+      if (!frame) frame = requestAnimationFrame(render)
+    }
+
     function refresh() {
       if (disposed) return
       cancelAnimationFrame(frame)
       frame = 0
-      if (!document.hidden && !contextInvalidated && !gl!.isContextLost()) render(performance.now())
+      if (contextInvalidated || gl!.isContextLost()) return
+      render(performance.now())
+      schedule()
     }
 
-    function resize() {
+    function markTheme() {
+      themeDirty = true
+      refresh()
+    }
+
+    function applySize(box: PromptFxCssBox) {
       if (disposed || contextInvalidated || gl!.isContextLost()) return
-      const rect = canvas.getBoundingClientRect()
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      const nextWidth = Math.round(rect.width * dpr)
-      const nextHeight = Math.round(rect.height * dpr)
-      if (!nextWidth || !nextHeight || (nextWidth === width && nextHeight === height)) return
+      const dpr = decorativeLayerDpr(window.devicePixelRatio || 1)
+      const nextWidth = Math.round(box.width * dpr)
+      const nextHeight = Math.round(box.height * dpr)
+      cssWidth = box.width
+      if (!nextWidth || !nextHeight) {
+        cancelAnimationFrame(frame)
+        frame = 0
+        width = 0
+        height = 0
+        return
+      }
+      if (nextWidth === width && nextHeight === height) {
+        schedule()
+        return
+      }
       cancelAnimationFrame(frame)
+      frame = 0
       width = canvas.width = nextWidth
       height = canvas.height = nextHeight
       // Fractional columns preserve isotropic cells at every responsive width.
       columns = width / height * rows
       // Max centers the handle half its width inside the track's right edge.
       const thumbSize = Number.parseFloat(getComputedStyle(canvas).getPropertyValue('--prompt-effort-thumb')) || 26
-      origin = 1 - thumbSize / (2 * rect.width)
+      origin = 1 - thumbSize / (2 * cssWidth)
       destroyTargets()
       gl!.activeTexture(gl!.TEXTURE0)
       front = makeTarget()
@@ -306,24 +377,22 @@ export function mountWebglEffort(
       frame = 0
     }
     const onContextRestored = () => hooks.onContextRestored()
-    resize()
-    resizeObserver = new ResizeObserver(resize)
-    resizeObserver.observe(canvas)
-    themeObserver = new MutationObserver(refresh)
+    const gate = attachPromptFxGate(canvas, schedule, applySize)
+    gateState = gate.state
+    disposeGate = gate.dispose
+    themeObserver = new MutationObserver(markTheme)
     if (document.documentElement) {
       themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
     }
     const settings = typeof canvas.closest === 'function' ? canvas.closest('.prompt-effort-settings') : null
     if (settings) themeObserver.observe(settings, { attributes: true, attributeFilter: ['class', 'style', 'data-work-mode'] })
-    motion.addEventListener('change', refresh)
-    colorScheme.addEventListener('change', refresh)
-    document.addEventListener('visibilitychange', refresh)
+    motion.addEventListener('change', markTheme)
+    colorScheme.addEventListener('change', markTheme)
     canvas.addEventListener('webglcontextlost', onContextLost)
     canvas.addEventListener('webglcontextrestored', onContextRestored)
     return () => {
-      motion.removeEventListener('change', refresh)
-      colorScheme.removeEventListener('change', refresh)
-      document.removeEventListener('visibilitychange', refresh)
+      motion.removeEventListener('change', markTheme)
+      colorScheme.removeEventListener('change', markTheme)
       canvas.removeEventListener('webglcontextlost', onContextLost)
       canvas.removeEventListener('webglcontextrestored', onContextRestored)
       dispose()

@@ -30,7 +30,7 @@ import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
 import { ChatVirtualHistory, shouldShowTailProcessingIndicator, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
-import { getWorkTimings, workStatusOwnsUser } from './ChatDisplay.work-status'
+import { formatWorkElapsed, getWorkTimings, TAIL_WORK_CHROME_RESERVE_CLASS, WORK_ELAPSED_SLOT_CLASS, workStatusOwnsUser } from './ChatDisplay.work-status'
 import { findRetryableCancelledUser, isCancelledTurnMarker } from '@craft-agent/shared/sessions/cancelled-turn'
 import { useComposerEnter } from '@/lib/composer-enter'
 import { shouldReserveConversationNavigationColumn, shouldShowConversationNavigation } from "./conversation-navigation"
@@ -423,16 +423,6 @@ const PROCESSING_MESSAGE_KEYS = [
   'chat.processing.rolling',
 ]
 
-/**
- * Format elapsed time: "45s" under a minute, "1:02" for 1+ minutes
- */
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
-}
-
 interface ProcessingIndicatorProps {
   /** Start timestamp (persists across remounts) */
   startTime?: number
@@ -444,13 +434,15 @@ interface ProcessingIndicatorProps {
   /** Exact start time supplied by the completed backend execution. */
   completedStartTime?: number
   trailing?: React.ReactNode
+  /** Reserve the collapsed work-header row before the assistant card exists. */
+  reserveWorkChrome?: boolean
 }
 
 /**
  * ProcessingIndicator - Shows cycling status messages with elapsed time
  * Matches TurnCard header layout for visual continuity
  */
-function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, endTime, interrupted = false, completedStartTime, trailing }: ProcessingIndicatorProps) {
+function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, endTime, interrupted = false, completedStartTime, trailing, reserveWorkChrome = false }: ProcessingIndicatorProps) {
   const { t } = useTranslation()
   const clock = React.useRef({
     start: startTime ?? Date.now(),
@@ -513,31 +505,35 @@ function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, en
 
   return (
     // No -mb-1: a margin outside the presence tween pops 4px on unmount.
-    <div data-chat-processing={isProcessing ? 'running' : 'completed'} className="flex items-center gap-2 px-3 pt-1 pb-3 text-[14px] text-muted-foreground">
-      {/* Spinner in same location as TurnCard chevron */}
-      <div className="size-3.5 flex items-center justify-center shrink-0">
-        <Spinner className="text-[14px]" status={isProcessing ? 'working' : interrupted ? 'error' : 'done'} />
-      </div>
-      {/* Label with crossfade animation on content change only */}
-      <span className="relative h-5 flex items-center">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span
-            key={displayMessage}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: 'easeInOut' }}
-          >
-            {displayMessage}
-          </motion.span>
-        </AnimatePresence>
-        {(elapsed >= 1 || !isProcessing) && (
-          <span className="text-muted-foreground/60 ml-1 tabular-nums">
-            {formatElapsed(elapsed)}
+    <div data-chat-processing={isProcessing ? 'running' : 'completed'}>
+      <div className="flex items-center gap-2 px-3 pt-1 pb-3 text-[14px] text-muted-foreground">
+        {/* Spinner in same location as TurnCard chevron */}
+        <div className="size-3.5 flex items-center justify-center shrink-0">
+          <Spinner className="text-[14px]" status={isProcessing ? 'working' : interrupted ? 'error' : 'done'} />
+        </div>
+        {/* Label crossfades in a reserved slot; the timer never mounts/unmounts. */}
+        <span className="relative flex h-5 min-w-0 flex-1 items-center">
+          <span className="relative h-5 min-w-0 flex-1">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={displayMessage}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.4, ease: 'easeInOut' }}
+                className="absolute inset-0 truncate"
+              >
+                {displayMessage}
+              </motion.span>
+            </AnimatePresence>
           </span>
-        )}
-      </span>
-      {trailing}
+          <span className={WORK_ELAPSED_SLOT_CLASS}>
+            {formatWorkElapsed(elapsed)}
+          </span>
+        </span>
+        {trailing}
+      </div>
+      {reserveWorkChrome && <div data-chat-work-chrome-reserve="" className={TAIL_WORK_CHROME_RESERVE_CLASS} aria-hidden="true" />}
     </div>
   )
 }
@@ -1373,7 +1369,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // Layout/stream growth can also emit scroll events. Only reader intent
     // may release the sticky bottom; geometry alone must not switch it off.
     if ((!isStickToBottomRef.current || atBottom) && shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, atBottom)) {
+      const wasStuck = isStickToBottomRef.current
       applyStickState(metrics)
+      if (atBottom && !wasStuck) stickyFollowRef.current?.resize()
     }
 
   }, [applyStickState])
@@ -1388,24 +1386,28 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
     const handleWheel = (event: WheelEvent) => {
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       // Hand control back before the next animation frame, even if the native
       // scroll event has not yet updated the distance-to-bottom state.
       if (event.deltaY < 0) isStickToBottomRef.current = false
     }
     const handleTouchMove = () => {
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       isStickToBottomRef.current = false
     }
     const handleScrollKey = (event: KeyboardEvent) => {
       if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return
       if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]')) return
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       isStickToBottomRef.current = false
     }
     // Pointer interaction (including dragging the scrollbar) hands scrolling
     // back to the user even while a follow frame is scheduled.
     const handlePointerDown = () => {
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       isStickToBottomRef.current = false
     }
     viewport.addEventListener('pointerdown', handlePointerDown)
@@ -1628,8 +1630,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!isStickToBottomRef.current) return
     const viewport = scrollViewportRef.current
     if (!viewport) return
-    // Adjust scroll to maintain position relative to content
-    viewport.scrollTop += delta
+    if (stickyFollowRef.current) stickyFollowRef.current.nudge(delta)
+    else viewport.scrollTop += delta
   }, [])
 
   // Handle structured input responses (permissions and credentials)
@@ -1941,7 +1943,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!timing) return null
     const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)
     return (
-      <HeightPresence key="work-status" animateIn={isProcessing} reduceMotion={reduceMotion}>
+      <HeightPresence key="work-status" animateIn={false} reduceMotion={reduceMotion}>
         <ProcessingIndicator
           isProcessing={isProcessing}
           startTime={isProcessing
@@ -1960,10 +1962,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       {/* This sits at the logical tail already. The virtual window can lag a
           newly sent message, so gating on it can hide the only live status. */}
       {sessionBusy && (
-        <HeightPresence key="processing-indicator" animateIn reduceMotion={reduceMotion}>
+        <HeightPresence key="processing-indicator" animateIn={false} reduceMotion={reduceMotion}>
           <ProcessingIndicator
             startTime={session?.processingStartedAt ?? session?.tokenUsage?.currentTurn?.startedAt ?? session?.messages.findLast(m => m.role === 'user' && !m.isQueued)?.timestamp}
             statusMessage={session?.currentStatus?.message}
+            reserveWorkChrome
           />
         </HeightPresence>
       )}
@@ -2565,7 +2568,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </button>
                   </div>
                 )}
-                {showTailProcessingIndicator && !clarificationLayout && processingIndicator}
+                {showTailProcessingIndicator && !clarificationLayout && (
+                  <div className="pt-2" data-chat-tail-processing="">
+                    {processingIndicator}
+                  </div>
+                )}
                 {/* Scroll anchor. The capsule and back-to-bottom control live in the composer toolbar, so the transcript does not reserve a gap for either. */}
                 <div ref={messagesEndRef} />
               </div>

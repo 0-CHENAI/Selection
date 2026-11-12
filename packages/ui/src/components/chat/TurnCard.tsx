@@ -1087,42 +1087,30 @@ function WorkHeaderIcon({
 }
 
 /**
- * Same badge as origin/main. When it joins an already-visible “思考中” header it
- * slides open from 0 width (plus the flex gap it introduces) so the title glides
- * right instead of jumping. Width is measured by motion, not a 0fr grid track.
+ * Collapsed work-header row is py-1.5 + h-5 = 32px. Keep this in lockstep
+ * with the tail processing spacer so send → first assistant card does not jump.
+ */
+export const WORK_CHROME_ROW_CLASS = 'h-8 box-border'
+
+/**
+ * Always occupies the badge column so 0 → 1 steps cannot shift the title.
+ * Hidden placeholder uses the same tabular-nums metrics as a two-digit count.
  */
 function WorkHeaderStepCount({
   count,
-  animateIn,
-  reduceMotion,
 }: {
   count: number
-  animateIn: boolean
-  reduceMotion: boolean | null
 }) {
-  if (count <= 0) return null
-  const instant = !!reduceMotion || !animateIn
-  const ref = useRef<HTMLSpanElement>(null)
-  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
-  const unclip = () => { if (ref.current) ref.current.style.overflow = '' }
   return (
-    <motion.span
-      ref={ref}
-      initial={instant ? false : { width: 0, opacity: 0, marginRight: '-0.5rem' }}
-      animate={{ width: 'auto', opacity: 1, marginRight: '0rem' }}
-      transition={{
-        duration: instant ? 0 : 0.24,
-        ease: WORK_CHAIN_EASE,
-        opacity: { duration: instant ? 0 : 0.18, delay: instant ? 0 : 0.06 },
-      }}
-      onAnimationStart={instant ? undefined : clip}
-      onAnimationComplete={unclip}
-      className="-ml-0.5 inline-flex shrink-0"
+    <span
+      className="-ml-0.5 inline-flex h-5 min-w-[1.75rem] shrink-0 items-center justify-center"
+      style={{ visibility: count > 0 ? 'visible' : 'hidden' }}
+      aria-hidden={count <= 0}
     >
-      <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
-        {count}
+      <span className="inline-flex min-w-[1.75rem] justify-center shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+        {count > 0 ? count : 0}
       </span>
-    </motion.span>
+    </span>
   )
 }
 
@@ -3777,8 +3765,8 @@ function TurnCardContent({
   const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
     && !hasExternalWorkStatus
     && !(response && hasVisibleResponse)
-  // True once the header has been on screen for a committed render, so a badge
-  // that arrives later slides in while a header that mounts with its badge does not.
+  // True once the header has been on screen for a committed render, so later
+  // process-chain rows can animate without remounting the chrome.
   const chromeWasMounted = chromeMountedRef.current
   const animateLiveBlocks = !isComplete || wasLiveRef.current
   const chainWindow = windowProcessChain
@@ -3812,7 +3800,7 @@ function TurnCardContent({
         <WorkChrome
           key="work-chrome"
           containerRef={chromeRef}
-          animateIn={!isComplete}
+          animateIn={false}
           reduceMotion={reduceMotion}
         >
           {/* Collapsed Header / Toggle */}
@@ -3826,6 +3814,7 @@ function TurnCardContent({
             data-clarification-open={clarificationLabel ? (isExpanded ? 'true' : 'false') : undefined}
             className={cn(
               "flex items-center gap-2 w-full pl-2.5 pr-1.5 py-1.5 rounded-[8px] text-left",
+              WORK_CHROME_ROW_CLASS,
               SIZE_CONFIG.fontSize,
               "text-muted-foreground",
               canToggleFold && "hover:bg-muted/50 transition-colors",
@@ -3839,11 +3828,7 @@ function TurnCardContent({
               reduceMotion={reduceMotion}
             />
             {!awaitingClarification && (
-              <WorkHeaderStepCount
-                count={stepCount}
-                animateIn={chromeWasMounted && !isComplete}
-                reduceMotion={reduceMotion}
-              />
+              <WorkHeaderStepCount count={stepCount} />
             )}
 
             {/* Status stays in the brief title. A real step label follows it. */}
@@ -3988,6 +3973,9 @@ function TurnCardContent({
         </WorkChrome>
       )}
       </AnimatePresence>
+      {hasExternalWorkStatus && !isComplete && !showWorkChrome && (
+        <div data-work-chrome-reserve="" className={WORK_CHROME_ROW_CLASS} aria-hidden="true" />
+      )}
 
       {todos && todos.length > 0 && todoRail !== 'hidden' && (
         todoRail === 'summary'
@@ -4161,12 +4149,8 @@ function TurnCardContent({
   )
 }
 
-export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
-  // Context updates skip memo, so a later restyle of a finished pptx still reaches this card.
-  useArtifactSupplements()
-  // A reused component must not carry local folds into another message/session.
-  return <TurnCardContent key={JSON.stringify([props.sessionId, props.turnId])} {...props} />
-}, (prev, next) => {
+/** Skip re-render for finished cards so only the streaming tail pays each token. */
+export function turnCardPropsAreEqual(prev: TurnCardProps, next: TurnCardProps): boolean {
   // Conservative memoization: only skip re-render for completed, non-streaming turns
   // Active turns (streaming or incomplete) always re-render to show updates
 
@@ -4202,6 +4186,7 @@ export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
   if (prev.awaitingClarification !== next.awaitingClarification) return false
   if (prev.researchSources !== next.researchSources) return false
   if (prev.workControls !== next.workControls) return false
+  if (prev.todos !== next.todos) return false
 
   // Re-render when response object changes (e.g., annotation updates)
   if (prev.response !== next.response) return false
@@ -4216,4 +4201,11 @@ export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
   // session and turn identities match. Prevents stale local UI state from
   // leaking across session switches that may reuse turn IDs/components.
   return prev.sessionId === next.sessionId && prev.turnId === next.turnId
-})
+}
+
+export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
+  // Context updates skip memo, so a later restyle of a finished pptx still reaches this card.
+  useArtifactSupplements()
+  // A reused component must not carry local folds into another message/session.
+  return <TurnCardContent key={JSON.stringify([props.sessionId, props.turnId])} {...props} />
+}, turnCardPropsAreEqual)
