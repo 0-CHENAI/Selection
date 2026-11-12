@@ -214,6 +214,7 @@ import type {
   SessionFile,
   OAuthResult,
   McpToolsResult,
+  McpResourcesInfo,
   GitBashStatus,
   ClaudeOAuthResult,
   UpdateInfo,

@@ -30,7 +30,7 @@ import {
   type PermissionRow,
   type ToolRow,
 } from '@/components/info'
-import type { LoadedSource, McpToolWithPermission } from '../../shared/types'
+import type { LoadedSource, McpResourcesInfo, McpToolWithPermission } from '../../shared/types'
 import type { PermissionsConfigFile } from '@craft-agent/shared/agent/modes'
 
 interface SourceInfoPageProps {
@@ -182,6 +182,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
   const [mcpTools, setMcpTools] = useState<McpToolWithPermission[] | null>(null)
   const [mcpToolsLoading, setMcpToolsLoading] = useState(false)
   const [mcpToolsError, setMcpToolsError] = useState<string | null>(null)
+  const [mcpResources, setMcpResources] = useState<McpResourcesInfo | null>(null)
   const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
 
 
@@ -228,6 +229,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     if (!source || source.config.type !== 'mcp') {
       setMcpTools(null)
       setMcpToolsError(null)
+      setMcpResources(null)
       return
     }
     if (
@@ -238,6 +240,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     ) {
       setMcpTools(null)
       setMcpToolsError(null)
+      setMcpResources(null)
       setMcpToolsLoading(source.config.connectionStatus === 'connecting')
       return
     }
@@ -251,10 +254,12 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         const result = await window.electronAPI.getMcpTools(workspaceId, sourceSlug)
         if (!isMounted) return
 
-        if (result.success && result.tools) {
-          setMcpTools(result.tools)
+        if (result.success) {
+          setMcpTools(result.tools ?? [])
+          setMcpResources(result.resources ?? null)
         } else {
           setMcpToolsError(result.error || t('sourceInfo.failedToLoadTools'))
+          setMcpResources(null)
         }
       } catch (err) {
         if (!isMounted) return
@@ -488,6 +493,12 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
                 </Info_Table.Row>
               )}
               <Info_Table.Row label={t('sourceInfo.lastTested')} value={formatRelativeTime(source.config.lastTestedAt, t)} />
+              {source.config.type === 'mcp' && mcpResources && (
+                <Info_Table.Row
+                  label={t('sourceInfo.mcpResources')}
+                  value={mcpResources.supported ? t('sourceInfo.resourcesSupported') : t('sourceInfo.resourcesNotDeclared')}
+                />
+              )}
             </Info_Table>
           </Info_Section>
 
@@ -509,6 +520,33 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
               }
             >
               <PermissionsDataTable data={apiPermissionsData} fullscreen fullscreenTitle="Permissions" />
+            </Info_Section>
+          )}
+
+          {/* Resources - for MCP sources that declared the capability */}
+          {source.config.type === 'mcp' && mcpResources?.supported && (
+            <Info_Section
+              title={t('sourceInfo.resources')}
+              description={t('sourceInfo.resourcesDesc')}
+            >
+              {mcpResources.items.length === 0 && mcpResources.templates.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-muted-foreground">{t('table.noResourcesAvailable')}</p>
+              ) : (
+                <ul className="divide-y divide-border/30">
+                  {mcpResources.items.map((item) => (
+                    <li key={item.uri} className="px-4 py-2.5 text-sm min-w-0">
+                      <div className="truncate font-medium">{item.name || item.uri}</div>
+                      <div className="truncate text-muted-foreground">{item.uri}</div>
+                    </li>
+                  ))}
+                  {mcpResources.templates.map((item) => (
+                    <li key={item.uriTemplate} className="px-4 py-2.5 text-sm min-w-0">
+                      <div className="truncate font-medium">{item.name || item.uriTemplate}</div>
+                      <div className="truncate text-muted-foreground">{t('sourceInfo.resourceTemplates')}: {item.uriTemplate}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Info_Section>
           )}
 

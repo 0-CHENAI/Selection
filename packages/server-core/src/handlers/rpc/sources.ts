@@ -1,4 +1,4 @@
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type McpResourcesInfo } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { getSourceCredentialManager, getSourceServerBuilder, loadWorkspaceSources } from '@craft-agent/shared/sources'
 import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
@@ -259,8 +259,37 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         })
       }
 
-      const tools = await client.listTools()
-      await client.close()
+      let tools: Array<{ name: string; description?: string }> = []
+      let resources: McpResourcesInfo | undefined
+      try {
+        tools = await client.listTools()
+        const { collectResourcePreview } = await import('@craft-agent/shared/mcp')
+        const preview = await collectResourcePreview(
+          () => client.listResources(),
+          () => client.listResourceTemplates(),
+          client.getResourceCapabilities(),
+        )
+        resources = {
+          supported: preview.supported,
+          subscribe: preview.subscribe,
+          listChanged: preview.listChanged,
+          items: preview.items.map(item => ({
+            uri: item.uri,
+            name: item.name,
+            description: item.description,
+            mimeType: item.mimeType,
+          })),
+          templates: preview.templates.map(item => ({
+            uriTemplate: item.uriTemplate,
+            name: item.name,
+            description: item.description,
+            mimeType: item.mimeType,
+          })),
+          ...(preview.truncated ? { truncated: true } : {}),
+        }
+      } finally {
+        await client.close().catch(() => {})
+      }
 
       const { loadSourcePermissionsConfig, permissionsConfigCache } = await import('@craft-agent/shared/agent')
       const permissionsConfig = loadSourcePermissionsConfig(workspace.rootPath, sourceSlug)
@@ -279,7 +308,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         }
       })
 
-      return { success: true, tools: toolsWithPermission }
+      return { success: true, tools: toolsWithPermission, resources }
     } catch (error) {
       log.error('Failed to get MCP tools:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch tools'

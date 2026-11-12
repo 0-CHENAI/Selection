@@ -26,6 +26,20 @@ import {
   detectExtensionFromMagic,
   sanitizeFilename,
 } from '../utils/binary-detection.ts';
+import {
+  LIST_MCP_RESOURCES_TOOL,
+  NO_RESOURCE_CAPABILITIES,
+  executeListMcpResources,
+  executeReadMcpResource,
+  getMcpResourceToolDefs,
+  isMcpResourceTool,
+  type McpResource,
+  type McpResourceCapabilities,
+  type McpResourceContent,
+  type McpResourceTemplate,
+  type McpResourceToolContent,
+  type ResourceHost,
+} from './resources.ts';
 
 /**
  * Configuration for an in-process API source server.
@@ -50,7 +64,7 @@ export interface ProxyToolDef {
  * Result of an MCP tool call, matching the subprocess protocol format.
  */
 export interface McpToolResult {
-  content: string;
+  content: string | McpResourceToolContent[];
   isError: boolean;
   /** Source slug for error attribution (set on failure) */
   sourceSlug?: string;
@@ -109,6 +123,9 @@ export class McpClientPool {
   /** Cached tool lists keyed by source slug */
   private toolCache = new Map<string, Tool[]>();
 
+  /** Cached resources capability per source slug */
+  private resourceCaps = new Map<string, McpResourceCapabilities>();
+
   /** Proxy tool name → { slug, originalName } (e.g., "mcp__linear__createIssue" → { slug: "linear", originalName: "createIssue" }) */
   private proxyTools = new Map<string, { slug: string; originalName: string }>();
 
@@ -158,6 +175,7 @@ export class McpClientPool {
     const tools = await client.listTools();
     this.clients.set(slug, client);
     this.toolCache.set(slug, tools);
+    this.resourceCaps.set(slug, client.getResourceCapabilities());
 
     for (const tool of tools) {
       const proxyName = proxyToolName(slug, tool.name);
@@ -217,6 +235,7 @@ export class McpClientPool {
       if (info.slug === slug) this.proxyTools.delete(proxyName);
     }
     this.toolCache.delete(slug);
+    this.resourceCaps.delete(slug);
     this.activeConfigs.delete(slug);
     this.debug(`Disconnected source: ${slug}`);
   }
@@ -229,6 +248,7 @@ export class McpClientPool {
     await Promise.all(closePromises);
     this.clients.clear();
     this.toolCache.clear();
+    this.resourceCaps.clear();
     this.proxyTools.clear();
     this.activeConfigs.clear();
     this.debug('Disconnected all MCP clients');
@@ -373,7 +393,58 @@ export class McpClientPool {
       }
     }
 
+    const resourceSlugs = this.getResourceCapableSlugs();
+    const advertiseResources = slugs
+      ? resourceSlugs.some(slug => slugs.includes(slug))
+      : resourceSlugs.length > 0;
+    if (advertiseResources) {
+      for (const def of getMcpResourceToolDefs()) {
+        if (seen.has(def.name)) continue;
+        seen.add(def.name);
+        defs.push(def);
+      }
+    }
+
     return defs;
+  }
+
+  getResourceCapabilities(slug: string): McpResourceCapabilities {
+    return this.resourceCaps.get(slug) ?? { ...NO_RESOURCE_CAPABILITIES };
+  }
+
+  getResourceCapableSlugs(): string[] {
+    return Array.from(this.resourceCaps.entries())
+      .filter(([, caps]) => caps.resources)
+      .map(([slug]) => slug);
+  }
+
+  private resourceHost(): ResourceHost {
+    return {
+      getResourceCapableSlugs: () => this.getResourceCapableSlugs(),
+      getResourceCapabilities: (slug) => this.getResourceCapabilities(slug),
+      listResources: (slug, cursor) => this.listResourcesForSlug(slug, cursor),
+      listResourceTemplates: (slug, cursor) => this.listResourceTemplatesForSlug(slug, cursor),
+      readResource: (slug, uri) => this.readResourceForSlug(slug, uri),
+      sessionPath: this.sessionPath,
+    };
+  }
+
+  private async listResourcesForSlug(slug: string, cursor?: string): Promise<{ resources: McpResource[]; nextCursor?: string }> {
+    const client = this.clients.get(slug);
+    if (!client || !this.getResourceCapabilities(slug).resources) return { resources: [] };
+    return client.listResources(cursor);
+  }
+
+  private async listResourceTemplatesForSlug(slug: string, cursor?: string): Promise<{ resourceTemplates: McpResourceTemplate[]; nextCursor?: string }> {
+    const client = this.clients.get(slug);
+    if (!client || !this.getResourceCapabilities(slug).resources) return { resourceTemplates: [] };
+    return client.listResourceTemplates(cursor);
+  }
+
+  private async readResourceForSlug(slug: string, uri: string): Promise<{ contents: McpResourceContent[] }> {
+    const client = this.clients.get(slug);
+    if (!client || !this.getResourceCapabilities(slug).resources) return { contents: [] };
+    return client.readResource(uri);
   }
 
   // ============================================================
@@ -385,6 +456,13 @@ export class McpClientPool {
    * Returns a result matching the subprocess protocol format.
    */
   async callTool(proxyName: string, args: Record<string, unknown>): Promise<McpToolResult> {
+    if (isMcpResourceTool(proxyName)) {
+      if (proxyName === LIST_MCP_RESOURCES_TOOL) {
+        return executeListMcpResources(this.resourceHost(), args);
+      }
+      return executeReadMcpResource(this.resourceHost(), args);
+    }
+
     const info = this.proxyTools.get(proxyName);
     if (!info) {
       return {
@@ -473,6 +551,6 @@ export class McpClientPool {
    * Check if a tool name is an MCP proxy tool managed by this pool.
    */
   isProxyTool(toolName: string): boolean {
-    return this.proxyTools.has(toolName);
+    return this.proxyTools.has(toolName) || isMcpResourceTool(toolName);
   }
 }

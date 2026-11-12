@@ -97,6 +97,9 @@ describe('Explore mode MCP and unknown-tool gate', () => {
       }
     }
 
+    expect(shouldAllowToolInMode('list_mcp_resources', {}, 'safe').allowed).toBe(true);
+    expect(shouldAllowToolInMode('read_mcp_resource', {}, 'safe').allowed).toBe(true);
+
     expect(shouldAllowToolInMode('Find', {}, 'safe').allowed).toBe(true);
     expect(shouldAllowToolInMode('Ls', {}, 'safe').allowed).toBe(true);
     expect(shouldAllowToolInMode('session_history', {}, 'safe').allowed).toBe(true);

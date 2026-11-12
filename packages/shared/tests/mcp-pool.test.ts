@@ -11,6 +11,7 @@ import { McpClientPool } from '../src/mcp/mcp-pool.ts';
 import type { SdkMcpServerConfig } from '../src/agent/backend/types.ts';
 import type { PoolClient } from '../src/mcp/client.ts';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { NO_RESOURCE_CAPABILITIES } from '../src/mcp/resources.ts';
 
 // ============================================================
 // Helpers
@@ -29,6 +30,12 @@ function makeMockClient(): PoolClient {
     listTools: async () => mockTools,
     callTool: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
     close: async () => {},
+    getResourceCapabilities: () => ({ ...NO_RESOURCE_CAPABILITIES }),
+    listResources: async () => ({ resources: [] }),
+    listResourceTemplates: async () => ({ resourceTemplates: [] }),
+    readResource: async () => ({ contents: [] }),
+    subscribeResource: async () => {},
+    unsubscribeResource: async () => {},
   };
 }
 

@@ -7,7 +7,19 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ResourceListChangedNotificationSchema,
+  ResourceUpdatedNotificationSchema,
+  type Tool,
+} from '@modelcontextprotocol/sdk/types.js';
+import {
+  NO_RESOURCE_CAPABILITIES,
+  resourceCapabilitiesFromServer,
+  type McpResource,
+  type McpResourceCapabilities,
+  type McpResourceContent,
+  type McpResourceTemplate,
+} from './resources.ts';
 
 /**
  * HTTP transport config for remote MCP servers
@@ -67,6 +79,12 @@ export interface PoolClient {
   listTools(): Promise<Tool[]>;
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   close(): Promise<void>;
+  getResourceCapabilities(): McpResourceCapabilities;
+  listResources(cursor?: string): Promise<{ resources: McpResource[]; nextCursor?: string }>;
+  listResourceTemplates(cursor?: string): Promise<{ resourceTemplates: McpResourceTemplate[]; nextCursor?: string }>;
+  readResource(uri: string): Promise<{ contents: McpResourceContent[] }>;
+  subscribeResource(uri: string): Promise<void>;
+  unsubscribeResource(uri: string): Promise<void>;
 }
 
 export class CraftMcpClient {
@@ -112,27 +130,112 @@ export class CraftMcpClient {
     if (this.connected) return;
 
     await this.client.connect(this.transport);
-
-    // Verify connection works by listing tools
-    try {
-      await this.client.listTools();
-    } catch (error) {
-      await this.client.close();
-      throw new Error(
-        `MCP connection failed health check: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-
     this.connected = true;
+
+    // Health-check tools/list only when the server declared tools. Calling it
+    // on a resources-only (or tools-less) server throws in the bundled SDK.
+    if (this.supportsTools()) {
+      try {
+        await this.client.listTools();
+      } catch (error) {
+        await this.client.close();
+        this.connected = false;
+        throw new Error(
+          `MCP connection failed health check: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+  }
+
+  private async ensureConnected(): Promise<void> {
+    if (!this.connected) await this.connect();
+  }
+
+  supportsTools(): boolean {
+    return Boolean(this.client.getServerCapabilities()?.tools);
+  }
+
+  getResourceCapabilities(): McpResourceCapabilities {
+    return resourceCapabilitiesFromServer(this.client.getServerCapabilities());
+  }
+
+  supportsResources(): boolean {
+    return this.getResourceCapabilities().resources;
   }
 
   async listTools(): Promise<Tool[]> {
-    if (!this.connected) {
-      await this.connect();
-    }
+    await this.ensureConnected();
+    if (!this.supportsTools()) return [];
 
     const result = await this.client.listTools();
     return result.tools;
+  }
+
+  async listResources(cursor?: string): Promise<{ resources: McpResource[]; nextCursor?: string }> {
+    await this.ensureConnected();
+    if (!this.supportsResources()) return { resources: [] };
+    const result = await this.client.listResources(cursor ? { cursor } : undefined);
+    return {
+      resources: (result.resources ?? []) as McpResource[],
+      ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+    };
+  }
+
+  async listResourceTemplates(cursor?: string): Promise<{ resourceTemplates: McpResourceTemplate[]; nextCursor?: string }> {
+    await this.ensureConnected();
+    if (!this.supportsResources()) return { resourceTemplates: [] };
+    try {
+      const result = await this.client.listResourceTemplates(cursor ? { cursor } : undefined);
+      return {
+        resourceTemplates: (result.resourceTemplates ?? []) as McpResourceTemplate[],
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+      };
+    } catch {
+      // templates/list is optional even for servers that declared resources.
+      return { resourceTemplates: [] };
+    }
+  }
+
+  async readResource(uri: string): Promise<{ contents: McpResourceContent[] }> {
+    await this.ensureConnected();
+    if (!this.supportsResources()) return { contents: [] };
+    const result = await this.client.readResource({ uri });
+    return { contents: (result.contents ?? []) as McpResourceContent[] };
+  }
+
+  async subscribeResource(uri: string): Promise<void> {
+    await this.ensureConnected();
+    if (!this.getResourceCapabilities().subscribe) return;
+    await this.client.subscribeResource({ uri });
+  }
+
+  async unsubscribeResource(uri: string): Promise<void> {
+    await this.ensureConnected();
+    if (!this.getResourceCapabilities().subscribe) return;
+    await this.client.unsubscribeResource({ uri });
+  }
+
+  /**
+   * Register list_changed / updated handlers only when the server declared
+   * `capabilities.resources.listChanged`. No-op otherwise — never attach
+   * handlers that would imply we called subscribe/list on an undeclared server.
+   */
+  enableResourceNotifications(handlers: {
+    onListChanged?: () => void;
+    onUpdated?: (uri: string) => void;
+  }): void {
+    if (!this.getResourceCapabilities().listChanged) return;
+    if (handlers.onListChanged) {
+      this.client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
+        handlers.onListChanged?.();
+      });
+    }
+    if (handlers.onUpdated) {
+      this.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+        const uri = (notification as { params?: { uri?: string } }).params?.uri;
+        if (uri) handlers.onUpdated?.(uri);
+      });
+    }
   }
 
   /**

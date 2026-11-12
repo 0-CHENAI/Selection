@@ -28,6 +28,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { McpClientPool } from './mcp-pool.ts';
+import { isMcpResourceTool } from './resources.ts';
 
 export class McpPoolServer {
   private pool: McpClientPool;
@@ -128,13 +129,16 @@ export class McpPoolServer {
     // Call tool — add `mcp__` prefix back before routing through pool
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      const internalName = `mcp__${name}`;
+      const internalName = isMcpResourceTool(name) ? name : `mcp__${name}`;
       this.debug(`Tool call: ${name} → ${internalName}`);
 
       const result = await this.pool.callTool(internalName, args || {});
+      const content = typeof result.content === 'string'
+        ? [{ type: 'text' as const, text: result.content }]
+        : result.content;
 
       return {
-        content: [{ type: 'text' as const, text: result.content }],
+        content,
         ...(result.isError ? { isError: true } : {}),
       };
     });
