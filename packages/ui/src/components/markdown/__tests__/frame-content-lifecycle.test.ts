@@ -6,7 +6,7 @@ import { expect, it } from 'bun:test'
 const harness = String.raw`
 import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
-let active, next=0;
+let active, next=0, now=0;
 const frames=new Map();
 globalThis.window={};
 globalThis.requestAnimationFrame=fn=>{frames.set(++next,fn);return next};
@@ -21,18 +21,25 @@ mock.module('react',()=>({
 const {useFrameContent}=await import(MODULE_URL);
 const c={hooks:[],pending:[],index:0,dirty:false,props:['原文',true,'one']};
 function render(props=c.props,commit=true){active=c;c.index=0;c.dirty=false;const result=useFrameContent(...props);if(commit){c.props=props;c.result=result;const jobs=c.pending.splice(0);jobs.forEach(fn=>fn());if(c.dirty)render()}else c.pending=[];return result}
-function step(){const jobs=[...frames.values()];frames.clear();jobs.forEach(fn=>fn(16));if(c.dirty)render()}
+function step(){const jobs=[...frames.values()];frames.clear();jobs.forEach(fn=>fn(now+=16.67));if(c.dirty)render()}
+function catchUp(expected){for(let i=0;i<12 && c.result!==expected;i++)step()}
 render();
 render(['原文已收到',true,'one']);
 assert.equal(c.result,'原文');
 assert.equal(frames.size,1);
 render(['原文已收到但未提交',true,'one'],false);
 step();
-assert.equal(c.result,'原文已收到','a pending frame must never publish an abandoned render');
+assert.notEqual(c.result,'原文已收到但未提交','a pending frame must never publish an abandoned render');
+assert.ok('原文已收到'.startsWith(c.result),'paced reveal stays on the committed prefix');
+catchUp('原文已收到');
+assert.equal(c.result,'原文已收到');
 render(['原文已收到新增',true,'one']);
 render(['另一条消息',true,'two'],false);
 step();
-assert.equal(c.result,'原文已收到新增','a speculative identity switch cannot contaminate the committed stream');
+assert.notEqual(c.result,'另一条消息','a speculative identity switch cannot contaminate the committed stream');
+assert.ok(c.result.startsWith('原文已收到'));
+catchUp('原文已收到新增');
+assert.equal(c.result,'原文已收到新增');
 render(['原文已收到新增尾部',true,'one']);
 render(['最终正文',false,'one']);
 assert.equal(c.result,'最终正文');

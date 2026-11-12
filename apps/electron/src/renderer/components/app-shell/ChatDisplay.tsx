@@ -1369,7 +1369,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // Layout/stream growth can also emit scroll events. Only reader intent
     // may release the sticky bottom; geometry alone must not switch it off.
     if ((!isStickToBottomRef.current || atBottom) && shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, atBottom)) {
+      const wasStuck = isStickToBottomRef.current
       applyStickState(metrics)
+      if (atBottom && !wasStuck) stickyFollowRef.current?.resize()
     }
 
   }, [applyStickState])
@@ -1384,24 +1386,28 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
     const handleWheel = (event: WheelEvent) => {
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       // Hand control back before the next animation frame, even if the native
       // scroll event has not yet updated the distance-to-bottom state.
       if (event.deltaY < 0) isStickToBottomRef.current = false
     }
     const handleTouchMove = () => {
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       isStickToBottomRef.current = false
     }
     const handleScrollKey = (event: KeyboardEvent) => {
       if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return
       if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]')) return
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       isStickToBottomRef.current = false
     }
     // Pointer interaction (including dragging the scrollbar) hands scrolling
     // back to the user even while a follow frame is scheduled.
     const handlePointerDown = () => {
       cancelProgrammaticLock()
+      stickyFollowRef.current?.cancel()
       isStickToBottomRef.current = false
     }
     viewport.addEventListener('pointerdown', handlePointerDown)
@@ -1624,8 +1630,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!isStickToBottomRef.current) return
     const viewport = scrollViewportRef.current
     if (!viewport) return
-    // Adjust scroll to maintain position relative to content
-    viewport.scrollTop += delta
+    if (stickyFollowRef.current) stickyFollowRef.current.nudge(delta)
+    else viewport.scrollTop += delta
   }, [])
 
   // Handle structured input responses (permissions and credentials)
