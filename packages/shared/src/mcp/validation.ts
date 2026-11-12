@@ -423,6 +423,18 @@ export async function validateStdioMcpConnection(
     const elapsedConnect = Date.now() - connectStart;
     listToolsTimeoutResolved = Math.max(listToolsFloor, timeout - elapsedConnect);
 
+    const serverCaps = client.getServerCapabilities();
+    if (!serverCaps?.tools) {
+      return {
+        success: true,
+        tools: [],
+        serverInfo: {
+          name: command,
+          version: args.join(' '),
+        },
+      };
+    }
+
     phase = 'list-tools';
     const toolsResult = await withTimeout(
       client.listTools(),

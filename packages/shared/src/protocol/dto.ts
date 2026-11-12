@@ -1006,10 +1006,34 @@ export interface McpToolWithPermission {
   allowed: boolean
 }
 
+export interface McpResourceListItem {
+  uri: string
+  name?: string
+  description?: string
+  mimeType?: string
+}
+
+export interface McpResourceTemplateItem {
+  uriTemplate: string
+  name?: string
+  description?: string
+  mimeType?: string
+}
+
+export interface McpResourcesInfo {
+  supported: boolean
+  subscribe: boolean
+  listChanged: boolean
+  items: McpResourceListItem[]
+  templates: McpResourceTemplateItem[]
+  truncated?: boolean
+}
+
 export interface McpToolsResult {
   success: boolean
   error?: string
   tools?: McpToolWithPermission[]
+  resources?: McpResourcesInfo
 }
 
 // ---------------------------------------------------------------------------

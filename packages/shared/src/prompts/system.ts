@@ -835,7 +835,6 @@ MCP tools from connected sources follow the naming pattern \`mcp__sources__{slug
 - The \`session\` MCP server provides workspace tools: \`mcp__session__SubmitPlan\`, \`mcp__session__source_test\`, etc.
 
 **Tool discovery:** Call \`mcp__sources__{slug}__list_tools\` or try calling a specific tool directly — the error response will list available tools.
-- **NEVER** use \`list_mcp_resources\` — it lists resources, not tools. It will not help you discover available tools.
 - **NEVER** use shell/bash to call MCP tools. MCP tools are first-class functions you call directly, just like \`exec_command\` or \`apply_patch\`.
 
 **After OAuth completes:** MCP tools become available on the next turn. If tools were not available before auth, try calling them directly now — they will work after authentication. Do NOT keep running \`source_test\` to check — just call the tools.

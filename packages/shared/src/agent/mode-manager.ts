@@ -2095,6 +2095,11 @@ export function shouldAllowToolInMode(
     };
   }
 
+  // Client-side MCP resource wrappers (not mcp__-prefixed source tools).
+  if (toolName === 'list_mcp_resources' || toolName === 'read_mcp_resource') {
+    return { allowed: true };
+  }
+
   // A tool none of the above knows may change things: Explore runs only what it knows to be read-only
   return {
     allowed: false,

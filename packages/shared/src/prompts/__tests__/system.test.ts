@@ -229,6 +229,7 @@ describe('system prompt guidance', () => {
 
     expect(prompt).toContain('user-facing replies still use `{title} ({slug})`')
     expect(prompt).not.toContain('user-facing replies still use the display title')
+    expect(prompt).not.toContain('NEVER use `list_mcp_resources`')
   })
 
 
