@@ -220,12 +220,10 @@ function ProcessingIndicator({ cycleMs = 10000, counting = true, elapsed: initia
             </motion.span>
           </AnimatePresence>
         </motion.span>
-        {/* Counter - no animation, just updates instantly */}
-        {elapsed >= 1 && (
-          <span className="text-muted-foreground/60 ml-1 tabular-nums">
-            {elapsed}s
-          </span>
-        )}
+        {/* Counter - reserved tabular slot so 0s → 1s does not shift the row */}
+        <span className="ml-1 inline-block w-[5ch] shrink-0 tabular-nums text-muted-foreground/60">
+          {elapsed}s
+        </span>
       </span>
     </div>
   )

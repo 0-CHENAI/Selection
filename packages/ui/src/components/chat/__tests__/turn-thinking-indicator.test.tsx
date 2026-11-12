@@ -348,10 +348,12 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(src).not.toContain('standalone-thinking')
     const icon = src.slice(src.indexOf('function WorkHeaderIcon'), src.indexOf('function WorkHeaderStepCount'))
     expect(icon).not.toContain('absolute inset-0')
-    const count = src.slice(src.indexOf('function WorkHeaderStepCount'), src.indexOf('function WorkChrome'))
-    // Badge chrome is the origin/main badge; only the slide-open wrapper is new.
+    const count = src.slice(src.indexOf('function WorkHeaderStepCount'), src.indexOf('export function HeightPresence'))
+    // Badge column is reserved at 0 steps so the title cannot shift when work arrives.
     expect(count).toContain('shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums')
-    expect(count).toContain("width: 'auto'")
+    expect(count).toContain('min-w-[1.75rem]')
+    expect(count).toContain("visibility: count > 0 ? 'visible' : 'hidden'")
+    expect(count).not.toContain("width: 'auto'")
     expect(count).not.toContain('grid-template-columns')
     // Header, response card and chat processing row share one height presence
     // instead of popping in and out around each header phase.
@@ -374,7 +376,13 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(chatDisplay).toContain('const showTailProcessingIndicator = shouldShowTailProcessingIndicator(processingTurnIndex)')
     expect(chatDisplay).not.toContain('shouldShowTailProcessingIndicator(processingTurnIndex, endIndex)')
     expect(chatDisplay).not.toContain('isVirtualTurnInWindow')
-    expect(chatDisplay).toContain('{showTailProcessingIndicator && !clarificationLayout && processingIndicator}')
+    expect(chatDisplay).toContain('{showTailProcessingIndicator && !clarificationLayout && (')
+    expect(chatDisplay).toContain('data-chat-tail-processing')
+    expect(chatDisplay).toContain('reserveWorkChrome')
+    expect(chatDisplay).not.toContain('elapsed >= 1')
+    expect(chatDisplay).toContain('WORK_ELAPSED_SLOT_CLASS')
+    expect(chatDisplay).toContain('animateIn={false}')
+    expect(chatDisplay).not.toContain('{showTailProcessingIndicator && !clarificationLayout && processingIndicator}')
     expect(chatDisplay).not.toContain('{processingTurnIndex === -1 && !clarificationLayout && processingIndicator}')
     expect(chatDisplay).not.toContain('py-1 -mb-1 text-[13px] text-muted-foreground">\n      {/* Spinner in same location as TurnCard chevron */}\n      <div className="w-3 h-3 flex items-center justify-center shrink-0">\n        <Spinner className="text-[10px]" />\n      </div>\n      {/* Label with crossfade')
   })
@@ -397,6 +405,22 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).toMatch(/>1<\/span>/)
     expect(countOccurrences(html, '思考中…')).toBe(0)
     expect(countOccurrences(html, 'data-status="working"')).toBe(0)
+  })
+
+  it('reserves the collapsed work-header row before tools arrive when the parent owns status', async () => {
+    const html = await renderTurn('zh-Hans', [], { hasExternalWorkStatus: true })
+    expect(html).toContain('data-work-chrome-reserve')
+    expect(html).toContain('h-8')
+    expect(html).not.toContain('data-status="working"')
+    const withTool = await renderTurn('zh-Hans', [{
+      id: 'tool-1',
+      type: 'tool',
+      status: 'completed',
+      timestamp: 1,
+      toolName: 'Read',
+    }], { hasExternalWorkStatus: true, expanded: false })
+    expect(withTool).not.toContain('data-work-chrome-reserve')
+    expect(withTool).toContain('min-w-[1.75rem]')
   })
 
   it('still hides a completed interrupted turn with no meaningful work', async () => {

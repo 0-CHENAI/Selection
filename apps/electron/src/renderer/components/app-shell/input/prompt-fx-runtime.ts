@@ -1,11 +1,7 @@
-/** Decorative composer canvases (sparks + Max WebGL). Pause work that is not on screen. */
+/** Decorative composer canvases (sparks + Max WebGL). Pause only when truly invisible. */
 
-export const PROMPT_FX_DPR_CAP = 1.5
-export const PROMPT_FX_AMBIENT_FPS = 30
-export const PROMPT_FX_ACTIVE_FPS = 60
-export const PROMPT_FX_AMBIENT_FRAME_MS = 1000 / PROMPT_FX_AMBIENT_FPS
-export const PROMPT_FX_ACTIVE_FRAME_MS = 1000 / PROMPT_FX_ACTIVE_FPS
-export const PROMPT_FX_ENERGY_LIVE = 0.02
+/** Original Max/sparks backing-store cap: `Math.min(devicePixelRatio, 2)`. */
+export const PROMPT_FX_DPR_CAP = 2
 
 export function decorativeLayerDpr(devicePixelRatio = 1, cap = PROMPT_FX_DPR_CAP): number {
   if (!Number.isFinite(devicePixelRatio) || devicePixelRatio <= 0) return 1
@@ -18,57 +14,89 @@ export function promptFxPageVisible(doc: { visibilityState?: string; hidden?: bo
   return !doc.hidden
 }
 
-export function promptFxWindowFocused(doc: { hasFocus?: () => boolean } | null | undefined): boolean {
-  try {
-    if (doc && typeof doc.hasFocus === 'function') return doc.hasFocus()
-  } catch {
-    return true
+export type PromptFxCssBox = { width: number; height: number }
+
+export function promptFxBoxFromObserver(entry: {
+  contentBoxSize?: ReadonlyArray<{ inlineSize: number; blockSize: number }> | { inlineSize: number; blockSize: number }
+  contentRect?: { width: number; height: number }
+}): PromptFxCssBox {
+  const sizes = entry.contentBoxSize
+  const box = Array.isArray(sizes) ? sizes[0] : sizes
+  if (box && Number.isFinite(box.inlineSize) && Number.isFinite(box.blockSize)) {
+    return { width: box.inlineSize, height: box.blockSize }
   }
-  return true
+  return { width: entry.contentRect?.width ?? 0, height: entry.contentRect?.height ?? 0 }
 }
 
-export function promptFxCanvasDisplayed(canvas: Pick<HTMLCanvasElement, 'getBoundingClientRect'> & { isConnected?: boolean }): boolean {
-  if (typeof canvas.isConnected === 'boolean' && !canvas.isConnected) return false
-  const rect = canvas.getBoundingClientRect()
-  if (!(rect.width > 1) || !(rect.height > 1)) return false
+/**
+ * CSS pixel size without a layout walk of ancestors. `clientWidth` is the
+ * content box; `getBoundingClientRect` is only a cold-start fallback (tests,
+ * first layout) and must stay off the rAF path.
+ */
+export function promptFxReadCssBox(canvas: {
+  clientWidth?: number
+  clientHeight?: number
+  getBoundingClientRect?: () => { width: number; height: number }
+}): PromptFxCssBox {
+  const width = canvas.clientWidth ?? 0
+  const height = canvas.clientHeight ?? 0
+  if (width > 0 && height > 0) return { width, height }
   try {
-    const style = typeof getComputedStyle === 'function' ? getComputedStyle(canvas as HTMLCanvasElement) : undefined
-    if (style && (style.display === 'none' || style.visibility === 'hidden')) return false
-  } catch {
-    return true
-  }
-  return true
+    const rect = canvas.getBoundingClientRect?.()
+    if (rect) return { width: rect.width, height: rect.height }
+  } catch { /* jsdom */ }
+  return { width, height }
+}
+
+export function promptFxCanvasDisplayed(input: {
+  width: number
+  height: number
+  isConnected?: boolean
+  display?: string
+  visibility?: string
+}): boolean {
+  if (input.isConnected === false) return false
+  if (input.display === 'none' || input.visibility === 'hidden') return false
+  return input.width > 1 && input.height > 1
 }
 
 export type PromptFxGate = {
   reducedMotion: boolean
   visible: boolean
-  windowFocused: boolean
   intersecting: boolean
   displayed: boolean
-  /** Composer is focused or hovered. WebGL fields leave this true while on screen. */
-  engaged: boolean
-  /** Particles, typing energy, streaming, or a color blend still in flight. */
-  live: boolean
 }
 
 /**
- * Animate only while the effect can be seen. Hidden, blurred, offscreen, and
- * `display: none` canvases drop the rAF chain; a resting bitmap stays on the canvas.
+ * Animate whenever the user could see the canvas. Hidden / minimized /
+ * occluded documents, offscreen canvases, `display:none`, and unmount drop
+ * the rAF chain. A visible idle field stays at full frame rate and DPR.
  */
 export function promptFxShouldLoop(gate: PromptFxGate): boolean {
   if (gate.reducedMotion) return false
-  if (!gate.visible || !gate.windowFocused || !gate.intersecting || !gate.displayed) return false
-  return gate.engaged || gate.live
+  return gate.visible && gate.intersecting && gate.displayed
 }
 
-export function promptFxFrameDue(now: number, lastDraw: number, intervalMs: number): boolean {
-  if (!(intervalMs > 0) || !(lastDraw > 0)) return true
-  return now - lastDraw >= intervalMs - 1
+export type PromptFxClock = {
+  offset: number
+  pausedAt: number | null
 }
 
-export function promptFxFrameIntervalMs(active: boolean): number {
-  return active ? PROMPT_FX_ACTIVE_FRAME_MS : PROMPT_FX_AMBIENT_FRAME_MS
+export function createPromptFxClock(): PromptFxClock {
+  return { offset: 0, pausedAt: null }
+}
+
+/** Freeze the animation clock while paused so resume has no visible jump. */
+export function promptFxSyncClock(clock: PromptFxClock, looping: boolean, wallNow: number): number {
+  if (!looping) {
+    if (clock.pausedAt == null) clock.pausedAt = wallNow
+    return clock.pausedAt - clock.offset
+  }
+  if (clock.pausedAt != null) {
+    clock.offset += wallNow - clock.pausedAt
+    clock.pausedAt = null
+  }
+  return wallNow - clock.offset
 }
 
 function listen(target: unknown, type: string, listener: EventListener): () => void {
@@ -80,26 +108,59 @@ function listen(target: unknown, type: string, listener: EventListener): () => v
   }
 }
 
+function readComputedDisplay(canvas: HTMLCanvasElement): { display?: string; visibility?: string } {
+  try {
+    const style = getComputedStyle(canvas)
+    return { display: style.display, visibility: style.visibility }
+  } catch {
+    return {}
+  }
+}
+
 export type PromptFxGateState = {
   visible: boolean
-  windowFocused: boolean
   intersecting: boolean
   displayed: boolean
+  box: PromptFxCssBox
 }
 
 /**
- * Visibility, window focus, intersection, and layout. Callers still own the
- * animation clock so a paused canvas can keep its last frame.
+ * Page visibility, intersection, and cached layout. Callers own the animation
+ * clock so a paused canvas keeps its last frame and time origin.
  */
 export function attachPromptFxGate(
   canvas: HTMLCanvasElement,
   onChange: () => void,
+  onBox?: (box: PromptFxCssBox) => void,
 ): { state: PromptFxGateState; dispose: () => void } {
+  const box = promptFxReadCssBox(canvas)
+  const style = readComputedDisplay(canvas)
   const state: PromptFxGateState = {
     visible: promptFxPageVisible(document),
-    windowFocused: promptFxWindowFocused(document),
     intersecting: true,
-    displayed: promptFxCanvasDisplayed(canvas),
+    displayed: promptFxCanvasDisplayed({
+      ...box,
+      isConnected: canvas.isConnected,
+      display: style.display,
+      visibility: style.visibility,
+    }),
+    box,
+  }
+
+  const emitBox = (next: PromptFxCssBox, force = false) => {
+    const styleNow = readComputedDisplay(canvas)
+    const displayed = promptFxCanvasDisplayed({
+      ...next,
+      isConnected: canvas.isConnected,
+      display: styleNow.display,
+      visibility: styleNow.visibility,
+    })
+    const boxChanged = state.box.width !== next.width || state.box.height !== next.height
+    if (!force && !boxChanged && state.displayed === displayed) return
+    state.box = next
+    state.displayed = displayed
+    onBox?.(next)
+    onChange()
   }
 
   const unvis = listen(document, 'visibilitychange', () => {
@@ -108,18 +169,8 @@ export function attachPromptFxGate(
     state.visible = visible
     onChange()
   })
-  const onFocus = () => {
-    if (state.windowFocused) return
-    state.windowFocused = true
-    onChange()
-  }
-  const onBlur = () => {
-    if (!state.windowFocused) return
-    state.windowFocused = false
-    onChange()
-  }
-  const unfocus = listen(window, 'focus', onFocus)
-  const unblur = listen(window, 'blur', onBlur)
+  // DPR / window size can change without a content-box resize.
+  const unresize = listen(window, 'resize', () => emitBox(state.box, true))
 
   let intersection: IntersectionObserver | undefined
   if (typeof IntersectionObserver === 'function') {
@@ -129,52 +180,29 @@ export function attachPromptFxGate(
       if (state.intersecting === intersecting) return
       state.intersecting = intersecting
       onChange()
-    })
+    }, { threshold: 0 })
     intersection.observe(canvas)
   }
+
+  let resize: ResizeObserver | undefined
+  if (typeof ResizeObserver === 'function') {
+    resize = new ResizeObserver(entries => {
+      const last = entries[entries.length - 1]
+      if (!last) return
+      emitBox(promptFxBoxFromObserver(last))
+    })
+    resize.observe(canvas)
+  }
+
+  onBox?.(state.box)
 
   return {
     state,
     dispose() {
       unvis()
-      unfocus()
-      unblur()
+      unresize()
       intersection?.disconnect()
+      resize?.disconnect()
     },
-  }
-}
-
-export function attachPromptFxEngagement(host: EventTarget | null | undefined, onChange: (engaged: boolean) => void): () => void {
-  if (!host || typeof (host as { addEventListener?: unknown }).addEventListener !== 'function') {
-    onChange(true)
-    return () => {}
-  }
-  const node = host as Element & { addEventListener: (type: string, listener: EventListener) => void }
-  const read = () => {
-    try {
-      if (typeof node.matches === 'function' && node.matches(':hover, :focus-within')) return true
-    } catch { /* jsdom / test hosts */ }
-    try {
-      if (typeof node.contains === 'function' && document.activeElement && node.contains(document.activeElement)) return true
-    } catch { /* tests */ }
-    return false
-  }
-  let engaged = read()
-  const emit = () => {
-    const next = read()
-    if (next === engaged) return
-    engaged = next
-    onChange(engaged)
-  }
-  onChange(engaged)
-  const unenter = listen(node, 'pointerenter', emit)
-  const unleave = listen(node, 'pointerleave', emit)
-  const infocus = listen(node, 'focusin', emit)
-  const outfocus = listen(node, 'focusout', emit)
-  return () => {
-    unenter()
-    unleave()
-    infocus()
-    outfocus()
   }
 }

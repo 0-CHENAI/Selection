@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { Turn } from '@craft-agent/ui'
-import { getWorkTimings } from '../ChatDisplay.work-status'
+import { formatWorkElapsed, getWorkTimings, WORK_ELAPSED_SLOT_CLASS, TAIL_WORK_CHROME_RESERVE_CLASS } from '../ChatDisplay.work-status'
 
 const user = (timestamp: number): Turn => ({ type: 'user', timestamp,
   message: { id: `user-${timestamp}`, role: 'user', content: '问题', timestamp } })
@@ -77,5 +77,18 @@ describe('work status for each user request', () => {
     marker.message.content = '已取消'
     marker.message.statusType = 'turn_cancelled'
     expect(getWorkTimings([user(1000), marker]).get(1)?.interrupted).toBe(true)
+  })
+})
+
+describe('stable processing header metrics', () => {
+  it('formats elapsed with a fixed tabular width so the timer never remounts', () => {
+    expect(formatWorkElapsed(0)).toBe('0s')
+    expect(formatWorkElapsed(9)).toBe('9s')
+    expect(formatWorkElapsed(46)).toBe('46s')
+    expect(formatWorkElapsed(60)).toBe('1:00')
+    expect(formatWorkElapsed(62)).toBe('1:02')
+    expect(WORK_ELAPSED_SLOT_CLASS).toContain('tabular-nums')
+    expect(WORK_ELAPSED_SLOT_CLASS).toContain('w-[5ch]')
+    expect(TAIL_WORK_CHROME_RESERVE_CLASS).toBe('h-8 shrink-0')
   })
 })

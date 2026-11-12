@@ -1,11 +1,10 @@
 import {
-  PROMPT_FX_ENERGY_LIVE,
-  attachPromptFxEngagement,
   attachPromptFxGate,
+  createPromptFxClock,
   decorativeLayerDpr,
-  promptFxFrameDue,
-  promptFxFrameIntervalMs,
   promptFxShouldLoop,
+  promptFxSyncClock,
+  type PromptFxCssBox,
 } from './prompt-fx-runtime'
 
 type Spark = { x: number; y: number; life: number; span: number; speed: number; phase: number }
@@ -20,79 +19,73 @@ export function mountPromptSparks(
   let width = 0
   let height = 0
   let frame = 0
-  let last = performance.now()
-  let lastDraw = 0
+  let last = 0
   let due = 0
   let disposed = false
-  let engaged = false
+  let fillStyle = ''
+  const clock = createPromptFxClock()
   const particles: Spark[] = []
-  const field = typeof canvas.closest === 'function' ? canvas.closest('.prompt-field') : canvas.parentElement
 
-  const resize = () => {
+  const looping = () => promptFxShouldLoop({
+    reducedMotion: !!host.reducedMotion,
+    visible: gateState.visible,
+    intersecting: gateState.intersecting,
+    displayed: gateState.displayed && width > 1 && height > 1,
+  })
+
+  const readColor = () => {
+    try {
+      fillStyle = getComputedStyle(canvas).color
+    } catch {
+      fillStyle = fillStyle || 'currentColor'
+    }
+  }
+
+  const applyBox = (box: PromptFxCssBox) => {
     if (disposed) return
-    const rect = canvas.getBoundingClientRect()
     const dpr = decorativeLayerDpr(window.devicePixelRatio || 1)
-    const nextWidth = rect.width
-    const nextHeight = rect.height
+    const nextWidth = box.width
+    const nextHeight = box.height
     const nextStoreW = Math.round(nextWidth * dpr)
     const nextStoreH = Math.round(nextHeight * dpr)
     if (!nextStoreW || !nextStoreH) {
       width = 0
       height = 0
-      gateState.displayed = false
       return
     }
-    gateState.displayed = true
     if (nextStoreW === canvas.width && nextStoreH === canvas.height && width === nextWidth && height === nextHeight) return
     width = nextWidth
     height = nextHeight
     canvas.width = nextStoreW
     canvas.height = nextStoreH
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    paint(performance.now())
   }
 
-  const live = () => host.energy.current > PROMPT_FX_ENERGY_LIVE || particles.length > 0
-
   const paint = (now: number) => {
-    lastDraw = now
     ctx.clearRect(0, 0, width, height)
-    ctx.fillStyle = getComputedStyle(canvas).color
+    ctx.fillStyle = fillStyle
+    const gain = host.energy.current
     for (const p of particles) {
       ctx.globalAlpha = Math.sin(p.life / p.span * Math.PI) * 0.5 * Math.max(0, Math.min(1, (height - p.y) / 12, p.y / 12))
       ctx.beginPath()
-      ctx.arc(p.x + Math.sin(now / 1100 + p.phase) * 5, p.y, 0.9 + host.energy.current * 0.5, 0, Math.PI * 2)
+      ctx.arc(p.x + Math.sin(now / 1100 + p.phase) * 5, p.y, 0.9 + gain * 0.5, 0, Math.PI * 2)
       ctx.fill()
     }
     ctx.globalAlpha = 1
   }
 
-  const tick = (now: number) => {
+  const tick = (wall: number) => {
     frame = 0
     if (disposed || !width || !height) return
-    const dt = Math.min(0.05, (now - last) / 1000)
+    const animate = looping()
+    const now = promptFxSyncClock(clock, animate, wall)
+    if (!animate) return
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 0
     last = now
     host.energy.current *= Math.exp(-dt / 0.8)
-    const gate = {
-      reducedMotion: !!host.reducedMotion,
-      visible: gateState.visible,
-      windowFocused: gateState.windowFocused,
-      intersecting: gateState.intersecting,
-      displayed: gateState.displayed && width > 1 && height > 1,
-      engaged,
-      live: live(),
-    }
-    if (!promptFxShouldLoop(gate)) {
-      paint(now)
-      return
-    }
-    const active = host.energy.current > PROMPT_FX_ENERGY_LIVE
-    if (!promptFxFrameDue(now, lastDraw, promptFxFrameIntervalMs(active))) {
-      frame = requestAnimationFrame(tick)
-      return
-    }
+    const gain = host.energy.current
     due += dt
-    if ((engaged || active) && due > 0.18 && particles.length < 22) {
+    if (due > 0.18 && particles.length < 22) {
       due = 0
       particles.push({
         x: Math.random() * width,
@@ -103,7 +96,6 @@ export function mountPromptSparks(
         phase: Math.random() * Math.PI * 2,
       })
     }
-    const gain = host.energy.current
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i]!
       p.life += dt
@@ -111,32 +103,36 @@ export function mountPromptSparks(
       if (p.life > p.span || p.y < 0) particles.splice(i, 1)
     }
     paint(now)
-    if (!disposed && promptFxShouldLoop({ ...gate, live: live() })) frame = requestAnimationFrame(tick)
+    if (!disposed && looping()) frame = requestAnimationFrame(tick)
   }
 
   const kick = () => {
     if (disposed || frame) return
-    last = performance.now()
+    if (!looping()) {
+      promptFxSyncClock(clock, false, performance.now())
+      return
+    }
     frame = requestAnimationFrame(tick)
   }
 
-  const { state: gateState, dispose: disposeGate } = attachPromptFxGate(canvas, kick)
-  const disposeEngagement = attachPromptFxEngagement(field ?? canvas.parentElement, next => {
-    engaged = next
-    kick()
-  })
-  const sizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null
-  sizeObserver?.observe(canvas)
-  resize()
+  const { state: gateState, dispose: disposeGate } = attachPromptFxGate(canvas, kick, applyBox)
+  readColor()
+  let themeObserver: MutationObserver | undefined
+  if (typeof MutationObserver === 'function' && document.documentElement) {
+    themeObserver = new MutationObserver(() => {
+      readColor()
+      kick()
+    })
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
+  }
   kick()
 
   return () => {
     disposed = true
     cancelAnimationFrame(frame)
     frame = 0
-    sizeObserver?.disconnect()
+    themeObserver?.disconnect()
     disposeGate()
-    disposeEngagement()
     if (width && height) ctx.clearRect(0, 0, width, height)
   }
 }

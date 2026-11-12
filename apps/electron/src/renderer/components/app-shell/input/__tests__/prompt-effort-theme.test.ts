@@ -15,7 +15,7 @@ import {
   type EffortShaderTheme,
 } from '../effort-theme'
 import { effortFramePlan, effortPaintPlan, mountWebglEffort } from '@/hooks/useWebglEffort'
-import { PROMPT_FX_ACTIVE_FRAME_MS, PROMPT_FX_AMBIENT_FRAME_MS, PROMPT_FX_DPR_CAP } from '../prompt-fx-runtime'
+import { PROMPT_FX_DPR_CAP } from '../prompt-fx-runtime'
 
 const css = readFileSync(join(import.meta.dir, '../PromptBarEffects.css'), 'utf8')
 const themeCss = readFileSync(join(import.meta.dir, '../../../../index.css'), 'utf8')
@@ -114,10 +114,10 @@ describe('max effort theme css', () => {
     expect(reduced).not.toContain('background-color 300ms')
     expect(effortFramePlan(true)).toEqual({ steps: 32, loop: false })
     expect(effortFramePlan(false)).toEqual({ steps: 1, loop: true })
-    expect(effortPaintPlan(true, false)).toEqual({ steps: 32, loop: false, intervalMs: 0 })
-    expect(effortPaintPlan(false, false)).toEqual({ steps: 1, loop: true, intervalMs: PROMPT_FX_ACTIVE_FRAME_MS })
-    expect(effortPaintPlan(false, true)).toEqual({ steps: 1, loop: true, intervalMs: PROMPT_FX_AMBIENT_FRAME_MS })
-    expect(effortPaintPlan(false, true, false)).toEqual({ steps: 1, loop: false, intervalMs: 0 })
+    expect(effortPaintPlan(true, false)).toEqual({ steps: 32, loop: false })
+    expect(effortPaintPlan(false, false)).toEqual({ steps: 1, loop: true })
+    expect(effortPaintPlan(false, true)).toEqual({ steps: 1, loop: true })
+    expect(effortPaintPlan(false, true, false)).toEqual({ steps: 1, loop: false })
   })
 })
 
@@ -496,7 +496,7 @@ describe('max effort webgl field', () => {
     expect(calls.filter(call => call.name === 'drawArrays').length).toBe(24)
   })
 
-  it('caps the decorative backing store below full devicePixelRatio', () => {
+  it('keeps the original decorative backing store at devicePixelRatio 2', () => {
     console.warn = () => {}
     const { gl, calls } = fakeGl()
     Object.assign(globalThis, {
@@ -541,7 +541,7 @@ describe('max effort webgl field', () => {
       closest: () => null,
     }
     const stop = mountWebglEffort(canvas as unknown as HTMLCanvasElement, { onContextRestored() {} })
-    expect(PROMPT_FX_DPR_CAP).toBe(1.5)
+    expect(PROMPT_FX_DPR_CAP).toBe(2)
     expect(canvas.width).toBe(Math.round(180 * PROMPT_FX_DPR_CAP))
     expect(canvas.height).toBe(Math.round(22 * PROMPT_FX_DPR_CAP))
     expect(calls.filter(call => call.name === 'drawArrays').length).toBeGreaterThan(0)

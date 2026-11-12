@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { mountPromptSparks } from '../prompt-sparks'
 import { PROMPT_FX_DPR_CAP } from '../prompt-fx-runtime'
 
-const hostKeys = ['window', 'document', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'IntersectionObserver'] as const
+const hostKeys = ['window', 'document', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'IntersectionObserver', 'MutationObserver'] as const
 
 describe('prompt sparks loop', () => {
   const previous = hostKeys.map(key => Object.getOwnPropertyDescriptor(globalThis, key))
@@ -19,6 +19,7 @@ describe('prompt sparks loop', () => {
     let frameId = 0
     let ioCallback: IntersectionObserverCallback | undefined
     const calls: string[] = []
+    let colorReads = 0
     const ctx = {
       setTransform: () => { calls.push('setTransform') },
       clearRect: () => { calls.push('clearRect') },
@@ -36,6 +37,7 @@ describe('prompt sparks loop', () => {
       },
       cancelAnimationFrame: (id: number) => { queue.delete(id) },
       ResizeObserver: class { observe() {} disconnect() {} },
+      MutationObserver: class { observe() {} disconnect() {} },
       IntersectionObserver: class {
         constructor(callback: IntersectionObserverCallback) { ioCallback = callback }
         observe() {}
@@ -55,28 +57,35 @@ describe('prompt sparks loop', () => {
       value: {
         hidden: options?.hidden ?? false,
         visibilityState: options?.hidden ? 'hidden' : 'visible',
-        activeElement: null,
+        documentElement: { classList: { contains: () => false } },
         addEventListener() {},
         removeEventListener() {},
-        hasFocus: () => !options?.hidden,
       },
     })
     Object.defineProperty(globalThis, 'getComputedStyle', {
       configurable: true,
-      value: () => ({ color: 'rgb(120, 80, 200)', display: 'block', visibility: 'visible' }),
+      value: () => {
+        colorReads += 1
+        return { color: 'rgb(120, 80, 200)', display: 'block', visibility: 'visible' }
+      },
     })
     const canvas = {
       width: 0,
       height: 0,
       style: {},
       className: 'prompt-sparks',
+      clientWidth: 1605,
+      clientHeight: 203,
       getContext: () => ctx,
-      getBoundingClientRect: () => ({ width: 1605, height: 203 }),
-      closest: (() => null) as () => { matches: (selector: string) => boolean; contains: () => boolean; addEventListener(type: string, listener: EventListener): void; removeEventListener(type: string, listener: EventListener): void; dispatch(type: string): void } | null,
+      getBoundingClientRect: () => {
+        calls.push('getBoundingClientRect')
+        return { width: 1605, height: 203 }
+      },
+      closest: () => null,
       parentElement: null,
       isConnected: true,
     }
-    return { queue, ctx, canvas, calls, ioCallback: () => ioCallback }
+    return { queue, ctx, canvas, calls, colorReads: () => colorReads, ioCallback: () => ioCallback }
   }
 
   function pump(queue: Map<number, FrameRequestCallback>, now: number) {
@@ -86,25 +95,37 @@ describe('prompt sparks loop', () => {
     pending![1](now)
   }
 
-  it('caps DPR, keeps a resting bitmap, and stops rAF when hidden or offscreen', () => {
-    const { queue, canvas, ioCallback } = install({ ratio: 2 })
+  it('uses full DPR 2, keeps a resting bitmap, and stops rAF only when hidden or offscreen', () => {
+    const { queue, canvas, calls, ioCallback } = install({ ratio: 2 })
     const energy = { current: 0 }
     const stop = mountPromptSparks(canvas as unknown as HTMLCanvasElement, { energy })
     expect(canvas.width).toBe(Math.round(1605 * PROMPT_FX_DPR_CAP))
     expect(canvas.height).toBe(Math.round(203 * PROMPT_FX_DPR_CAP))
+    expect(calls.includes('getBoundingClientRect')).toBe(false)
     expect(queue.size).toBe(1)
     const started = performance.now()
-    pump(queue, started + 40)
+    pump(queue, started + 16)
     expect(queue.size).toBe(1)
 
     ioCallback()?.([{ isIntersecting: false, intersectionRatio: 0, target: canvas } as unknown as IntersectionObserverEntry], {} as IntersectionObserver)
-    pump(queue, started + 80)
+    pump(queue, started + 32)
     expect(queue.size).toBe(0)
 
     ioCallback()?.([{ isIntersecting: true, intersectionRatio: 1, target: canvas } as unknown as IntersectionObserverEntry], {} as IntersectionObserver)
     expect(queue.size).toBe(1)
     stop()
     expect(queue.size).toBe(0)
+  })
+
+  it('keeps idle sparks looping without composer hover or focus', () => {
+    const { queue, canvas } = install()
+    const energy = { current: 0 }
+    const stop = mountPromptSparks(canvas as unknown as HTMLCanvasElement, { energy })
+    const started = performance.now()
+    pump(queue, started + 16)
+    pump(queue, started + 32)
+    expect(queue.size).toBe(1)
+    stop()
   })
 
   it('does not keep a rAF chain after unmount', () => {
@@ -123,38 +144,20 @@ describe('prompt sparks loop', () => {
     const { queue, canvas } = install()
     const energy = { current: 1 }
     const stop = mountPromptSparks(canvas as unknown as HTMLCanvasElement, { energy, reducedMotion: true })
-    pump(queue, performance.now() + 40)
     expect(queue.size).toBe(0)
     stop()
   })
 
-  it('pauses ambient sparks until the composer is hovered or focused', () => {
-    const { queue, canvas } = install()
-    let hovered = false
-    const listeners = new Map<string, Set<EventListener>>()
-    const field = {
-      matches: (selector: string) => hovered && selector.includes(':hover'),
-      contains: () => false,
-      addEventListener(type: string, listener: EventListener) {
-        const set = listeners.get(type) ?? new Set()
-        set.add(listener)
-        listeners.set(type, set)
-      },
-      removeEventListener(type: string, listener: EventListener) {
-        listeners.get(type)?.delete(listener)
-      },
-      dispatch(type: string) {
-        hovered = type === 'pointerenter'
-        for (const listener of listeners.get(type) ?? []) listener(new Event(type))
-      },
-    }
-    canvas.closest = () => field
-    const energy = { current: 0 }
+  it('does not re-read computed color on every frame', () => {
+    const { queue, canvas, colorReads } = install()
+    const energy = { current: 0.2 }
     const stop = mountPromptSparks(canvas as unknown as HTMLCanvasElement, { energy })
-    pump(queue, performance.now() + 40)
-    expect(queue.size).toBe(0)
-    field.dispatch('pointerenter')
-    expect(queue.size).toBe(1)
+    const before = colorReads()
+    const started = performance.now()
+    pump(queue, started + 16)
+    pump(queue, started + 32)
+    pump(queue, started + 48)
+    expect(colorReads()).toBe(before)
     stop()
   })
 })
