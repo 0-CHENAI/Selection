@@ -15,6 +15,7 @@ import {
   type EffortShaderTheme,
 } from '../effort-theme'
 import { effortFramePlan, effortPaintPlan, mountWebglEffort } from '@/hooks/useWebglEffort'
+import { PROMPT_FX_ACTIVE_FRAME_MS, PROMPT_FX_AMBIENT_FRAME_MS, PROMPT_FX_DPR_CAP } from '../prompt-fx-runtime'
 
 const css = readFileSync(join(import.meta.dir, '../PromptBarEffects.css'), 'utf8')
 const themeCss = readFileSync(join(import.meta.dir, '../../../../index.css'), 'utf8')
@@ -113,9 +114,10 @@ describe('max effort theme css', () => {
     expect(reduced).not.toContain('background-color 300ms')
     expect(effortFramePlan(true)).toEqual({ steps: 32, loop: false })
     expect(effortFramePlan(false)).toEqual({ steps: 1, loop: true })
-    expect(effortPaintPlan(true, false)).toEqual({ steps: 32, loop: false })
-    expect(effortPaintPlan(false, false)).toEqual({ steps: 1, loop: true })
-    expect(effortPaintPlan(false, true)).toEqual({ steps: 1, loop: true })
+    expect(effortPaintPlan(true, false)).toEqual({ steps: 32, loop: false, intervalMs: 0 })
+    expect(effortPaintPlan(false, false)).toEqual({ steps: 1, loop: true, intervalMs: PROMPT_FX_ACTIVE_FRAME_MS })
+    expect(effortPaintPlan(false, true)).toEqual({ steps: 1, loop: true, intervalMs: PROMPT_FX_AMBIENT_FRAME_MS })
+    expect(effortPaintPlan(false, true, false)).toEqual({ steps: 1, loop: false, intervalMs: 0 })
   })
 })
 
@@ -304,7 +306,7 @@ function fakeGl() {
 }
 
 describe('max effort webgl field', () => {
-  const previous = ['window', 'document', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'MutationObserver']
+  const previous = ['window', 'document', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'MutationObserver', 'IntersectionObserver']
     .map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const)
   const warn = console.warn
   afterEach(() => {
@@ -477,20 +479,142 @@ describe('max effort webgl field', () => {
     const stop = mountWebglEffort(canvas as unknown as HTMLCanvasElement, { onContextRestored() {} })
     expect(calls.filter(call => call.name === 'drawArrays').length).toBe(4)
     expect(queue.size).toBe(1)
+    const started = performance.now()
     for (let step = 0; step < 5; step++) {
       const pending = queue.entries().next().value as [number, FrameRequestCallback] | undefined
       expect(pending).toBeTruthy()
       queue.delete(pending![0])
-      pending![1](performance.now())
+      pending![1](started + (step + 1) * 40)
     }
     expect(queue.size).toBe(1)
     expect(calls.filter(call => call.name === 'drawArrays').length).toBe(24)
     const stale = [...queue.values()][0]!
     stop()
     expect(queue.size).toBe(0)
-    stale(performance.now())
+    stale(started + 280)
     expect(queue.size).toBe(0)
     expect(calls.filter(call => call.name === 'drawArrays').length).toBe(24)
+  })
+
+  it('caps the decorative backing store below full devicePixelRatio', () => {
+    console.warn = () => {}
+    const { gl, calls } = fakeGl()
+    Object.assign(globalThis, {
+      requestAnimationFrame: () => 1,
+      cancelAnimationFrame: () => {},
+      ResizeObserver: class { observe() {} disconnect() {} },
+      MutationObserver: class { observe() {} disconnect() {} },
+    })
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        devicePixelRatio: 2,
+        matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+      },
+    })
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        hidden: false,
+        documentElement: { classList: { contains: () => false } },
+        addEventListener() {},
+        removeEventListener() {},
+      },
+    })
+    Object.defineProperty(globalThis, 'getComputedStyle', {
+      configurable: true,
+      value: () => ({
+        color: 'rgb(1, 2, 3)',
+        borderTopColor: 'rgb(4, 5, 6)',
+        borderRightColor: 'rgb(7, 8, 9)',
+        borderBottomColor: 'rgb(10, 11, 12)',
+        getPropertyValue: () => '',
+      }),
+    })
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => gl,
+      getBoundingClientRect: () => ({ width: 180, height: 22 }),
+      addEventListener() {},
+      removeEventListener() {},
+      closest: () => null,
+    }
+    const stop = mountWebglEffort(canvas as unknown as HTMLCanvasElement, { onContextRestored() {} })
+    expect(PROMPT_FX_DPR_CAP).toBe(1.5)
+    expect(canvas.width).toBe(Math.round(180 * PROMPT_FX_DPR_CAP))
+    expect(canvas.height).toBe(Math.round(22 * PROMPT_FX_DPR_CAP))
+    expect(calls.filter(call => call.name === 'drawArrays').length).toBeGreaterThan(0)
+    stop()
+  })
+
+  it('drops the frame loop when the field leaves the viewport and keeps the last draw', () => {
+    console.warn = () => {}
+    const { gl, calls } = fakeGl()
+    const queue = new Map<number, FrameRequestCallback>()
+    let frameId = 0
+    let ioCallback: IntersectionObserverCallback | undefined
+    Object.assign(globalThis, {
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        const id = ++frameId
+        queue.set(id, callback)
+        return id
+      },
+      cancelAnimationFrame: (id: number) => { queue.delete(id) },
+      ResizeObserver: class { observe() {} disconnect() {} },
+      MutationObserver: class { observe() {} disconnect() {} },
+      IntersectionObserver: class {
+        constructor(callback: IntersectionObserverCallback) { ioCallback = callback }
+        observe() {}
+        disconnect() {}
+      },
+    })
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        devicePixelRatio: 1,
+        matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+      },
+    })
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        hidden: false,
+        visibilityState: 'visible',
+        documentElement: { classList: { contains: () => false } },
+        addEventListener() {},
+        removeEventListener() {},
+      },
+    })
+    Object.defineProperty(globalThis, 'getComputedStyle', {
+      configurable: true,
+      value: () => ({
+        color: 'rgb(1, 2, 3)',
+        borderTopColor: 'rgb(4, 5, 6)',
+        borderRightColor: 'rgb(7, 8, 9)',
+        borderBottomColor: 'rgb(10, 11, 12)',
+        getPropertyValue: () => '',
+      }),
+    })
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => gl,
+      getBoundingClientRect: () => ({ width: 180, height: 22 }),
+      addEventListener() {},
+      removeEventListener() {},
+      closest: () => null,
+    }
+    const stop = mountWebglEffort(canvas as unknown as HTMLCanvasElement, { onContextRestored() {} })
+    expect(queue.size).toBe(1)
+    const before = calls.filter(call => call.name === 'drawArrays').length
+    ioCallback?.([{ isIntersecting: false, intersectionRatio: 0, target: canvas } as unknown as IntersectionObserverEntry], {} as IntersectionObserver)
+    expect(queue.size).toBe(0)
+    expect(calls.filter(call => call.name === 'drawArrays').length).toBeGreaterThanOrEqual(before)
+    ioCallback?.([{ isIntersecting: true, intersectionRatio: 1, target: canvas } as unknown as IntersectionObserverEntry], {} as IntersectionObserver)
+    expect(queue.size).toBe(1)
+    stop()
+    expect(queue.size).toBe(0)
   })
 
   it('eases shader colors across frames and keeps drawing until the blend settles', () => {

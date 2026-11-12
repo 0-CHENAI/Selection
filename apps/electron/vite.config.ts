@@ -1,7 +1,18 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
+import { stripReactDevtoolsHtml } from './vite-strip-react-devtools'
+
+function stripReactDevtools(): Plugin {
+  return {
+    name: 'strip-react-devtools-html',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return stripReactDevtoolsHtml(html)
+    },
+  }
+}
 
 // NOTE: Source map upload to Sentry is intentionally disabled.
 // To re-enable, uncomment the sentryVitePlugin below and add SENTRY_AUTH_TOKEN,
@@ -26,6 +37,7 @@ export default defineConfig({
       },
     }),
     tailwindcss(),
+    stripReactDevtools(),
     // Sentry source map upload — intentionally disabled. See CLAUDE.md for re-enabling instructions.
     // sentryVitePlugin({
     //   org: process.env.SENTRY_ORG,

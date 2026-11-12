@@ -9,6 +9,7 @@ import { type ThinkingLevel, type ThinkingLevelDefinition, getThinkingLevelNameK
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { useWebglEffort } from '@/hooks/useWebglEffort'
 import { EFFORT_FIELD_FADE_MS } from './effort-theme'
+import { mountPromptSparks } from './prompt-sparks'
 import './PromptBarEffects.css'
 
 // Keep the handle centered on each stop, including both track endpoints.
@@ -215,64 +216,9 @@ export function PromptSparks({ active, energy }: { active: boolean; energy: Reac
   React.useEffect(() => {
     const canvas = canvasRef.current
     if (!active || reducedMotion || !canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    let width = 0
-    let height = 0
-    let frame = 0
-    let last = performance.now()
-    let due = 0
-    const particles: { x: number; y: number; life: number; span: number; speed: number; phase: number }[] = []
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect()
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
-      width = rect.width
-      height = rect.height
-      canvas.width = Math.round(width * dpr)
-      canvas.height = Math.round(height * dpr)
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    }
-    const tick = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000)
-      last = now
-      energy.current *= Math.exp(-dt / 0.8)
-      const gain = energy.current
-      due += dt
-      if (due > 0.18 && particles.length < 22) {
-        due = 0
-        particles.push({ x: Math.random() * width, y: height + 2, life: 0, span: 3 + Math.random() * 2, speed: 8 + Math.random() * 7, phase: Math.random() * Math.PI * 2 })
-      }
-      ctx.clearRect(0, 0, width, height)
-      // Resolve the token each frame so an open composer follows theme changes.
-      ctx.fillStyle = getComputedStyle(canvas).color
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i]!
-        p.life += dt
-        p.y -= p.speed * dt * (1 + gain * 3)
-        if (p.life > p.span || p.y < 0) { particles.splice(i, 1); continue }
-        ctx.globalAlpha = Math.sin(p.life / p.span * Math.PI) * 0.5 * Math.max(0, Math.min(1, (height - p.y) / 12, p.y / 12))
-        ctx.beginPath()
-        ctx.arc(p.x + Math.sin(now / 1100 + p.phase) * 5, p.y, 0.9 + gain * 0.5, 0, Math.PI * 2)
-        ctx.fill()
-      }
-      frame = requestAnimationFrame(tick)
-    }
-    const visibility = () => {
-      cancelAnimationFrame(frame)
-      if (!document.hidden) { last = performance.now(); frame = requestAnimationFrame(tick) }
-    }
-    resize()
-    const observer = new ResizeObserver(resize)
-    observer.observe(canvas)
-    document.addEventListener('visibilitychange', visibility)
-    visibility()
-    return () => {
-      cancelAnimationFrame(frame)
-      observer.disconnect()
-      document.removeEventListener('visibilitychange', visibility)
-      ctx.clearRect(0, 0, width, height)
-    }
+    return mountPromptSparks(canvas, { energy, reducedMotion: !!reducedMotion })
   }, [active, energy, reducedMotion])
 
+  if (!active || reducedMotion) return null
   return <canvas ref={canvasRef} className="prompt-sparks" aria-hidden="true" />
 }
