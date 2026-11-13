@@ -554,6 +554,7 @@
   "chat.renameSession": "Sitzung umbenennen",
   "chat.scrollToBottom": "Zum Ende",
   "chat.scrollUpForEarlier": "Nach oben scrollen für ältere Nachrichten ({{count}} weitere)",
+  "chat.selectedSourcesCount": "{{count}} Quellen ausgewählt",
   "chat.selectedText": "Ausgewählter Text",
   "chat.session": "Sitzung",
   "chat.sessionFiles": "Sitzungsdateien",

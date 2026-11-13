@@ -554,6 +554,7 @@
   "chat.renameSession": "Munkamenet átnevezése",
   "chat.scrollToBottom": "Ugrás az aljára",
   "chat.scrollUpForEarlier": "Görgess fel a korábbi üzenetekért (még {{count}})",
+  "chat.selectedSourcesCount": "{{count}} forrás kiválasztva",
   "chat.selectedText": "Kijelölt szöveg",
   "chat.session": "Munkamenet",
   "chat.sessionFiles": "Munkamenet fájlok",

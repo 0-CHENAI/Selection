@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 import type { Turn } from '@craft-agent/ui'
-import { formatWorkElapsed, getWorkTimings, WORK_ELAPSED_SLOT_CLASS, TAIL_WORK_CHROME_RESERVE_CLASS } from '../ChatDisplay.work-status'
+import {
+  formatWorkElapsed,
+  getWorkTimings,
+  WORK_ELAPSED_SLOT_CLASS,
+  WORK_STATUS_CONTENT_CLASS,
+  WORK_STATUS_LABEL_CLASS,
+  TAIL_WORK_CHROME_RESERVE_CLASS,
+} from '../ChatDisplay.work-status'
 
 const user = (timestamp: number): Turn => ({ type: 'user', timestamp,
   message: { id: `user-${timestamp}`, role: 'user', content: '问题', timestamp } })
@@ -90,5 +97,12 @@ describe('stable processing header metrics', () => {
     expect(WORK_ELAPSED_SLOT_CLASS).toContain('tabular-nums')
     expect(WORK_ELAPSED_SLOT_CLASS).toContain('w-[5ch]')
     expect(TAIL_WORK_CHROME_RESERVE_CLASS).toBe('h-8 shrink-0')
+  })
+
+  it('keeps elapsed time immediately after the work label', () => {
+    expect(WORK_STATUS_CONTENT_CLASS).toContain('items-center')
+    expect(WORK_STATUS_CONTENT_CLASS).not.toContain('flex-1')
+    expect(WORK_STATUS_LABEL_CLASS).toContain('grid')
+    expect(WORK_STATUS_LABEL_CLASS).not.toContain('flex-1')
   })
 })

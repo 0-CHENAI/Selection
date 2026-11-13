@@ -4,13 +4,20 @@ import { effortThemeFallback, readEffortShaderTheme, stepEffortShaderTheme, type
 import {
   attachPromptFxGate,
   createPromptFxClock,
-  decorativeLayerDpr,
+  PROMPT_FX_DPR_CAP,
   promptFxShouldLoop,
   promptFxSyncClock,
   type PromptFxCssBox,
 } from '@/components/app-shell/input/prompt-fx-runtime'
 
 type Target = { framebuffer: WebGLFramebuffer; texture: WebGLTexture }
+
+/**
+ * Use the same Retina-density backing store on every desktop platform. The
+ * field is tiny, while a platform DPR changes cell edges and the pixel-based
+ * bloom kernel enough to make Windows and macOS visibly diverge.
+ */
+export const MAX_EFFORT_RENDER_DPR = PROMPT_FX_DPR_CAP
 
 /**
  * Reduced motion draws one settled field and does not schedule another frame.
@@ -337,7 +344,7 @@ export function mountWebglEffort(
 
     function applySize(box: PromptFxCssBox) {
       if (disposed || contextInvalidated || gl!.isContextLost()) return
-      const dpr = decorativeLayerDpr(window.devicePixelRatio || 1)
+      const dpr = MAX_EFFORT_RENDER_DPR
       const nextWidth = Math.round(box.width * dpr)
       const nextHeight = Math.round(box.height * dpr)
       cssWidth = box.width

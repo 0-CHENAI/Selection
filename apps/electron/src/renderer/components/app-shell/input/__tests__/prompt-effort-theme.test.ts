@@ -14,11 +14,11 @@ import {
   stepEffortShaderTheme,
   type EffortShaderTheme,
 } from '../effort-theme'
-import { effortFramePlan, effortPaintPlan, mountWebglEffort } from '@/hooks/useWebglEffort'
+import { effortFramePlan, effortPaintPlan, MAX_EFFORT_RENDER_DPR, mountWebglEffort } from '@/hooks/useWebglEffort'
 import { PROMPT_FX_DPR_CAP } from '../prompt-fx-runtime'
 
-const css = readFileSync(join(import.meta.dir, '../PromptBarEffects.css'), 'utf8')
-const themeCss = readFileSync(join(import.meta.dir, '../../../../index.css'), 'utf8')
+const css = readFileSync(join(import.meta.dir, '../PromptBarEffects.css'), 'utf8').replace(/\r\n/g, '\n')
+const themeCss = readFileSync(join(import.meta.dir, '../../../../index.css'), 'utf8').replace(/\r\n/g, '\n')
 
 function ruleBodies(source: string, selector: string): string[] {
   const bodies: string[] = []
@@ -392,6 +392,9 @@ describe('max effort webgl field', () => {
     const stop = mountWebglEffort(canvas as unknown as HTMLCanvasElement, { onContextRestored() {} })
     expect(warnings).toEqual([])
     expect(contextAttrs).toMatchObject({ alpha: true, premultipliedAlpha: true, antialias: false })
+    expect(MAX_EFFORT_RENDER_DPR).toBe(2)
+    expect(canvas.width).toBe(180 * MAX_EFFORT_RENDER_DPR)
+    expect(canvas.height).toBe(22 * MAX_EFFORT_RENDER_DPR)
     expect(calls.filter(call => call.name === 'clearColor').every(call => call.args.join(',') === '0,0,0,0')).toBe(true)
     expect(draws()).toBe(35)
     expect(queue.size).toBe(0)
@@ -496,7 +499,7 @@ describe('max effort webgl field', () => {
     expect(calls.filter(call => call.name === 'drawArrays').length).toBe(24)
   })
 
-  it('keeps the original decorative backing store at devicePixelRatio 2', () => {
+  it('keeps the same 2x backing store at devicePixelRatio 2', () => {
     console.warn = () => {}
     const { gl, calls } = fakeGl()
     Object.assign(globalThis, {

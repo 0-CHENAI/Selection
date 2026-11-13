@@ -554,6 +554,7 @@
   "chat.renameSession": "Renombrar sesión",
   "chat.scrollToBottom": "Volver al final",
   "chat.scrollUpForEarlier": "Sube para ver mensajes anteriores ({{count}} más)",
+  "chat.selectedSourcesCount": "Usando {{count}} fuentes",
   "chat.selectedText": "Texto seleccionado",
   "chat.session": "Sesión",
   "chat.sessionFiles": "Archivos de sesión",

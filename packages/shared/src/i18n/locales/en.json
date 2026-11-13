@@ -554,6 +554,7 @@
   "chat.renameSession": "Rename Session",
   "chat.scrollToBottom": "Back to bottom",
   "chat.scrollUpForEarlier": "Scroll up for earlier messages ({{count}} more)",
+  "chat.selectedSourcesCount": "Using {{count}} sources",
   "chat.selectedText": "Selected text",
   "chat.session": "Session",
   "chat.sessionFiles": "Session Files",

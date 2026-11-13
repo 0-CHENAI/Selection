@@ -12,6 +12,10 @@ export function formatWorkElapsed(seconds: number): string {
 /** Fixed tabular slot so 9s → 10s and 59s → 1:00 never shift the header. */
 export const WORK_ELAPSED_SLOT_CLASS = 'ml-1 inline-block w-[5ch] shrink-0 tabular-nums text-muted-foreground/60'
 
+/** Keep elapsed time next to the status copy instead of consuming the whole row. */
+export const WORK_STATUS_CONTENT_CLASS = 'flex h-5 min-w-0 items-center'
+export const WORK_STATUS_LABEL_CLASS = 'relative grid h-5 min-w-0'
+
 /**
  * Collapsed TurnCard work header is h-8. Reserve that row in the tail
  * processing indicator so the first assistant card does not jump.

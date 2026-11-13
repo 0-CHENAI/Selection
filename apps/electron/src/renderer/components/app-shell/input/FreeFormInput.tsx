@@ -87,7 +87,6 @@ import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shar
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { type ThinkingLevel, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
-import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -700,6 +699,7 @@ export function FreeFormInput({
   // composer's unacknowledged selection even for one render/event.
   if (currentSourceSelection !== sourceSelection) setSourceSelection(currentSourceSelection)
   const optimisticSourceSlugs = currentSourceSelection.slugs
+  const selectedSourcesLabel = t("chat.selectedSourcesCount", { count: optimisticSourceSlugs.length })
   const setOptimisticSourceSlugs = React.useCallback((slugs: string[]) => {
     setSourceSelection(previous => ({ ...previous, slugs }))
   }, [])
@@ -2276,14 +2276,11 @@ export function FreeFormInput({
                 label={
                   optimisticSourceSlugs.length === 0
                     ? t("chat.sourcesTooltip")
-                    : (() => {
-                        const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
-                        if (enabledSources.length === 1) return resolveSourceTitle(enabledSources[0])
-                        return t("chat.sourcesCount", { count: enabledSources.length })
-                      })()
+                    : selectedSourcesLabel
                 }
                 isExpanded={false}
                 hasSelection={optimisticSourceSlugs.length > 0}
+                selectionChrome={false}
                 showChevron={false}
                 isOpen={sourceDropdownOpen}
                 disabled={disabled}
@@ -2385,15 +2382,11 @@ export function FreeFormInput({
                 label={
                   optimisticSourceSlugs.length === 0
                     ? t("chat.chooseSources")
-                    : (() => {
-                        const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
-                        if (enabledSources.length === 1) return resolveSourceTitle(enabledSources[0])
-                        if (enabledSources.length === 2) return enabledSources.map(s => resolveSourceTitle(s)).join(', ')
-                        return t("chat.sourcesCount", { count: enabledSources.length })
-                      })()
+                    : selectedSourcesLabel
                 }
                 isExpanded={isEmptySession}
                 hasSelection={optimisticSourceSlugs.length > 0}
+                selectionChrome={false}
                 showChevron={true}
                 isOpen={sourceDropdownOpen}
                 disabled={disabled}

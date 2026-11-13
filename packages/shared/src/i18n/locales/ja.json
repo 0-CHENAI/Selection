@@ -554,6 +554,7 @@
   "chat.renameSession": "セッション名を変更",
   "chat.scrollToBottom": "最下部に戻る",
   "chat.scrollUpForEarlier": "上にスクロールして以前のメッセージを表示 (あと {{count}} 件)",
+  "chat.selectedSourcesCount": "{{count}}件のデータソースを選択済み",
   "chat.selectedText": "選択テキスト",
   "chat.session": "セッション",
   "chat.sessionFiles": "セッションファイル",

@@ -554,6 +554,7 @@
   "chat.renameSession": "重命名会话",
   "chat.scrollToBottom": "回到底部",
   "chat.scrollUpForEarlier": "向上滚动查看更早的消息 (还有 {{count}} 条)",
+  "chat.selectedSourcesCount": "已选用{{count}}个数据源",
   "chat.selectedText": "选中文本",
   "chat.session": "会话",
   "chat.sessionFiles": "会话文件",

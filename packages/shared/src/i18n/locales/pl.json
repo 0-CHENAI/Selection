@@ -554,6 +554,7 @@
   "chat.renameSession": "Zmień nazwę sesji",
   "chat.scrollToBottom": "Wróć na dół",
   "chat.scrollUpForEarlier": "Przewiń w górę, aby zobaczyć wcześniejsze wiadomości (jeszcze {{count}})",
+  "chat.selectedSourcesCount": "Wybrano {{count}} źródeł",
   "chat.selectedText": "Zaznaczony tekst",
   "chat.session": "Sesja",
   "chat.sessionFiles": "Pliki sesji",

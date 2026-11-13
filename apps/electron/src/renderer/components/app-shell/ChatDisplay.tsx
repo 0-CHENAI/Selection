@@ -30,7 +30,7 @@ import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
 import { ChatVirtualHistory, shouldShowTailProcessingIndicator, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
-import { formatWorkElapsed, getWorkTimings, TAIL_WORK_CHROME_RESERVE_CLASS, WORK_ELAPSED_SLOT_CLASS, workStatusOwnsUser } from './ChatDisplay.work-status'
+import { formatWorkElapsed, getWorkTimings, TAIL_WORK_CHROME_RESERVE_CLASS, WORK_ELAPSED_SLOT_CLASS, WORK_STATUS_CONTENT_CLASS, WORK_STATUS_LABEL_CLASS, workStatusOwnsUser } from './ChatDisplay.work-status'
 import { findRetryableCancelledUser, isCancelledTurnMarker } from '@craft-agent/shared/sessions/cancelled-turn'
 import { useComposerEnter } from '@/lib/composer-enter'
 import { shouldReserveConversationNavigationColumn, shouldShowConversationNavigation } from "./conversation-navigation"
@@ -512,8 +512,8 @@ function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, en
           <Spinner className="text-[14px]" status={isProcessing ? 'working' : interrupted ? 'error' : 'done'} />
         </div>
         {/* Label crossfades in a reserved slot; the timer never mounts/unmounts. */}
-        <span className="relative flex h-5 min-w-0 flex-1 items-center">
-          <span className="relative h-5 min-w-0 flex-1">
+        <span className={WORK_STATUS_CONTENT_CLASS}>
+          <span className={WORK_STATUS_LABEL_CLASS}>
             <AnimatePresence mode="wait" initial={false}>
               <motion.span
                 key={displayMessage}
@@ -521,7 +521,7 @@ function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, en
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.4, ease: 'easeInOut' }}
-                className="absolute inset-0 truncate"
+                className="col-start-1 row-start-1 truncate"
               >
                 {displayMessage}
               </motion.span>
