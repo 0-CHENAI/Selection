@@ -2,6 +2,7 @@ import type { TaskDeliveryReceipt } from './task-delivery-receipt'
 import type { WorkspaceDeliveryContract } from './workspace-delivery-contract'
 import { isNativeReadOnlyTool, PI_TOOL_NAME_MAP } from '../../../shared/src/agent/backend/pi/constants'
 import { execFileSync } from 'node:child_process'
+import { gitEnv, gitExecutable } from '../runtime/git-command.ts'
 import { randomUUID, createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -27,7 +28,7 @@ export interface IsolatedWorkspace {
 export function inside(root: string, path: string): boolean {
   const r = relative(root, path); return r === '' || (r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r))
 }
-const git = (cwd: string, args: string[], env?: NodeJS.ProcessEnv) => execFileSync('git', args, { cwd, env: { ...process.env, ...env, LC_ALL: 'C' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+const git = (cwd: string, args: string[], env?: NodeJS.ProcessEnv) => execFileSync(gitExecutable(), args, { cwd, env: gitEnv(env), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
 /** An alternate index snapshots dirty files without touching the user's index or refs. */
 export function snapshotGit(root: string, metadataDir: string): { head: string; snapshot: string } {
@@ -65,12 +66,12 @@ export function prepareIsolatedWorkspace(sourceRoot: string, storage: string, de
     state.directory = join(checkout, relative(gitRoot, root))
     // Reuse installed, ignored dependencies as read references; both file guards
     // and native Shell confinement prohibit writes through these links.
-    const manifests = execFileSync('git', ['ls-files', '-z', '--', 'package.json', '**/package.json'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean)
+    const manifests = execFileSync(gitExecutable(), ['ls-files', '-z', '--', 'package.json', '**/package.json'], { cwd: root, encoding: 'utf8', env: gitEnv() }).split('\0').filter(Boolean)
     for (const manifest of manifests) {
       const source = join(root, dirname(manifest), 'node_modules')
       const target = join(state.directory, dirname(manifest), 'node_modules')
       if (!existsSync(source) || existsSync(target)) continue
-      try { execFileSync('git', ['check-ignore', '-q', '--', source], { cwd: root, stdio: 'ignore' }) }
+      try { execFileSync(gitExecutable(), ['check-ignore', '-q', '--', source], { cwd: root, stdio: 'ignore', env: gitEnv() }) }
       catch { continue }
       mkdirSync(dirname(target), { recursive: true })
       symlinkSync(realpathSync(source), target, process.platform === 'win32' ? 'junction' : 'dir')

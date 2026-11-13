@@ -24,8 +24,7 @@
  */
 
 import { join } from 'node:path'
-import { homedir } from 'node:os'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
 import { enableDebug } from '@craft-agent/shared/utils/debug'
 import { bootstrapServer, startHealthHttpServer, generateServerToken } from '@craft-agent/server-core/bootstrap'
@@ -47,6 +46,7 @@ import { initModelRefreshService, setFetcherPlatform } from '@craft-agent/server
 import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
 import type { HandlerDeps } from '@craft-agent/server-core/handlers'
 import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { applyHostTools, ensureUserPythonVenv, resolveHostTools } from '@craft-agent/server-core/runtime'
 
 process.env.CRAFT_IS_PACKAGED ??= 'false'
 
@@ -93,6 +93,29 @@ function parseOptionalWebSocketUrl(name: string, value: string | undefined): str
 // In packaged mode, use CRAFT_BUNDLED_ASSETS_ROOT env or cwd.
 const bundledAssetsRoot = process.env.CRAFT_BUNDLED_ASSETS_ROOT
   ?? join(import.meta.dir, '..', '..', '..', '..')
+
+{
+  const resourcesBase = [
+    process.env.CRAFT_RESOURCES_BASE,
+    process.env.CRAFT_APP_ROOT,
+    bundledAssetsRoot,
+    join(bundledAssetsRoot, 'apps', 'electron'),
+  ].filter((dir): dir is string => Boolean(dir))
+    .find(dir => existsSync(join(dir, 'vendor', 'git')) || existsSync(join(dir, 'vendor', 'python')))
+    ?? process.env.CRAFT_APP_ROOT
+    ?? bundledAssetsRoot
+  const hostTools = resolveHostTools({
+    resourcesBase,
+    userDataDir: CONFIG_DIR,
+  })
+  applyHostTools(hostTools)
+  if (hostTools.pythonSource === 'bundled' && hostTools.pythonBinary && hostTools.venvDir) {
+    if (hostTools.pythonUserBase) mkdirSync(hostTools.pythonUserBase, { recursive: true })
+    if (ensureUserPythonVenv(hostTools.pythonBinary, hostTools.venvDir)) {
+      applyHostTools(resolveHostTools({ resourcesBase, userDataDir: CONFIG_DIR }))
+    }
+  }
+}
 
 // TLS configuration — when cert + key paths are provided, server listens on wss://
 let tls: WsRpcTlsOptions | undefined

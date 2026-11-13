@@ -41,6 +41,9 @@ export function buildDarwinSandboxProfile(
   options?: FilesystemIsolationOptions,
 ): string {
   const escapedRoot = escapeSandboxPath(resolve(sessionDir));
+  // process* + file-read* let the bundled vendor/git and vendor/python run,
+  // including paths with spaces (quoted subpath). Writes stay in sessionDir;
+  // createScriptRuntimeEnv pins PYTHONUSERBASE there.
   const profileParts = [
     '(version 1)',
     '(deny default)',

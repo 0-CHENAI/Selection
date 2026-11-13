@@ -57,6 +57,10 @@ files:
   - resources/bin/linux-x64/**/*
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
+  # Relocatable Git + CPython. Windows excludes these from `files` (EBUSY) and
+  # copies them via extraResources; afterPack copies all platforms before signing.
+  - vendor/git/**/*
+  - vendor/python/**/*
   # Exclude everything from node_modules (will use extraResources for SDK)
   - "!node_modules/**/*"
   # Build outputs live inside the Electron project. Never recursively package a
@@ -81,8 +85,14 @@ publish:
   provider: generic
   url: https://agents.craft.do/electron/latest
 
-# Disable ASAR to avoid decompression overhead and click delays
+# Disable ASAR to avoid decompression overhead and click delays.
+# Vendor Git/Python are native executables and must never live inside app.asar
+# (Electron cannot exec from asar). asar:false unpacks the whole app; extraResources
+# and afterPack also copy vendor/ to Resources/app/vendor (outside asar). asarUnpack
+# is belt-and-suspenders if asar is ever re-enabled.
 asar: false
+asarUnpack:
+  - vendor/**
 
 mac:
   category: public.app-category.productivity
@@ -114,6 +124,12 @@ mac:
     # ripgrep (used by packages/server-core/src/services/search.ts).
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    # Relocatable Git (dugite-native) and CPython (python-build-standalone).
+    # Copied before signing so every Mach-O in these trees is notarized.
+    - from: vendor/git
+      to: app/vendor/git
+    - from: vendor/python
+      to: app/vendor/python
   # Exclude binaries for other platforms
   files:
     # A positive platform filter prevents electron-builder from prepending its
@@ -174,6 +190,8 @@ win:
     # Moving them to extraResources avoids this by copying before the collector runs.
     # See: https://github.com/electron-userland/electron-builder/issues/8250
     - "!vendor/bun/**/*"
+    - "!vendor/git/**/*"
+    - "!vendor/python/**/*"
     - "!**/resources/bin/win32-x64/**"
     - "!release/**"
     - "!release-swarm-preview/**"
@@ -184,6 +202,10 @@ win:
       to: app/node_modules/@vscode/ripgrep
     - from: vendor/bun/bun.exe
       to: app/vendor/bun/bun.exe
+    - from: vendor/git
+      to: app/vendor/git
+    - from: vendor/python
+      to: app/vendor/python
     - from: resources/bin/win32-x64
       to: app/resources/bin/win32-x64
 
@@ -209,6 +231,10 @@ linux:
   extraResources:
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    - from: vendor/git
+      to: app/vendor/git
+    - from: vendor/python
+      to: app/vendor/python
   # Exclude binaries for other platforms
   files:
     - dist/**/*

@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **安装包内置 Git 与 Python** — Windows / macOS 安装包完整内置 Git 2.56 与 CPython 3.12，开箱即可离线使用 `git`、`python3` 和 `uv run`，无需系统已安装 Git、Python 或 Xcode 命令行工具，也不会在首次使用时再下载。Agent 终端、MCP stdio 与隔离工作区优先走内置副本；主进程 pip 写入用户数据目录，隔离沙箱把 pip 写入私有 HOME，避免泄漏。Linux x64 无头服务端同样打包这些运行时。可用 `CRAFT_PREFER_SYSTEM_GIT=1` / `CRAFT_PREFER_SYSTEM_PYTHON=1` 改用系统安装。
+
 - **Office 首页 Word 网格只展示内容案例** — 七款自动套用的「文档样式」模板（设计报告、实验分析、投资备忘录、法律备忘录、简约信笺、战略备忘录、系统设计）不再出现在新建 Office 卡片中；普通聊天写 Word 时仍按用途自动选择这些样式。
 
 - **分离成品与临时文件** — 未选择项目目录时，最终文件默认交付到会话 outputs/；data/ 仅存放中间文件。Word 模板工具拒绝向会话临时目录写入成品，避免文件存在却不显示产物卡片。

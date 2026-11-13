@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFileSync, type ExecFileSyncOptionsWithBufferEncoding } from 'node:child_process'
+import { gitEnv, gitExecutable } from '../runtime/git-command.ts'
 import { existsSync, lstatSync, readFileSync, realpathSync, readdirSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inside, type IsolatedWorkspace } from './isolated-workspace'
@@ -28,11 +29,11 @@ export function collectWorkspaceCandidates(state: IsolatedWorkspace, outputs: Re
     let base: Buffer | null
     if (state.kind === 'git') {
       if (!state.baseSnapshot) throw new Error('Missing Git input snapshot')
-      const options: ExecFileSyncOptionsWithBufferEncoding = { cwd: state.directory, env: { ...process.env, LC_ALL:'C' }, stdio:['ignore','pipe','pipe'], maxBuffer: Infinity }
-      const prefix = execFileSync('git',['rev-parse','--show-prefix'],options).toString().trim()
+      const options: ExecFileSyncOptionsWithBufferEncoding = { cwd: state.directory, env: gitEnv(), stdio:['ignore','pipe','pipe'], maxBuffer: Infinity }
+      const prefix = execFileSync(gitExecutable(),['rev-parse','--show-prefix'],options).toString().trim()
       const gitPath = `${prefix}${normalized}`
-      const entry = execFileSync('git',['ls-tree','--full-tree','-z',state.baseSnapshot,'--',gitPath],options)
-      base = entry.length ? execFileSync('git',['show',`${state.baseSnapshot}:${gitPath}`],options) : null
+      const entry = execFileSync(gitExecutable(),['ls-tree','--full-tree','-z',state.baseSnapshot,'--',gitPath],options)
+      base = entry.length ? execFileSync(gitExecutable(),['show',`${state.baseSnapshot}:${gitPath}`],options) : null
     } else {
       if (!state.baseDirectory) throw new Error('Missing file input snapshot; recreate the isolated workspace')
       base = readRegular(state.baseDirectory,output.path)
@@ -50,11 +51,11 @@ export function discoverWorkspaceOutputs(state: IsolatedWorkspace): Record<strin
   const paths = new Set<string>()
   if (state.kind === 'git') {
     if (!state.baseSnapshot) throw new Error('Missing Git input snapshot')
-    const options = { cwd: state.directory, encoding: 'utf8' as const, maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] }
+    const options = { cwd: state.directory, encoding: 'utf8' as const, maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'], env: gitEnv() }
     for (const args of [
       ['diff', '--no-ext-diff', '--name-only', '-z', '--relative', state.baseSnapshot, '--', '.'],
       ['ls-files', '--others', '--exclude-standard', '-z', '--', '.'],
-    ]) for (const path of execFileSync('git', args, options).split('\0').filter(Boolean)) paths.add(path)
+    ]) for (const path of execFileSync(gitExecutable(), args, options).split('\0').filter(Boolean)) paths.add(path)
   } else {
     const visit = (directory: string) => {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {

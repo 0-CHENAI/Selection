@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { isGitBashExecutablePath, isUsableGitBashPath, validateGitBashPath } from '@craft-agent/server-core/services'
+import { detectGitBash, isGitBashExecutablePath, isUsableGitBashPath, validateGitBashPath, windowsGitBashSearchPaths } from '@craft-agent/server-core/services'
 
 let tempDir: string
 
@@ -50,5 +50,25 @@ describe('git-bash helpers', () => {
       expect(result.path).toBe(bashPath)
     }
     await expect(isUsableGitBashPath(bashPath)).resolves.toBe(true)
+  })
+
+  it('lists bundled Git Bash before Program Files locations', () => {
+    const paths = windowsGitBashSearchPaths('C:\\Selection\\vendor\\git\\bin\\bash.exe')
+    expect(paths[0]).toBe('C:\\Selection\\vendor\\git\\bin\\bash.exe')
+    expect(paths).toContain('C:\\Program Files\\Git\\bin\\bash.exe')
+  })
+
+  it('keeps bundled Git Bash paths that contain spaces', () => {
+    const bundled = 'C:\\Program Files\\Selection Swarm Preview\\vendor\\git\\bin\\bash.exe'
+    expect(windowsGitBashSearchPaths(bundled)[0]).toBe(bundled)
+  })
+
+  it('treats Git Bash as present on non-Windows hosts', async () => {
+    if (process.platform === 'win32') return
+    await expect(detectGitBash()).resolves.toEqual({
+      found: true,
+      path: null,
+      platform: process.platform as 'win32' | 'darwin' | 'linux',
+    })
   })
 })

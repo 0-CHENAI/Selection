@@ -1,0 +1,21 @@
+Third-party runtimes bundled with Selection
+==========================================
+
+Git 2.56.1 is licensed under the GNU General Public License v2.
+See git/COPYING in this directory.
+
+  macOS and Linux: Git is provided by dugite-native
+  (https://github.com/desktop/dugite-native), a relocatable Git build
+  used so Selection does not invoke the Xcode Command Line Tools stub
+  at /usr/bin/git.
+
+  Windows: Git for Windows, including Git Bash
+  (https://github.com/git-for-windows/git). MinGit is not used because
+  Selection's Windows agent shell requires bash.exe.
+
+CPython 3.12.16 is provided by python-build-standalone
+(https://github.com/astral-sh/python-build-standalone) under the
+Python Software Foundation License. See python/LICENSE in this
+directory. This is the same CPython distribution uv uses; Selection
+ships it inside the installer so `uv run --python 3.12` and `python3`
+work offline.

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join, relative, isAbsolute, sep } from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
+import { withIsolatedPythonHome } from './isolated-python-env'
 import { createWindowsIsolatedShell } from './windows-isolated-shell'
 
 /** Only native confinement may authorize Shell in a candidate workspace. */
@@ -33,12 +34,16 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
   let prefix: string[]
   if (process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec')) {
     executable = '/usr/bin/sandbox-exec'
+    // file-read* + process-exec cover bundled vendor/git and vendor/python, including
+    // app paths with spaces (JSON.stringify quotes the write roots). Writes stay on
+    // the candidate and private $TMPDIR home — not userData PYTHONUSERBASE.
     prefix = ['-p', `(version 1)(deny default)(allow file-read*)(allow process-exec process-fork)(allow sysctl-read)(allow file-write-data (literal "/dev/null"))(allow signal (target self))(allow file-write* (subpath ${JSON.stringify(root)}) (subpath ${JSON.stringify(temporary)}))(allow network-outbound (remote unix-socket (subpath ${JSON.stringify(temporary)})))(allow network-bind network-inbound (local unix-socket (subpath ${JSON.stringify(temporary)})))(deny file-write* (subpath ${JSON.stringify(join(root, '.git'))}))`, '/bin/bash', '--noprofile', '--norc', '-c']
   } else if (process.platform === 'linux') {
     const bwrap = ['/usr/bin/bwrap', '/bin/bwrap'].find(path => existsSync(path))
     if (!bwrap) { dispose(); return undefined }
     executable = bwrap
-    // Mount private /tmp first so it cannot hide candidate directories under /tmp.
+    // Read-only root keeps vendor/git and vendor/python executable; writes stay on
+    // the candidate and private home (PYTHONUSERBASE is redirected there).
     prefix = ['--die-with-parent', '--new-session', '--unshare-all', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', root, root, '--bind', temporary, temporary, '--chdir', root]
     if (existsSync(join(root, '.git'))) prefix.push('--ro-bind', join(root, '.git'), join(root, '.git'))
     prefix.push('/bin/bash', '--noprofile', '--norc', '-c')
@@ -48,8 +53,12 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
     // or Python. Deny before exec, so Chrome never starts and cannot crash.
     prefix[1] += ' (deny process-exec (regex #".*/([Gg]oogle [Cc]hrome[^/]*|[Cc]hrome[^/]*|[Cc]hromium[^/]*|[Ff]irefox[^/]*|[Mm]icrosoft [Ee]dge[^/]*|[Ss]afari[^/]*|[Mm][Ss][Ee]dge[^/]*)(/.*)?$"))'
   }
-  const environment = (env?: NodeJS.ProcessEnv) => ({ ...process.env, ...env, HOME: home, TMPDIR: temporary, TMP: temporary, TEMP: temporary,
-    XDG_CACHE_HOME: join(home, '.cache'), XDG_CONFIG_HOME: join(home, '.config'), DOTNET_CLI_HOME: home, DOTNET_EnableDiagnostics: '0', PYTHONDONTWRITEBYTECODE: '1' })
+  const environment = (env?: NodeJS.ProcessEnv) => ({
+    ...withIsolatedPythonHome(home, env),
+    HOME: home, TMPDIR: temporary, TMP: temporary, TEMP: temporary,
+    XDG_CACHE_HOME: join(home, '.cache'), XDG_CONFIG_HOME: join(home, '.config'),
+    DOTNET_CLI_HOME: home, DOTNET_EnableDiagnostics: '0', PYTHONDONTWRITEBYTECODE: '1',
+  })
   // Executable presence is insufficient: kernel/container policy may reject it.
   try { execFileSync(executable, [...prefix, 'exit 0'], { cwd: root, env: environment(), stdio: 'ignore' }) } catch { dispose(); return undefined }
   return { directory: root, dispose, operations: { exec(command, cwd, { onData, signal, timeout, env }) {

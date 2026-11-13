@@ -33,13 +33,18 @@ describe('afterPack OfficeCLI runtime pruning', () => {
       expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Required agent runtime')
       const files = ['resources/session-mcp-server/index.js', 'resources/pi-agent-server/index.js',
         'resources/pi-agent-server/image-resize-worker.js', 'resources/pi-agent-server/photon_rs_bg.wasm',
-        'resources/pi-agent-server/node_modules/koffi/native.node', 'vendor/bun/bun', 'node_modules/@vscode/ripgrep/bin/rg']
+        'resources/pi-agent-server/node_modules/koffi/native.node', 'vendor/bun/bun', 'vendor/git/bin/git',
+        'vendor/python/bin/python3', 'node_modules/@vscode/ripgrep/bin/rg']
       for (const file of files) {
         mkdirSync(join(projectDir, file, '..'), { recursive: true })
         writeFileSync(join(projectDir, file), file)
       }
       copyAgentRuntimes(context, resourcesRoot)
       for (const file of files) expect(readFileSync(join(resourcesRoot, 'app', file), 'utf8')).toBe(file)
+      rmSync(join(projectDir, 'vendor/git'), { recursive: true, force: true })
+      expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Required host runtime is missing: vendor/git')
+      mkdirSync(join(projectDir, 'vendor/git/bin'), { recursive: true })
+      writeFileSync(join(projectDir, 'vendor/git/bin/git'), 'vendor/git/bin/git')
       rmSync(join(projectDir, 'resources/pi-agent-server/photon_rs_bg.wasm'))
       expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Packaged agent runtime is missing')
     } finally { rmSync(root, { recursive: true, force: true }) }

@@ -512,6 +512,7 @@ describe('lean context contracts', () => {
     const { estimateTextTokensConservatively, estimateContextInputBreakdown } = await import('../../agent/backend/pi/context-budget.ts');
     const prompt = getSystemPrompt('', undefined, '/evaluation/workspace', undefined, 'default', 'Selection Backend', false, undefined, false, false);
     expect(estimateTextTokensConservatively(prompt)).toBeLessThan(8000);
+    expect(prompt).toContain('Selection ships those runtimes');
     for (const guide of ['browser-tools.md', 'data-tables.md', 'html-preview.md', 'pdf-preview.md', 'image-preview.md', 'markdown-preview.md', 'mermaid.md', 'llm-tool.md']) {
       expect(prompt).toContain(`/docs/${guide}`);
     }

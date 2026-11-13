@@ -59,6 +59,7 @@ import {
   copyPiAgentServer,
   getPlatformKey,
 } from './build/common';
+import { downloadHostRuntimesIfSupported, hasHostRuntimeArtifacts } from './build/host-runtimes';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -259,6 +260,43 @@ async function downloadOfficecliForServer(config: ServerBuildConfig): Promise<vo
     await $`chmod +x ${destPath}`.quiet();
   }
   console.log(`  officecli binary installed (${(lstatSync(destPath).size / 1024 / 1024).toFixed(1)} MB)`);
+}
+
+async function downloadHostRuntimesForServer(config: ServerBuildConfig): Promise<void> {
+  const { platform, arch, outputDir, skipDownload, electronDir, rootDir } = config;
+  if (!hasHostRuntimeArtifacts(platform, arch)) {
+    console.log(`  Host git/python artifacts not published for ${platform}-${arch}; using system git/python`);
+    return;
+  }
+
+  const buildConfig: BuildConfig = {
+    platform,
+    arch,
+    upload: false,
+    uploadLatest: false,
+    uploadScript: false,
+    rootDir,
+    electronDir,
+  };
+  if (!skipDownload) {
+    await downloadHostRuntimesIfSupported(buildConfig);
+  }
+
+  for (const relative of ['vendor/git', 'vendor/python'] as const) {
+    const src = join(electronDir, relative);
+    const dest = join(outputDir, relative);
+    if (!existsSync(src)) {
+      if (skipDownload) {
+        console.log(`  ${relative} missing (skip-download); agents will use system tools`);
+        continue;
+      }
+      throw new Error(`Host runtime missing after download: ${relative}`);
+    }
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(src, dest, { recursive: true, dereference: true });
+    console.log(`  Copied ${relative}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -615,8 +653,16 @@ export CRAFT_SCRIPTS="$ROOT/resources/scripts"
 export CRAFT_OFFICECLI="$ROOT/resources/bin/officecli"
 export CRAFT_OFFICECLI_RESOURCES="$ROOT/resources/officecli"
 
-# Prepend resource bin to PATH (makes doc tool wrappers available)
-export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
+# Prepend resource bin and bundled Git/Python so agent shells do not need system installs
+export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$ROOT/vendor/git/bin:$ROOT/vendor/python/bin:$PATH"
+if [ -x "$ROOT/vendor/python/bin/python3" ]; then
+  export UV_PYTHON="$ROOT/vendor/python/bin/python3"
+  export CRAFT_PYTHON="$UV_PYTHON"
+  export UV_PYTHON_DOWNLOADS=never
+fi
+if [ -x "$ROOT/vendor/git/bin/git" ]; then
+  export CRAFT_GIT="$ROOT/vendor/git/bin/git"
+fi
 
 # Use bundled Bun runtime
 exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
@@ -644,6 +690,8 @@ echo ""
 chmod +x "$DIR/bin/craft-server" "$DIR/start.sh"
 [ -f "$DIR/vendor/bun/bun" ] && chmod +x "$DIR/vendor/bun/bun"
 [ -f "$DIR/resources/bin/uv" ] && chmod +x "$DIR/resources/bin/uv"
+[ -f "$DIR/vendor/git/bin/git" ] && chmod +x "$DIR/vendor/git/bin/git"
+[ -f "$DIR/vendor/python/bin/python3" ] && chmod +x "$DIR/vendor/python/bin/python3"
 
 # Make doc tool wrappers executable
 for wrapper in "$DIR/resources/bin/"*; do
@@ -749,7 +797,9 @@ COPY . .
 
 # Make binaries executable
 RUN chmod +x bin/craft-server vendor/bun/bun resources/bin/uv && \\
-    for f in resources/bin/*; do [ -f "$f" ] && chmod +x "$f"; done
+    for f in resources/bin/*; do [ -f "$f" ] && chmod +x "$f"; done && \\
+    if [ -f vendor/git/bin/git ]; then chmod +x vendor/git/bin/git; fi && \\
+    if [ -f vendor/python/bin/python3 ]; then chmod +x vendor/python/bin/python3; fi
 
 ENV CRAFT_IS_PACKAGED=true
 ENV CRAFT_BUNDLED_ASSETS_ROOT=/app
@@ -761,7 +811,8 @@ ENV CRAFT_OFFICECLI=/app/resources/bin/officecli
 ENV CRAFT_OFFICECLI_RESOURCES=/app/resources/officecli
 ENV CRAFT_RPC_HOST=0.0.0.0
 ENV CRAFT_RPC_PORT=9100
-ENV PATH="/app/resources/bin:/app/vendor/bun:\${PATH}"
+ENV PATH="/app/resources/bin:/app/vendor/bun:/app/vendor/git/bin:/app/vendor/python/bin:\${PATH}"
+ENV UV_PYTHON_DOWNLOADS=never
 
 EXPOSE 9100
 
@@ -872,6 +923,7 @@ async function main(): Promise<void> {
   console.log(`\n[3/8] Downloading uv ${UV_VERSION}...`);
   await downloadUvForServer(config);
   await downloadOfficecliForServer(config);
+  await downloadHostRuntimesForServer(config);
 
   // Step 4: Build MCP servers
   console.log('\n[4/8] Building MCP servers...');

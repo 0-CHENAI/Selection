@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnGit } from '../runtime/git-command.ts'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +28,7 @@ export function mergeCandidate(base: Buffer | null, current: Buffer | null, cand
   try {
     const paths = ['current', 'base', 'candidate'].map(name => join(directory, name))
     for (const [index, content] of [current, base, candidate].entries()) writeFileSync(paths[index]!, content, { mode: 0o600 })
-    const result = spawnSync('git', ['merge-file', '--stdout', '--', ...paths], { encoding: 'buffer', maxBuffer: Math.max(1024 * 1024, (base.length + current.length + candidate.length) * 3), env: { ...process.env, LC_ALL: 'C' } })
+    const result = spawnGit(['merge-file', '--stdout', '--', ...paths], { encoding: 'buffer', maxBuffer: Math.max(1024 * 1024, (base.length + current.length + candidate.length) * 3) })
     if (result.error) throw result.error
     if (result.status === 0) return { status: 'merged', content: result.stdout, changed: !result.stdout.equals(current) }
     if (result.status !== null && result.status > 0 && result.status <= 127) return { status: 'conflict', reason: 'text', candidate, current }

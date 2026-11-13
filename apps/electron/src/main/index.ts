@@ -85,7 +85,7 @@ const machineId = createHash('sha256').update(hostname() + homedir()).digest('he
 Sentry.setUser({ id: machineId })
 
 import { join, delimiter } from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@craft-agent/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
@@ -123,6 +123,7 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook, setBeforeUpdateInstallHook, setInstallQuitFailedHook } from './auto-update'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@craft-agent/server-core/services'
+import { applyHostTools, ensureUserPythonVenv, resolveHostTools } from '@craft-agent/server-core/runtime'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -143,7 +144,8 @@ if (isDebugMode) {
 
 // Bundle CLI tools: resolve platform-specific uv binary and wrapper scripts.
 // These are available to all agent Bash sessions via CRAFT_UV, CRAFT_SCRIPTS env vars
-// and PATH prepend. uv auto-downloads Python 3.12 on first use (~5s, then cached).
+// and PATH prepend. Git and CPython 3.12 ship inside the installer (no first-use
+// download). UV_PYTHON_DOWNLOADS=never keeps `uv run --python 3.12` offline.
 {
   // In packaged app: resources are at process.resourcesPath/app/resources/
   // In dev: resources are at __dirname/../resources/ (sibling of dist/)
@@ -231,6 +233,44 @@ if (isDebugMode) {
 
   if (isDebugMode) {
     mainLog.info('CLI tools configured:', { uvBinary: process.env.CRAFT_UV, binDir, scriptsDir, bundledUvExists })
+  }
+
+  const hostTools = resolveHostTools({
+    resourcesBase,
+    userDataDir: app.getPath('userData'),
+  })
+  applyHostTools(hostTools)
+  if (hostTools.pythonSource === 'bundled' && hostTools.pythonBinary && hostTools.venvDir) {
+    if (hostTools.pythonUserBase) mkdirSync(hostTools.pythonUserBase, { recursive: true })
+    if (!ensureUserPythonVenv(hostTools.pythonBinary, hostTools.venvDir)) {
+      mainLog.warn('Isolated Python venv was not created; pip installs will use PYTHONUSERBASE only.', {
+        pythonBinary: hostTools.pythonBinary,
+        venvDir: hostTools.venvDir,
+      })
+    } else {
+      applyHostTools(resolveHostTools({
+        resourcesBase,
+        userDataDir: app.getPath('userData'),
+      }))
+    }
+  }
+  if (hostTools.gitSource === 'missing') {
+    mainLog.warn('Bundled Git runtime missing; agent git commands need a system git.', {
+      expectedGitRoot: join(resourcesBase, 'vendor', 'git'),
+    })
+  }
+  if (hostTools.pythonSource === 'missing') {
+    mainLog.warn('Bundled Python runtime missing; uv will not download CPython (UV_PYTHON_DOWNLOADS=never).', {
+      expectedPythonRoot: join(resourcesBase, 'vendor', 'python'),
+    })
+  }
+  if (isDebugMode) {
+    mainLog.info('Host tools configured:', {
+      git: hostTools.gitBinary,
+      gitSource: hostTools.gitSource,
+      python: hostTools.pythonBinary,
+      pythonSource: hostTools.pythonSource,
+    })
   }
 }
 
@@ -592,17 +632,20 @@ app.whenReady().then(async () => {
     })
 
     if (!isClientOnly) {
-      // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)
+      // Restore a persisted Git Bash path only when the user prefers system Git,
+      // or when the bundled Git-for-Windows bash was not applied at startup.
       if (process.platform === 'win32') {
         const { getGitBashPath, clearGitBashPath } = await import('@craft-agent/shared/config')
         const gitBashPath = getGitBashPath()
-        if (gitBashPath) {
+        const preferSystemGit = process.env.CRAFT_PREFER_SYSTEM_GIT === '1'
+        const bundledAlready = Boolean(process.env.CLAUDE_CODE_GIT_BASH_PATH)
+        if (gitBashPath && (preferSystemGit || !bundledAlready)) {
           const validation = await validateGitBashPath(gitBashPath)
           if (validation.valid) {
             process.env.CLAUDE_CODE_GIT_BASH_PATH = validation.path
           } else {
             clearGitBashPath()
-            delete process.env.CLAUDE_CODE_GIT_BASH_PATH
+            if (!bundledAlready) delete process.env.CLAUDE_CODE_GIT_BASH_PATH
             mainLog.warn(`Cleared invalid persisted Git Bash path: ${gitBashPath}`)
           }
         }

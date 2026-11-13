@@ -138,10 +138,10 @@ const DOWNLOAD_TIMEOUT_MS = 120_000;
  * This is the fallback on Windows installations where PowerShell exposes a
  * `curl` alias but no curl.exe exists for child processes.
  */
-async function fetchDownload(dest: string, url: string): Promise<void> {
+async function fetchDownload(dest: string, url: string, timeoutMs = DOWNLOAD_TIMEOUT_MS): Promise<void> {
   const response = await fetch(url, {
     redirect: 'follow',
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
     tls: process.env.CURL_INSECURE === '1'
       ? { rejectUnauthorized: false }
       : undefined,
@@ -161,9 +161,14 @@ async function fetchDownload(dest: string, url: string): Promise<void> {
  * Bun fetch. The historical export name is retained for build-script API
  * compatibility.
  */
-export async function curlDownload(dest: string, urls: string[]): Promise<string> {
+export async function curlDownload(
+  dest: string,
+  urls: string[],
+  options?: { timeoutMs?: number },
+): Promise<string> {
   const curlPath = Bun.which('curl');
   const curlInsecure = process.env.CURL_INSECURE === '1' ? ['-k'] : [];
+  const timeoutMs = options?.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
   let lastError: unknown;
 
   for (const url of urls) {
@@ -171,7 +176,12 @@ export async function curlDownload(dest: string, urls: string[]): Promise<string
 
     if (curlPath) {
       try {
-        await $`${curlPath} -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 -o ${dest} ${url}`;
+        if (options?.timeoutMs) {
+          const maxTimeSec = Math.max(30, Math.ceil(timeoutMs / 1000));
+          await $`${curlPath} -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 --max-time ${maxTimeSec} -o ${dest} ${url}`;
+        } else {
+          await $`${curlPath} -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 -o ${dest} ${url}`;
+        }
         return url;
       } catch (err) {
         lastError = err;
@@ -179,7 +189,7 @@ export async function curlDownload(dest: string, urls: string[]): Promise<string
     } else {
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
-          await fetchDownload(dest, url);
+          await fetchDownload(dest, url, timeoutMs);
           return url;
         } catch (err) {
           lastError = err;
@@ -295,7 +305,7 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
 /**
  * Find the first matching file recursively under a directory.
  */
-function findFileRecursive(root: string, fileName: string): string | null {
+export function findFileRecursive(root: string, fileName: string): string | null {
   const entries = readdirSync(root, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = join(root, entry.name);
@@ -329,7 +339,7 @@ async function runExecutable(executable: string, args: string[]): Promise<void> 
   }
 }
 
-async function extractArchive(archivePath: string, destination: string): Promise<void> {
+export async function extractArchive(archivePath: string, destination: string): Promise<void> {
   if (process.platform === 'win32') {
     // Bun's shell can run with a restricted PATH even when Windows system
     // tools exist. Resolve bsdtar by absolute path so ZIP and tar.gz archives
@@ -352,7 +362,7 @@ async function extractArchive(archivePath: string, destination: string): Promise
 
   const args = archivePath.endsWith('.zip')
     ? ['-o', archivePath, '-d', destination]
-    : ['-xzf', archivePath, '-C', destination];
+    : ['-xf', archivePath, '-C', destination];
   await runExecutable(executable, args);
 }
 

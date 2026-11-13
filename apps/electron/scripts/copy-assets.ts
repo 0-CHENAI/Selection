@@ -13,18 +13,19 @@
 
 import { cpSync, copyFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { copyPiAgentServer, copySessionServer, downloadBun, downloadOfficecliDesktopTargets, verifyMcpServersExist, type BuildConfig } from '../../../scripts/build/common.ts';
+import { copyPiAgentServer, copySessionServer, downloadBun, downloadOfficecliDesktopTargets, verifyMcpServersExist } from '../../../scripts/build/common.ts';
+import { downloadHostRuntimesIfSupported, resolveBundleConfig } from '../../../scripts/build/host-runtimes.ts';
 
-const config: BuildConfig = {
-  platform: process.platform as BuildConfig['platform'], arch: process.arch as BuildConfig['arch'],
+const config = resolveBundleConfig({
   upload: false, uploadLatest: false, uploadScript: false,
   rootDir: join(import.meta.dir, '..', '..', '..'), electronDir: join(import.meta.dir, '..'),
-};
+});
 // The main build produces these bundles; ordinary distribution commands must ship them too.
 copySessionServer(config);
 copyPiAgentServer(config);
 verifyMcpServersExist(config);
 await downloadBun(config);
+await downloadHostRuntimesIfSupported(config);
 
 await downloadOfficecliDesktopTargets({
   upload: false,
