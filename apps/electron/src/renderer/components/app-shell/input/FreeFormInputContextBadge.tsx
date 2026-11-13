@@ -13,6 +13,8 @@ export interface FreeFormInputContextBadgeProps extends Omit<React.ButtonHTMLAtt
   isExpanded?: boolean
   /** Whether there's an active selection (affects collapsed state styling and shows label) */
   hasSelection?: boolean
+  /** Keep collapsed selections icon-only while preserving the label as the accessible name. */
+  showSelectionLabel?: boolean
   /**
    * Collapsed selection draws a filled chip (`bg-background` + hairline).
    * Working-directory marks pass false so the folder name stays borderless.
@@ -53,6 +55,7 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
       label,
       isExpanded = false,
       hasSelection = false,
+      showSelectionLabel = true,
       selectionChrome = true,
       showChevron = false,
       onClick,
@@ -72,7 +75,7 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
     const mergedRef = buttonRef || ref
 
     // Show label in expanded state OR in collapsed state with selection
-    const showLabel = isExpanded || hasSelection
+    const showLabel = isExpanded || (hasSelection && showSelectionLabel)
     const filledSelection = !isExpanded && hasSelection && selectionChrome
 
     const button = (

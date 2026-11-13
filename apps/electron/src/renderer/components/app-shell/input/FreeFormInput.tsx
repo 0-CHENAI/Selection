@@ -2280,6 +2280,7 @@ export function FreeFormInput({
                 }
                 isExpanded={false}
                 hasSelection={optimisticSourceSlugs.length > 0}
+                showSelectionLabel={false}
                 selectionChrome={false}
                 showChevron={false}
                 isOpen={sourceDropdownOpen}
@@ -2384,8 +2385,9 @@ export function FreeFormInput({
                     ? t("chat.chooseSources")
                     : selectedSourcesLabel
                 }
-                isExpanded={isEmptySession}
+                isExpanded={isEmptySession && optimisticSourceSlugs.length === 0}
                 hasSelection={optimisticSourceSlugs.length > 0}
+                showSelectionLabel={false}
                 selectionChrome={false}
                 showChevron={true}
                 isOpen={sourceDropdownOpen}
