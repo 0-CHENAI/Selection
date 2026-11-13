@@ -54,15 +54,17 @@ describe('sandbox-env', () => {
     expect(env.UV_PYTHON_DOWNLOADS).toBe('never');
     expect(env.VIRTUAL_ENV).toBeUndefined();
     expect(env.PYTHONUSERBASE).toBe(join(dataDir, 'python-user'));
+    expect(env.PIP_CACHE_DIR).toBe(join(dataDir, '.cache', 'pip'));
 
     expect(existsSync(env.TMPDIR!)).toBe(true);
     expect(existsSync(env.UV_CACHE_DIR!)).toBe(true);
     expect(existsSync(env.XDG_CACHE_HOME!)).toBe(true);
     expect(existsSync(env.PYTHONPYCACHEPREFIX!)).toBe(true);
     expect(existsSync(env.PYTHONUSERBASE!)).toBe(true);
+    expect(existsSync(env.PIP_CACHE_DIR!)).toBe(true);
   });
 
-  it('keeps an existing PYTHONUSERBASE and strips VIRTUAL_ENV for python', () => {
+  it('overrides inherited PYTHONUSERBASE into the session directory and keeps UV_PYTHON', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'sandbox-env-python-user-'));
     createdDirs.push(dataDir);
 
@@ -72,10 +74,12 @@ describe('sandbox-env', () => {
     }, {
       PYTHONUSERBASE: '/data/python-user',
       VIRTUAL_ENV: '/tmp/user-venv',
+      UV_PYTHON: '/app/vendor/python/bin/python3',
     });
 
-    expect(env.PYTHONUSERBASE).toBe('/data/python-user');
+    expect(env.PYTHONUSERBASE).toBe(join(dataDir, 'python-user'));
     expect(env.VIRTUAL_ENV).toBeUndefined();
+    expect(env.UV_PYTHON).toBe('/app/vendor/python/bin/python3');
     expect(env.UV_PYTHON_DOWNLOADS).toBe('never');
   });
 

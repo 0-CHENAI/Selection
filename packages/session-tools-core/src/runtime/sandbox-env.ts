@@ -75,10 +75,12 @@ export function createScriptRuntimeEnv(
     env.PYTHONPYCACHEPREFIX = pythonPyCachePrefix;
     env.UV_PYTHON_DOWNLOADS = 'never';
     delete env.VIRTUAL_ENV;
-    if (!env.PYTHONUSERBASE) {
-      env.PYTHONUSERBASE = join(dataDir, 'python-user');
-      mkdirSync(env.PYTHONUSERBASE, { recursive: true });
-    }
+    // Always pin pip writes to the session tree. Inherited PYTHONUSERBASE points
+    // at userData, which Darwin/Linux filesystem isolation cannot write.
+    env.PYTHONUSERBASE = join(dataDir, 'python-user');
+    mkdirSync(env.PYTHONUSERBASE, { recursive: true });
+    env.PIP_CACHE_DIR = join(xdgCacheHome, 'pip');
+    mkdirSync(env.PIP_CACHE_DIR, { recursive: true });
   }
 
   return env;

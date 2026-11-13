@@ -186,7 +186,7 @@ Selection 使用 **Pi** 作为智能体运行时。你可以在设置中添加�
 
 ## 从源码运行
 
-需要 **Git、Bun 和 Node.js 18+**。当前 CI 使用 Bun **1.3.10**。Windows 执行 shell 工具还需要 Git Bash，可随 [Git for Windows](https://git-scm.com/downloads/win) 安装。
+从源码克隆需要 **Git、Bun 和 Node.js 18+**。当前 CI 使用 Bun **1.3.10**。安装包与 `electron:dev` 会内置 Git 与 CPython，最终用户无需再装系统 Git、Python 或 Xcode 命令行工具。
 
 ```bash
 git clone --branch test https://github.com/0-CHENAI/Selection.git
@@ -195,7 +195,7 @@ bun install --frozen-lockfile
 bun run electron:dev
 ```
 
-`electron:dev` 启动桌面应用并启用界面热更新。首次运行会按需下载当前平台的 uv 和 OfficeCLI，因此需要能够访问相关下载服务。
+`electron:dev` 启动桌面应用并启用界面热更新。首次运行会按需下载当前平台的 Git、Python、uv 和 OfficeCLI，因此需要能够访问相关下载服务。打包安装包时这些运行时已打进安装程序，不再在首次使用时下载。
 
 构建后启动：
 
@@ -219,7 +219,7 @@ bun run electron:start
 | `bun run validate:dev` | 类型、界面启动、共享模块与文档工具检查 |
 | `bun run officecli:check` | 检查内置 OfficeCLI 运行时与资源 |
 
-完整验证还需要可用的 Bash 和 uv；Windows 可使用 Git Bash 执行依赖 Bash 的脚本。
+完整验证还需要可用的 Bash；uv、Git 与 Python 由开发环境下载到 `apps/electron/vendor/` 与 `resources/bin/`。Windows 上仓库脚本若依赖 Bash，可使用系统 Git Bash 或内置副本。
 
 ### 构建安装包
 

@@ -83,6 +83,9 @@ describe('bundled host runtime artifacts', () => {
     expect(builder).toContain('to: app/vendor/python')
     expect(builder).toContain('!vendor/git/**/*')
     expect(builder).toContain('!vendor/python/**/*')
+    expect(builder).toMatch(/^asar: false$/m)
+    expect(builder).toContain('asarUnpack:')
+    expect(builder).toContain('- vendor/**')
 
     const afterPack = readFileSync(join(repoRoot, 'apps/electron/scripts/afterPack.cjs'), 'utf8')
     expect(afterPack).toContain('vendor/git')
@@ -105,6 +108,36 @@ describe('bundled host runtime artifacts', () => {
     expect(main).toContain('applyHostTools')
     expect(main).toContain('ensureUserPythonVenv')
     expect(main).toContain('UV_PYTHON_DOWNLOADS=never')
+
+    const serverBuild = readFileSync(join(repoRoot, 'scripts/build-server.ts'), 'utf8')
+    expect(serverBuild).toContain('downloadHostRuntimesForServer')
+    expect(serverBuild).toContain('$ROOT/vendor/git/bin')
+    expect(serverBuild).toContain('$ROOT/vendor/python/bin')
+
+    const serverIndex = readFileSync(join(repoRoot, 'packages/server/src/index.ts'), 'utf8')
+    expect(serverIndex).toContain('applyHostTools')
+    expect(serverIndex).toContain('ensureUserPythonVenv')
+  })
+
+  it('quotes uv wrappers so UV_PYTHON paths with spaces stay intact', () => {
+    const binDir = join(repoRoot, 'apps/electron/resources/bin')
+    for (const name of ['markitdown', 'pdf-tool', 'img-tool', 'doc-diff', 'ical-tool']) {
+      const sh = readFileSync(join(binDir, name), 'utf8')
+      expect(sh).toContain('PYTHON="${UV_PYTHON:-3.12}"')
+      expect(sh).toContain('exec "$CRAFT_UV" run --python "$PYTHON"')
+      const cmd = readFileSync(join(binDir, `${name}.cmd`), 'utf8')
+      expect(cmd).toContain('if defined UV_PYTHON')
+      expect(cmd).toContain('"%CRAFT_UV%" run --python "%UV_PYTHON%"')
+    }
+  })
+
+  it('redirects isolated-shell pip writes away from userData PYTHONUSERBASE', () => {
+    const darwin = readFileSync(join(repoRoot, 'packages/shared/src/utils/isolated-shell.ts'), 'utf8')
+    expect(darwin).toContain('withIsolatedPythonHome')
+    const windows = readFileSync(join(repoRoot, 'packages/shared/src/utils/windows-isolated-shell.ts'), 'utf8')
+    expect(windows).toContain('withIsolatedPythonHome')
+    const sandbox = readFileSync(join(repoRoot, 'packages/session-tools-core/src/runtime/sandbox-env.ts'), 'utf8')
+    expect(sandbox).toContain('env.PYTHONUSERBASE = join(dataDir, \'python-user\')')
   })
 
   it('ships Git GPL and Python PSF license files', () => {

@@ -12,4 +12,13 @@ describe('buildDarwinSandboxProfile', () => {
     const profile = buildDarwinSandboxProfile('/tmp/craft-session', { includeNetworkDeny: true });
     expect(profile).toContain('(deny network*)');
   });
+
+  it('quotes session paths that contain spaces', () => {
+    const profile = buildDarwinSandboxProfile('/Users/me/Library/Application Support/Selection/sessions/abc');
+    expect(profile).toContain(
+      '(allow file-write* (subpath "/Users/me/Library/Application Support/Selection/sessions/abc"))',
+    );
+    expect(profile).toContain('(allow process*)');
+    expect(profile).toContain('(allow file-read*)');
+  });
 });

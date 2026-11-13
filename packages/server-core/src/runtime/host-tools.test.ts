@@ -193,6 +193,14 @@ describe('hostToolsEnv and PATH', () => {
       .toBe('/app/vendor/git/bin:/usr/bin:/bin')
   })
 
+  it('keeps PATH entries that contain spaces', () => {
+    const vendor = '/Applications/Selection Swarm Preview.app/Contents/Resources/app/vendor/git/bin'
+    expect(prependPath('/usr/bin', [vendor], 'darwin'))
+      .toBe(`${vendor}:/usr/bin`)
+    expect(prependPath('C:\\Windows\\System32', ['C:\\Program Files\\Selection\\vendor\\git\\cmd'], 'win32'))
+      .toBe('C:\\Program Files\\Selection\\vendor\\git\\cmd;C:\\Windows\\System32')
+  })
+
   it('applies PATH and env onto a target object', () => {
     const env: NodeJS.ProcessEnv = { PATH: '/usr/bin', VIRTUAL_ENV: '/tmp/venv' }
     applyHostTools({

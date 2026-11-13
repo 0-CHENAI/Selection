@@ -58,6 +58,11 @@ describe('git-bash helpers', () => {
     expect(paths).toContain('C:\\Program Files\\Git\\bin\\bash.exe')
   })
 
+  it('keeps bundled Git Bash paths that contain spaces', () => {
+    const bundled = 'C:\\Program Files\\Selection Swarm Preview\\vendor\\git\\bin\\bash.exe'
+    expect(windowsGitBashSearchPaths(bundled)[0]).toBe(bundled)
+  })
+
   it('treats Git Bash as present on non-Windows hosts', async () => {
     if (process.platform === 'win32') return
     await expect(detectGitBash()).resolves.toEqual({

@@ -4,6 +4,7 @@ import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync,
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
+import { withIsolatedPythonHome } from './isolated-python-env'
 
 const source = String.raw`
 using System;
@@ -624,8 +625,7 @@ export function createWindowsIsolatedShell(directory: string, options: { denyExt
   let securityRestored = false
 
   const environment = (env?: NodeJS.ProcessEnv) => ({
-    ...process.env,
-    ...env,
+    ...withIsolatedPythonHome(home, env),
     HOME: home,
     USERPROFILE: home,
     APPDATA: join(home, 'AppData', 'Roaming'),

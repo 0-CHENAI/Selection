@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs'
 /**
  * Git binary for host-owned subprocesses (isolated workspaces, merge, branch).
  * CRAFT_GIT is the bundled executable when the desktop app applied host tools.
+ * execFileSync/spawnSync take the path as argv[0], so spaces in
+ * `Application Support` / `Program Files` do not need extra quoting.
  */
 export function gitExecutable(): string {
   const configured = process.env.CRAFT_GIT?.trim()

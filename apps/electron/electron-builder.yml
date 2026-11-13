@@ -85,8 +85,14 @@ publish:
   provider: generic
   url: https://agents.craft.do/electron/latest
 
-# Disable ASAR to avoid decompression overhead and click delays
+# Disable ASAR to avoid decompression overhead and click delays.
+# Vendor Git/Python are native executables and must never live inside app.asar
+# (Electron cannot exec from asar). asar:false unpacks the whole app; extraResources
+# and afterPack also copy vendor/ to Resources/app/vendor (outside asar). asarUnpack
+# is belt-and-suspenders if asar is ever re-enabled.
 asar: false
+asarUnpack:
+  - vendor/**
 
 mac:
   category: public.app-category.productivity

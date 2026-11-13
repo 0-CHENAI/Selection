@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { gitEnv, gitExecutable } from './git-command.ts'
 
 describe('gitExecutable', () => {
@@ -8,6 +11,21 @@ describe('gitExecutable', () => {
     try {
       expect(gitExecutable()).toBe(process.execPath)
     } finally {
+      if (previous === undefined) delete process.env.CRAFT_GIT
+      else process.env.CRAFT_GIT = previous
+    }
+  })
+
+  it('accepts CRAFT_GIT paths that contain spaces', () => {
+    const previous = process.env.CRAFT_GIT
+    const dir = mkdtempSync(join(tmpdir(), 'git space '))
+    const fake = join(dir, 'git binary')
+    writeFileSync(fake, '')
+    process.env.CRAFT_GIT = fake
+    try {
+      expect(gitExecutable()).toBe(fake)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
       if (previous === undefined) delete process.env.CRAFT_GIT
       else process.env.CRAFT_GIT = previous
     }

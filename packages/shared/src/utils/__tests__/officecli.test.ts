@@ -213,6 +213,8 @@ describe('resolveOfficecliBinary', () => {
     expect(serverBuild).toContain("join(outputDir, 'resources', 'bin', platformKey, destName)")
     expect(serverBuild).toContain('export CRAFT_OFFICECLI_RESOURCES="$ROOT/resources/officecli"')
     expect(serverBuild).toContain('ENV CRAFT_OFFICECLI_RESOURCES=/app/resources/officecli')
+    expect(serverBuild).toContain('$ROOT/vendor/git/bin')
+    expect(serverBuild).toContain('$ROOT/vendor/python/bin')
   })
 
   it('fetches every supported desktop binary for installer builds', () => {
