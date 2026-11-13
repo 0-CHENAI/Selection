@@ -1,4 +1,5 @@
-import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
+import { BrowserWindow, shell, nativeTheme, Menu, app, dialog } from 'electron'
+import { installRendererRecovery } from './renderer-recovery'
 import { windowLog } from './logger'
 import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
@@ -273,6 +274,27 @@ export class WindowManager {
 
     trackWindowResize(window)
 
+    let recoveryPromptOpen = false
+    const offerRendererRetry = () => {
+      if (recoveryPromptOpen || this.isAppQuitting || window.isDestroyed()) return
+      recoveryPromptOpen = true
+      void dialog.showMessageBox(window, {
+        type: 'error',
+        title: 'Selection',
+        message: '页面暂时无法显示，后台任务未被中断。',
+        detail: '可以重新加载页面以恢复会话。',
+        buttons: ['重新加载', '稍后'],
+        defaultId: 0,
+        cancelId: 1,
+      }).then(({ response }) => {
+        if (response === 0 && !this.isAppQuitting && !window.isDestroyed()) window.webContents.reload()
+      }).catch(error => windowLog.warn('Renderer recovery prompt failed:', error))
+        .finally(() => { recoveryPromptOpen = false })
+    }
+    installRendererRecovery(window, () => this.isAppQuitting,
+      reason => windowLog.error('Renderer process exited; recovering UI:', { workspaceId, reason }),
+      offerRendererRetry)
+
     // Show window when first paint is ready (faster perceived startup)
     window.once('ready-to-show', () => {
       window.show()
@@ -389,12 +411,18 @@ export class WindowManager {
     // In dev mode, retry the Vite dev server (it may not be ready yet) instead of falling back
     // to file:// which doesn't exist during development.
     let failLoadRetries = 0
-    window.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3 || this.isAppQuitting || window.isDestroyed()) return
       windowLog.warn('Failed to load renderer:', errorCode, errorDescription)
-      if (VITE_DEV_SERVER_URL && failLoadRetries < 5) {
-        failLoadRetries++
+      if (failLoadRetries >= 5) {
+        offerRendererRetry()
+        return
+      }
+      failLoadRetries++
+      if (VITE_DEV_SERVER_URL) {
         windowLog.info(`Retrying Vite dev server (attempt ${failLoadRetries}/5)...`)
         setTimeout(() => {
+          if (this.isAppQuitting || window.isDestroyed()) return
           const params = new URLSearchParams({ workspaceId }).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }, 1000)
