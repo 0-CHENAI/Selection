@@ -43,7 +43,7 @@ jobs:
           path: |
             ~/.bun/install/cache
             apps/electron/.cache/downloads
-          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock', 'scripts/build/host-runtimes.ts') }}
           restore-keys: |
             desktop-${{ runner.os }}-${{ runner.arch }}-
 
@@ -95,7 +95,7 @@ jobs:
           path: |
             ~/.bun/install/cache
             apps/electron/.cache/downloads
-          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock', 'scripts/build/host-runtimes.ts') }}
           restore-keys: |
             desktop-${{ runner.os }}-${{ runner.arch }}-
 

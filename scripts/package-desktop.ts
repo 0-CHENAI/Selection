@@ -44,6 +44,7 @@ import {
   curlDownload,
   resignNativeBuildTools,
 } from './build/common'
+import { bundleRuntimePlatform, downloadHostRuntimes } from './build/host-runtimes'
 import { packageDarwin } from './build/darwin'
 import { packageWindows } from './build/win32'
 
@@ -155,6 +156,7 @@ async function copyRipgrepForTarget(config: BuildConfig): Promise<void> {
 
 async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   console.log(`\n========== Prepare ${config.platform}-${config.arch} ==========\n`)
+  bundleRuntimePlatform(config)
   cleanBuildArtifacts(config)
   // When cross-compiling from macOS/Linux, do NOT use Windows hoisted install —
   // it can replace host-native esbuild with a broken/incompatible binary.
@@ -167,6 +169,7 @@ async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   }
   resignNativeBuildTools(ROOT_DIR)
   await downloadBun(config)
+  await downloadHostRuntimes(config)
   await downloadUv(config)
   await downloadOfficecli(config)
   await copyRipgrepForTarget(config)

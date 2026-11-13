@@ -8,6 +8,7 @@ import { chmodSync, existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSyn
 import { join, basename } from "path";
 import * as esbuild from "esbuild";
 import { downloadOfficecli, downloadUv, type Platform, type Arch } from "./build/common";
+import { downloadHostRuntimesIfSupported } from "./build/host-runtimes";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 const ELECTRON_DIR = join(ROOT_DIR, "apps/electron");
@@ -426,6 +427,7 @@ async function main(): Promise<void> {
 
   await ensureBundledUvForCurrentPlatform();
   await ensureBundledOfficecliForCurrentPlatform();
+  await downloadHostRuntimesIfSupported(currentBuildConfig());
   ensureTrustedBunForDev();
 
   copyResources();

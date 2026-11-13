@@ -103,6 +103,22 @@ function resolvePackagedResourcesRoot(context) {
   return path.join(context.appOutDir, `${productFilename}.app`, 'Contents', 'Resources');
 }
 
+function hasAny(root, relatives) {
+  return relatives.some(relative => fs.existsSync(path.join(root, relative)));
+}
+
+function copyHostRuntime(projectDir, resourcesRoot, relative, markers) {
+  const source = path.join(projectDir, relative);
+  if (!fs.existsSync(source)) throw new Error(`Required host runtime is missing: ${relative}`);
+  const destination = path.join(resourcesRoot, 'app', relative);
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, { recursive: true, dereference: true });
+  if (!hasAny(destination, markers)) {
+    throw new Error(`Packaged host runtime is missing: ${relative}`);
+  }
+}
+
 function copyAgentRuntimes(context, resourcesRoot) {
   const projectDir = context.packager.projectDir;
   // electron-builder excludes nested node_modules and may omit symlinked vendor directories.
@@ -120,6 +136,12 @@ function copyAgentRuntimes(context, resourcesRoot) {
     `vendor/bun/${context.electronPlatformName === 'win32' ? 'bun.exe' : 'bun'}`]) {
     if (!fs.existsSync(path.join(resourcesRoot, 'app', relative))) throw new Error(`Packaged agent runtime is missing: ${relative}`);
   }
+  copyHostRuntime(projectDir, resourcesRoot, 'vendor/git', [
+    'bin/git', 'cmd/git.exe', 'mingw64/bin/git.exe', 'ucrt64/bin/git.exe',
+  ]);
+  copyHostRuntime(projectDir, resourcesRoot, 'vendor/python', [
+    'bin/python3', 'python.exe', 'python3.exe',
+  ]);
   const ripgrep = 'node_modules/@vscode/ripgrep';
   const sources = [path.join(projectDir, ripgrep), path.join(projectDir, '..', '..', ripgrep)];
   const source = sources.find(candidate => fs.existsSync(candidate));

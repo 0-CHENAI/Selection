@@ -1,11 +1,12 @@
 import { resolve } from 'path'
 import { join } from 'path'
 import { homedir } from 'os'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/shared/config'
+import { setGitBashPath } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
-import { isUsableGitBashPath, validateGitBashPath } from '@craft-agent/server-core/services'
+import { detectGitBash, validateGitBashPath } from '@craft-agent/server-core/services'
+import { gitEnv, gitExecutable } from '@craft-agent/server-core/runtime'
 import {
   assertLocalWorkspace,
   normalizeAccessibleFilePath,
@@ -112,11 +113,12 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
   // Get git branch for a directory (returns null if not a git repo or git unavailable)
   server.handle(RPC_CHANNELS.git.GET_BRANCH, async (_ctx, dirPath: string) => {
     try {
-      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      const branch = execFileSync(gitExecutable(), ['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: dirPath,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
+        env: gitEnv(),
       }).trim()
       return branch || null
     } catch {
@@ -124,57 +126,7 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
     }
   })
 
-  // Git Bash detection and configuration (Windows only)
-  server.handle(RPC_CHANNELS.gitbash.CHECK, async () => {
-    const platform = process.platform as 'win32' | 'darwin' | 'linux'
-
-    if (platform !== 'win32') {
-      return { found: true, path: null, platform }
-    }
-
-    const commonPaths = [
-      'C:\\Program Files\\Git\\bin\\bash.exe',
-      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-      join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
-      join(process.env.PROGRAMFILES || '', 'Git', 'bin', 'bash.exe'),
-    ]
-
-    const persistedPath = getGitBashPath()
-    if (persistedPath) {
-      if (await isUsableGitBashPath(persistedPath)) {
-        process.env.CLAUDE_CODE_GIT_BASH_PATH = persistedPath.trim()
-        return { found: true, path: persistedPath, platform }
-      }
-      clearGitBashPath()
-    }
-
-    for (const bashPath of commonPaths) {
-      if (await isUsableGitBashPath(bashPath)) {
-        process.env.CLAUDE_CODE_GIT_BASH_PATH = bashPath
-        setGitBashPath(bashPath)
-        return { found: true, path: bashPath, platform }
-      }
-    }
-
-    try {
-      const result = execSync('where bash', {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 5000,
-      }).trim()
-      const firstPath = result.split('\n')[0]?.trim()
-      if (firstPath && firstPath.toLowerCase().includes('git') && await isUsableGitBashPath(firstPath)) {
-        process.env.CLAUDE_CODE_GIT_BASH_PATH = firstPath
-        setGitBashPath(firstPath)
-        return { found: true, path: firstPath, platform }
-      }
-    } catch {
-      // where command failed
-    }
-
-    delete process.env.CLAUDE_CODE_GIT_BASH_PATH
-    return { found: false, path: null, platform }
-  })
+  server.handle(RPC_CHANNELS.gitbash.CHECK, async () => detectGitBash())
 
   server.handle(RPC_CHANNELS.gitbash.BROWSE, async (ctx) => {
     const result = await requestClientOpenFileDialog(server, ctx.clientId, {

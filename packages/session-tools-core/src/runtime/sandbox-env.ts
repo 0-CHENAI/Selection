@@ -73,6 +73,12 @@ export function createScriptRuntimeEnv(
     env.UV_CACHE_DIR = uvCacheDir;
     env.XDG_CACHE_HOME = xdgCacheHome;
     env.PYTHONPYCACHEPREFIX = pythonPyCachePrefix;
+    env.UV_PYTHON_DOWNLOADS = 'never';
+    delete env.VIRTUAL_ENV;
+    if (!env.PYTHONUSERBASE) {
+      env.PYTHONUSERBASE = join(dataDir, 'python-user');
+      mkdirSync(env.PYTHONUSERBASE, { recursive: true });
+    }
   }
 
   return env;

@@ -7,7 +7,11 @@ import { resolveScriptRuntime } from './resolve-script-runtime.ts';
 describe('resolveScriptRuntime', () => {
   it('prefers CRAFT_UV for python3', () => {
     const prev = process.env.CRAFT_UV;
+    const prevUvPython = process.env.UV_PYTHON;
+    const prevCraftPython = process.env.CRAFT_PYTHON;
     process.env.CRAFT_UV = '/tmp/custom-uv';
+    delete process.env.UV_PYTHON;
+    delete process.env.CRAFT_PYTHON;
 
     try {
       const resolved = resolveScriptRuntime('python3', { isPackaged: false });
@@ -17,6 +21,27 @@ describe('resolveScriptRuntime', () => {
     } finally {
       if (prev === undefined) delete process.env.CRAFT_UV;
       else process.env.CRAFT_UV = prev;
+      if (prevUvPython === undefined) delete process.env.UV_PYTHON;
+      else process.env.UV_PYTHON = prevUvPython;
+      if (prevCraftPython === undefined) delete process.env.CRAFT_PYTHON;
+      else process.env.CRAFT_PYTHON = prevCraftPython;
+    }
+  });
+
+  it('points uv at the bundled interpreter when UV_PYTHON is set', () => {
+    const prev = process.env.CRAFT_UV;
+    const prevUvPython = process.env.UV_PYTHON;
+    process.env.CRAFT_UV = '/tmp/custom-uv';
+    process.env.UV_PYTHON = '/app/vendor/python/bin/python3';
+
+    try {
+      const resolved = resolveScriptRuntime('python3', { isPackaged: false });
+      expect(resolved.argsPrefix).toEqual(['run', '--python', '/app/vendor/python/bin/python3']);
+    } finally {
+      if (prev === undefined) delete process.env.CRAFT_UV;
+      else process.env.CRAFT_UV = prev;
+      if (prevUvPython === undefined) delete process.env.UV_PYTHON;
+      else process.env.UV_PYTHON = prevUvPython;
     }
   });
 

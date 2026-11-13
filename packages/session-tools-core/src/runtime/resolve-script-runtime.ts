@@ -126,6 +126,11 @@ function resolveBundledBun(ctx?: ResolveScriptRuntimeContext): string | null {
   ]);
 }
 
+function pythonInterpreterArg(): string {
+  const interpreter = process.env.UV_PYTHON?.trim() || process.env.CRAFT_PYTHON?.trim();
+  return interpreter || '3.12';
+}
+
 function validatePackagedEnvRuntime(command: string, label: string): string {
   const hasPathSeparator = command.includes('/') || command.includes('\\');
 
@@ -169,7 +174,7 @@ export function resolveScriptRuntime(
 
       return {
         command: cmd,
-        argsPrefix: ['run', '--python', '3.12'],
+        argsPrefix: ['run', '--python', pythonInterpreterArg()],
         source: 'env',
       };
     }
@@ -178,7 +183,7 @@ export function resolveScriptRuntime(
     if (bundledUv) {
       return {
         command: bundledUv,
-        argsPrefix: ['run', '--python', '3.12'],
+        argsPrefix: ['run', '--python', pythonInterpreterArg()],
         source: 'bundled',
       };
     }
@@ -188,7 +193,7 @@ export function resolveScriptRuntime(
       if (uvPath) {
         return {
           command: uvPath,
-          argsPrefix: ['run', '--python', '3.12'],
+          argsPrefix: ['run', '--python', pythonInterpreterArg()],
           source: 'path',
         };
       }

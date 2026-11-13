@@ -2,6 +2,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { gitEnv, gitExecutable } from '../runtime/git-command.ts'
 import { atomicWrite } from './artifact-versions'
 import { assertIsolatedTool, prepareIsolatedWorkspace, disposeIsolatedWorkspace } from './isolated-workspace'
 import { planProjectValidation } from './project-validation-plan'
@@ -28,7 +29,7 @@ export async function validateProjectCandidate(options: {
     expected.set(path, createHash('sha256').update(file.content).digest('hex'))
   }
   const plan = planProjectValidation(baseline.directory, options.files.map(file => file.path))
-  const git = (args: string[]) => execFileSync('git', args, { cwd: candidate.directory, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: Infinity })
+  const git = (args: string[]) => execFileSync(gitExecutable(), args, { cwd: candidate.directory, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: Infinity, env: gitEnv() })
   const revision = baseline.kind === 'git' ? git(['rev-parse', 'HEAD']).toString().trim() : undefined
   // Checks may generate ignored reports, but changing tracked project inputs
   // would validate a different project than the one we are about to apply.
