@@ -13,16 +13,18 @@
 import {
   chmodSync,
   copyFileSync,
-  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'fs'
-import { dirname, join } from 'path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import {
   curlDownload,
   extractArchive,
@@ -172,7 +174,14 @@ function locateRuntimeRoot(extracted: string, predicate: (root: string) => boole
   if (predicate(extracted)) return extracted
   for (const name of readdirSync(extracted)) {
     const candidate = join(extracted, name)
-    if (statSync(candidate).isDirectory() && predicate(candidate)) return candidate
+    let st
+    try {
+      st = lstatSync(candidate)
+      if (st.isSymbolicLink()) st = statSync(candidate)
+    } catch {
+      continue
+    }
+    if (st.isDirectory() && predicate(candidate)) return candidate
   }
   throw new Error(`Could not locate a runtime root under ${extracted}`)
 }
@@ -210,10 +219,92 @@ async function cachedDownload(electronDir: string, fileName: string, urls: strin
   return cached
 }
 
-function replaceTree(source: string, destination: string): void {
+function isVirtualUnixTarget(target: string): boolean {
+  const posix = target.replace(/\\/g, '/')
+  return posix === '/dev' || posix.startsWith('/dev/')
+    || posix === '/proc' || posix.startsWith('/proc/')
+    || posix === '/sys' || posix.startsWith('/sys/')
+}
+
+function isInsideTree(root: string, candidate: string): boolean {
+  const rel = relative(resolve(root), resolve(candidate))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+/**
+ * Copy a relocatable Git/Python tree without `cpSync({ dereference: true })`.
+ *
+ * Git for Windows' portable tarball (Git-2.56.1-64-bit.tar.bz2) ships MSYS2
+ * Unix symlinks — `dev/fd -> /proc/self/fd`, `dev/std{in,out,err}`,
+ * `etc/mtab -> /proc/mounts`. After extract those links dangle on Windows;
+ * Bun then `stat`s them and throws ENOENT (Package Desktop Installers
+ * 43403568887 / 43863028271). Skip non-relocatable and dangling links;
+ * dereference in-tree links so later electron-builder/afterPack copies stay
+ * symlink-free.
+ */
+export function copyRuntimeTree(source: string, destination: string): void {
+  copyRuntimeNode(source, destination, resolve(source), new Set())
+}
+
+function copyRuntimeNode(
+  source: string,
+  destination: string,
+  treeRoot: string,
+  walkStack: Set<string>,
+): void {
+  let sourceStat
+  try {
+    sourceStat = lstatSync(source)
+  } catch {
+    return
+  }
+
+  if (sourceStat.isSymbolicLink()) {
+    let target: string
+    try {
+      target = readlinkSync(source)
+    } catch {
+      return
+    }
+    if (isVirtualUnixTarget(target)) return
+    const resolvedTarget = isAbsolute(target)
+      ? resolve(target)
+      : resolve(dirname(source), target)
+    if (!isInsideTree(treeRoot, resolvedTarget)) return
+    try {
+      sourceStat = statSync(source)
+    } catch {
+      return
+    }
+  }
+
+  if (sourceStat.isDirectory()) {
+    let real = source
+    try {
+      real = realpathSync(source)
+    } catch {
+      /* keep source */
+    }
+    if (walkStack.has(real)) return
+    walkStack.add(real)
+    mkdirSync(destination, { recursive: true })
+    for (const name of readdirSync(source)) {
+      copyRuntimeNode(join(source, name), join(destination, name), treeRoot, walkStack)
+    }
+    walkStack.delete(real)
+    return
+  }
+
+  if (sourceStat.isFile()) {
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(source, destination)
+  }
+}
+
+export function replaceTree(source: string, destination: string): void {
   rmSync(destination, { recursive: true, force: true })
   mkdirSync(dirname(destination), { recursive: true })
-  cpSync(source, destination, { recursive: true, dereference: true })
+  copyRuntimeTree(source, destination)
 }
 
 function ensureWindowsPython3Alias(pythonRoot: string, platform: Platform): void {
