@@ -20,6 +20,13 @@
   --think-base: var(--muted-foreground);
   --think-highlight: var(--foreground);
   --think-band: 400%;
+  /* Live work-header enter. Matches WorkChainRow fade/y; height stays reserved. */
+  --work-chrome-enter: 220ms;
+  --work-chrome-enter-y: 280ms;
+  --work-chrome-enter-delay: 60ms;
+  --work-chrome-enter-distance: 4px;
+  --work-chrome-enter-blur: 2px;
+  --work-chrome-enter-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .thinking-label-swap {
@@ -104,6 +111,46 @@
   opacity: 0;
 }
 
+/* Clip the reserved h-8 slot so the inner 4px rise cannot shift ancestor
+   overflow, overlap the header, or land the layout box on a fractional Y. */
+.work-chrome-enter-clip {
+  overflow: hidden;
+  contain: paint;
+}
+
+/* Inner compositor layer. The button's layout box stays identity; parked
+   keeps translate3d(0,0,0) so dropping the run class cannot snap filter/transform to none. */
+.work-chrome-enter {
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
+  backface-visibility: hidden;
+}
+
+.work-chrome-enter.is-enter-start {
+  transition: none;
+  transform: translate3d(0, var(--work-chrome-enter-distance), 0);
+  filter: blur(var(--work-chrome-enter-blur));
+  opacity: 0;
+  will-change: transform, filter, opacity;
+}
+
+.work-chrome-enter.is-enter-run {
+  transform: translate3d(0, 0, 0);
+  filter: blur(0px);
+  opacity: 1;
+  will-change: transform, filter, opacity;
+  transition:
+    transform var(--work-chrome-enter-y) var(--work-chrome-enter-ease),
+    filter var(--work-chrome-enter) var(--work-chrome-enter-ease),
+    opacity var(--work-chrome-enter) var(--work-chrome-enter-ease);
+  transition-delay: 0ms, 0ms, var(--work-chrome-enter-delay);
+}
+
+.work-chrome-enter.is-enter-parked {
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .thinking-text-shimmer::before {
     content: none;
@@ -112,7 +159,8 @@
   }
 
   .thinking-swap-text,
-  .thinking-preview-enter {
+  .thinking-preview-enter,
+  .work-chrome-enter {
     transition: none !important;
     transform: none !important;
     filter: none !important;

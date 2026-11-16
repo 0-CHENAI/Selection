@@ -361,6 +361,22 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(presence).toContain("height: 'auto'")
     expect(presence).toContain('exit=')
     expect(src).toContain('<WorkChrome')
+    // Live first header fades in place; #805 height reserve must stay (no header height tween).
+    expect(src).toContain('function WorkChromeToggle')
+    expect(src).toContain('useWorkChromeEnter')
+    expect(src).toContain('live={!isComplete}')
+    expect(src).toContain('animateIn={false}')
+    const toggle = src.slice(src.indexOf('function WorkChromeToggle'), src.indexOf('function WorkChainRow'))
+    expect(toggle).not.toContain('key={stepPreview}')
+    expect(toggle).not.toContain('height:')
+    // Motion lives on an inner layer; the button only clips during start/run.
+    expect(toggle).toContain('work-chrome-enter-clip')
+    expect(toggle).toContain('flex min-w-0 w-full items-center gap-2')
+    expect(toggle).not.toContain('cn(className, enter.className)')
+    const header = src.slice(src.indexOf('{/* Collapsed Header / Toggle */}'), src.indexOf('{/* Expanded Activity List'))
+    expect(header).toContain('<WorkChromeToggle')
+    expect(header).not.toContain('key={stepCount}')
+    expect(header).toContain('key={stepPreview}')
     // A transient progress note and the answer card are separate presences.
     expect(src).toContain("key={`stream-${response.streamKey ?? response.messageId ?? 'response'}`}")
     expect(presence).toContain("'merge-into-chain'")
@@ -477,6 +493,28 @@ it('shows 待澄清 and three centered accent dots while a clarification is wait
   expect(settled).toContain('步骤已完成')
   expect(settled).not.toContain('data-clarification-ellipsis')
   expect(settled).not.toContain('待澄清')
+})
+
+it('fades the live “1 思考中…” header in without a height tween, and skips it for history', async () => {
+  const thinking: ActivityItem = {
+    id: 'think', type: 'thinking', status: 'running', content: '先整理结构', timestamp: 1,
+  }
+  const live = await renderTurn('zh-Hans', [thinking], { hasExternalWorkStatus: true, expanded: false })
+  expect(live).toContain('思考中…')
+  expect(live).toContain('work-chrome-enter is-enter-start')
+  expect(live).toContain('work-chrome-enter-clip')
+  expect(live).toContain('data-work-chrome-enter="start"')
+  expect(live).toMatch(/>1<\/span>/)
+  expect(live).not.toContain('data-work-chrome-reserve')
+
+  const done = await renderTurn('zh-Hans', [{ ...thinking, status: 'completed' }], {
+    hasExternalWorkStatus: true, isComplete: true, isStreaming: false, expanded: false,
+  })
+  expect(done).not.toContain('work-chrome-enter')
+  expect(done).not.toContain('work-chrome-enter-clip')
+  expect(done).not.toContain('is-enter-start')
+  expect(done).not.toContain('is-enter-parked')
+  expect(done).not.toContain('data-work-chrome-enter')
 })
 
 it('does not repeat a thinking header in the status slot', async () => {
