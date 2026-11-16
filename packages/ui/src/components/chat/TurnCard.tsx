@@ -25,7 +25,7 @@ import type { Message } from '@craft-agent/core/types'
 import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
-import { thinkingLabelSizer, useThinkingCompletionSwap } from './thinking-step-motion'
+import { thinkingLabelSizer, useThinkingCompletionSwap, useWorkChromeEnter } from './thinking-step-motion'
 import {
   PROCESS_CHAIN_EXPAND_MS,
   PROCESS_CHAIN_ROW_PX,
@@ -1188,6 +1188,34 @@ function WorkChrome(props: {
   children: React.ReactNode
 }) {
   return <HeightPresence {...props} className="group select-none" data-search-exclude="true" />
+}
+
+/**
+ * Collapsed work-header toggle. Height is already reserved; a live first mount
+ * fades/rises/blurs in. The hook lives here so a later preview swap cannot
+ * replay the entrance (the chrome stays mounted; only this instance enters).
+ */
+function WorkChromeToggle({
+  live,
+  reduceMotion,
+  className,
+  children,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  live: boolean
+  reduceMotion: boolean | null
+}) {
+  const enter = useWorkChromeEnter(live, reduceMotion)
+  return (
+    <button
+      {...rest}
+      ref={enter.ref}
+      data-work-chrome-enter={enter.pose === 'rest' ? undefined : enter.pose}
+      className={cn(className, enter.className)}
+    >
+      {children}
+    </button>
+  )
 }
 
 /** Per-row enter/exit so “思考中” can collapse into the next tool without a hard cut. */
@@ -3800,12 +3828,15 @@ function TurnCardContent({
         <WorkChrome
           key="work-chrome"
           containerRef={chromeRef}
+          // Height stays reserved (#805). The live first paint fades on WorkChromeToggle.
           animateIn={false}
           reduceMotion={reduceMotion}
         >
           {/* Collapsed Header / Toggle */}
-          <button
+          <WorkChromeToggle
             type="button"
+            live={!isComplete}
+            reduceMotion={reduceMotion}
             onClick={canToggleFold ? toggleExpanded : undefined}
             aria-expanded={canToggleFold ? isExpanded : undefined}
             aria-disabled={!canToggleFold}
@@ -3874,7 +3905,7 @@ function TurnCardContent({
                 hasEditOrWriteActivities={hasEditOrWriteActivities}
               />
             ))}
-          </button>
+          </WorkChromeToggle>
 
           {/* Expanded Activity List — work rows, or a settled clarification on its own */}
           {canToggleFold && (

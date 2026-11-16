@@ -7,11 +7,18 @@ import {
   THINKING_SWAP_DISTANCE_PX,
   THINKING_SWAP_GAP_MS,
   THINKING_SWAP_MS,
+  WORK_CHROME_ENTER_BLUR_PX,
+  WORK_CHROME_ENTER_DELAY_MS,
+  WORK_CHROME_ENTER_DISTANCE_PX,
+  WORK_CHROME_ENTER_MS,
+  WORK_CHROME_ENTER_Y_MS,
   initialThinkingSwapPhase,
+  initialWorkChromeEnterPose,
   nextThinkingSwapPhase,
   readCssMs,
   thinkingLabelSizer,
   thinkingSwapEntering,
+  workChromeEnterClassName,
 } from '../thinking-step-motion'
 
 const root = join(import.meta.dir, '../../../../../..')
@@ -65,6 +72,21 @@ describe('thinking step swap phase', () => {
   })
 })
 
+describe('work chrome header enter', () => {
+  it('plays start only for a live first mount', () => {
+    expect(initialWorkChromeEnterPose(true, false)).toBe('start')
+    expect(initialWorkChromeEnterPose(false, false)).toBe('rest')
+    expect(initialWorkChromeEnterPose(true, true)).toBe('rest')
+    expect(initialWorkChromeEnterPose(false, true)).toBe('rest')
+  })
+
+  it('drops enter classes once the row is at rest so later preview swaps cannot replay', () => {
+    expect(workChromeEnterClassName('start')).toBe('work-chrome-enter is-enter-start')
+    expect(workChromeEnterClassName('run')).toBe('work-chrome-enter')
+    expect(workChromeEnterClassName('rest')).toBeUndefined()
+  })
+})
+
 describe('thinking step motion css', () => {
   it('matches the prototype shimmer and text-swap timing', () => {
     expect(motionCss).toContain(`--think-shimmer: ${THINKING_SHIMMER_MS}ms`)
@@ -91,6 +113,16 @@ describe('thinking step motion css', () => {
     expect(motionCss).toContain('transition: none')
     expect(motionCss).not.toContain('#0d0d0d')
     expect(motionCss).not.toContain('#7c7c7c')
+    expect(motionCss).toContain(`--work-chrome-enter: ${WORK_CHROME_ENTER_MS}ms`)
+    expect(motionCss).toContain(`--work-chrome-enter-y: ${WORK_CHROME_ENTER_Y_MS}ms`)
+    expect(motionCss).toContain(`--work-chrome-enter-delay: ${WORK_CHROME_ENTER_DELAY_MS}ms`)
+    expect(motionCss).toContain(`--work-chrome-enter-distance: ${WORK_CHROME_ENTER_DISTANCE_PX}px`)
+    expect(motionCss).toContain(`--work-chrome-enter-blur: ${WORK_CHROME_ENTER_BLUR_PX}px`)
+    expect(motionCss).toContain('--work-chrome-enter-ease: cubic-bezier(0.22, 1, 0.36, 1)')
+    expect(motionCss).toContain('.work-chrome-enter')
+    expect(motionCss).toContain('translateY(var(--work-chrome-enter-distance))')
+    expect(motionCss).toContain('.work-chrome-enter.is-enter-start')
+    expect(motionCss).not.toContain('height: 0')
   })
 
   it('keeps reduced motion as static text', () => {
@@ -103,6 +135,7 @@ describe('thinking step motion css', () => {
     expect(reduced).toContain('transform: none !important')
     expect(reduced).toContain('filter: none !important')
     expect(reduced).toContain('opacity: 1 !important')
+    expect(reduced).toContain('.work-chrome-enter')
   })
 
   it('is loaded by the shared UI theme and the Electron renderer', () => {

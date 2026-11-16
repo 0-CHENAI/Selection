@@ -58,6 +58,78 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+/**
+ * First paint of the live work-header row (“1 思考中…”).
+ *
+ * Height stays reserved (#805); this is opacity + 4px rise + 2px blur only.
+ * The instance that mounts with the chrome plays `start` → `run` → `rest`.
+ * History, reduced motion, and a later preview/text swap stay `rest`.
+ */
+export const WORK_CHROME_ENTER_MS = 220
+export const WORK_CHROME_ENTER_Y_MS = 280
+export const WORK_CHROME_ENTER_DELAY_MS = 60
+export const WORK_CHROME_ENTER_DISTANCE_PX = 4
+export const WORK_CHROME_ENTER_BLUR_PX = 2
+
+export type WorkChromeEnterPose = 'start' | 'run' | 'rest'
+
+export function initialWorkChromeEnterPose(
+  live: boolean,
+  reduceMotion: boolean,
+): WorkChromeEnterPose {
+  return live && !reduceMotion ? 'start' : 'rest'
+}
+
+export function workChromeEnterClassName(pose: WorkChromeEnterPose): string | undefined {
+  if (pose === 'rest') return undefined
+  return pose === 'start' ? 'work-chrome-enter is-enter-start' : 'work-chrome-enter'
+}
+
+export function useWorkChromeEnter(live: boolean, reduceMotion: boolean | null) {
+  const [pose, setPose] = useState<WorkChromeEnterPose>(() =>
+    initialWorkChromeEnterPose(live, !!reduceMotion),
+  )
+  const ref = useRef<HTMLButtonElement>(null)
+
+  // First paint must flush `start` (hidden). Scheduling from useLayoutEffect
+  // would setState before paint and skip the enter pose entirely.
+  useEffect(() => {
+    if (pose !== 'start') return
+    const id = requestAnimationFrame(() => setPose('run'))
+    return () => cancelAnimationFrame(id)
+  }, [pose])
+
+  useEffect(() => {
+    if (pose !== 'run') return
+    const node = ref.current
+    const finish = () => setPose(current => (current === 'run' ? 'rest' : current))
+    if (!node) {
+      finish()
+      return
+    }
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target !== node) return
+      // Filter finishes first; transform is the long axis of the enter.
+      if (event.propertyName !== 'transform') return
+      finish()
+    }
+    node.addEventListener('transitionend', onEnd)
+    const ms = readCssMs('--work-chrome-enter-y', WORK_CHROME_ENTER_Y_MS)
+      + readCssMs('--work-chrome-enter-delay', WORK_CHROME_ENTER_DELAY_MS)
+    const fallback = window.setTimeout(finish, ms + 50)
+    return () => {
+      node.removeEventListener('transitionend', onEnd)
+      window.clearTimeout(fallback)
+    }
+  }, [pose])
+
+  return {
+    ref,
+    pose,
+    className: workChromeEnterClassName(pose),
+  }
+}
+
 export function readCssMs(name: string, fallback: number): number {
   if (typeof document === 'undefined') return fallback
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name)
