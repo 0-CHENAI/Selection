@@ -1,6 +1,7 @@
-# Post-merge packaging only. Not a PR gate. macOS ARM64 still needs macos-15
-# here because it produces the Darwin installers; a queue stall on this
-# workflow does not turn a PR red. See docs/ci.md.
+# Post-merge packaging, plus Windows packaging on PRs that change host runtime
+# bundling (the #809 Git-for-Windows extract/copy regression). macOS ARM64
+# stays off pull_request: macos-15 often queues ~15 minutes then cancels with
+# 0 steps, which is not a product failure. Not a required PR gate. See docs/ci.md.
 name: Package Desktop Installers
 
 on:
@@ -8,6 +9,11 @@ on:
     branches:
       - main
       - test
+  pull_request:
+    paths:
+      - 'scripts/build/host-runtimes.ts'
+      - 'scripts/build/host-runtimes.test.ts'
+      - '.github/workflows/package-desktop.yml'
   workflow_dispatch:
 
 concurrency:
@@ -23,6 +29,7 @@ env:
 jobs:
   package-macos-arm64:
     name: Package macOS ARM64
+    if: github.event_name != 'pull_request'
     runs-on: macos-15
     timeout-minutes: 120
     env:

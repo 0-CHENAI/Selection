@@ -1,14 +1,27 @@
 import { describe, expect, it } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   DUGITE_NATIVE_VERSION,
   GIT_FOR_WINDOWS_VERSION,
   PYTHON_STANDALONE_TAG,
   PYTHON_STANDALONE_VERSION,
+  copyRuntimeTree,
   getGitArtifact,
   getPythonArtifact,
   hasHostRuntimeArtifacts,
+  replaceTree,
   resolveBundleConfig,
 } from './host-runtimes.ts'
 
@@ -148,5 +161,71 @@ describe('bundled host runtime artifacts', () => {
     expect(gitCopying).toContain('GNU GENERAL PUBLIC LICENSE')
     const pythonLicense = readFileSync(join(repoRoot, 'apps/electron/resources/licenses/python/LICENSE'), 'utf8')
     expect(pythonLicense).toContain('PYTHON SOFTWARE FOUNDATION LICENSE')
+  })
+})
+
+describe('copyRuntimeTree', () => {
+  it('skips Git-for-Windows MSYS Unix symlinks that break cpSync dereference on Windows', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'git-runtime-copy-'))
+    try {
+      const source = join(tmp, 'extract')
+      const dest = join(tmp, 'vendor-git')
+      const danglingOnly = join(tmp, 'dangling-extract')
+      const cpDest = join(tmp, 'cp-sync-dest')
+      mkdirSync(join(source, 'cmd'), { recursive: true })
+      mkdirSync(join(source, 'bin'), { recursive: true })
+      mkdirSync(join(source, 'dev'), { recursive: true })
+      mkdirSync(join(source, 'etc'), { recursive: true })
+      mkdirSync(join(source, 'mingw64', 'bin'), { recursive: true })
+      writeFileSync(join(source, 'cmd', 'git.exe'), 'git-binary')
+      writeFileSync(join(source, 'bin', 'bash.exe'), 'bash-binary')
+      writeFileSync(join(source, 'mingw64', 'bin', 'git.exe'), 'mingw-git')
+      writeFileSync(join(source, 'readme.txt'), 'hello')
+      symlinkSync('readme.txt', join(source, 'readme.link'))
+      symlinkSync('/proc/self/fd', join(source, 'dev', 'fd'))
+      symlinkSync('/proc/self/fd/2', join(source, 'dev', 'stderr'))
+      symlinkSync('/proc/self/fd/0', join(source, 'dev', 'stdin'))
+      symlinkSync('/proc/self/fd/1', join(source, 'dev', 'stdout'))
+      symlinkSync('/proc/mounts', join(source, 'etc', 'mtab'))
+      symlinkSync('missing-rel-target', join(source, 'dev', 'dangling'))
+
+      mkdirSync(join(danglingOnly, 'dev'), { recursive: true })
+      writeFileSync(join(danglingOnly, 'ok.txt'), 'ok')
+      symlinkSync('missing-rel-target', join(danglingOnly, 'dev', 'fd'))
+      expect(() => cpSync(danglingOnly, cpDest, { recursive: true, dereference: true })).toThrow(/ENOENT|no such file/i)
+
+      replaceTree(source, dest)
+
+      expect(readFileSync(join(dest, 'cmd', 'git.exe'), 'utf8')).toBe('git-binary')
+      expect(readFileSync(join(dest, 'bin', 'bash.exe'), 'utf8')).toBe('bash-binary')
+      expect(readFileSync(join(dest, 'mingw64', 'bin', 'git.exe'), 'utf8')).toBe('mingw-git')
+      expect(readFileSync(join(dest, 'readme.txt'), 'utf8')).toBe('hello')
+      expect(readFileSync(join(dest, 'readme.link'), 'utf8')).toBe('hello')
+      expect(lstatSync(join(dest, 'readme.link')).isSymbolicLink()).toBe(false)
+      expect(existsSync(join(dest, 'dev', 'fd'))).toBe(false)
+      expect(existsSync(join(dest, 'dev', 'stderr'))).toBe(false)
+      expect(existsSync(join(dest, 'dev', 'stdin'))).toBe(false)
+      expect(existsSync(join(dest, 'dev', 'stdout'))).toBe(false)
+      expect(existsSync(join(dest, 'etc', 'mtab'))).toBe(false)
+      expect(existsSync(join(dest, 'dev', 'dangling'))).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('does not follow cyclic directory symlinks and still copies real files', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'git-runtime-cycle-'))
+    try {
+      const source = join(tmp, 'extract')
+      const dest = join(tmp, 'vendor')
+      mkdirSync(join(source, 'bin'), { recursive: true })
+      writeFileSync(join(source, 'bin', 'python3'), 'python')
+      symlinkSync('..', join(source, 'bin', 'loop'))
+      copyRuntimeTree(source, dest)
+      expect(readFileSync(join(dest, 'bin', 'python3'), 'utf8')).toBe('python')
+      expect(existsSync(join(dest, 'bin', 'loop'))).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })
