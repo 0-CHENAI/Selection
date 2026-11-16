@@ -111,10 +111,32 @@
   opacity: 0;
 }
 
-/* First live work-header row. Transform-only so the reserved h-8 slot does not tween. */
+/* Clip the reserved h-8 slot so the inner 4px rise cannot shift ancestor
+   overflow, overlap the header, or land the layout box on a fractional Y. */
+.work-chrome-enter-clip {
+  overflow: hidden;
+  contain: paint;
+}
+
+/* Inner compositor layer. The button's layout box stays identity; parked
+   keeps translate3d(0,0,0) so dropping the run class cannot snap filter/transform to none. */
 .work-chrome-enter {
-  transform: translateY(0);
-  filter: blur(0);
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
+  backface-visibility: hidden;
+}
+
+.work-chrome-enter.is-enter-start {
+  transition: none;
+  transform: translate3d(0, var(--work-chrome-enter-distance), 0);
+  filter: blur(var(--work-chrome-enter-blur));
+  opacity: 0;
+  will-change: transform, filter, opacity;
+}
+
+.work-chrome-enter.is-enter-run {
+  transform: translate3d(0, 0, 0);
+  filter: blur(0px);
   opacity: 1;
   will-change: transform, filter, opacity;
   transition:
@@ -124,11 +146,9 @@
   transition-delay: 0ms, 0ms, var(--work-chrome-enter-delay);
 }
 
-.work-chrome-enter.is-enter-start {
-  transition: none;
-  transform: translateY(var(--work-chrome-enter-distance));
-  filter: blur(var(--work-chrome-enter-blur));
-  opacity: 0;
+.work-chrome-enter.is-enter-parked {
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

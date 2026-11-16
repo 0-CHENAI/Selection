@@ -19,6 +19,7 @@ import {
   thinkingLabelSizer,
   thinkingSwapEntering,
   workChromeEnterClassName,
+  workChromeEnterClips,
 } from '../thinking-step-motion'
 
 const root = join(import.meta.dir, '../../../../../..')
@@ -82,8 +83,16 @@ describe('work chrome header enter', () => {
 
   it('drops enter classes once the row is at rest so later preview swaps cannot replay', () => {
     expect(workChromeEnterClassName('start')).toBe('work-chrome-enter is-enter-start')
-    expect(workChromeEnterClassName('run')).toBe('work-chrome-enter')
+    expect(workChromeEnterClassName('run')).toBe('work-chrome-enter is-enter-run')
+    expect(workChromeEnterClassName('parked')).toBe('work-chrome-enter is-enter-parked')
     expect(workChromeEnterClassName('rest')).toBeUndefined()
+  })
+
+  it('clips the reserved slot only while the inner layer is translating', () => {
+    expect(workChromeEnterClips('start')).toBe(true)
+    expect(workChromeEnterClips('run')).toBe(true)
+    expect(workChromeEnterClips('parked')).toBe(false)
+    expect(workChromeEnterClips('rest')).toBe(false)
   })
 })
 
@@ -120,8 +129,14 @@ describe('thinking step motion css', () => {
     expect(motionCss).toContain(`--work-chrome-enter-blur: ${WORK_CHROME_ENTER_BLUR_PX}px`)
     expect(motionCss).toContain('--work-chrome-enter-ease: cubic-bezier(0.22, 1, 0.36, 1)')
     expect(motionCss).toContain('.work-chrome-enter')
-    expect(motionCss).toContain('translateY(var(--work-chrome-enter-distance))')
+    expect(motionCss).toContain('.work-chrome-enter-clip')
+    expect(motionCss).toContain('contain: paint')
+    expect(motionCss).toContain('translate3d(0, var(--work-chrome-enter-distance), 0)')
+    expect(motionCss).toContain('translate3d(0, 0, 0)')
     expect(motionCss).toContain('.work-chrome-enter.is-enter-start')
+    expect(motionCss).toContain('.work-chrome-enter.is-enter-run')
+    expect(motionCss).toContain('.work-chrome-enter.is-enter-parked')
+    expect(motionCss).not.toContain('translateY(var(--work-chrome-enter-distance))')
     expect(motionCss).not.toContain('height: 0')
   })
 

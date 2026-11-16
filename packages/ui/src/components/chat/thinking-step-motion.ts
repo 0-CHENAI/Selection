@@ -61,8 +61,9 @@ export function prefersReducedMotion(): boolean {
 /**
  * First paint of the live work-header row (“1 思考中…”).
  *
- * Height stays reserved (#805); this is opacity + 4px rise + 2px blur only.
- * The instance that mounts with the chrome plays `start` → `run` → `rest`.
+ * Height stays reserved (#805); this is opacity + 4px rise + 2px blur only,
+ * on an inner compositor layer so the h-8 slot, header, and content below
+ * keep integer boxes. `start` → `run` → `parked` (identity translate3d).
  * History, reduced motion, and a later preview/text swap stay `rest`.
  */
 export const WORK_CHROME_ENTER_MS = 220
@@ -71,7 +72,7 @@ export const WORK_CHROME_ENTER_DELAY_MS = 60
 export const WORK_CHROME_ENTER_DISTANCE_PX = 4
 export const WORK_CHROME_ENTER_BLUR_PX = 2
 
-export type WorkChromeEnterPose = 'start' | 'run' | 'rest'
+export type WorkChromeEnterPose = 'start' | 'run' | 'parked' | 'rest'
 
 export function initialWorkChromeEnterPose(
   live: boolean,
@@ -82,14 +83,21 @@ export function initialWorkChromeEnterPose(
 
 export function workChromeEnterClassName(pose: WorkChromeEnterPose): string | undefined {
   if (pose === 'rest') return undefined
-  return pose === 'start' ? 'work-chrome-enter is-enter-start' : 'work-chrome-enter'
+  if (pose === 'start') return 'work-chrome-enter is-enter-start'
+  if (pose === 'run') return 'work-chrome-enter is-enter-run'
+  return 'work-chrome-enter is-enter-parked'
+}
+
+/** Clip the reserved slot only while the inner layer is still translating. */
+export function workChromeEnterClips(pose: WorkChromeEnterPose): boolean {
+  return pose === 'start' || pose === 'run'
 }
 
 export function useWorkChromeEnter(live: boolean, reduceMotion: boolean | null) {
   const [pose, setPose] = useState<WorkChromeEnterPose>(() =>
     initialWorkChromeEnterPose(live, !!reduceMotion),
   )
-  const ref = useRef<HTMLButtonElement>(null)
+  const ref = useRef<HTMLSpanElement>(null)
 
   // First paint must flush `start` (hidden). Scheduling from useLayoutEffect
   // would setState before paint and skip the enter pose entirely.
@@ -102,7 +110,7 @@ export function useWorkChromeEnter(live: boolean, reduceMotion: boolean | null) 
   useEffect(() => {
     if (pose !== 'run') return
     const node = ref.current
-    const finish = () => setPose(current => (current === 'run' ? 'rest' : current))
+    const finish = () => setPose(current => (current === 'run' ? 'parked' : current))
     if (!node) {
       finish()
       return
@@ -127,6 +135,7 @@ export function useWorkChromeEnter(live: boolean, reduceMotion: boolean | null) 
     ref,
     pose,
     className: workChromeEnterClassName(pose),
+    clip: workChromeEnterClips(pose),
   }
 }
 

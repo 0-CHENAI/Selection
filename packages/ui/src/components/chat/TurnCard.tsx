@@ -1192,8 +1192,9 @@ function WorkChrome(props: {
 
 /**
  * Collapsed work-header toggle. Height is already reserved; a live first mount
- * fades/rises/blurs in. The hook lives here so a later preview swap cannot
- * replay the entrance (the chrome stays mounted; only this instance enters).
+ * fades/rises/blurs on an inner compositor layer while the h-8 slot clips.
+ * The hook lives here so a later preview swap cannot replay the entrance
+ * (the chrome stays mounted; only this instance enters).
  */
 function WorkChromeToggle({
   live,
@@ -1209,11 +1210,15 @@ function WorkChromeToggle({
   return (
     <button
       {...rest}
-      ref={enter.ref}
       data-work-chrome-enter={enter.pose === 'rest' ? undefined : enter.pose}
-      className={cn(className, enter.className)}
+      className={cn(className, enter.clip && 'work-chrome-enter-clip')}
     >
-      {children}
+      <span
+        ref={enter.ref}
+        className={cn('flex min-w-0 w-full items-center gap-2', enter.className)}
+      >
+        {children}
+      </span>
     </button>
   )
 }

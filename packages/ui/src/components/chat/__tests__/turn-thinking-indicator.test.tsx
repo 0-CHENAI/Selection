@@ -369,6 +369,10 @@ describe('TurnCard thinking indicator (#239)', () => {
     const toggle = src.slice(src.indexOf('function WorkChromeToggle'), src.indexOf('function WorkChainRow'))
     expect(toggle).not.toContain('key={stepPreview}')
     expect(toggle).not.toContain('height:')
+    // Motion lives on an inner layer; the button only clips during start/run.
+    expect(toggle).toContain('work-chrome-enter-clip')
+    expect(toggle).toContain('flex min-w-0 w-full items-center gap-2')
+    expect(toggle).not.toContain('cn(className, enter.className)')
     const header = src.slice(src.indexOf('{/* Collapsed Header / Toggle */}'), src.indexOf('{/* Expanded Activity List'))
     expect(header).toContain('<WorkChromeToggle')
     expect(header).not.toContain('key={stepCount}')
@@ -498,6 +502,7 @@ it('fades the live “1 思考中…” header in without a height tween, and sk
   const live = await renderTurn('zh-Hans', [thinking], { hasExternalWorkStatus: true, expanded: false })
   expect(live).toContain('思考中…')
   expect(live).toContain('work-chrome-enter is-enter-start')
+  expect(live).toContain('work-chrome-enter-clip')
   expect(live).toContain('data-work-chrome-enter="start"')
   expect(live).toMatch(/>1<\/span>/)
   expect(live).not.toContain('data-work-chrome-reserve')
@@ -506,7 +511,9 @@ it('fades the live “1 思考中…” header in without a height tween, and sk
     hasExternalWorkStatus: true, isComplete: true, isStreaming: false, expanded: false,
   })
   expect(done).not.toContain('work-chrome-enter')
+  expect(done).not.toContain('work-chrome-enter-clip')
   expect(done).not.toContain('is-enter-start')
+  expect(done).not.toContain('is-enter-parked')
   expect(done).not.toContain('data-work-chrome-enter')
 })
 
