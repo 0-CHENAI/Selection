@@ -1,18 +1,27 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileUp } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import {
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from 'motion/react'
 import {
   createFileDragDepth,
   droppedFilesFromDataTransfer,
   hasFileDragType,
   shouldResetFileDragOnLeave,
 } from '@/lib/external-file-drag'
+import {
+  PANE_DROP_WASH,
+  createPaneDropPlayer,
+} from '@/components/app-shell/pane-drop-overlay-motion'
 
 export const COMPOSER_FILE_DROP_ATTR = 'data-composer-file-drop'
 
-const OVERLAY_EASE = [0.4, 0, 0.2, 1] as const
-const OVERLAY_CLASS = 'pointer-events-none absolute inset-0 z-30 isolate flex flex-col items-center justify-center bg-background/40 backdrop-blur-[16px] [-webkit-backdrop-filter:blur(16px)]'
+const OVERLAY_POSITION_CLASS = 'pointer-events-none absolute inset-0 z-30 isolate flex flex-col items-center justify-center'
+const OVERLAY_CLASS = `${OVERLAY_POSITION_CLASS} bg-background/40 backdrop-blur-[16px] [-webkit-backdrop-filter:blur(16px)]`
 
 type ComposerFileDropSink = (files: File[]) => void
 
@@ -56,6 +65,8 @@ export function ChatPaneDropOverlay({ hint }: { hint: string }) {
   )
 }
 
+type OverlayPhase = 'idle' | 'over' | 'leaving' | 'accepting'
+
 /**
  * Whole chat/content pane drop target. Overlay is visual-only; composer keeps
  * its own drop zone and still runs the same ingest path.
@@ -63,14 +74,33 @@ export function ChatPaneDropOverlay({ hint }: { hint: string }) {
 export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
+  const reduceMotionRef = React.useRef(reduceMotion)
+  reduceMotionRef.current = reduceMotion
   const rootRef = React.useRef<HTMLDivElement>(null)
   const depthRef = React.useRef(createFileDragDepth())
   const sinkRef = React.useRef<ComposerFileDropSink | null>(null)
-  const [active, setActive] = React.useState(false)
+  const phaseRef = React.useRef<OverlayPhase>('idle')
+  const [present, setPresent] = React.useState(false)
+  const presentRef = React.useRef(false)
+  presentRef.current = present
+  const pendingEnterRef = React.useRef(false)
   const [hasSink, setHasSink] = React.useState(false)
-  const fade = reduceMotion
-    ? { duration: 0 }
-    : { duration: 0.25, ease: OVERLAY_EASE }
+
+  const blur = useMotionValue(0)
+  const wash = useMotionValue(0)
+  const hintOpacity = useMotionValue(0)
+  const hintY = useMotionValue(10)
+  const hintScale = useMotionValue(0.94)
+  const washOpacity = useTransform(wash, value => value * PANE_DROP_WASH)
+  const backdrop = useTransform(blur, value => `blur(${value}px)`)
+
+  const playerRef = React.useRef<ReturnType<typeof createPaneDropPlayer> | null>(null)
+  if (playerRef.current == null) {
+    playerRef.current = createPaneDropPlayer(
+      { blur, wash, hintOpacity, hintY, hintScale },
+      () => Boolean(reduceMotionRef.current),
+    )
+  }
 
   const context = React.useMemo<ComposerFileDropContextValue>(() => ({
     register(handler) {
@@ -85,21 +115,63 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
     },
   }), [])
 
-  const clear = React.useCallback(() => {
-    depthRef.current.reset()
-    setActive(false)
+  const playEnter = React.useCallback(() => {
+    phaseRef.current = 'over'
+    if (presentRef.current) {
+      pendingEnterRef.current = false
+      playerRef.current?.enter()
+      return
+    }
+    pendingEnterRef.current = true
+    setPresent(true)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (!present || !pendingEnterRef.current) return
+    pendingEnterRef.current = false
+    playerRef.current?.enter()
+  }, [present])
+
+  const playLeave = React.useCallback(() => {
+    if (phaseRef.current === 'idle' || phaseRef.current === 'accepting') return
+    if (phaseRef.current === 'leaving') return
+    phaseRef.current = 'leaving'
+    void playerRef.current?.leave().then(() => {
+      if (phaseRef.current !== 'leaving') return
+      phaseRef.current = 'idle'
+      setPresent(false)
+    })
+  }, [])
+
+  const playAccept = React.useCallback(() => {
+    phaseRef.current = 'accepting'
+    void playerRef.current?.acceptThenLeave().then(() => {
+      if (phaseRef.current !== 'accepting') return
+      phaseRef.current = 'idle'
+      setPresent(false)
+    })
   }, [])
 
   React.useEffect(() => {
-    if (!active) return
+    if (!present) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
       event.stopPropagation()
-      clear()
+      if (phaseRef.current === 'accepting') return
+      depthRef.current.reset()
+      playLeave()
     }
-    const onDragEnd = () => clear()
-    const onBlur = () => clear()
+    const onDragEnd = () => {
+      if (phaseRef.current === 'accepting') return
+      depthRef.current.reset()
+      playLeave()
+    }
+    const onBlur = () => {
+      if (phaseRef.current === 'accepting') return
+      depthRef.current.reset()
+      playLeave()
+    }
     window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('dragend', onDragEnd)
     window.addEventListener('blur', onBlur)
@@ -108,24 +180,27 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
       window.removeEventListener('dragend', onDragEnd)
       window.removeEventListener('blur', onBlur)
     }
-  }, [active, clear])
+  }, [present, playLeave])
 
   const handleDragEnterCapture = (event: React.DragEvent<HTMLDivElement>) => {
     if (!hasSink || !hasFileDragType(event.dataTransfer.types)) return
     event.preventDefault()
-    if (depthRef.current.enter(event.dataTransfer.types)) setActive(true)
+    depthRef.current.enter(event.dataTransfer.types)
+    if (phaseRef.current === 'over') return
+    playEnter()
   }
 
   const handleDragLeaveCapture = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!active && depthRef.current.depth === 0) return
+    if (phaseRef.current === 'idle' && depthRef.current.depth === 0) return
     event.preventDefault()
     const stillInside = depthRef.current.leave()
     const root = rootRef.current?.getBoundingClientRect()
     if (root && shouldResetFileDragOnLeave(event, root)) {
-      clear()
+      depthRef.current.reset()
+      playLeave()
       return
     }
-    setActive(stillInside)
+    if (!stillInside) playLeave()
   }
 
   const handleDragOverCapture = (event: React.DragEvent<HTMLDivElement>) => {
@@ -137,7 +212,8 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   const handleDropCapture = (event: React.DragEvent<HTMLDivElement>) => {
     if (!hasFileDragType(event.dataTransfer.types)) return
     event.preventDefault()
-    clear()
+    depthRef.current.reset()
+    playAccept()
   }
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
@@ -166,30 +242,36 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
         onDrop={handleDrop}
       >
         {children}
-        <AnimatePresence>
-          {active && hasSink && (
+        {present && hasSink && (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="chat-pane-file-drop-overlay"
+            className={OVERLAY_POSITION_CLASS}
+          >
             <motion.div
-              key="pane-file-drop-overlay"
-              role="status"
-              aria-live="polite"
-              data-testid="chat-pane-file-drop-overlay"
-              className={OVERLAY_CLASS}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={fade}
+              className="absolute inset-0"
+              style={{
+                backdropFilter: backdrop,
+                WebkitBackdropFilter: backdrop,
+              }}
+            />
+            <motion.div
+              className="absolute inset-0 bg-background"
+              style={{ opacity: washOpacity }}
+            />
+            <motion.div
+              className="relative will-change-[opacity,transform]"
+              style={{
+                opacity: hintOpacity,
+                y: hintY,
+                scale: hintScale,
+              }}
             >
-              <motion.div
-                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={reduceMotion ? undefined : { opacity: 0, y: 4 }}
-                transition={fade}
-              >
-                <DropHint hint={hint} />
-              </motion.div>
+              <DropHint hint={hint} />
             </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
       </div>
     </ComposerFileDropContext.Provider>
   )
