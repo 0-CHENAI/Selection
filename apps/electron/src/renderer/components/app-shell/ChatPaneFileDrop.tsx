@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Paperclip } from 'lucide-react'
+import { FileUp } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   createFileDragDepth,
   droppedFilesFromDataTransfer,
@@ -9,6 +10,9 @@ import {
 } from '@/lib/external-file-drag'
 
 export const COMPOSER_FILE_DROP_ATTR = 'data-composer-file-drop'
+
+const OVERLAY_EASE = [0.4, 0, 0.2, 1] as const
+const OVERLAY_CLASS = 'pointer-events-none absolute inset-0 z-30 isolate flex flex-col items-center justify-center bg-background/40 backdrop-blur-[16px] [-webkit-backdrop-filter:blur(16px)]'
 
 type ComposerFileDropSink = (files: File[]) => void
 
@@ -29,19 +33,25 @@ export function useComposerFileDropSink(handler: ComposerFileDropSink): void {
   }, [ctx])
 }
 
+function DropHint({ hint }: { hint: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2.5 text-foreground/80">
+      <FileUp className="size-7" strokeWidth={1.5} aria-hidden="true" />
+      <p className="text-[13px] font-medium">{hint}</p>
+    </div>
+  )
+}
+
+/** Frosted pane overlay: blur + centered file icon and hint. */
 export function ChatPaneDropOverlay({ hint }: { hint: string }) {
   return (
     <div
       role="status"
       aria-live="polite"
       data-testid="chat-pane-file-drop-overlay"
-      className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+      className={OVERLAY_CLASS}
     >
-      <div className="absolute inset-3 rounded-[16px] border-2 border-dashed border-foreground/20 bg-foreground/[0.04]" />
-      <div className="relative flex items-center gap-2 rounded-full bg-background/95 px-3 py-1.5 text-[13px] text-foreground/80 shadow-minimal">
-        <Paperclip className="size-3.5" aria-hidden="true" />
-        {hint}
-      </div>
+      <DropHint hint={hint} />
     </div>
   )
 }
@@ -52,11 +62,15 @@ export function ChatPaneDropOverlay({ hint }: { hint: string }) {
  */
 export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
   const rootRef = React.useRef<HTMLDivElement>(null)
   const depthRef = React.useRef(createFileDragDepth())
   const sinkRef = React.useRef<ComposerFileDropSink | null>(null)
   const [active, setActive] = React.useState(false)
   const [hasSink, setHasSink] = React.useState(false)
+  const fade = reduceMotion
+    ? { duration: 0 }
+    : { duration: 0.25, ease: OVERLAY_EASE }
 
   const context = React.useMemo<ComposerFileDropContextValue>(() => ({
     register(handler) {
@@ -137,6 +151,8 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
     sinkRef.current?.(files)
   }
 
+  const hint = t('chat.dropToAttach')
+
   return (
     <ComposerFileDropContext.Provider value={context}>
       <div
@@ -150,7 +166,30 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
         onDrop={handleDrop}
       >
         {children}
-        {active && hasSink && <ChatPaneDropOverlay hint={t('chat.dropToAttach')} />}
+        <AnimatePresence>
+          {active && hasSink && (
+            <motion.div
+              key="pane-file-drop-overlay"
+              role="status"
+              aria-live="polite"
+              data-testid="chat-pane-file-drop-overlay"
+              className={OVERLAY_CLASS}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={fade}
+            >
+              <motion.div
+                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduceMotion ? undefined : { opacity: 0, y: 4 }}
+                transition={fade}
+              >
+                <DropHint hint={hint} />
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </ComposerFileDropContext.Provider>
   )

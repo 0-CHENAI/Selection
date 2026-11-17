@@ -52,16 +52,20 @@ describe('chat pane file drop', () => {
     expect(pane).toContain("event.key !== 'Escape'")
     expect(pane).toContain("window.addEventListener('dragend', onDragEnd)")
     expect(pane).toContain("window.addEventListener('blur', onBlur)")
-    expect(LOCALE_REGISTRY['zh-Hans'].messages['chat.dropToAttach']).toBe('松开以添加为附件')
-    expect(LOCALE_REGISTRY.en.messages['chat.dropToAttach']).toBe('Drop to attach')
+    expect(LOCALE_REGISTRY['zh-Hans'].messages['chat.dropToAttach']).toBe('松开光标以放入文件')
+    expect(LOCALE_REGISTRY.en.messages['chat.dropToAttach']).toBe('Release to drop files')
+    expect(pane).toContain('AnimatePresence')
+    expect(pane).toContain('backdrop-blur-[16px]')
   })
 
-  it('renders a dashed overlay with the drop hint and no pointer capture', () => {
-    const html = renderToStaticMarkup(ChatPaneDropOverlay({ hint: '松开以添加为附件' }))
-    expect(html).toContain('松开以添加为附件')
+  it('renders a frosted overlay with a file icon, hint, and no pointer capture', () => {
+    const html = renderToStaticMarkup(ChatPaneDropOverlay({ hint: '松开光标以放入文件' }))
+    expect(html).toContain('松开光标以放入文件')
     expect(html).toContain('data-testid="chat-pane-file-drop-overlay"')
     expect(html).toContain('pointer-events-none')
-    expect(html).toContain('border-dashed')
+    expect(html).toContain('backdrop-blur-[16px]')
+    expect(html).not.toContain('border-dashed')
+    expect(html).toContain('flex-col')
   })
 
   it('installs a window-level guard so Electron cannot navigate to a dropped file', () => {

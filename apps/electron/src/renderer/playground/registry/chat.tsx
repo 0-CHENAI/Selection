@@ -1048,7 +1048,7 @@ const emptyStateHintVariants = Array.from({ length: getHintCount() }, (_, i) => 
 }))
 
 function ChatPaneFileDropPreview({ locale = 'zh-Hans' }: { locale?: 'zh-Hans' | 'en' }) {
-  const hint = locale === 'en' ? 'Drop to attach' : '松开以添加为附件'
+  const hint = locale === 'en' ? 'Release to drop files' : '松开光标以放入文件'
   const title = locale === 'en' ? 'New session' : '新建会话'
   return (
     <div className="relative h-[560px] w-[840px] overflow-hidden rounded-[10px] bg-foreground-2">

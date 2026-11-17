@@ -358,7 +358,7 @@
   "chat.delegateDisabled": "Turn on Swarm agents in Advanced settings before delegating",
   "chat.delegateTaskRequired": "Add a task after /delegate",
   "chat.delegateWaitForIdle": "Finish or stop the current response before delegating",
-  "chat.dropToAttach": "Drop to attach",
+  "chat.dropToAttach": "Release to drop files",
   "chat.enterSessionName": "Enter session name...",
   "chat.enterValue": "Enter {{label}}",
   "chat.failedToLoadConversation": "Failed to load conversation",

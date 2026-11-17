@@ -358,7 +358,7 @@
   "chat.delegateDisabled": "Włącz agentów Swarm w ustawieniach zaawansowanych przed delegowaniem",
   "chat.delegateTaskRequired": "Dodaj zadanie po /delegate",
   "chat.delegateWaitForIdle": "Przed delegowaniem zakończ lub zatrzymaj bieżącą odpowiedź",
-  "chat.dropToAttach": "Upuść, aby załączyć",
+  "chat.dropToAttach": "Puść kursor, aby wstawić pliki",
   "chat.enterSessionName": "Wprowadź nazwę sesji...",
   "chat.enterValue": "Wprowadź {{label}}",
   "chat.failedToLoadConversation": "Nie udało się wczytać rozmowy",

@@ -358,7 +358,7 @@
   "chat.delegateDisabled": "委任する前に、詳細設定で Swarm サブエージェントを有効にしてください",
   "chat.delegateTaskRequired": "/delegate の後にタスクを入力してください",
   "chat.delegateWaitForIdle": "委任する前に現在の応答を完了または停止してください",
-  "chat.dropToAttach": "ドロップして添付",
+  "chat.dropToAttach": "カーソルを離してファイルを置く",
   "chat.enterSessionName": "セッション名を入力...",
   "chat.enterValue": "{{label}}を入力",
   "chat.failedToLoadConversation": "会話を読み込めませんでした",
