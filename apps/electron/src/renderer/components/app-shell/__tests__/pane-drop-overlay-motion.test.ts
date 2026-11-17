@@ -14,6 +14,7 @@ function makeValues() {
     hintOpacity: motionValue(0),
     hintY: motionValue(10),
     hintScale: motionValue(0.94),
+    acceptHold: motionValue(0),
   }
 }
 
@@ -114,9 +115,8 @@ describe('pane drop overlay motion', () => {
     const { animate, calls } = mockAnimate()
     const player = createPaneDropPlayer(values, () => false, animate)
     await player.acceptThenLeave()
-    const scales = calls.filter(call => call.value === values.hintScale).map(call => call.to)
-    expect(scales[0]).toBe(1)
-    expect(scales.at(-1)).toBe(0.9)
+    const hold = calls.find(call => call.value === values.acceptHold)
+    expect(hold?.to).toBe(1)
     expect(calls.some(call => call.value === values.blur && call.to === 0)).toBe(true)
   })
 })

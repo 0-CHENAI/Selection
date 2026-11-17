@@ -44,19 +44,17 @@ export function useComposerFileDropSink(handler: ComposerFileDropSink): void {
 
 function DropHint({
   hint,
-  color,
   folderHovered,
   folderOpen,
 }: {
   hint: string
-  color: 'black' | 'white'
   folderHovered: boolean
   folderOpen: boolean
 }) {
   return (
     <div className="flex flex-col items-center gap-3 text-foreground/80">
       <Folder
-        color={color}
+        color="blue"
         size="sm"
         hovered={folderHovered}
         open={folderOpen}
@@ -77,7 +75,7 @@ export function ChatPaneDropOverlay({ hint }: { hint: string }) {
       data-testid="chat-pane-file-drop-overlay"
       className={OVERLAY_CLASS}
     >
-      <DropHint hint={hint} color="black" folderHovered folderOpen={false} />
+      <DropHint hint={hint} folderHovered folderOpen={false} />
     </div>
   )
 }
@@ -110,13 +108,14 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   const hintOpacity = useMotionValue(0)
   const hintY = useMotionValue(10)
   const hintScale = useMotionValue(0.94)
+  const acceptHold = useMotionValue(0)
   const washOpacity = useTransform(wash, value => value * PANE_DROP_WASH)
   const backdrop = useTransform(blur, value => `blur(${value}px)`)
 
   const playerRef = React.useRef<ReturnType<typeof createPaneDropPlayer> | null>(null)
   if (playerRef.current == null) {
     playerRef.current = createPaneDropPlayer(
-      { blur, wash, hintOpacity, hintY, hintScale },
+      { blur, wash, hintOpacity, hintY, hintScale, acceptHold },
       () => Boolean(reduceMotionRef.current),
     )
   }
@@ -253,10 +252,6 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   }
 
   const hint = t('chat.dropToAttach')
-  const folderColor =
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-      ? 'white'
-      : 'black'
 
   return (
     <ComposerFileDropContext.Provider value={context}>
@@ -302,7 +297,6 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
             >
               <DropHint
                 hint={hint}
-                color={folderColor}
                 folderHovered={folderHovered}
                 folderOpen={folderOpen}
               />
