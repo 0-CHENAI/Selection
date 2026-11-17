@@ -110,8 +110,8 @@ export function createPaneDropPlayer(
       values.blur.set(0)
       values.wash.set(0)
       values.hintOpacity.set(0)
-      values.hintY.set(8)
-      values.hintScale.set(0.92)
+      values.hintY.set(10)
+      values.hintScale.set(0.9)
       return
     }
     await wait(fadeOut())
@@ -123,8 +123,8 @@ export function createPaneDropPlayer(
       values.blur.set(0)
       values.wash.set(0)
       values.hintOpacity.set(0)
-      values.hintY.set(8)
-      values.hintScale.set(0.92)
+      values.hintY.set(10)
+      values.hintScale.set(0.9)
       return
     }
     await wait([
