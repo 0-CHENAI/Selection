@@ -358,6 +358,7 @@
   "chat.delegateDisabled": "请先在高级设置中开启 Swarm 子代理，再使用委托命令",
   "chat.delegateTaskRequired": "请在 /delegate 后输入任务",
   "chat.delegateWaitForIdle": "请等待当前回复完成或先停止，再进行委派",
+  "chat.dropToAttach": "松开光标以放入文件",
   "chat.enterSessionName": "输入会话名称…",
   "chat.enterValue": "输入{{label}}",
   "chat.failedToLoadConversation": "无法加载对话",

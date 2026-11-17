@@ -358,6 +358,7 @@
   "chat.delegateDisabled": "A delegálás előtt kapcsold be a Swarm-ügynököket a Speciális beállításokban",
   "chat.delegateTaskRequired": "Adj meg egy feladatot a /delegate után",
   "chat.delegateWaitForIdle": "Delegálás előtt fejezd be vagy állítsd le az aktuális választ",
+  "chat.dropToAttach": "Engedje el a kurzort a fájlok elhelyezéséhez",
   "chat.enterSessionName": "Add meg a munkamenet nevét...",
   "chat.enterValue": "{{label}} megadása",
   "chat.failedToLoadConversation": "Nem sikerült betölteni a beszélgetést",

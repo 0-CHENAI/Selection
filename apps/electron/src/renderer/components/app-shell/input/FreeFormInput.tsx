@@ -13,6 +13,8 @@ import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/
 import { toast } from 'sonner'
 import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
 import { clipboardFiles } from '@/lib/clipboard-files'
+import { droppedFilesFromDataTransfer, hasFileDragType } from '@/lib/external-file-drag'
+import { useComposerFileDropSink } from '@/components/app-shell/ChatPaneFileDrop'
 import {
   Paperclip,
   ArrowUp,
@@ -1427,7 +1429,7 @@ export function FreeFormInput({
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current++
-    if (e.dataTransfer.types.includes('Files')) {
+    if (hasFileDragType(e.dataTransfer.types)) {
       setIsDraggingOver(true)
     }
   }
@@ -1556,19 +1558,21 @@ export function FreeFormInput({
     richInputRef.current?.focus()
   }, []) // No deps needed - uses ref
 
+  const ingestDroppedFiles = async (files: File[]) => {
+    setLoadingCount(files.length)
+    for (const file of files) {
+      await processFileAttachment(file)
+    }
+  }
+
+  useComposerFileDropSink(files => { void ingestDroppedFiles(files) })
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current = 0
     setIsDraggingOver(false)
-    if (disabled) return
-
-    const files = Array.from(e.dataTransfer.files)
-    setLoadingCount(files.length)
-
-    for (const file of files) {
-      await processFileAttachment(file)
-    }
+    await ingestDroppedFiles(droppedFilesFromDataTransfer(e.dataTransfer))
   }
 
   // Submit message - backend handles queueing and interruption
@@ -1965,6 +1969,7 @@ export function FreeFormInput({
         )}
         data-max={promptMaxed || undefined}
         data-work-mode={workMode}
+        data-composer-file-drop=""
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
