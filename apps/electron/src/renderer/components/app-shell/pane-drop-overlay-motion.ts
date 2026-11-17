@@ -8,7 +8,7 @@ type AnimateValue = (
 
 export const PANE_DROP_EASE = [0.22, 1, 0.36, 1] as const
 export const PANE_DROP_BLUR_PX = 16
-export const PANE_DROP_HINT_DELAY = 0.08
+export const PANE_DROP_HINT_DELAY = 0.1
 export const PANE_DROP_WASH = 0.4
 
 export type PaneDropMotionValues = {
@@ -80,14 +80,13 @@ export function createPaneDropPlayer(
   }
 
   const fadeOut = () => {
-    const hintDelay = 0
-    const frostDelay = dur(0.04)
+    const frostDelay = dur(0.06)
     return [
-      track(animate(values.hintOpacity, 0, { duration: dur(0.2), ease: PANE_DROP_EASE, delay: hintDelay })),
-      track(animate(values.hintY, 8, { duration: dur(0.24), ease: PANE_DROP_EASE })),
-      track(animate(values.hintScale, 0.92, { duration: dur(0.22), ease: PANE_DROP_EASE })),
-      track(animate(values.wash, 0, { duration: dur(0.28), ease: PANE_DROP_EASE, delay: frostDelay })),
-      track(animate(values.blur, 0, { duration: dur(0.32), ease: PANE_DROP_EASE })),
+      track(animate(values.hintOpacity, 0, { duration: dur(0.26), ease: PANE_DROP_EASE })),
+      track(animate(values.hintY, 10, { duration: dur(0.3), ease: PANE_DROP_EASE })),
+      track(animate(values.hintScale, 0.9, { duration: dur(0.28), ease: PANE_DROP_EASE })),
+      track(animate(values.wash, 0, { duration: dur(0.36), ease: PANE_DROP_EASE, delay: frostDelay })),
+      track(animate(values.blur, 0, { duration: dur(0.42), ease: PANE_DROP_EASE })),
     ]
   }
 
@@ -98,11 +97,11 @@ export function createPaneDropPlayer(
       return
     }
     const hintDelay = PANE_DROP_HINT_DELAY
-    track(animate(values.blur, PANE_DROP_BLUR_PX, { duration: 0.32, ease: PANE_DROP_EASE }))
-    track(animate(values.wash, 1, { duration: 0.28, ease: PANE_DROP_EASE }))
-    track(animate(values.hintOpacity, 1, { duration: 0.26, ease: PANE_DROP_EASE, delay: hintDelay }))
-    track(animate(values.hintY, 0, { duration: 0.32, ease: PANE_DROP_EASE, delay: hintDelay }))
-    track(animate(values.hintScale, 1, { duration: 0.32, ease: PANE_DROP_EASE, delay: hintDelay }))
+    track(animate(values.blur, PANE_DROP_BLUR_PX, { duration: 0.5, ease: PANE_DROP_EASE }))
+    track(animate(values.wash, 1, { duration: 0.42, ease: PANE_DROP_EASE }))
+    track(animate(values.hintOpacity, 1, { duration: 0.4, ease: PANE_DROP_EASE, delay: hintDelay }))
+    track(animate(values.hintY, 0, { duration: 0.46, ease: PANE_DROP_EASE, delay: hintDelay }))
+    track(animate(values.hintScale, 1, { duration: 0.46, ease: PANE_DROP_EASE, delay: hintDelay }))
   }
 
   const leave = async () => {
@@ -129,13 +128,13 @@ export function createPaneDropPlayer(
       return
     }
     await wait([
-      track(animate(values.hintScale, 0.9, { duration: 0.12, ease: PANE_DROP_EASE })),
-      track(animate(values.hintY, 10, { duration: 0.12, ease: PANE_DROP_EASE })),
+      track(animate(values.hintScale, 0.88, { duration: 0.14, ease: PANE_DROP_EASE })),
+      track(animate(values.hintY, 12, { duration: 0.14, ease: PANE_DROP_EASE })),
     ])
     if (generation !== gen) return
     await wait([
-      track(animate(values.hintScale, 1.05, { duration: 0.16, ease: PANE_DROP_EASE })),
-      track(animate(values.hintY, -3, { duration: 0.16, ease: PANE_DROP_EASE })),
+      track(animate(values.hintScale, 1.06, { duration: 0.2, ease: PANE_DROP_EASE })),
+      track(animate(values.hintY, -4, { duration: 0.2, ease: PANE_DROP_EASE })),
     ])
     if (generation !== gen) return
     await wait(fadeOut())

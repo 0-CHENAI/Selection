@@ -250,6 +250,7 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
             className={OVERLAY_POSITION_CLASS}
           >
             <motion.div
+              data-pane-drop-frost=""
               className="absolute inset-0"
               style={{
                 backdropFilter: backdrop,
@@ -257,10 +258,12 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
               }}
             />
             <motion.div
+              data-pane-drop-wash=""
               className="absolute inset-0 bg-background"
               style={{ opacity: washOpacity }}
             />
             <motion.div
+              data-pane-drop-hint=""
               className="relative will-change-[opacity,transform]"
               style={{
                 opacity: hintOpacity,
