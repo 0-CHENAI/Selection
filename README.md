@@ -267,4 +267,6 @@ packages/
 
 Selection 基于 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents-oss) 继续开发，代码采用 [Apache License 2.0](LICENSE)。感谢上游项目及开源贡献者。
 
+Folder animation from [Rare UI](https://rareui.com).
+
 第三方声明见 [NOTICE](NOTICE)，上游名称与标志的使用规则见 [TRADEMARK.md](TRADEMARK.md)。PPT 模板与参考素材保留各自的许可和署名，详见[模板来源说明](apps/electron/resources/skills/ppt-design/ATTRIBUTION.md)。

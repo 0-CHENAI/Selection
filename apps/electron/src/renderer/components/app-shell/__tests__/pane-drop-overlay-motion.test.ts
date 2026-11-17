@@ -105,7 +105,7 @@ describe('pane drop overlay motion', () => {
     expect(values.hintOpacity.get()).toBe(0)
   })
 
-  it('plays a distinct accept settle before fading out', async () => {
+  it('holds for the folder lift-open, then fades the overlay out', async () => {
     const values = makeValues()
     values.blur.set(16)
     values.hintOpacity.set(1)
@@ -115,8 +115,7 @@ describe('pane drop overlay motion', () => {
     const player = createPaneDropPlayer(values, () => false, animate)
     await player.acceptThenLeave()
     const scales = calls.filter(call => call.value === values.hintScale).map(call => call.to)
-    expect(scales[0]).toBe(0.88)
-    expect(scales[1]).toBe(1.06)
+    expect(scales[0]).toBe(1)
     expect(scales.at(-1)).toBe(0.9)
     expect(calls.some(call => call.value === values.blur && call.to === 0)).toBe(true)
   })

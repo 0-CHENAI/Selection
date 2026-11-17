@@ -60,6 +60,12 @@ describe('chat pane file drop', () => {
     expect(pane).toContain('playAccept')
     expect(pane).toContain('acceptThenLeave')
     expect(pane).toContain('backdrop-blur-[16px]')
+    expect(pane).toContain("from '@/components/ui/folder-component'")
+    expect(pane).toContain('hovered={folderHovered}')
+    expect(pane).toContain('open={folderOpen}')
+    expect(pane).toContain('setFolderHovered(true)')
+    expect(pane).toContain('setFolderOpen(true)')
+    expect(pane).not.toContain('FileUp')
     expect(pane).not.toContain('AnimatePresence')
     expect(pane).not.toContain('border-dashed')
   })
@@ -76,16 +82,32 @@ describe('chat pane file drop', () => {
     const pane = read('../ChatPaneFileDrop.tsx')
     expect(pane).toContain('blur(${value}px)')
     expect(pane).toContain('will-change-[opacity,transform]')
+    expect(motion).toContain('PANE_DROP_ACCEPT_HOLD')
   })
 
-  it('renders a frosted overlay with a file icon, hint, and no pointer capture', () => {
+  it('keeps Rare UI copyright in the copied Folder source', () => {
+    const folder = read('../../ui/folder-component.tsx')
+    expect(folder).toContain('Copyright (c) 2026 Swami Malode')
+    expect(folder).toContain('https://rareui.com')
+    expect(folder).toContain('Commons Clause')
+    expect(folder).toContain('hovered?: boolean')
+    expect(folder).toContain('open?: boolean')
+  })
+
+  it('renders a frosted overlay with a Rare UI folder, hint, and no pointer capture', () => {
     const html = renderToStaticMarkup(ChatPaneDropOverlay({ hint: '松开光标以放入文件' }))
     expect(html).toContain('松开光标以放入文件')
     expect(html).toContain('data-testid="chat-pane-file-drop-overlay"')
     expect(html).toContain('pointer-events-none')
     expect(html).toContain('backdrop-blur-[16px]')
+    expect(html).toContain('data-slot="folder"')
     expect(html).not.toContain('border-dashed')
     expect(html).toContain('flex-col')
+  })
+
+  it('credits Rare UI in the repository README', () => {
+    const readme = readFileSync(join(import.meta.dir, '../../../../../../../README.md'), 'utf8')
+    expect(readme).toContain('Folder animation from [Rare UI](https://rareui.com)')
   })
 
   it('installs a window-level guard so Electron cannot navigate to a dropped file', () => {

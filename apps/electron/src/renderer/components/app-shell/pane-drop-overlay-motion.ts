@@ -9,6 +9,7 @@ type AnimateValue = (
 export const PANE_DROP_EASE = [0.22, 1, 0.36, 1] as const
 export const PANE_DROP_BLUR_PX = 16
 export const PANE_DROP_HINT_DELAY = 0.1
+export const PANE_DROP_ACCEPT_HOLD = 0.55
 export const PANE_DROP_WASH = 0.4
 
 export type PaneDropMotionValues = {
@@ -128,13 +129,7 @@ export function createPaneDropPlayer(
       return
     }
     await wait([
-      track(animate(values.hintScale, 0.88, { duration: 0.14, ease: PANE_DROP_EASE })),
-      track(animate(values.hintY, 12, { duration: 0.14, ease: PANE_DROP_EASE })),
-    ])
-    if (generation !== gen) return
-    await wait([
-      track(animate(values.hintScale, 1.06, { duration: 0.2, ease: PANE_DROP_EASE })),
-      track(animate(values.hintY, -4, { duration: 0.2, ease: PANE_DROP_EASE })),
+      track(animate(values.hintScale, 1, { duration: dur(PANE_DROP_ACCEPT_HOLD), ease: PANE_DROP_EASE })),
     ])
     if (generation !== gen) return
     await wait(fadeOut())

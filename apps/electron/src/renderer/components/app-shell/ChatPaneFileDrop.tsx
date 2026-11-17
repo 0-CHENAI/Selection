@@ -1,12 +1,12 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { FileUp } from 'lucide-react'
 import {
   motion,
   useMotionValue,
   useReducedMotion,
   useTransform,
 } from 'motion/react'
+import { Folder } from '@/components/ui/folder-component'
 import {
   createFileDragDepth,
   droppedFilesFromDataTransfer,
@@ -42,16 +42,33 @@ export function useComposerFileDropSink(handler: ComposerFileDropSink): void {
   }, [ctx])
 }
 
-function DropHint({ hint }: { hint: string }) {
+function DropHint({
+  hint,
+  color,
+  folderHovered,
+  folderOpen,
+}: {
+  hint: string
+  color: 'black' | 'white'
+  folderHovered: boolean
+  folderOpen: boolean
+}) {
   return (
-    <div className="flex flex-col items-center gap-2.5 text-foreground/80">
-      <FileUp className="size-7" strokeWidth={1.5} aria-hidden="true" />
+    <div className="flex flex-col items-center gap-3 text-foreground/80">
+      <Folder
+        color={color}
+        size="sm"
+        hovered={folderHovered}
+        open={folderOpen}
+        className="h-auto w-auto shrink-0"
+        aria-hidden="true"
+      />
       <p className="text-[13px] font-medium">{hint}</p>
     </div>
   )
 }
 
-/** Frosted pane overlay: blur + centered file icon and hint. */
+/** Frosted pane overlay: blur + centered Rare UI folder and hint. */
 export function ChatPaneDropOverlay({ hint }: { hint: string }) {
   return (
     <div
@@ -60,7 +77,7 @@ export function ChatPaneDropOverlay({ hint }: { hint: string }) {
       data-testid="chat-pane-file-drop-overlay"
       className={OVERLAY_CLASS}
     >
-      <DropHint hint={hint} />
+      <DropHint hint={hint} color="black" folderHovered folderOpen={false} />
     </div>
   )
 }
@@ -85,6 +102,8 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   presentRef.current = present
   const pendingEnterRef = React.useRef(false)
   const [hasSink, setHasSink] = React.useState(false)
+  const [folderHovered, setFolderHovered] = React.useState(false)
+  const [folderOpen, setFolderOpen] = React.useState(false)
 
   const blur = useMotionValue(0)
   const wash = useMotionValue(0)
@@ -117,6 +136,8 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
 
   const playEnter = React.useCallback(() => {
     phaseRef.current = 'over'
+    setFolderOpen(false)
+    setFolderHovered(true)
     if (presentRef.current) {
       pendingEnterRef.current = false
       playerRef.current?.enter()
@@ -136,6 +157,8 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
     if (phaseRef.current === 'idle' || phaseRef.current === 'accepting') return
     if (phaseRef.current === 'leaving') return
     phaseRef.current = 'leaving'
+    setFolderOpen(false)
+    setFolderHovered(false)
     void playerRef.current?.leave().then(() => {
       if (phaseRef.current !== 'leaving') return
       phaseRef.current = 'idle'
@@ -145,6 +168,8 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
 
   const playAccept = React.useCallback(() => {
     phaseRef.current = 'accepting'
+    setFolderHovered(true)
+    setFolderOpen(true)
     void playerRef.current?.acceptThenLeave().then(() => {
       if (phaseRef.current !== 'accepting') return
       phaseRef.current = 'idle'
@@ -228,6 +253,10 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   }
 
   const hint = t('chat.dropToAttach')
+  const folderColor =
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+      ? 'white'
+      : 'black'
 
   return (
     <ComposerFileDropContext.Provider value={context}>
@@ -271,7 +300,12 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
                 scale: hintScale,
               }}
             >
-              <DropHint hint={hint} />
+              <DropHint
+                hint={hint}
+                color={folderColor}
+                folderHovered={folderHovered}
+                folderOpen={folderOpen}
+              />
             </motion.div>
           </div>
         )}
