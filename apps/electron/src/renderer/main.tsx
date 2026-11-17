@@ -15,6 +15,9 @@ import LanguageDetector from 'i18next-browser-languagedetector'
 import './index.css'
 // generative-loaders styles for InlineLoader (thinking / preparing response)
 import 'generative-loaders/styles.css'
+import { installExternalFileWindowGuard } from './lib/external-file-drag'
+
+installExternalFileWindowGuard()
 
 // Initialize i18n before any React rendering
 setupI18n([LanguageDetector, initReactI18next])

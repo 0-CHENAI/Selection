@@ -4,6 +4,8 @@ import type {
   SkillImportPreview,
 } from '../../../shared/types'
 
+export { hasFileDragType } from '@/lib/external-file-drag'
+
 export type SkillFileImportApi = Pick<
   ElectronAPI,
   'previewSkillFileImport' | 'importSkillFile'
@@ -39,10 +41,6 @@ const BASE64_CHUNK_BYTES = 0x8000
 
 export function isSupportedSkillImportFile(file: Pick<File, 'name'>): boolean {
   return /\.(?:md|zip)$/i.test(file.name)
-}
-
-export function hasFileDragType(types: ArrayLike<string>): boolean {
-  return Array.from(types).some(type => type.toLowerCase() === 'files')
 }
 
 export function getDroppedSkillImportFile(files: ArrayLike<File>): File {

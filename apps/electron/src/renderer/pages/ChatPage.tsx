@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, FolderOpen, X } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
+import { ChatPaneFileDrop } from '@/components/app-shell/ChatPaneFileDrop'
 import { useOrchestrationRuns } from '@/hooks/useOrchestrationRuns'
 import { canPreviewOrchestrationChild, nodeStateForSession } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
@@ -910,6 +911,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
 
       return (
         <>
+          <ChatPaneFileDrop>
           <div className="h-full flex flex-col">
             <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             <div className="relative flex-1 flex flex-col min-h-0">
@@ -975,6 +977,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
               </div>
             </div>
           </div>
+          </ChatPaneFileDrop>
           <RenameDialog
             open={renameDialogOpen}
             onOpenChange={setRenameDialogOpen}
@@ -1005,6 +1008,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
   return (
     <ResponseSourcesLayout resizeHandle={SourcesResizeHandle} key={optionsSessionId} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
       renderHeader={(title, onClose) => <PanelHeader title={title} leadingAction={<></>} compensateForStoplight={false} rightSidebarButton={<PanelHeaderCenterButton icon={<X className="size-4" />} onClick={onClose} tooltip={t('common.close')} />} />}>
+      <ChatPaneFileDrop>
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="relative flex-1 flex flex-col min-h-0">
@@ -1079,6 +1083,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
           </div>
         </div>
       </div>
+      </ChatPaneFileDrop>
       <RenameDialog
         open={renameDialogOpen}
         onOpenChange={setRenameDialogOpen}

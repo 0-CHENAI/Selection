@@ -358,6 +358,7 @@
   "chat.delegateDisabled": "Aktiviere Swarm-Agenten unter Erweitert, bevor du delegierst",
   "chat.delegateTaskRequired": "Füge nach /delegate eine Aufgabe hinzu",
   "chat.delegateWaitForIdle": "Beende oder stoppe die aktuelle Antwort vor dem Delegieren",
+  "chat.dropToAttach": "Loslassen, um anzuhängen",
   "chat.enterSessionName": "Sitzungsname eingeben...",
   "chat.enterValue": "{{label}} eingeben",
   "chat.failedToLoadConversation": "Unterhaltung konnte nicht geladen werden",

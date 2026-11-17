@@ -31,6 +31,8 @@ import {
 } from '../mock-utils'
 import { mockAdminApprovalRequest } from '../adapters/input-adapters'
 import { getRecentDirsForScenario, type RecentDirScenario } from '../recent-working-dirs'
+import { ChatPaneDropOverlay } from '@/components/app-shell/ChatPaneFileDrop'
+import { NewSessionBrand } from '@/components/app-shell/NewSessionBrand'
 
 const sampleCodeAttachment: FileAttachment = {
   type: 'text',
@@ -1045,7 +1047,46 @@ const emptyStateHintVariants = Array.from({ length: getHintCount() }, (_, i) => 
   props: { hintIndex: i },
 }))
 
+function ChatPaneFileDropPreview({ locale = 'zh-Hans' }: { locale?: 'zh-Hans' | 'en' }) {
+  const hint = locale === 'en' ? 'Drop to attach' : '松开以添加为附件'
+  const title = locale === 'en' ? 'New session' : '新建会话'
+  return (
+    <div className="relative h-[560px] w-[840px] overflow-hidden rounded-[10px] bg-foreground-2">
+      <div className="flex h-full flex-col">
+        <div className="flex h-[42px] shrink-0 items-center justify-center text-[13px] font-medium">
+          {title}
+        </div>
+        <div className="relative min-h-0 flex-1">
+          <NewSessionBrand />
+        </div>
+        <div className="px-5 pb-4">
+          <div className="h-[114px] rounded-[16px] bg-background shadow-middle" data-composer-file-drop="" />
+        </div>
+      </div>
+      <ChatPaneDropOverlay hint={hint} />
+    </div>
+  )
+}
+
 export const chatComponents: ComponentEntry[] = [
+  {
+    id: 'chat-pane-file-drop',
+    name: 'Chat pane file drop',
+    category: 'Chat',
+    description: 'External-file drop overlay covering the main chat pane, including the title bar and composer',
+    component: ChatPaneFileDropPreview,
+    props: [
+      {
+        name: 'locale',
+        control: { type: 'select', options: [
+          { label: '简体中文', value: 'zh-Hans' },
+          { label: 'English', value: 'en' },
+        ] },
+        defaultValue: 'zh-Hans',
+      },
+    ],
+    layout: 'centered',
+  },
   {
     id: 'lattice-loader',
     name: 'LatticeLoader',
