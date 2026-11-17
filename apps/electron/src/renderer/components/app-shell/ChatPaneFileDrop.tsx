@@ -42,23 +42,47 @@ export function useComposerFileDropSink(handler: ComposerFileDropSink): void {
   }, [ctx])
 }
 
+type FolderThemeColor = 'black' | 'white'
+
+function folderColorFromDocument(): FolderThemeColor {
+  if (typeof document === 'undefined') return 'black'
+  return document.documentElement.classList.contains('dark') ? 'white' : 'black'
+}
+
+/** Follow the live `dark` class so the overlay Folder switches with the app theme. */
+function useFolderThemeColor(): FolderThemeColor {
+  const [color, setColor] = React.useState<FolderThemeColor>(folderColorFromDocument)
+  React.useEffect(() => {
+    const root = document.documentElement
+    const sync = () => setColor(folderColorFromDocument())
+    sync()
+    const observer = new MutationObserver(sync)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+  return color
+}
+
 function DropHint({
   hint,
+  color,
   folderHovered,
   folderOpen,
 }: {
   hint: string
+  color: FolderThemeColor
   folderHovered: boolean
   folderOpen: boolean
 }) {
   return (
     <div className="flex flex-col items-center gap-3 text-foreground/80">
       <Folder
-        color="blue"
+        color={color}
         size="sm"
         hovered={folderHovered}
         open={folderOpen}
         className="h-auto w-auto shrink-0"
+        data-folder-color={color}
         aria-hidden="true"
       />
       <p className="text-[13px] font-medium">{hint}</p>
@@ -67,7 +91,13 @@ function DropHint({
 }
 
 /** Frosted pane overlay: blur + centered Rare UI folder and hint. */
-export function ChatPaneDropOverlay({ hint }: { hint: string }) {
+export function ChatPaneDropOverlay({
+  hint,
+  color = 'black',
+}: {
+  hint: string
+  color?: FolderThemeColor
+}) {
   return (
     <div
       role="status"
@@ -75,7 +105,7 @@ export function ChatPaneDropOverlay({ hint }: { hint: string }) {
       data-testid="chat-pane-file-drop-overlay"
       className={OVERLAY_CLASS}
     >
-      <DropHint hint={hint} folderHovered folderOpen={false} />
+      <DropHint hint={hint} color={color} folderHovered folderOpen={false} />
     </div>
   )
 }
@@ -252,6 +282,7 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
   }
 
   const hint = t('chat.dropToAttach')
+  const folderColor = useFolderThemeColor()
 
   return (
     <ComposerFileDropContext.Provider value={context}>
@@ -297,6 +328,7 @@ export function ChatPaneFileDrop({ children }: { children: React.ReactNode }) {
             >
               <DropHint
                 hint={hint}
+                color={folderColor}
                 folderHovered={folderHovered}
                 folderOpen={folderOpen}
               />
