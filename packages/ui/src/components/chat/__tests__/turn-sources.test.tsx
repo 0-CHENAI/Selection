@@ -92,3 +92,9 @@ it('reserves the same source shelf before completion and keeps it non-interactiv
   expect(completed).toContain('opacity:1')
   expect(render(false, false, '普通回答', true)).not.toContain('data-response-sources')
 })
+
+it('renders the sources button for a search result ending at the URL', () => {
+  const activities: ActivityItem[] = [{ id: 'search', type: 'tool', status: 'completed', timestamp: 1,
+    toolName: 'WebSearch', content: 'Search results for "docs" (via search):\n\n1. **Docs**\n   https://docs.example/page' }]
+  expect(render(false, true, '调查结论', false, activities)).toContain('data-response-sources=""')
+})

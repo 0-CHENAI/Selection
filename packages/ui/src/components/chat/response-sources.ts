@@ -7,8 +7,10 @@ import type { RootContent, Nodes } from 'mdast'
 
 export interface ResponseSource { url: string; title: string; hostname: string; description?: string }
 const parser = unified().use(remarkParse).use(remarkGfm)
-const sourceLabels = ['官方来源', '主要来源', '参考资料', '参考来源', '参考文献', '资料来源', '来源', 'sources', 'references']
-const sourceLabel = /^(?:官方来源|主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]?\s*$/i
+const sourceLabels = ['官方来源', '主要来源', '参考资料', '参考来源', '参考文献', '资料来源', '数据来源', '网页来源', '来源', 'sources', 'references']
+const labelPattern = `^(?:${sourceLabels.join('|')})\\s*`
+const sourceLabel = new RegExp(labelPattern + '[:：]?\\s*$', 'i')
+const inlineSourceLabel = new RegExp(labelPattern + '[:：]', 'i')
 
 function textOutsideLinks(node: Nodes): string {
   if (node.type === 'link' || node.type === 'linkReference') return ''
@@ -65,7 +67,10 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
       continue
     }
     const first = block.type === 'paragraph' ? block.children[0] : undefined
-    const explicit = (first?.type === 'text' || first?.type === 'strong') && /^(?:官方来源|主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]/i.test(first.type === 'text' ? first.value : textOutsideLinks(first))
+    const labelText = first?.type === 'strong' ? textOutsideLinks(first) : first?.type === 'text' ? first.value : ''
+    const afterLabel = block.type === 'paragraph' ? block.children[1] : undefined
+    const explicit = inlineSourceLabel.test(labelText)
+      || (first?.type === 'strong' && sourceLabel.test(labelText) && afterLabel?.type === 'text' && /^\s*[:：]/.test(afterLabel.value))
     const isSourceBlock = explicit || sectionDepth !== undefined
     if (block.type === 'definition') continue
     if (block.type === 'code') {
@@ -102,7 +107,7 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
       } catch { invalid = true }
     })
     const remaining = textOutsideLinks(block)
-      .replace(/^(?:官方来源|主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]/i, '')
+      .replace(inlineSourceLabel, '')
     // Parenthesized publisher labels are citation metadata, not body prose.
     const citationRemainder = remaining.replace(/[（(][^()（）\n]{1,80}[)）]/g, '')
     // A publisher suffix is still metadata while its closing bracket is in flight.

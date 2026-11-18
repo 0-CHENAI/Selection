@@ -23,9 +23,10 @@ export function collectSourceMetadata(messages: SourceToolMessage[]): Map<string
     if (message.role !== 'tool') continue
     const text = message.toolResult || message.content
     if (/^web_?search$/i.test(message.toolName ?? '') || (!message.toolName && /^Search results for /m.test(text))) {
-      const pattern = /^\d+\. \*\*(.+?)\*\*\r?\n[ \t]+(https?:\/\/\S+)\r?\n([\s\S]*?)(?=\r?\n\s*\r?\n\d+\. \*\*|$)/gm
-      for (const match of text.matchAll(pattern)) {
-        metadata.set(sourceUrlKey(match[2]!), { title: sourcePlainText(match[1]!), description: sourcePlainText(match[3]!).slice(0, 1200) })
+      // Split numbered entries before parsing their optional, multiline snippets.
+      for (const entry of text.split(/^\d+\. \*\*/m).slice(1)) {
+        const match = entry.match(/^(.+?)\*\*\r?\n[ \t]+(https?:\/\/\S+)[ \t]*(?:\r?\n([\s\S]*))?$/)
+        if (match) metadata.set(sourceUrlKey(match[2]!), { title: sourcePlainText(match[1]!), description: sourcePlainText(match[3] ?? '').slice(0, 1200) })
       }
     }
     if (/^web_?fetch$/i.test(message.toolName ?? '') || isHandoverWebSnapshotRead(message)

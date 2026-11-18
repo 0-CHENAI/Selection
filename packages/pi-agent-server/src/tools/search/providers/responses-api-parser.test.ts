@@ -48,3 +48,19 @@ describe('parseResponsesApiResults', () => {
     }]);
   });
 });
+
+it('recovers distinct URLs from completed search actions when annotations are missing', () => {
+  const output = [
+    { type: 'web_search_call', status: 'failed', action: { type: 'search', sources: [{ type: 'url', url: 'https://failed.example' }] } },
+    { type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [
+      { type: 'url', url: 'javascript:alert(1)' }, { type: 'url', url: 'https://one.example' },
+      { type: 'url', url: 'https://one.example/' }, { type: 'url', url: 'https://two.example/' },
+    ] } },
+  ];
+  expect(parseResponsesApiResults({ output, output_text: 'Summary' }, 'test', 2).map(r => r.url))
+    .toEqual(['https://one.example/', 'https://two.example/']);
+  expect(parseResponsesApiResults({ output }, 'test', 1)).toHaveLength(1);
+  expect(parseResponsesApiResults({ output: [...output, { type: 'message', content: [{ annotations: [
+    { type: 'url_citation', url: 'https://cited.example' },
+  ] }] }] }, 'test', 3).map(r => r.url)).toEqual(['https://cited.example/']);
+});

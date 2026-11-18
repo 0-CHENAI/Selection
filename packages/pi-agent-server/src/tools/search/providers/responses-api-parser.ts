@@ -25,6 +25,8 @@ interface ResponsesOutputTextPart {
 interface ResponsesOutputItem {
   type?: string;
   content?: ResponsesOutputTextPart[];
+  status?: string;
+  action?: { type?: string; sources?: Array<{ type?: string; url?: string }> };
 }
 
 export interface ResponsesApiResponse {
@@ -116,6 +118,20 @@ export function parseResponsesApiResults(
 
     if (results.length > 0) return results;
   }
+
+  // A completed search may report its consulted URLs only in the tool action.
+  const consulted = new Map<string, WebSearchResult>();
+  for (const item of data.output ?? []) {
+    if (item.type !== 'web_search_call' || item.status !== 'completed' || item.action?.type !== 'search'
+      || !Array.isArray(item.action.sources)) continue;
+    for (const source of item.action.sources) {
+      const url = source?.type === 'url' ? normalizeSearchUrl(source.url) : null;
+      if (!url || consulted.has(url)) continue;
+      consulted.set(url, { title: url, url, description: '' });
+      if (consulted.size >= count) return [...consulted.values()];
+    }
+  }
+  if (consulted.size) return [...consulted.values()];
 
   if (!text) {
     throw new Error('Search returned no content');

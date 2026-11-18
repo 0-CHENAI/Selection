@@ -45,6 +45,8 @@ export class ResponsesApiSearchProvider implements WebSearchProvider {
         model: this.config.model || DEFAULT_SEARCH_MODEL,
         tools: [{ type: 'web_search' }],
         tool_choice: 'required',
+        ...(this.config.apiBase.replace(/\/$/, '') === 'https://api.openai.com/v1'
+          ? { include: ['web_search_call.action.sources'] } : {}),
         input: `Search the web for: ${query}\n\nReturn the top ${count} results with title, URL, and a brief description.`,
       }),
       signal: createSearchSignal(signal),

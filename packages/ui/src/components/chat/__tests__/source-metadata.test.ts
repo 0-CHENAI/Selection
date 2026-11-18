@@ -75,3 +75,9 @@ it('excludes ordinary files, manifests, failed reads and unfinished snapshot rea
     { ...read, content: 'Content from https://user:secret@example.com/page:\n\nSaved evidence.' },
   ])).toEqual([])
 })
+
+it('keeps multiline snippets and a final result with no snippet after trimming', () => {
+  const content = 'Search results for "q" (via search):\r\n\r\n1. **One**\r\n   https://one.example\r\n   First line\r\ncontinued\r\n\r\n2. **Two**\r\n   https://two.example'
+  const records = collectSourceMetadata([{ role: 'tool', toolName: 'WebSearch', content }])
+  expect([...records.values()]).toEqual([{ title: 'One', description: 'First line continued' }, { title: 'Two', description: '' }])
+})
