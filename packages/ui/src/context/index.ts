@@ -14,3 +14,5 @@ export {
   useShikiTheme,
   type ShikiThemeProviderProps,
 } from './ShikiThemeContext'
+
+export { PendingAnnotationIndices } from './PendingAnnotationIndices'

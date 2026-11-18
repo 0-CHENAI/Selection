@@ -52,7 +52,7 @@ export interface DocumentFormattedMarkdownOverlayProps {
   /** Callback to add annotation */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove annotation */
-  onRemoveAnnotation?: (messageId: string, annotationId: string) => void
+  onRemoveAnnotation?: (messageId: string, annotationId: string) => void | Promise<void>
   /** Callback to update annotation */
   onUpdateAnnotation?: (messageId: string, annotationId: string, patch: Partial<AnnotationV1>) => void
   /** Input send key behavior used by follow-up editor */

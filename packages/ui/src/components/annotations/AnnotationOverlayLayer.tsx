@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { AnnotationV1 } from '@craft-agent/core'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../tooltip'
+import { PendingAnnotationIndices } from '../../context/PendingAnnotationIndices'
 import { cn } from '../../lib/utils'
 import { getAnnotationRectVisual, getAnnotationChipVisual } from './annotation-style-tokens'
 import { getAnnotationChipInteraction } from './interaction-policy'
@@ -8,6 +9,7 @@ import type { AnnotationOverlayRect } from './annotation-core'
 import type { AnnotationOverlayChip } from './annotation-overlay-geometry'
 
 export interface AnnotationOverlayLayerProps {
+  messageId?: string
   rects: AnnotationOverlayRect[]
   chips: AnnotationOverlayChip[]
   annotations?: AnnotationV1[]
@@ -18,6 +20,7 @@ export interface AnnotationOverlayLayerProps {
 }
 
 export function AnnotationOverlayLayer({
+  messageId,
   rects,
   chips,
   annotations,
@@ -25,6 +28,8 @@ export function AnnotationOverlayLayer({
   allowChipOpen = true,
   onChipOpen,
 }: AnnotationOverlayLayerProps) {
+  const sessionIndices = React.useContext(PendingAnnotationIndices)
+  const messageIndices = messageId ? sessionIndices?.get(messageId) : undefined
   const annotationMap = React.useMemo(() => {
     return new Map((annotations ?? []).map((annotation) => [annotation.id, annotation]))
   }, [annotations])
@@ -56,10 +61,11 @@ export function AnnotationOverlayLayer({
       })}
 
       {chips.map((chip) => {
+        const index = messageIndices?.get(chip.id) ?? chip.index
         const chipVisual = getAnnotationChipVisual(chip)
         const chipAnnotation = annotationMap.get(chip.id) ?? null
         const interaction = getAnnotationChipInteraction(chipAnnotation)
-        const tooltipText = chipAnnotation && getTooltipText ? getTooltipText(chipAnnotation, chip.index) : ''
+        const tooltipText = chipAnnotation && getTooltipText ? getTooltipText(chipAnnotation, index) : ''
 
         const canOpenChip = allowChipOpen && interaction.clickable
 
@@ -67,13 +73,13 @@ export function AnnotationOverlayLayer({
           <button
             type="button"
             data-ca-annotation-id={chip.id}
-            data-ca-annotation-index={String(chip.index)}
+            data-ca-annotation-index={String(index)}
             aria-disabled={!canOpenChip}
             onClick={canOpenChip ? (event) => {
               const rect = event.currentTarget.getBoundingClientRect()
               onChipOpen({
                 annotationId: chip.id,
-                index: chip.index,
+                index,
                 anchorX: rect.left + rect.width / 2,
                 anchorY: rect.top - 8,
                 mode: interaction.openMode,
@@ -83,21 +89,21 @@ export function AnnotationOverlayLayer({
             style={{
               left: chip.left,
               top: chip.top,
-              transform: 'translate(-2px, -8px)',
-              minWidth: '16px',
-              height: '15px',
-              padding: '0 3px',
+              transform: 'translate(-2px, -50%)',
+              minWidth: '20px',
+              height: '18px',
+              padding: '0 4px',
               borderRadius: '4px',
-              fontSize: '10px',
-              fontWeight: '600',
-              lineHeight: '15px',
+              fontSize: '12px',
+              fontWeight: '700',
+              lineHeight: '18px',
               textAlign: 'center',
               userSelect: 'none',
               position: 'absolute',
               ...chipVisual.style,
             }}
           >
-            {chip.sentFollowUp ? 'i' : chip.index}
+            {chip.sentFollowUp ? 'i' : index}
           </button>
         )
 

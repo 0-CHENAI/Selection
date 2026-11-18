@@ -143,8 +143,8 @@ export function collectTextSegments(root: HTMLElement): Array<{ node: Text; star
   return segments
 }
 
-export function getCanonicalText(root: HTMLElement): string {
-  return collectTextSegments(root)
+export function getCanonicalText(root: HTMLElement, segments = collectTextSegments(root)): string {
+  return segments
     .map(segment => segment.node.nodeValue || '')
     .join('')
 }
@@ -208,10 +208,8 @@ export function resolveRangeFromOffsets(root: HTMLElement, start: number, end: n
   return range
 }
 
-export function getClientRectsForOffsets(root: HTMLElement, start: number, end: number): DOMRect[] {
+export function getClientRectsForOffsets(root: HTMLElement, start: number, end: number, segments = collectTextSegments(root)): DOMRect[] {
   if (end <= start) return []
-
-  const segments = collectTextSegments(root)
   const rects: DOMRect[] = []
 
   for (const segment of segments) {

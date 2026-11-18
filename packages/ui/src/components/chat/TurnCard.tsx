@@ -115,14 +115,10 @@ import {
   createSelectionPreviewAnnotation,
   createTextSelectionAnnotation,
   hashAnnotationSource,
-  collectTextSegments,
   getCanonicalText,
   resolveNodeOffset,
   type AnnotationOverlayRect,
 } from '../annotations/annotation-core'
-import {
-  annotationColorToCss,
-} from '../annotations/annotation-style-tokens'
 import { clearBlockAnnotationMarkers, applyBlockAnnotationMarker } from '../annotations/block-markers'
 import { canAnnotateMessage, shouldRenderAnnotationIslandInPortal } from '../annotations/annotation-host-config'
 import { clearDomSelection } from '../annotations/selection-restore'
@@ -513,7 +509,7 @@ export interface TurnCardProps {
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove a persisted annotation from a response message */
-  onRemoveAnnotation?: (messageId: string, annotationId: string) => void
+  onRemoveAnnotation?: (messageId: string, annotationId: string) => void | Promise<void>
   /** Callback to update a persisted annotation */
   onUpdateAnnotation?: (messageId: string, annotationId: string, patch: Partial<AnnotationV1>) => void
   /** Input send key behavior used by follow-up editor */
@@ -2076,7 +2072,7 @@ export interface ResponseCardProps {
   /** Callback to add annotation from selected text */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove persisted annotation */
-  onRemoveAnnotation?: (messageId: string, annotationId: string) => void
+  onRemoveAnnotation?: (messageId: string, annotationId: string) => void | Promise<void>
   /** Callback to update persisted annotation */
   onUpdateAnnotation?: (messageId: string, annotationId: string, patch: Partial<AnnotationV1>) => void
   /** Input send key behavior used by follow-up editor */
@@ -2167,159 +2163,6 @@ function SkillUsedIndicator({ skills }: { skills: string[] }) {
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
     </div>
   )
-}
-
-function clearAnnotationMarks(root: HTMLElement): void {
-  const annotatedInlineCodeNodes = root.querySelectorAll<HTMLElement>('code[data-ca-annotation-inline-code="true"]')
-  annotatedInlineCodeNodes.forEach((codeNode) => {
-    codeNode.removeAttribute('data-ca-annotation-inline-code')
-    codeNode.style.backgroundColor = ''
-    codeNode.style.removeProperty('box-shadow')
-  })
-
-  const marks = root.querySelectorAll('span[data-ca-annotation-id]')
-  marks.forEach(mark => {
-    const parent = mark.parentNode
-    if (!parent) return
-
-    const badge = mark.querySelector('[data-ca-annotation-index]')
-    if (badge) badge.remove()
-
-    parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
-    parent.normalize()
-  })
-}
-
-function createAnnotationIndexBadge(index: number): HTMLSpanElement {
-  const chip = document.createElement('span')
-  chip.setAttribute('data-ca-annotation-index', String(index))
-  chip.textContent = String(index)
-  chip.style.position = 'absolute'
-  chip.style.top = '-7px'
-  chip.style.right = '-7px'
-  chip.style.minWidth = '16px'
-  chip.style.height = '15px'
-  chip.style.padding = '0 3px'
-  chip.style.borderRadius = '9999px'
-  chip.style.backgroundColor = 'var(--info)'
-  chip.style.color = 'rgba(15, 23, 42, 0.95)'
-  chip.style.fontSize = '10px'
-  chip.style.fontWeight = '600'
-  chip.style.lineHeight = '15px'
-  chip.style.textAlign = 'center'
-  chip.classList.add('shadow-tinted')
-  chip.style.setProperty('--shadow-color', 'var(--info-rgb)')
-  chip.style.pointerEvents = 'none'
-  chip.style.userSelect = 'none'
-  return chip
-}
-
-function applyTextHighlightRange(
-  root: HTMLElement,
-  range: { start: number; end: number },
-  annotation: AnnotationV1,
-  annotationIndex?: number,
-): void {
-  if (range.end <= range.start) return
-
-  // Avoid visually highlighting trailing/leading hard newlines.
-  // Those can produce extra apparent blank lines at line boundaries.
-  const fullText = getCanonicalText(root)
-  let displayStart = range.start
-  let displayEnd = range.end
-  while (displayStart < displayEnd && /[\n\r]/.test(fullText[displayStart] ?? '')) displayStart += 1
-  while (displayEnd > displayStart && /[\n\r]/.test(fullText[displayEnd - 1] ?? '')) displayEnd -= 1
-  if (displayEnd <= displayStart) return
-
-  const segments = collectTextSegments(root)
-  const createdMarks: HTMLSpanElement[] = []
-
-  for (const segment of segments) {
-    if (segment.end <= displayStart || segment.start >= displayEnd) continue
-
-    const localStart = Math.max(displayStart, segment.start) - segment.start
-    const localEnd = Math.min(displayEnd, segment.end) - segment.start
-    if (localEnd <= localStart) continue
-
-    const source = segment.node
-    const after = source.splitText(localEnd)
-    const selected = source.splitText(localStart)
-
-    const inlineCodeParent = selected.parentElement?.closest<HTMLElement>('code')
-    if (inlineCodeParent) {
-      inlineCodeParent.setAttribute('data-ca-annotation-inline-code', 'true')
-      inlineCodeParent.style.backgroundColor = annotationColorToCss(annotation.style?.color)
-      inlineCodeParent.style.boxShadow = 'none'
-    }
-
-    const mark = document.createElement('span')
-    mark.setAttribute('data-ca-annotation-id', annotation.id)
-    mark.style.backgroundColor = annotationColorToCss(annotation.style?.color)
-    mark.style.borderRadius = '0'
-    mark.style.padding = '0'
-    mark.style.margin = '0'
-    mark.style.position = 'relative'
-    selected.parentNode?.replaceChild(mark, selected)
-    mark.appendChild(selected)
-    createdMarks.push(mark)
-
-    // Keep reference alive for TS and clarity
-    void after
-  }
-
-  if (createdMarks.length > 0) {
-    type RowBucket = { top: number; marks: HTMLSpanElement[] }
-    const rows: RowBucket[] = []
-
-    for (const mark of createdMarks) {
-      const rect = mark.getBoundingClientRect()
-      const row = rows.find(candidate => Math.abs(candidate.top - rect.top) <= 2)
-      if (row) {
-        row.marks.push(mark)
-      } else {
-        rows.push({ top: rect.top, marks: [mark] })
-      }
-    }
-
-    for (const row of rows) {
-      const rowMarks = row.marks
-      const first = rowMarks[0]
-      const last = rowMarks[rowMarks.length - 1]
-      if (!first || !last) continue
-
-      first.style.borderTopLeftRadius = '6px'
-      first.style.borderBottomLeftRadius = '6px'
-      last.style.borderTopRightRadius = '6px'
-      last.style.borderBottomRightRadius = '6px'
-    }
-  }
-
-  if (annotationIndex != null && createdMarks.length > 0) {
-    // Prefer placing the index badge on non-code marks, then choose the top-right-most
-    // mark on the first visible row for stable placement.
-    const nonCodeMarks = createdMarks.filter(mark => !mark.closest('code'))
-    const badgePool = nonCodeMarks.length > 0 ? nonCodeMarks : createdMarks
-
-    const preferredInitial = badgePool[0]
-    if (!preferredInitial) return
-
-    let preferredMark = preferredInitial
-    let preferredRect = preferredMark.getBoundingClientRect()
-
-    for (const mark of badgePool.slice(1)) {
-      const rect = mark.getBoundingClientRect()
-      const isHigherRow = rect.top < preferredRect.top - 1
-      const sameRow = Math.abs(rect.top - preferredRect.top) <= 2
-      const isMoreRight = rect.right > preferredRect.right
-
-      if (isHigherRow || (sameRow && isMoreRight)) {
-        preferredMark = mark
-        preferredRect = rect
-      }
-    }
-
-    preferredMark.appendChild(createAnnotationIndexBadge(annotationIndex))
-  }
 }
 
 /**
@@ -2588,9 +2431,6 @@ export function ResponseCard({
 
     // Full recompute: rewrites block-marker DOM. Used for content/annotation changes.
     const recomputeOverlay = () => {
-      clearAnnotationMarks(root)
-      clearBlockAnnotationMarkers(root)
-
       if (!renderedAnnotations.length) {
         setAnnotationOverlay(previous => previous.rects.length || previous.chips.length ? { rects: [], chips: [] } : previous)
         return
@@ -2626,6 +2466,7 @@ export function ResponseCard({
     // viewport inside MarkdownDocBlock (and any future nested scroll surface).
     root.addEventListener('scroll', scheduleCoordsRecompute, { capture: true, passive: true })
     return () => {
+      clearBlockAnnotationMarkers(root)
       if (rafId != null) cancelAnimationFrame(rafId)
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
@@ -2878,6 +2719,7 @@ export function ResponseCard({
   useEffect(() => {
     if (!allowAnnotationIsland) return
 
+    if (!openAnnotationRequest || openAnnotationRequest.messageId !== messageId) return
     const contentRect = contentLayerRef.current?.getBoundingClientRect()
     const fallbackAnchor = {
       x: contentRect ? contentRect.left + contentRect.width / 2 : window.innerWidth / 2,
@@ -2904,13 +2746,17 @@ export function ResponseCard({
     triggerSelectionMenuEntryReplay,
   ])
 
-  const handleDeleteActiveAnnotation = useCallback(() => {
+  const handleDeleteActiveAnnotation = useCallback(async () => {
     if (!onRemoveAnnotation || !messageId || !activeAnnotationDetail) return
     if (isAnnotationFollowUpProcessing(activeAnnotation)) return
 
-    onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
-    markDeleteSuccess()
-  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, activeAnnotation, markDeleteSuccess])
+    try {
+      await onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
+      markDeleteSuccess()
+    } catch {
+      setFollowUpError(t('toast.couldNotRemoveHighlight'))
+    }
+  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, activeAnnotation, markDeleteSuccess, t])
 
   const handleSelectionPointerDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     selectionStartedInContentRef.current = true
@@ -3204,6 +3050,7 @@ export function ResponseCard({
 
   const annotationOverlayLayer = (
     <AnnotationOverlayLayer
+      messageId={messageId}
       rects={annotationOverlay.rects}
       chips={annotationOverlay.chips}
       annotations={renderedAnnotations}
@@ -3271,7 +3118,7 @@ export function ResponseCard({
               : isPlan ? "pl-[22px] pr-4 py-3 text-sm" : "px-2.5 py-1 text-sm")}
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
-            <div ref={contentLayerRef} className="relative">
+            <div data-ca-annotatable ref={contentLayerRef} className="relative">
               <MemoizedMarkdown
                 id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
                 isStreaming={presentationStreaming && variant === 'response'}

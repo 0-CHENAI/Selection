@@ -1,0 +1,35 @@
+/* A chat can have its own mode in a split window. Portals inherit the window mode. */
+.dark,
+[data-work-mode="NORM"],
+[data-work-mode="PRO"] {
+  --annotation-accent: rgb(var(--annotation-accent-rgb));
+  --annotation-highlight-strength: 20%;
+}
+
+[data-work-mode="NORM"] {
+  --annotation-accent-rgb: 216, 199, 242; /* pale lavender */
+}
+
+:where(.dark),
+[data-work-mode="PRO"] {
+  --annotation-accent-rgb: 244, 220, 174; /* pale champagne */
+}
+
+.dark {
+  --annotation-pending-badge-strength: 42%;
+}
+
+[data-ca-annotatable] ::selection {
+  background-color: color-mix(in srgb, var(--annotation-accent, var(--info)) var(--annotation-highlight-strength, 20%), transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-ca-annotation-overlay] > div,
+  [data-ca-annotation-overlay] button[data-ca-annotation-index] {
+    transition: background-color 160ms ease-out, box-shadow 160ms ease-out;
+  }
+
+  [data-ca-block-annotated="true"] {
+    transition: background-color 160ms ease-out, outline-color 160ms ease-out;
+  }
+}

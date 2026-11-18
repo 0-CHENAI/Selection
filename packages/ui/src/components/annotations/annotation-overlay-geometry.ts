@@ -4,6 +4,7 @@ import {
   annotationColorToCss,
 } from './annotation-style-tokens'
 import {
+  collectTextSegments,
   getCanonicalText,
   getClientRectsForOffsets,
   consolidateRectsByLine,
@@ -42,7 +43,8 @@ export function computeAnnotationOverlayGeometry({
     return { rects: [], chips: [], unresolved: [] }
   }
 
-  const fullText = getCanonicalText(root)
+  const segments = collectTextSegments(root)
+  const fullText = getCanonicalText(root, segments)
   const resolution = resolveTextAnnotations(fullText, renderedAnnotations)
   const annotationIndexById = new Map((persistedAnnotations ?? []).map((annotation, idx) => [annotation.id, idx + 1]))
   const rootRect = root.getBoundingClientRect()
@@ -55,7 +57,7 @@ export function computeAnnotationOverlayGeometry({
     const pendingFollowUp = followUpState === 'pending'
     const sentFollowUp = followUpState === 'sent'
 
-    const rawRects = getClientRectsForOffsets(root, item.range.start, item.range.end)
+    const rawRects = getClientRectsForOffsets(root, item.range.start, item.range.end, segments)
       .map(rect => ({
         id: item.annotation.id,
         left: rect.left - rootRect.left,

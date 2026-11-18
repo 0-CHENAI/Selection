@@ -268,16 +268,6 @@ function SwitcherConnectionModels({
   )
 }
 
-function formatFollowUpChipText(text: string, fallback: string, maxLength = 50): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return fallback
-
-  return normalized.length > maxLength
-    ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
-    : normalized
-}
-
-
 /** Platform-specific modifier key for keyboard shortcuts */
 const cmdKey = isMac ? '⌘' : 'Ctrl'
 
@@ -304,6 +294,7 @@ export interface FollowUpInputItem {
 }
 
 export interface FreeFormInputProps {
+  formRef?: React.Ref<HTMLFormElement>
   pptMode?: boolean
   /** Placeholder text(s) for the textarea - can be array for rotation */
   placeholder?: string | string[]
@@ -395,8 +386,6 @@ export interface FreeFormInputProps {
   followUpItems?: FollowUpInputItem[]
   /** Callback when user clicks a follow-up chip body */
   onFollowUpClick?: (item: FollowUpInputItem, anchor?: { x: number; y: number }) => void
-  /** Callback when user clicks the follow-up index badge */
-  onFollowUpIndexClick?: (item: FollowUpInputItem) => void
   /**
    * Compact-footer layout. Used by EditPopover (popover embedding) and by
    * ChatPage in auto-compact / WebUI mobile mode. The popover case hides the
@@ -486,9 +475,9 @@ export function FreeFormInput({
   disableSend = false,
   isEmptySession = false,
   contextStatus,
+  formRef,
   followUpItems = [],
   onFollowUpClick,
-  onFollowUpIndexClick,
   compactMode = false,
   enableCompactModelPicker = false,
   compactInputMaxHeight,
@@ -1956,7 +1945,7 @@ export function FreeFormInput({
   const fastInThinkingHeading = !!promptThinkingSettings && currentPickerPage
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form ref={formRef} onSubmit={handleSubmit}>
       <div
         ref={containerRef}
         className={cn(
@@ -2073,10 +2062,6 @@ export function FreeFormInput({
                   <AnimatePresence initial={false}>
                     {followUpItems.map((item, idx) => {
                       const chipIndex = item.index ?? idx + 1
-                      const tooltipText = item.selectedText.trim() || t('chat.selectedText')
-                      const selectedExcerpt = formatFollowUpChipText(item.selectedText, t('chat.selectedText'), 50)
-                      const noteExcerpt = formatFollowUpChipText(item.noteLabel, t('chat.followUp'), 50)
-
                       return (
                         <motion.button
                           key={item.id}
@@ -2086,7 +2071,8 @@ export function FreeFormInput({
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.98 }}
                           transition={{ duration: 0.16, ease: [0.2, 0, 0.2, 1] }}
-                          className="inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[6px] bg-foreground/2 pl-1.5 pr-2 py-1 text-[13px] text-foreground/80 select-none transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          title={item.selectedText}
+                          className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-full bg-foreground/6 px-2.5 py-1 text-[13px] text-foreground select-none transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                           onClick={(event) => {
                             const rect = event.currentTarget.getBoundingClientRect()
                             onFollowUpClick?.(item, {
@@ -2095,41 +2081,8 @@ export function FreeFormInput({
                             })
                           }}
                         >
-                          <Tooltip delayDuration={250}>
-                            <TooltipTrigger asChild>
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                className="inline-flex h-4 min-w-4 cursor-pointer items-center justify-center rounded-[4px] bg-background px-0.5 text-[10px] font-medium text-foreground shadow-minimal focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                onMouseDown={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                }}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  onFollowUpIndexClick?.(item)
-                                }}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                    onFollowUpIndexClick?.(item)
-                                  }
-                                }}
-                              >
-                                {chipIndex}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[420px] break-words text-xs">
-                              {tooltipText}
-                            </TooltipContent>
-                          </Tooltip>
-                          <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left">
-                            <span className="italic text-foreground/60">{selectedExcerpt}</span>
-                            <span className="mx-1 text-foreground/40">·</span>
-                            <span>{noteExcerpt}</span>
-                          </span>
+                          <span className="shrink-0 font-medium">{t('chat.followUp')} {chipIndex}</span>
+                          <span className="min-w-0 max-w-[28ch] truncate">{item.noteLabel}</span>
                         </motion.button>
                       )
                     })}

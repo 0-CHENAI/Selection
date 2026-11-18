@@ -56,7 +56,7 @@ export interface AnnotatableMarkdownDocumentProps {
   sessionId?: string
   annotations?: AnnotationV1[]
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
-  onRemoveAnnotation?: (messageId: string, annotationId: string) => void
+  onRemoveAnnotation?: (messageId: string, annotationId: string) => void | Promise<void>
   onUpdateAnnotation?: (messageId: string, annotationId: string, patch: Partial<AnnotationV1>) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (path: string) => void
@@ -224,6 +224,7 @@ export function AnnotatableMarkdownDocument({
     }
 
     recomputeOverlay()
+    if (!renderedAnnotations.length) return
     window.addEventListener('resize', scheduleCoordsRecompute)
     // Capture-phase: scroll events don't bubble, but capture-phase listeners on
     // ancestors fire for descendant scrolls — so this catches the overflow-auto
@@ -317,12 +318,16 @@ export function AnnotatableMarkdownDocument({
     cancelFollowUp,
   })
 
-  const handleDeleteActiveAnnotation = React.useCallback(() => {
+  const handleDeleteActiveAnnotation = React.useCallback(async () => {
     if (!onRemoveAnnotation || !activeAnnotationDetail) return
     if (isAnnotationFollowUpProcessing(activeAnnotation)) return
-    onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
-    markDeleteSuccess()
-  }, [onRemoveAnnotation, activeAnnotationDetail, activeAnnotation, messageId, markDeleteSuccess])
+    try {
+      await onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
+      markDeleteSuccess()
+    } catch {
+      setFollowUpError(t('toast.couldNotRemoveHighlight'))
+    }
+  }, [onRemoveAnnotation, activeAnnotationDetail, activeAnnotation, messageId, markDeleteSuccess, t])
 
   const handleOpenAnnotationDetail = React.useCallback((
     annotationId: string,
@@ -342,6 +347,7 @@ export function AnnotatableMarkdownDocument({
   }, [annotations, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
   React.useEffect(() => {
+    if (!openAnnotationRequest || openAnnotationRequest.messageId !== messageId) return
     const contentRect = contentLayerRef.current?.getBoundingClientRect()
     const fallbackAnchor = {
       x: contentRect ? contentRect.left + contentRect.width / 2 : window.innerWidth / 2,
@@ -677,7 +683,7 @@ export function AnnotatableMarkdownDocument({
   return (
     <>
       <div
-        ref={contentLayerRef}
+        data-ca-annotatable ref={contentLayerRef}
         className="relative"
         onMouseDown={handleSelectionPointerDown}
         onMouseUp={handleTextSelection}
@@ -687,6 +693,7 @@ export function AnnotatableMarkdownDocument({
         </Markdown>
 
         <AnnotationOverlayLayer
+          messageId={messageId}
           rects={annotationOverlay.rects}
           chips={annotationOverlay.chips}
           annotations={renderedAnnotations}

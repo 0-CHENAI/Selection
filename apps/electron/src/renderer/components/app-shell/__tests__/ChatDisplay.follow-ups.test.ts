@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import {
+  composeFollowUpMessage,
+  hasSavedFollowUp,
   formatFollowUpSection,
   normalizeFollowUpsMarkdown,
   truncateForChipTooltip,
@@ -64,6 +66,24 @@ describe('formatFollowUpSection — the OSS #580 regression', () => {
     const output = formatFollowUpSection([followUp()])
     expect(output.startsWith('---\n\n**Follow-ups**')).toBe(true)
   })
+})
+
+test('save and send waits for the edited note on the exact source annotation', () => {
+  const saved = followUp({ note: '修改稿' })
+  expect(hasSavedFollowUp([
+    { ...saved, note: '旧稿' },
+    { ...saved, messageId: 'other' },
+    { ...saved, annotationId: 'other' },
+  ], saved)).toBe(false)
+  expect(hasSavedFollowUp([saved], saved)).toBe(true)
+})
+
+test('sends quoted arrows, multiline edits and literal headings intact with a new follow-up', () => {
+  const question = '解释 **Follow-ups** 的含义'
+  const item = followUp({ selectedText: '草稿 → 发布', note: '比较两者\n保留换行' })
+  expect(composeFollowUpMessage(question, [item])).toBe(
+    question + '\n\n---\n\n**Follow-ups**\n\n> [#1] 草稿 → 发布\n→ 比较两者\n保留换行',
+  )
 })
 
 describe('normalizeFollowUpsMarkdown — round-trip parser', () => {

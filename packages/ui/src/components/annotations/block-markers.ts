@@ -28,6 +28,6 @@ export function applyBlockAnnotationMarker(root: HTMLElement, annotation: Annota
 
   target.setAttribute('data-ca-block-annotated', 'true')
   target.style.backgroundColor = annotationColorToCss(annotation.style?.color)
-  target.style.outline = '1px solid color-mix(in srgb, var(--info) 22%, transparent)'
+  target.style.outline = '1px solid color-mix(in srgb, var(--annotation-accent, var(--info)) 22%, transparent)'
   target.style.outlineOffset = '-1px'
 }

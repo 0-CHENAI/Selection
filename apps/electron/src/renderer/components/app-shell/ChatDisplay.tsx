@@ -57,6 +57,7 @@ import {
   type FileChange,
   type DiffViewerSettings,
 } from "@craft-agent/ui"
+import { PendingAnnotationIndices } from '@craft-agent/ui/context'
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
@@ -349,8 +350,8 @@ interface ChatDisplayProps {
 }
 
 import {
-  formatFollowUpSection,
-  normalizeFollowUpsMarkdown,
+  composeFollowUpMessage,
+  hasSavedFollowUp,
   truncateForChipTooltip,
   type PendingFollowUpAnnotation,
 } from './ChatDisplay.follow-ups'
@@ -1333,7 +1334,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           annotationId: annotation.id,
           note,
           selectedText: extractAnnotationSelectedText(annotation, message.content),
-          createdAt: annotation.updatedAt ?? annotation.createdAt,
+          createdAt: annotation.createdAt,
+          updatedAt: annotation.updatedAt,
           color: annotation.style?.color,
           meta: asRecord(annotation.meta) ?? undefined,
         })
@@ -1354,6 +1356,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       color: followUp.color,
     }))
   }, [pendingFollowUpAnnotations])
+
+  const pendingIndices = useMemo(() => {
+    if (!followUpInputItems.length) return null
+    const byMessage = new Map<string, Map<string, number>>()
+    for (const item of followUpInputItems) {
+      const indices = byMessage.get(item.messageId) ?? new Map<string, number>()
+      indices.set(item.annotationId, item.index)
+      byMessage.set(item.messageId, indices)
+    }
+    return byMessage
+  }, [followUpInputItems])
 
   // Track scroll position to toggle sticky-bottom behavior
   // - User scrolls up → unstick (stop auto-scrolling)
@@ -1520,17 +1533,23 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     })
   }, [session?.id, messageCount, lastMessageId, lastMessageRole, scrollToLatest])
 
+  const composerForm = React.useRef<HTMLFormElement>(null)
+  const [sendAfterSave, setSendAfterSave] = useState<{
+    sessionId: string
+    messageId: string
+    annotationId: string
+    note: string
+  } | null>(null)
+
+  const readyToSendSavedNote = !!sendAfterSave && sendAfterSave.sessionId === activeSessionId
+    && hasSavedFollowUp(pendingFollowUpAnnotations, sendAfterSave)
+
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
   const handleSubmit = async (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
-    const hasBaseMessage = message.trim().length > 0
-    const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
-      includeTopSeparator: hasBaseMessage,
-    })
-    const messageWithFollowUps = followUpSection.length > 0
-      ? (hasBaseMessage ? `${message}\n\n${followUpSection}` : followUpSection)
-      : message
-    const normalizedMessage = normalizeFollowUpsMarkdown(messageWithFollowUps)
+    if (sendAfterSave && !readyToSendSavedNote) return false
+    setSendAfterSave(null)
+    const normalizedMessage = composeFollowUpMessage(message, pendingFollowUpAnnotations)
 
     // Force stick-to-bottom when user sends a message. Lock immediately so a
     // resize from the new bubble cannot unstick before the rAF scroll starts.
@@ -1539,7 +1558,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       ignoreUnstickMs: programmaticScrollLockMs(reduceMotion ? 'instant' : 'smooth'),
     })
     const accepted = await onSendMessage(normalizedMessage, attachments, skillSlugs, pendingFollowUpAnnotations.map(item => ({
-      messageId: item.messageId, annotationId: item.annotationId, text: item.note, updatedAt: item.createdAt,
+      messageId: item.messageId, annotationId: item.annotationId, text: item.note, updatedAt: item.updatedAt ?? item.createdAt,
     })))
     if (accepted === false) return false
 
@@ -1549,7 +1568,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     return true
   }
 
-  const handleSaveAndSendFollowUp = useCallback((_target: {
+  const handleSaveAndSendFollowUp = useCallback((target: {
     messageId: string
     annotationId: string
     note: string
@@ -1564,13 +1583,32 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       return
     }
 
-    // Mimic pressing Send in the input after Save completes.
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('craft:submit-input', {
-        detail: { sessionId: session.id },
-      }))
-    }, 0)
-  }, [session, isInputDisabled, disableSend, connectionUnavailable])
+    if (sessionIdRef.current === session.id) {
+      setSendAfterSave({ sessionId: session.id, ...target })
+    }
+  }, [session, isInputDisabled, disableSend, connectionUnavailable, t])
+
+  // The IPC acknowledgment and the annotation update can arrive in either order.
+  useEffect(() => {
+    if (!sendAfterSave) return
+    if (sendAfterSave.sessionId !== activeSessionId || isInputDisabled || disableSend || connectionUnavailable) {
+      setSendAfterSave(null)
+      return
+    }
+    if (!readyToSendSavedNote) return
+    setSendAfterSave(null)
+    if (composerForm.current) composerForm.current.requestSubmit()
+    else toast.error(t('toast.cannotSendRightNow'))
+  }, [sendAfterSave, activeSessionId, readyToSendSavedNote, isInputDisabled, disableSend, connectionUnavailable, t])
+
+  useEffect(() => {
+    if (!sendAfterSave) return
+    const timeout = window.setTimeout(() => {
+      setSendAfterSave(null)
+      toast.error(t('toast.cannotSendRightNow'))
+    }, 5000)
+    return () => window.clearTimeout(timeout)
+  }, [sendAfterSave, t])
 
   // Handle stop request from InputContainer
   // silent=true when redirecting (sending new message), silent=false when user clicks Stop button
@@ -1855,19 +1893,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     setOpenAnnotationRequest({
       messageId: item.messageId,
       annotationId: item.annotationId,
-      mode: 'view',
+      mode: 'edit',
       anchorX: anchor?.x,
       anchorY: anchor?.y,
       nonce: followUpOpenNonceRef.current,
     })
   }, [assistantTurnIndexByMessageId, startIndex, endIndex, revealTurn])
-
-  const handleFollowUpIndexClick = useCallback((item: {
-    messageId: string
-    annotationId: string
-  }) => {
-    scrollToFollowUpTurn(item)
-  }, [scrollToFollowUpTurn])
 
   // Compute if we should skip scroll-to-bottom (when search is active on session switch)
   // At render time, prevSessionIdForScrollRef still has the OLD session ID, so we can detect the switch
@@ -1974,8 +2005,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   )
 
   return (
+    <PendingAnnotationIndices.Provider value={pendingIndices}>
     <PptArtifactScope session={session}>
     <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat"
+      data-work-mode={session?.workMode}
       data-chat-window-start={startIndex} data-chat-window-end={endIndex} data-chat-total-turns={allTurns.length}>
       <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
         refreshKey={sessionMessages?.findLast(message => message.answerCommitted)?.id}
@@ -2423,17 +2456,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         }}
                         onRemoveAnnotation={async (messageId, annotationId) => {
                           if (!session) return
-                          try {
-                            await window.electronAPI.sessionCommand(session.id, {
-                              type: 'removeAnnotation',
-                              messageId,
-                              annotationId,
-                            })
-                          } catch (error) {
-                            toast.error(t('toast.couldNotRemoveHighlight'), {
-                              description: error instanceof Error ? error.message : 'Unknown error',
-                            })
-                          }
+                          await window.electronAPI.sessionCommand(session.id, {
+                            type: 'removeAnnotation',
+                            messageId,
+                            annotationId,
+                          })
                         }}
                         onUpdateAnnotation={async (messageId, annotationId, patch) => {
                           if (!session) return
@@ -2709,9 +2736,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 cacheHitRate: cacheHitRateFromTokenUsage(session.tokenUsage),
                 contextBreakdown: session.tokenUsage?.contextBreakdown,
               },
+              formRef: composerForm,
               followUpItems: followUpInputItems,
               onFollowUpClick: handleFollowUpChipClick,
-              onFollowUpIndexClick: handleFollowUpIndexClick,
               compactInputMaxHeight,
             }}
           />
@@ -2861,6 +2888,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       )}
     </div>
     </PptArtifactScope>
+    </PendingAnnotationIndices.Provider>
   )
 })
 

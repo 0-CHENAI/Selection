@@ -10,7 +10,7 @@
  *     content-preserving whitespace collapse used for the agent-facing
  *     message. NO length cap.
  *   - `truncateForChipTooltip` — UI helper that shortens + ellipsizes for
- *     the hover tooltip on the chip's index badge. Caller MUST supply the
+ *     the hover tooltip on the follow-up chip. Caller MUST supply the
  *     cap — there is no sensible default, and a default was the root
  *     cause of a past bug (OSS #580) where the agent-facing path
  *     accidentally reused it.
@@ -24,13 +24,14 @@ export type PendingFollowUpAnnotation = {
   note: string
   selectedText: string
   createdAt: number
+  updatedAt?: number
   color?: string
   meta?: Record<string, unknown>
 }
 
 /**
  * Whitespace-normalize + truncate for the hover tooltip shown on the
- * chip's index badge. Do NOT use for agent-facing messages — use
+ * follow-up chip. Do NOT use for agent-facing messages — use
  * `normalizeFollowUpText` directly so the agent sees the full quote.
  */
 export function truncateForChipTooltip(text: string, maxLength: number): string {
@@ -118,4 +119,18 @@ export function normalizeFollowUpsMarkdown(message: string): string {
     : rebuiltBody
 
   return beforeHeading.length > 0 ? `${beforeHeading}\n\n${rebuiltSection}` : rebuiltSection
+}
+
+/** Fresh annotations are already structured. Parsing their Markdown again can split quoted arrows or rewrite multiline notes. */
+export function composeFollowUpMessage(message: string, followUps: PendingFollowUpAnnotation[]): string {
+  if (!followUps.length) return normalizeFollowUpsMarkdown(message)
+  const hasMessage = Boolean(message.trim())
+  const section = formatFollowUpSection(followUps, { includeTopSeparator: hasMessage })
+  return hasMessage ? `${message}\n\n${section}` : section
+}
+
+export function hasSavedFollowUp(items: PendingFollowUpAnnotation[], target: Pick<PendingFollowUpAnnotation, 'messageId' | 'annotationId' | 'note'>): boolean {
+  return items.some(item => item.messageId === target.messageId
+    && item.annotationId === target.annotationId
+    && item.note === target.note)
 }

@@ -59,7 +59,10 @@ describe('annotation core helpers', () => {
     const sent = getAnnotationChipVisual({ pendingFollowUp: false, sentFollowUp: true })
 
     expect(pending.className.includes('shadow-tinted')).toBe(true)
-    expect(String(pending.style.backgroundColor)).toContain('34%')
+    for (const chip of [getAnnotationChipVisual({}), pending, sent]) {
+      expect(chip.style.color).toBe('var(--foreground)')
+    }
+    expect(String(pending.style.backgroundColor)).toContain('55%')
     expect(String(sent.style.backgroundColor)).toContain('14%')
   })
   it('hashes the raw source consistently with the runtime without normalizing line endings', async () => {
