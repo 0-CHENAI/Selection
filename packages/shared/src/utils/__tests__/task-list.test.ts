@@ -16,8 +16,18 @@ test('reopens latest successful snapshot, ignores rejected updates and empties a
 });
 
 test('a nested agent snapshot does not replace the plan used to resume the conversation', () => {
-  const item = { id: 'a', content: '核验结果', status: 'in_progress' };
+  const item: TaskListItem = { id: 'a', content: '核验结果', status: 'in_progress' };
   const plan = { toolName: 'update_task_list', toolStatus: 'completed', content: JSON.stringify({ items: [item] }) };
   const nested = { ...plan, parentToolUseId: 'agent', content: JSON.stringify({ items: [{ ...item, status: 'completed' }] }) };
   expect(latestTaskList([plan, nested])).toEqual([item]);
+});
+
+test('resume follows the latest accepted timestamp, using transcript order for ties', () => {
+  const snapshot = (timestamp: number, status: string) => ({
+    timestamp, toolName: 'update_task_list', toolStatus: 'completed',
+    content: JSON.stringify({ items: [{ id: 'a', content: '检查', status }] }),
+  });
+  const newer = snapshot(3, 'in_progress');
+  expect(latestTaskList([newer, snapshot(2, 'completed')])?.[0]?.status).toBe('in_progress');
+  expect(latestTaskList([newer, snapshot(3, 'interrupted')])?.[0]?.status).toBe('interrupted');
 });

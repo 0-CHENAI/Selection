@@ -743,31 +743,32 @@ function calculateActivityDepths(activities: ActivityItem[]): void {
 // TodoWrite Extraction
 // ============================================================================
 
-/**
- * Extract todos from TodoWrite tool results in activities.
- * Returns the latest todo state (from the most recent TodoWrite call).
- */
-export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
-  // Stable ascending order preserves transcript order when tool timestamps tie.
-  const ordered = [...activities].sort((a, b) => a.timestamp - b.timestamp)
-  for (let i = ordered.length - 1; i >= 0; i--) {
-    const activity = ordered[i]!
-    if (activity.parentId || activity.status !== 'completed' || !activity.content) continue
-    const name = normalizeCraftSessionToolName(activity.toolName ?? '')
-    if (name === 'update_task_list') {
-      const items = parseTaskListResult(activity.content)
-      if (items) return items
-    } else if (name === 'TodoWrite' && Array.isArray(activity.toolInput?.todos)) {
-      // Read old transcripts only; TodoWrite is not the public tool contract.
-      return activity.toolInput.todos as TodoItem[]
-    }
+type TaskListActivity = Pick<ActivityItem, 'toolName' | 'toolUseId' | 'timestamp' | 'status' | 'content' | 'toolInput' | 'parentId'>
+
+function taskListSnapshot(activity: TaskListActivity): TodoItem[] | undefined {
+  if (activity.parentId || activity.status !== 'completed') return undefined
+  const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+  if (name === 'update_task_list') return parseTaskListResult(activity.content)
+  if (name === 'TodoWrite' && activity.content && Array.isArray(activity.toolInput?.todos)) {
+    // Old transcripts stored the accepted list in the tool input.
+    return activity.toolInput.todos as TodoItem[]
   }
   return undefined
 }
 
-function isTaskListActivity(toolName: string | undefined): boolean {
-  const name = normalizeCraftSessionToolName(toolName ?? '')
-  return name === 'update_task_list' || name === 'TodoWrite'
+/** Equal timestamps follow transcript order, so a later correction wins. */
+export function extractTodosFromActivities(activities: readonly ActivityItem[]): TodoItem[] | undefined {
+  let latest: TodoItem[] | undefined
+  let timestamp = -Infinity
+  for (const activity of activities) {
+    if (activity.timestamp < timestamp) continue
+    const items = taskListSnapshot(activity)
+    if (items) {
+      latest = items
+      timestamp = activity.timestamp
+    }
+  }
+  return latest
 }
 
 /**
@@ -779,16 +780,21 @@ function isTaskListActivity(toolName: string | undefined): boolean {
  * then the session id, cover lists whose tool call id was not persisted.
  */
 export function taskListSeed(input: {
-  activities?: readonly Pick<ActivityItem, 'toolName' | 'toolUseId' | 'timestamp'>[]
+  activities?: readonly TaskListActivity[]
   turnId?: string | null
   sessionId?: string | null
 }): string {
-  const origin = [...(input.activities ?? [])]
-    .filter(activity => isTaskListActivity(activity.toolName))
-    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
-    .find(activity => activity.toolUseId?.trim())
-  const toolUseId = origin?.toolUseId?.trim()
-  if (toolUseId) return toolUseId
+  let originId: string | undefined
+  let earliest = Infinity
+  for (const activity of input.activities ?? []) {
+    if (activity.timestamp >= earliest) continue
+    const id = activity.toolUseId?.trim()
+    if (id && taskListSnapshot(activity)) {
+      earliest = activity.timestamp
+      originId = id
+    }
+  }
+  if (originId) return originId
   const turnId = input.turnId?.trim()
   if (turnId) return turnId
   const sessionId = input.sessionId?.trim()

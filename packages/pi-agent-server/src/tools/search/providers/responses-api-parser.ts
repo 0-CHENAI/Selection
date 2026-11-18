@@ -127,7 +127,9 @@ export function parseResponsesApiResults(
     for (const source of item.action.sources) {
       const url = source?.type === 'url' ? normalizeSearchUrl(source.url) : null;
       if (!url || consulted.has(url)) continue;
-      consulted.set(url, { title: url, url, description: '' });
+      const result: WebSearchResult = { title: url, url, description: '' };
+      if (consulted.size === 0 && text) result.searchSummary = text;
+      consulted.set(url, result);
       if (consulted.size >= count) return [...consulted.values()];
     }
   }

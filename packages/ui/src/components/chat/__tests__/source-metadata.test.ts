@@ -81,3 +81,10 @@ it('keeps multiline snippets and a final result with no snippet after trimming',
   const records = collectSourceMetadata([{ role: 'tool', toolName: 'WebSearch', content }])
   expect([...records.values()]).toEqual([{ title: 'One', description: 'First line continued' }, { title: 'Two', description: '' }])
 })
+
+it('keeps numbered bold text within a search snippet', () => {
+  const content = '1. **Guide**\n   https://guide.example/\n   First\n2. **Important**\nMore detail\n\n2. **Next**\n   https://next.example/'
+  const result = collectSourceMetadata([{ role: 'tool', toolName: 'WebSearch', content }])
+  expect(result.get('https://guide.example/')?.description).toContain('More detail')
+  expect(result.size).toBe(2)
+})
