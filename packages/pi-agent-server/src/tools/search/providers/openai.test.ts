@@ -52,6 +52,7 @@ describe('ResponsesApiSearchProvider', () => {
     expect(calledBody.model).toBe('gpt-4o-mini');
     expect(calledBody.tools).toEqual([{ type: 'web_search' }]);
     expect(calledBody.tool_choice).toBe('required');
+    expect(calledBody.include).toEqual(['web_search_call.action.sources']);
     expect(calledHeaders['Authorization']).toBe('Bearer sk-test');
 
     expect(results).toHaveLength(2);
@@ -98,6 +99,7 @@ describe('ResponsesApiSearchProvider', () => {
 
     const results = await provider.search('test', 5);
 
+    expect(calledBody.include).toBeUndefined();
     expect(calledUrl).toBe('https://openrouter.ai/api/v1/responses');
     expect(calledBody.model).toBe('openai/gpt-4o-mini');
     expect(results).toHaveLength(1);

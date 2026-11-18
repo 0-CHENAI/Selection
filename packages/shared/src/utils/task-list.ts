@@ -18,14 +18,21 @@ export function parseTaskListResult(content?: string): TaskListItem[] | undefine
   } catch { return undefined; }
 }
 
-export function latestTaskList(messages: Array<{ toolName?: string; toolStatus?: string; toolResult?: string; content: string; isError?: boolean }>): TaskListItem[] | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]!;
-    if (!isTaskListTool(message.toolName) || message.toolStatus !== 'completed' || message.isError) continue;
+export function latestTaskList(messages: Array<{ timestamp?: number; parentToolUseId?: string; toolName?: string; toolStatus?: string; toolResult?: string; content: string; isError?: boolean }>): TaskListItem[] | undefined {
+  let latest: TaskListItem[] | undefined;
+  let latestTimestamp = -Infinity;
+  for (const message of messages) {
+    if (message.parentToolUseId || !isTaskListTool(message.toolName) || message.toolStatus !== 'completed' || message.isError) continue;
+    // Older transcripts without timestamps retain their recorded order.
+    const timestamp = message.timestamp ?? latestTimestamp;
+    if (timestamp < latestTimestamp) continue;
     const items = parseTaskListResult(message.toolResult ?? message.content);
-    if (items) return items;
+    if (items) {
+      latest = items;
+      latestTimestamp = timestamp;
+    }
   }
-  return undefined;
+  return latest;
 }
 
 export function withoutInheritedTaskLists<T extends { toolName?: string }>(messages: T[]): T[] {

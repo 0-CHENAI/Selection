@@ -155,3 +155,20 @@ describe('createSearchTool', () => {
     expect(fallbackCalls).toBe(0);
   });
 });
+
+it('delivers both the unannotated provider summary and the consulted URLs', async () => {
+  const { parseResponsesApiResults } = await import('./providers/responses-api-parser.ts');
+  const summary = 'Provider synthesis across multiple pages.';
+  const tool = createSearchTool({ name: 'Mock', async search(query, count) {
+    return parseResponsesApiResults({ output_text: summary, output: [{
+      type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [
+        { type: 'url', url: 'https://user:secret@example.com/' }, { type: 'url', url: 'https://docs.example/' },
+      ] },
+    }] }, query, count);
+  } });
+  const result = await tool.execute('search', { query: 'q', count: 1 });
+  const part = result.content[0];
+  expect(part?.type === 'text' && part.text).toContain(summary);
+  expect(part?.type === 'text' && part.text).toContain('1. **https://docs.example/**');
+  expect(part?.type === 'text' && part.text).not.toContain('secret');
+});

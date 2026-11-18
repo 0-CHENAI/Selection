@@ -24,17 +24,43 @@ test('historical turns retain snapshots and a stopped turn interrupts only the a
 test('rail seed stays on the call that created the list', () => {
   expect(taskListSeed({
     activities: [
-      { toolName: 'update_task_list', toolUseId: 'origin', timestamp: 2 },
-      { toolName: 'mcp__session__update_task_list', toolUseId: 'later', timestamp: 5 },
+      { ...activity(0), parentId: 'child', toolUseId: 'nested' },
+      { ...activity(1), content: 'invalid', toolUseId: 'invalid' },
+      { ...activity(1), status: 'error', toolUseId: 'failed' },
+      { ...activity(2), toolUseId: 'origin' },
+      { ...activity(5), toolUseId: 'later' },
     ],
     turnId: 'turn',
     sessionId: 'session',
   })).toBe('origin');
   expect(taskListSeed({
-    activities: [{ toolName: 'TodoWrite', toolUseId: 'legacy', timestamp: 4 }],
+    activities: [{ ...activity(4), toolName: 'TodoWrite', toolInput: { todos: items }, toolUseId: 'legacy' }],
     turnId: 'turn',
   })).toBe('legacy');
   expect(taskListSeed({ activities: [], turnId: 'turn', sessionId: 'session' })).toBe('turn');
   expect(taskListSeed({ sessionId: ' session ' })).toBe('session');
   expect(taskListSeed({})).toBe('task-list');
+});
+
+test('same-millisecond correction supersedes the earlier completed checklist', () => {
+  const done = items.map(item => ({ ...item, status: 'completed' as const }));
+  expect(extractTodosFromActivities([activity(1, done), activity(1)])).toEqual(items);
+});
+
+test('failed updates and nested checklists cannot complete the conversation checklist', () => {
+  const done = items.map(item => ({ ...item, status: 'completed' as const }));
+  const tool = (id: string, list: TodoItem[]): Message => ({
+    id, role: 'tool', content: '', timestamp: 2, toolUseId: id, toolName: 'update_task_list',
+    toolStatus: 'completed', toolResult: JSON.stringify({ items: list }),
+  });
+  for (const update of [
+    { ...tool('failed', done), timestamp: 3, toolStatus: 'error' as const },
+    { ...tool('child', done), timestamp: 3, parentToolUseId: 'agent' },
+  ]) {
+    const turns = groupMessagesByTurn([
+      { id: 'u', role: 'user', content: '多步工作', timestamp: 1 },
+      tool('plan', items), update,
+    ], { isSessionProcessing: false });
+    expect(turns.find(turn => turn.type === 'assistant')?.todos).toEqual(items);
+  }
 });

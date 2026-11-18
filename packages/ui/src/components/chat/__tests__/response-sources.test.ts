@@ -198,3 +198,12 @@ it('keeps previous annotated citations folded while the next entry streams in', 
     expect(extractResponseSources(text.slice(0, end), new Set(), true).content.trim()).toBe('')
   }
 })
+
+it('recognizes inline bibliography labels when the colon is outside the bold span', () => {
+  for (const label of ['**参考来源**：', '**数据来源**：', '**Sources**: ']) {
+    const text = label + '[文档](https://docs.example/page)'
+    expect(extractResponseSources(text).sources.map(source => source.url)).toEqual(['https://docs.example/page'])
+    expect(extractResponseSources(text).content.trim()).toBe('')
+  }
+  expect(extractResponseSources('**参考来源说明**：[入口](https://app.example)').sources).toEqual([])
+})
