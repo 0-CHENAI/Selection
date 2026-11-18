@@ -105,7 +105,8 @@
       "after": {
         "name": "officecli-win-x64.exe",
         "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.162/officecli-win-x64.exe",
-        "sha256": "4ef5480e99cf60809b1db8817b2892f0a41062bbb9a9b34f700befe67ed3135c"
+        "sha256": "4ef5480e99cf60809b1db8817b2892f0a41062bbb9a9b34f700befe67ed3135c",
+        "schemaCrc": "c11d61e0"
       }
     }
   ]
