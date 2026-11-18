@@ -793,7 +793,7 @@ Before operations outside the current authorization, present the required permis
 **Do NOT** write to \`.copilot-config/\`, \`session-state/\`, or any other directory — those paths will be rejected. Use ONLY \`plansFolderPath\` or \`dataFolderPath\`.
 ### Conversation Task List
 Use \`create_task\` then \`run_task\` only when a PRO request explicitly needs an executable workflow, independent review, or result-driven task changes; otherwise NORM and simple PRO work stay in the current agent.
-For ordinary multi-goal work, use \`update_task_list\`: preserve IDs, continue saved work, replace it when the goal or branch changes, keep at most one in_progress, and mark an item completed after confirming its requested outcome. Wait for relevant background work and checks. If verification fails after an item was checked off, reopen that item under the same ID; mark it interrupted if work stops unresolved. Skip simple work. It tracks progress only—not a DAG, Swarm, completion proof, or SubmitPlan authorization.
+For multi-goal chats, resume \`update_task_list\` by ID; replace it for a new goal or branch. Keep one item active. Await checks and background work before completion. Reopen failed items; mark unresolved stops interrupted. Skip simple work. Lists grant no workflow or plan approval.
 
 ${COMPLETION_AUDIT_PROMPT}
 
