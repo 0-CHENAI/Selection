@@ -1237,7 +1237,7 @@ function AppShellContent({
   // NavigationContext cannot see that local filter when it auto-selects a chat.
   // Select a project-bound session explicitly, or suppress auto-selection when
   // the project is empty so an unrelated global chat cannot remain on the right.
-  const completionAttention = useMemo(() => sessionCompletionAttention(activeSessionMetas), [activeSessionMetas])
+  const completionAttention = useMemo(() => sessionCompletionAttention(activeSessionMetas, officeHistoryMetas), [activeSessionMetas, officeHistoryMetas])
 
   const handleJumpToProjectSessions = useCallback((projectId: string, sessionId?: string, newPanel?: boolean) => {
     setHistoryScope(serializeProjectHistoryScope([projectId]))
@@ -2140,6 +2140,7 @@ function AppShellContent({
                     {
                       id: "nav:allSessions",
                       hasUnread: completionAttention.ordinary,
+                      isProcessing: completionAttention.runningOrdinary,
                       title: t("sidebar.allSessions"),
                       label: String(workspaceSessionMetas.filter(session => !session.projectId).length),
                       icon: Inbox,
@@ -2269,6 +2270,7 @@ function AppShellContent({
                     {
                       id: 'nav:office',
                       title: t('sidebar.office'),
+                      isProcessing: completionAttention.runningOffice,
                       label: String(pptSessionMetas.length + wordSessionMetas.length + excelSessionMetas.length),
                       icon: Presentation,
                       variant: isOfficeArea ? 'default' : 'ghost',

@@ -223,14 +223,17 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
           )
           const buttonElement = link.actions ? (
             <div className="group/project-row relative">
-              {React.cloneElement(navigationButton, { className: 'pr-9' })}
+              {React.cloneElement(navigationButton, { className: link.isProcessing ? 'pr-14' : 'pr-9' })}
               {(link.isProcessing || link.hasUnread) && (
-                <span className="pointer-events-none absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center gap-1 opacity-100 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none group-hover/project-row:scale-90 group-hover/project-row:opacity-0 group-focus-within/project-row:scale-90 group-focus-within/project-row:opacity-0 group-has-[[data-state=open]]/project-row:opacity-0">
+                <span className={cn(
+                  "pointer-events-none absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center",
+                  !link.isProcessing && "transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none group-hover/project-row:scale-90 group-hover/project-row:opacity-0 group-focus-within/project-row:scale-90 group-focus-within/project-row:opacity-0 group-has-[[data-state=open]]/project-row:opacity-0",
+                )}>
                   {link.isProcessing ? <SessionRunningMark /> : <CompletionUnreadMark />}
                 </span>
               )}
               <div
-                className="absolute right-1 top-1/2 -translate-y-1/2"
+                className={cn("absolute top-1/2 -translate-y-1/2", link.isProcessing ? "right-7" : "right-1")}
                 onKeyDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
               >
@@ -561,11 +564,15 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
           </span>
         )}
         {/* Label Badge: Shows count or status on the right, revealed on section hover */}
-        {!link.actions && link.isProcessing && <SessionRunningMark />}
         {!link.actions && link.hasUnread && <CompletionUnreadMark />}
         {link.label && (
           <span data-touch-reveal="true" className={cn(link.afterTitle ? 'ml-0' : 'ml-auto', 'text-xs text-foreground/30 opacity-0 group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100 transition-opacity')}>
             {link.label}
+          </span>
+        )}
+        {!link.actions && link.isProcessing && (
+          <span className={cn("flex shrink-0 items-center justify-center", !link.label && !link.afterTitle && "ml-auto")}>
+            <SessionRunningMark />
           </span>
         )}
       </button>
