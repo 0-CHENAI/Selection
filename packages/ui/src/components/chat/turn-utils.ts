@@ -645,7 +645,7 @@ export function getActiveTurnPreview(
 function getToolStatus(message: Message): ActivityStatus {
   // response_too_large is success (data was saved, just too large for inline display)
   if (message.errorCode === 'response_too_large') return 'completed'
-  if (message.isError) return 'error'
+  if (message.isError || message.toolStatus === 'error') return 'error'
   // Backgrounded takes priority — tool_result arrives before task_backgrounded,
   // so toolResult is set but the task is still running in the background
   if (message.toolStatus === 'backgrounded') return 'backgrounded'
@@ -748,8 +748,11 @@ function calculateActivityDepths(activities: ActivityItem[]): void {
  * Returns the latest todo state (from the most recent TodoWrite call).
  */
 export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
-  for (const activity of [...activities].sort((a, b) => b.timestamp - a.timestamp)) {
-    if (activity.status !== 'completed' || !activity.content) continue
+  // Stable ascending order preserves transcript order when tool timestamps tie.
+  const ordered = [...activities].sort((a, b) => a.timestamp - b.timestamp)
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const activity = ordered[i]!
+    if (activity.parentId || activity.status !== 'completed' || !activity.content) continue
     const name = normalizeCraftSessionToolName(activity.toolName ?? '')
     if (name === 'update_task_list') {
       const items = parseTaskListResult(activity.content)

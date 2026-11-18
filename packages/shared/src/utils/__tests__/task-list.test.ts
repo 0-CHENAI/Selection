@@ -14,3 +14,10 @@ test('reopens latest successful snapshot, ignores rejected updates and empties a
   expect(latestTaskList(withoutInheritedTaskLists(messages))).toBeUndefined();
   expect(messages[1]!.toolResult).toBe(JSON.stringify({ items: first }));
 });
+
+test('a nested agent snapshot does not replace the plan used to resume the conversation', () => {
+  const item = { id: 'a', content: '核验结果', status: 'in_progress' };
+  const plan = { toolName: 'update_task_list', toolStatus: 'completed', content: JSON.stringify({ items: [item] }) };
+  const nested = { ...plan, parentToolUseId: 'agent', content: JSON.stringify({ items: [{ ...item, status: 'completed' }] }) };
+  expect(latestTaskList([plan, nested])).toEqual([item]);
+});

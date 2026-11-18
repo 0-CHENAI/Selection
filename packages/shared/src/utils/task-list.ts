@@ -18,10 +18,10 @@ export function parseTaskListResult(content?: string): TaskListItem[] | undefine
   } catch { return undefined; }
 }
 
-export function latestTaskList(messages: Array<{ toolName?: string; toolStatus?: string; toolResult?: string; content: string; isError?: boolean }>): TaskListItem[] | undefined {
+export function latestTaskList(messages: Array<{ parentToolUseId?: string; toolName?: string; toolStatus?: string; toolResult?: string; content: string; isError?: boolean }>): TaskListItem[] | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
-    if (!isTaskListTool(message.toolName) || message.toolStatus !== 'completed' || message.isError) continue;
+    if (message.parentToolUseId || !isTaskListTool(message.toolName) || message.toolStatus !== 'completed' || message.isError) continue;
     const items = parseTaskListResult(message.toolResult ?? message.content);
     if (items) return items;
   }
