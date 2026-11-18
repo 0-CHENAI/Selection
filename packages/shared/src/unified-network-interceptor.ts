@@ -1732,11 +1732,7 @@ const openAiAdapter: ApiAdapter = {
       const updatedSchema = injectMetadataIntoToolSchema(params);
       params.properties = updatedSchema.properties;
       params.required = updatedSchema.required;
-      // External MCP servers may set additionalProperties: false which would
-      // cause validation to reject _intent/_displayName in tool inputs.
-      if ((params as Record<string, unknown>).additionalProperties === false) {
-        delete (params as Record<string, unknown>).additionalProperties;
-      }
+      // Strict tools stay closed: the metadata fields are now declared properties.
       modifiedCount++;
     }
 
@@ -1986,9 +1982,7 @@ const openAiResponsesAdapter: ApiAdapter = {
       const updatedSchema = injectMetadataIntoToolSchema(params);
       params.properties = updatedSchema.properties;
       params.required = updatedSchema.required;
-      if ((params as Record<string, unknown>).additionalProperties === false) {
-        delete (params as Record<string, unknown>).additionalProperties;
-      }
+      // Strict tools stay closed: the metadata fields are now declared properties.
       modifiedCount++;
     }
 
