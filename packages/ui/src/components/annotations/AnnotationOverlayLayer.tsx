@@ -85,21 +85,11 @@ export function AnnotationOverlayLayer({
                 mode: interaction.openMode,
               })
             } : undefined}
-            className={cn(chipVisual.className, !canOpenChip && 'cursor-default')}
+            className={cn(chipVisual.className, canOpenChip ? 'cursor-pointer' : 'cursor-default')}
             style={{
               left: chip.left,
               top: chip.top,
               transform: 'translate(-2px, -50%)',
-              minWidth: '20px',
-              height: '18px',
-              padding: '0 4px',
-              borderRadius: '4px',
-              fontSize: '12px',
-              fontWeight: '700',
-              lineHeight: '18px',
-              textAlign: 'center',
-              userSelect: 'none',
-              position: 'absolute',
               ...chipVisual.style,
             }}
           >

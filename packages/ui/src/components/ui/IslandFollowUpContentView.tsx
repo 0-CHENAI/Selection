@@ -96,7 +96,9 @@ export function IslandFollowUpContentView({
   const isSentFollowUp = Boolean(feedbackStatus)
   const isViewMode = mode === 'view' || isSentFollowUp
   const isEmpty = !isViewMode && value.trim().length === 0
-  const canSubmitAndSend = !isViewMode && !!onSubmitAndSend
+  const editingExisting = !isViewMode && !!onDelete
+  const cancelEdit = editingExisting && onDiscardDraft ? onDiscardDraft : onCancel
+  const canSubmitAndSend = !isViewMode && !editingExisting && !!onSubmitAndSend
   const minInputHeight = isViewMode ? 20 : 44
   const [inputHeight, setInputHeight] = React.useState(minInputHeight)
   const [inputOverflow, setInputOverflow] = React.useState(false)
@@ -209,7 +211,7 @@ export function IslandFollowUpContentView({
 
               if (event.key === 'Escape') {
                 event.preventDefault()
-                onCancel()
+                cancelEdit()
                 return
               }
 
@@ -279,10 +281,10 @@ export function IslandFollowUpContentView({
           </div>
 
           <div className="flex gap-2">
-            {onDiscardDraft && !isViewMode && value && <button type="button" onClick={onDiscardDraft} className="h-8 px-3 rounded-[8px] text-sm text-foreground/75 hover:bg-foreground/5">{t('chat.artifactVersions.discardDraft')}</button>}
+            {onDiscardDraft && !isViewMode && !editingExisting && value && <button type="button" onClick={onDiscardDraft} className="h-8 px-3 rounded-[8px] text-sm text-foreground/75 hover:bg-foreground/5">{t('chat.artifactVersions.discardDraft')}</button>}
             <button
               type="button"
-              onClick={onCancel}
+              onClick={cancelEdit}
               className="h-8 px-3 rounded-[8px] text-sm text-foreground/75 hover:bg-foreground/5"
             >
               {t('common.cancel')}

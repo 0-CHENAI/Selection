@@ -143,6 +143,17 @@ describe('sent follow-up card', () => {
     expect(html).toContain('text-red-500')
   })
 
+  it('shows only delete, cancel and save while editing an existing follow-up', async () => {
+    const html = await renderCard({
+      mode: 'edit',
+      submitLabel: '保存',
+      onDiscardDraft: () => {},
+      onSubmitAndSend: () => {},
+    })
+    expect(html.match(/<button\b/g)).toHaveLength(3)
+    for (const label of ['删除', '取消', '保存']) expect(html).toContain(`>${label}<`)
+  })
+
   it('keeps cancel and save on an unsent composer', async () => {
     const html = await renderCard({
       language: 'en',

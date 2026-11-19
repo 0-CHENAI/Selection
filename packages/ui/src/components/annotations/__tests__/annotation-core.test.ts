@@ -58,8 +58,8 @@ describe('annotation core helpers', () => {
     const pending = getAnnotationChipVisual({ pendingFollowUp: true, sentFollowUp: false })
     const sent = getAnnotationChipVisual({ pendingFollowUp: false, sentFollowUp: true })
 
-    expect(pending.className.includes('shadow-tinted')).toBe(true)
     for (const chip of [getAnnotationChipVisual({}), pending, sent]) {
+      expect(chip.className.split(' ')).toContain('annotation-bubble')
       expect(chip.style.color).toBe('var(--foreground)')
     }
     expect(String(pending.style.backgroundColor)).toContain('55%')

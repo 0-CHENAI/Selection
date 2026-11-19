@@ -35,12 +35,7 @@ export function getAnnotationChipVisual(chip: { pendingFollowUp?: boolean; sentF
   const sent = !!chip.sentFollowUp
 
   return {
-    className: cn(
-      'absolute pointer-events-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-      pending ? 'shadow-tinted cursor-pointer hover:bg-foreground/10' : undefined,
-      sent ? 'cursor-default hover:bg-foreground/5' : undefined,
-      !pending && !sent ? 'cursor-pointer hover:bg-foreground/6' : undefined,
-    ),
+    className: 'annotation-bubble absolute pointer-events-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
     style: {
       backgroundColor: pending
         ? 'color-mix(in srgb, var(--annotation-accent, var(--info)) var(--annotation-pending-badge-strength, 55%), var(--background))'
@@ -48,9 +43,6 @@ export function getAnnotationChipVisual(chip: { pendingFollowUp?: boolean; sentF
           ? 'color-mix(in srgb, var(--annotation-accent, var(--info)) 14%, var(--background))'
           : 'color-mix(in srgb, var(--annotation-accent, var(--info)) 20%, var(--background))',
       color: 'var(--foreground)',
-      ['--shadow-color' as string]: 'var(--annotation-accent-rgb, var(--info-rgb))',
-      ['--shadow-border-opacity' as string]: pending ? '0.14' : '0.05',
-      ['--shadow-blur-opacity' as string]: pending ? '0.10' : '0.03',
     },
   }
 }
