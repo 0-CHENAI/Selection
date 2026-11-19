@@ -29,7 +29,9 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
       const bytes = readFileSync(path);
       const hash = createHash('sha256').update(bytes).digest('hex');
       const adjacentSnapshot = readSourceSnapshot(join(dirname(path), 'index.json'), base);
-      const indexed = adjacentSnapshot?.textPath === path ? adjacentSnapshot : readSourceSnapshot(sourceIndexPath(base, path), base);
+      const indexed = adjacentSnapshot?.textPath === path ? adjacentSnapshot
+        : (extname(path).toLowerCase() === '.pdf' ? readSourceSnapshot(sourceIndexPath(base, path, 'selection-pdf-v2'), base) : undefined)
+          ?? readSourceSnapshot(sourceIndexPath(base, path), base);
       if (indexed) {
         const extracted = readFileSync(indexed.textPath), snapshotPath = join(target, `source-${index}.txt`);
         writeFileSync(snapshotPath, extracted);

@@ -27,13 +27,18 @@ export function projectHistory(root: string, requester: Pick<StoredSession, 'id'
   const eligible = headers.filter(session => session.projectId === requester.projectId && !session.hidden
     && (session.id === requester.id || (session.executionRootSessionId ?? session.id) !== (requester.executionRootSessionId ?? requester.id)));
   const safeMessage = (session: StoredSession, message: StoredSession['messages'][number]) => {
-    if (!['user', 'assistant'].includes(message.type) || message.isIntermediate || !message.content.trim()) return undefined;
+    if (message.hidden || message.isIntermediate) return undefined;
+    // Tool history exposes the recorded call identity and status, never raw arguments or output.
+    const tool = message.type === 'tool' && message.toolName
+      ? { toolName: message.toolName, toolUseId: message.toolUseId, status: message.toolStatus, isError: message.isError } : undefined;
+    if (!tool && (!['user', 'assistant', 'info', 'status'].includes(message.type) || !message.content.trim())) return undefined;
+    const content = tool ? [tool.toolName, tool.toolUseId, tool.isError ? 'error' : tool.status].filter(Boolean).join(' · ') : message.content;
     // Hash the original fields exposed by expansion in a fixed order. Session
     // persistence may reorder JSON keys without changing the original message.
     const version = createHash('sha256').update(JSON.stringify({ id: message.id, type: message.type,
-      timestamp: message.timestamp, content: message.content })).digest('hex');
+      timestamp: message.timestamp, content, ...(tool && { tool }) })).digest('hex');
     return { sessionId: session.id, messageId: message.id, version, role: message.type,
-      text: redactHandoverText(message.content), parentSessionId: session.parentSessionId, timestamp: message.timestamp };
+      ...(tool && { tool }), text: redactHandoverText(content), parentSessionId: session.parentSessionId, timestamp: message.timestamp };
   };
   if (input.sessionId || input.messageId) {
     if (!input.sessionId || !input.messageId || !input.expectedVersion) throw new Error('Expansion requires sessionId, messageId and expectedVersion from a search hit.');
@@ -53,7 +58,7 @@ export function projectHistory(root: string, requester: Pick<StoredSession, 'id'
       if (!value || !value.text.toLowerCase().includes(query)) return [];
       const start = Math.max(0, value.text.toLowerCase().indexOf(query) - 100);
       return [{ sessionId: value.sessionId, messageId: value.messageId, version: value.version, role: value.role,
-        parentSessionId: value.parentSessionId, timestamp: value.timestamp, excerpt: value.text.slice(start, start + 400) }]; });
+        ...(value.tool && { tool: value.tool }), parentSessionId: value.parentSessionId, timestamp: value.timestamp, excerpt: value.text.slice(start, start + 400) }]; });
   }).sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
   const offset = input.offset ?? 0;
   return { projectId: requester.projectId, total: matches.length, hits: matches.slice(offset, offset + 12), nextOffset: offset + 12 < matches.length ? offset + 12 : null,

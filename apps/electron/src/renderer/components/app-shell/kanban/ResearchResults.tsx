@@ -54,7 +54,21 @@ function ResearchJudgment({ research, onOpenSession }: { research: ResearchSumma
     <ul className="space-y-1">{judgment.stages.map(stage => <li key={stage.lineId} className="flex min-w-0 items-baseline justify-between gap-3"><span className="truncate">{research.lines.find(line => line.id === stage.lineId)?.question ?? stage.lineId}</span><span className="shrink-0 text-muted-foreground">{t(`tasks.research.judgment.stage.${stage.state}`)}</span></li>)}</ul>
     <details><summary className="cursor-pointer font-medium">{t('tasks.research.judgment.falsification')}</summary><ul className="mt-2 space-y-2">{research.claims.map(claim => <li key={`${claim.id}@${claim.version}`}><p>{claim.id}@{claim.version}</p>{claim.falsificationConditions?.length ? claim.falsificationConditions.map((condition, index) => <p key={index} className="text-muted-foreground">{condition}</p>) : <p className="text-muted-foreground">{t('tasks.research.judgment.unrecorded')}</p>}</li>)}</ul></details>
     {!!judgment.critiques.length && <details><summary className="cursor-pointer font-medium">{t('tasks.research.judgment.critique')} ({judgment.critiques.length})</summary><ul className="mt-2 space-y-2">{judgment.critiques.map(critique => <li key={critique.id} className="rounded-md border border-border p-2"><p>{critique.lineId} · {critique.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p><p className="text-muted-foreground">{t(`tasks.research.judgment.${critique.current ? 'current' : 'superseded'}`)}</p><p>{critique.finding}</p>{critique.changeEvidence.map((item, index) => <p key={index} className="text-muted-foreground">{item}</p>)}<Receipt producer={critique.producedBy} onOpenSession={onOpenSession} /></li>)}</ul></details>}
-    {!!judgment.candidates.length && <details><summary className="cursor-pointer font-medium">{t('tasks.research.judgment.candidates')} ({judgment.candidates.length})</summary><ul className="mt-2 space-y-2">{judgment.candidates.map(candidate => <li key={candidate.id} className="rounded-md border border-border p-2"><p className="font-medium">{candidate.question}</p><p>{candidate.premises.join('；')}</p><p className="text-muted-foreground">{candidate.disposition ? t(`tasks.research.judgment.${candidate.disposition.action}`) : t('tasks.research.judgment.undecided')} · {candidate.disposition?.reason ?? candidate.reason}</p><Receipt producer={candidate.producedBy} onOpenSession={onOpenSession} /></li>)}</ul></details>}
+    {!!judgment.candidates.length && <details>
+      <summary className="cursor-pointer font-medium">{t('tasks.research.judgment.candidates')} ({judgment.candidates.length})</summary>
+      <ul className="mt-2 space-y-2">{judgment.candidates.map(candidate => {
+        const { coverage, disposition } = candidate
+        return <li key={candidate.id} className="rounded-md border border-border p-2">
+          <p className="font-medium">{candidate.question}</p>
+          <p>{candidate.premises.join('；')}</p>
+          {coverage ? <>
+            <p className="text-muted-foreground">{t(coverage.current ? 'tasks.research.covered' : 'tasks.research.judgment.superseded')} · {coverage.lineId} · {coverage.claimRef.id}@{coverage.claimRef.version} · {coverage.reason}</p>
+            <Receipt producer={coverage.producedBy} onOpenSession={onOpenSession} />
+          </> : <p className="text-muted-foreground">{disposition ? t(`tasks.research.judgment.${disposition.action}`) : t('tasks.research.judgment.undecided')} · {disposition?.reason ?? candidate.reason}</p>}
+          <Receipt producer={candidate.producedBy} onOpenSession={onOpenSession} />
+        </li>
+      })}</ul>
+    </details>}
   </div>
 }
 

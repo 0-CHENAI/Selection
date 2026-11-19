@@ -774,6 +774,7 @@ export class PiAgent extends BaseAgent {
         ? { path: this.config.isolatedOfficeDocumentPath, binary: officecliBinary! } : undefined,
       denyExternalBrowsers: this.config.denyExternalBrowsers,
 
+      proDocumentReading: this.config.session?.workMode === 'PRO',
       documentSourceDirectory: this.config.documentSourceDirectory,
       forceFreshSession: this.config.session?.forceFreshSdkSession,
     });

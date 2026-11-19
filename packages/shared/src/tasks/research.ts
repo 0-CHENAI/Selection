@@ -94,6 +94,7 @@ const premiseReview = z.object({ id, lineId: id, premises: z.array(id), claimRef
 const branchCandidate = z.object({ id, critiqueId: id, parentLineId: id, question: id, premises: z.array(id).min(1), reason: id }).strict();
 export const ResearchPayloadSchema = z.object({
   evidence: z.array(evidence).default([]), claims: z.array(claim).default([]), reviews: z.array(review).default([]), issues: z.array(issue).default([]),
+  coverageReviews: z.array(z.object({ candidateId: id, lineId: id, claimRef, reason: z.string().trim().min(1) }).strict()).optional(),
   errata: z.array(erratum).optional(),
   premiseReviews: z.array(premiseReview).optional(), branchCandidates: z.array(branchCandidate).optional(),
   relations: z.array(z.object({ id, type: z.enum(['supports', 'refutes', 'converges']), from: claimRef, to: claimRef, reason: id }).strict()).optional(),
@@ -105,6 +106,8 @@ export const ResearchPayloadSchema = z.object({
     const identities = (payload[field] ?? []).map(item => item.id);
     if (new Set(identities).size !== identities.length) ctx.addIssue({ code: 'custom', path: [field], message: `Duplicate ${field} identity` });
   }
+  const covered = payload.coverageReviews ?? [];
+  if (new Set(covered.map(item => item.candidateId)).size !== covered.length) ctx.addIssue({ code: 'custom', path: ['coverageReviews'], message: 'Duplicate candidate coverage review' });
   if (new Set(payload.reviews.map(review => `${review.claimRef.id}@${review.claimRef.version}`)).size !== payload.reviews.length) ctx.addIssue({code:'custom',path:['reviews'],message:'Duplicate review target in one submission'});
 });
 export type ResearchPayload = z.infer<typeof ResearchPayloadSchema>;
@@ -387,7 +390,7 @@ export function renderResearchReport(summary: ResearchSummary): string {
     ...(summary.report?.alternatives ?? []).map(item => `替代解释：${item}`),
     ...(summary.report?.changeEvidence ?? []).map(item => `可能改变结论的证据：${item}`),
     ...summary.relations.filter(relation => relation.current).map(relation => `研究关系：${key(relation.from)} ${relation.type} ${key(relation.to)}；${relation.reason}`),
-    ...(summary.judgment?.candidates ?? []).map(candidate => `歧路候选：${candidate.id} · ${candidate.question}；${candidate.disposition?.action ?? 'pending'} · ${candidate.disposition?.reason ?? candidate.reason}`),
+    ...(summary.judgment?.candidates ?? []).map(candidate => `歧路候选：${candidate.id} · ${candidate.question}；${candidate.disposition?.action ?? (candidate.coverage?.current ? key(candidate.coverage.claimRef) : 'pending')} · ${candidate.disposition?.reason ?? candidate.coverage?.reason ?? candidate.reason}`),
     ...summary.errata.map(value => `追加勘误：${value.id} · ${value.target.kind === 'claim' ? key(value.target.claimRef) : `${value.target.sourceId}@${value.target.sourceVersion}`} · ${value.reason}；影响 ${value.affectedClaimRefs.map(key).join(', ')}；${value.state}`),
     ...(summary.report?.unresolved ?? []).map(item => `未决问题：${item}`),
     `可追溯版本：${refs.map(key).join(', ')}`].join('\n');

@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test';
+import { test, expect, spyOn } from 'bun:test';
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { createDocumentTools, indexOriginalDocument } from './documents';
 import { freezeResearchSources, readResearchSources } from '../../../shared/src/tasks/research-storage';
 import { ResearchConfigSchema } from '../../../shared/src/tasks/research';
+import * as pdfReader from './web-fetch';
 import { minimalPdf } from './fixtures/minimal-pdf';
 const office = (files: Record<string, string>) => zipSync(Object.fromEntries(Object.entries(files).map(([key, value]) => [key, strToU8(value)])));
 
@@ -96,4 +97,42 @@ test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; c
     expect(readFileSync(fromSnapshots[3]!.snapshotPath!, 'utf8')).toBe('100万元');
     await expect(indexOriginalDocument(directory, '/etc/passwd')).rejects.toThrow('authorized');
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('PRO PDF quote navigation preserves per-path provenance and credits only the page read', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'selection-pro-pdf-'));
+  try {
+    const pdf = minimalPdf(['Introduction', 'A cost is 1000000 yuan', ''], 350);
+    for (const name of ['a.pdf', 'b.pdf']) writeFileSync(join(directory, name), pdf);
+    const parse = spyOn(pdfReader, 'readPdfPages');
+    const [a, b] = await Promise.all(['a.pdf', 'b.pdf'].map(name => indexOriginalDocument(directory, name, true)))
+      .finally(() => { const count = parse.mock.calls.length; parse.mockRestore(); expect(count).toBe(1); });
+    expect(a.originalHash).toBe(b.originalHash);
+    expect(a.version).not.toBe(b.version);
+    expect(a.units[1]?.label).toContain('351');
+    const [, read] = createDocumentTools(() => directory, undefined, true);
+    async function find(unit: number, quote: string) {
+      return read!.execute('read', { path: 'a.pdf', unit_id: `page-${unit}`, quote }, undefined, undefined, {} as any);
+    }
+    const wrong = await find(1, '1000000');
+    expect(wrong.details.sourceRead).toMatchObject({ startLine: 1, endLine: 1 });
+    expect(wrong.content[0]).toMatchObject({ text: expect.stringContaining('"quoteLocations":[{"id":"page-2"') });
+    expect((await find(1, 'absent')).content[0]).toMatchObject({ text: expect.stringContaining('"quoteLocations":[]') });
+    expect((await find(3, '1000000')).details.sourceRead).toBeUndefined();
+    expect((await find(2, '1000000')).content[0]).toMatchObject({ text: expect.stringContaining('"quoteMatched":true') });
+    writeFileSync(join(directory, 'printed.pdf'), minimalPdf(['First', 'Second', 'Appendix'], undefined, [42, 43, 99]));
+    const printed = await indexOriginalDocument(directory, 'printed.pdf', true);
+    expect(printed.units[0]?.label).toContain('印刷页 42');
+    expect(printed.units[2]?.label).not.toContain('99');
+    const legacy = await indexOriginalDocument(directory, 'a.pdf');
+    expect(legacy.extractor).toBe('selection-original-v1');
+    const config = ResearchConfigSchema.parse({ line: { id: 'main', question: 'Cost' }, dimensions: [{ id: 'cost', requirement: 'amount' }], sources: [{ id: 's', path: 'a.pdf' }] });
+    expect(freezeResearchSources(directory, 'task', 'run', config, directory)[0]?.version).toBe(a.version);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('vertical PDF glyphs follow columns right to left and horizontal text retains its order', () => {
+  const glyph = (str: string, x: number, y: number, dir = 'ttb') => ({ str, dir, transform: [1, 0, 0, 1, x, y] });
+  expect(pdfReader.pdfReadingOrder([glyph('章', 10, 30), glyph('顧', 30, 30), glyph('節', 10, 10), glyph('問', 30, 10)])).toBe('顧問章節');
+  expect(pdfReader.pdfReadingOrder([glyph('First', 10, 20, 'ltr'), glyph('second', 20, 20, 'ltr')])).toBe('First second');
 });

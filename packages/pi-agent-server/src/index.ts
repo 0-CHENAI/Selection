@@ -190,6 +190,7 @@ interface InitMessage {
   denyExternalBrowsers?: boolean;
 
   documentSourceDirectory?: string;
+  proDocumentReading?: boolean;
   toolResultRecovery?: import('../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan;
   forceFreshSession?: boolean;
   /** Swarm sessions enable an earlier auto-compaction policy. */
@@ -920,7 +921,7 @@ async function ensureSession(): Promise<AgentSession> {
   ];
   confinedBashTool = isolatedShell ? builtinDefs[1] : undefined;
   confinedBashDirectory = isolatedShell?.directory;
-  builtinDefs.push(...createDocumentTools(() => cwd, () => initConfig?.documentSourceDirectory).map(tool => registerRecoveryClass(tool, 'read-only')));
+  builtinDefs.push(...createDocumentTools(() => cwd, () => initConfig?.documentSourceDirectory, initConfig?.proDocumentReading).map(tool => registerRecoveryClass(tool, 'read-only')));
   const proxyTools = buildProxyTools();
   // Pi sessions can switch models at runtime, while their registered tool schemas
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral

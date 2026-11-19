@@ -96,3 +96,34 @@ test('B4 execution and a citation do not bypass unfinished corrections; explicit
     premiseReviews: [{ ...critique, classification: 'fact-error' }] });
   expect(summarizeResearch(config, sources, [authored, hiddenFinding, report]).blockers.join(' ')).toContain('same-line correction');
 });
+
+test('cross-line coverage reopens on correction and accepts a fresh review or an explicit branch', () => {
+  const multi = ResearchConfigSchema.parse({ ...config, lines: [{ id: 'annual', question: 'Annual cost', premises: ['one year'] }] });
+  const candidate = { id: 'alternative', critiqueId: critique.id, parentLineId: 'main', question: 'Annual price?', premises: ['one year'], reason: 'Different period' };
+  const fork = record('reviewer', 'critique', { premiseReviews: [{ ...critique, classification: 'alternative-premise' }], branchCandidates: [candidate] });
+  const target = { ...authored.payload.claims[0]!, id: 'annual-cost', lineIds: ['annual'] };
+  const targetRef = { id: target.id, version: 1 };
+  const source = record('researcher', 'annual-author', { claims: [target] });
+  const support = (version: number) => record('reviewer', 'audit', { reviews: [{ ...reviewed.payload.reviews[0]!, claimRef: { ...targetRef, version } }] });
+  const coverage = (version: number) => record('reviewer', 'compare', { coverageReviews: [{ candidateId: candidate.id, lineId: 'annual', claimRef: { ...targetRef, version }, reason: 'Same annual period and amount' }] });
+  const records = [authored, reviewed, fork, source, support(1)];
+  expect(validateResearchRecord(multi, sources, records, coverage(1))).toEqual([]);
+  expect(validateResearchRecord(multi, sources, records, { ...coverage(1), producedBy: source.producedBy })).not.toEqual([]);
+  expect(validateResearchRecord(multi, sources, records, { ...coverage(1), producedBy: fork.producedBy })).not.toEqual([]);
+  const local = record('reporter', 'local', { report: { ...report.payload.report, lineIds: ['main'], branchCandidateIds: [candidate.id] } });
+  const blockers = () => summarizeResearch(multi, sources, records, [], ['main']).blockers;
+  records.push(coverage(1), local);
+  expect(blockers()).toEqual([]);
+  records.push(record('reviewer', 'correction', { errata: [{ id: 'error', reason: 'Annual amount corrected', target: { kind: 'claim', claimRef: targetRef } }] }));
+  expect(blockers().join(' ')).toContain('Reopen alternative');
+  records.push(record('researcher', 'annual-author', { claims: [{ ...target, version: 2 }] }), support(2));
+  expect(blockers().join(' ')).toContain('Reopen alternative');
+  const line = { id: 'reopened', candidateId: candidate.id, question: candidate.question, premises: candidate.premises, parentLineIds: ['main'] };
+  const reopened = expandResearch(multi, { lines: [line], branchDispositions: [{ candidateId: candidate.id, action: 'open', lineId: line.id, taskRef: 'follow', reason: 'Needs its own answer' }] },
+    new Map([['follow', { researchRole: 'researcher', researchLineIds: [line.id] }]]), records);
+  expect(reopened.lines?.at(-1)?.premises).toEqual(candidate.premises);
+  records.push(coverage(2));
+  expect(blockers().join(' ')).toContain('Refresh the report');
+  records.push(local);
+  expect(blockers()).toEqual([]);
+});

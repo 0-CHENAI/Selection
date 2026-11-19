@@ -2054,6 +2054,7 @@ class ActiveRun {
     if (node.researchLineIds && (payload.claims.some(claim => (claim.lineIds ?? [config.line.id]).some(id => !node.researchLineIds!.includes(id)))
       || payload.premiseReviews?.some(value => !node.researchLineIds!.includes(value.lineId))
       || payload.branchCandidates?.some(value => !node.researchLineIds!.includes(value.parentLineId))
+      || payload.coverageReviews?.some(value => !node.researchLineIds!.includes(previous.judgment?.candidates.find(item => item.id === value.candidateId)?.parentLineId ?? ''))
       || payload.report?.lineIds?.some(id => !node.researchLineIds!.includes(id)))) errors.push('Research record exceeds the task research line binding');
     if (errors.length) throw new Error(errors.join('; '));
     if (record.payload.report) {
