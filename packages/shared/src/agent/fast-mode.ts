@@ -9,7 +9,7 @@ function normalizedModelId(model: string): string {
 /** Fast is a service tier, independent of reasoning effort. Keep eligibility explicit. */
 export function supportsGptOAuthFast(model: string, provider?: string): boolean {
   const id = normalizedModelId(model)
-  return provider === 'openai-codex' && /^(gpt-6\.1-(sol|terra)|gpt-6-(astra|sol|luna)|gpt-5\.6-(sol|terra|luna))$/.test(id)
+  return provider === 'openai-codex' && /^(gpt-6\.2-(sol|astra)|gpt-6\.1-(sol|terra)|gpt-6-(astra|sol|luna)|gpt-5\.6-(sol|terra|luna))$/.test(id)
 }
 
 export function fastServiceFamily(model: string, provider?: string): FastServiceFamily | undefined {

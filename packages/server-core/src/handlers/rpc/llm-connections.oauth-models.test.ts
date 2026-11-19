@@ -16,7 +16,8 @@ it('keeps OAuth model catalogs provider-managed across settings saves and setup'
       models: ['pi/old', 'pi/new'], defaultModel: 'pi/old',
       modelSelectionMode: 'automaticallySyncedFromProvider', createdAt: 1,
     })
-    const connections = [makeConnection('kimi', 'oauth', 'kimi-coding'), makeConnection('api', 'api_key', 'openai')]
+    const connections = [makeConnection('kimi', 'oauth', 'kimi-coding'), makeConnection('api', 'api_key', 'openai'),
+      { ...makeConnection('chatgpt-offline', 'oauth', 'openai-codex'), chatgptCatalogFetchedAt: 10 }]
     writeFileSync(configPath, JSON.stringify({
       workspaces: [{ id: 'ws', name: 'ws', rootPath: workspace, createdAt: 1 }],
       activeWorkspaceId: 'ws', activeSessionId: null, defaultLlmConnection: 'kimi', llmConnections: connections,
@@ -30,6 +31,7 @@ it('keeps OAuth model catalogs provider-managed across settings saves and setup'
       import { MODEL_FETCHERS } from ${JSON.stringify(registryUrl)};
       import { RPC_CHANNELS } from '@craft-agent/shared/protocol';
       MODEL_FETCHERS.pi = { refreshIntervalMs: 0, fetchModels: async connection => {
+        if (connection.slug === 'chatgpt-offline') throw new Error('catalog unavailable');
         if (connection.slug === 'github-copilot' || connection.slug === 'direct-copilot') throw new Error('offline');
         return { models: [
           { id: 'pi/old', name: 'Old', shortName: 'Old', description: '', provider: 'pi', contextWindow: 100000 },
@@ -42,6 +44,12 @@ it('keeps OAuth model catalogs provider-managed across settings saves and setup'
         sessionManager: { refreshConnectionRuntime: async () => {}, reinitializeAuth: async () => {} },
         platform: { logger: { info() {}, warn() {}, error() {}, debug() {} } },
       });
+      const refresh = await handlers.get(RPC_CHANNELS.llmConnections.REFRESH_MODELS)({}, 'chatgpt-offline');
+      if (refresh.success || refresh.error !== 'catalog unavailable') throw new Error('Refresh misreported discovery failure');
+      const read = () => JSON.parse(require('node:fs').readFileSync(${JSON.stringify(configPath)}, 'utf8')).llmConnections.find(c => c.slug === 'chatgpt-offline');
+      if (read().chatgptCatalogFetchedAt !== 10 || read().defaultModel !== 'pi/old') throw new Error('Offline refresh lost the cached catalog');
+      const logout = await handlers.get(RPC_CHANNELS.chatgpt.LOGOUT)({}, 'chatgpt-offline');
+      if (!logout.success || read().chatgptCatalogFetchedAt !== undefined || read().defaultModel === 'pi/old') throw new Error('Logout retained account catalog');
       const save = handlers.get(RPC_CHANNELS.llmConnections.SAVE);
       const stale = ${JSON.stringify(connections[0])};
       stale.models = ['pi/old']; stale.modelSelectionMode = 'userDefined3Tier'; stale.defaultModel = 'pi/new';

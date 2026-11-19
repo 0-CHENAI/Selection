@@ -777,12 +777,13 @@ app.whenReady().then(async () => {
           : registerAllRpcHandlers,
         setSessionEventSink: (sm, sink) => sm.setEventSink(sink),
         initializeSessionManager: (sm) => sm.initialize(),
-        initModelRefreshService: () => initModelRefreshService(async (slug: string) => {
+        initModelRefreshService: () => initModelRefreshService(async (slug, connection) => {
           const { getCredentialManager } = await import('@craft-agent/shared/credentials')
           const manager = getCredentialManager()
           const [apiKey, oauth] = await Promise.all([
             manager.getLlmApiKey(slug).catch(() => null),
-            manager.getLlmOAuth(slug).catch(() => null),
+            (connection.piAuthProvider === 'openai-codex' && connection.authType === 'oauth'
+              ? manager.getFreshChatGptOAuth(slug) : manager.getLlmOAuth(slug)).catch(() => null),
           ])
           return {
             apiKey: apiKey ?? undefined,

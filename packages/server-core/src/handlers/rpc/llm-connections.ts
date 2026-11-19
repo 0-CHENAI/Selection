@@ -22,7 +22,7 @@ import {
   type LlmConnection,
   type LlmConnectionWithStatus,
 } from '@craft-agent/shared/config'
-import { readChatGptPlanDisplayName } from '@craft-agent/shared/auth'
+import { extractChatGptAccountId, readChatGptPlanDisplayName } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
 import {
@@ -47,6 +47,16 @@ import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { randomUUID } from 'node:crypto'
 import { CLIENT_OPEN_EXTERNAL } from '@craft-agent/server-core/transport'
+
+function clearChatGptAccountCatalog(slug: string): void {
+  const connection = getLlmConnection(slug)
+  if (connection?.piAuthProvider !== 'openai-codex' || connection.authType !== 'oauth') return
+  updateLlmConnection(slug, {
+    chatgptCatalogFetchedAt: undefined,
+    models: getDefaultModelsForConnection('pi', 'openai-codex'),
+    defaultModel: getDefaultModelForConnection('pi', 'openai-codex'),
+  })
+}
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
@@ -181,8 +191,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (setup.piAuthProvider && !isCustomEndpointCompat) {
         updates.piAuthProvider = setup.piAuthProvider
         // Only set default models when using standard Pi provider AND user didn't pick explicit models
-        const isCopilotOAuth = connection.authType === 'oauth' && setup.piAuthProvider === 'github-copilot'
-        if (!hasConfiguredBaseUrl && !setup.models?.length && !isCopilotOAuth) {
+        const hasAccountCatalog = connection.authType === 'oauth' && (setup.piAuthProvider === 'github-copilot'
+          || (setup.piAuthProvider === 'openai-codex' && connection.chatgptCatalogFetchedAt !== undefined))
+        if (!hasConfiguredBaseUrl && !setup.models?.length && !hasAccountCatalog) {
           updates.models = getDefaultModelsForConnection('pi', setup.piAuthProvider)
           updates.defaultModel = getDefaultModelForConnection('pi', setup.piAuthProvider)
           updates.modelSelectionMode ??= 'automaticallySyncedFromProvider'
@@ -583,6 +594,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
           && connection.providerType === 'pi' && connection.authType === 'oauth') {
           // Settings saves may carry a stale snapshot while refresh is in flight.
           delete updates.models
+          delete updates.chatgptCatalogFetchedAt
           updates.modelSelectionMode = 'automaticallySyncedFromProvider'
           const modelIds = (existing.models ?? []).map(model => typeof model === 'string' ? model : model.id)
           if (updates.defaultModel !== undefined && !modelIds.includes(updates.defaultModel)
@@ -838,12 +850,19 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
       const tokens = await exchangeChatGptTokens(code, flow.codeVerifier)
 
+      const previous = await credentialManager.getLlmOAuth(flow.connectionSlug)
+      const previousAccount = previous && extractChatGptAccountId(previous.accessToken)
+      const account = extractChatGptAccountId(tokens.accessToken)
       await credentialManager.setLlmOAuth(flow.connectionSlug, {
         accessToken: tokens.accessToken,
         idToken: tokens.idToken,
         refreshToken: tokens.refreshToken,
         expiresAt: tokens.expiresAt,
       })
+
+      if ((!account || previousAccount !== account) && getLlmConnection(flow.connectionSlug)?.chatgptCatalogFetchedAt !== undefined) {
+        clearChatGptAccountCatalog(flow.connectionSlug)
+      }
 
       pendingChatGptFlows.delete(state)
       deps.platform.logger?.info(`[ChatGPT OAuth] Flow complete for ${flow.connectionSlug}`)
@@ -904,6 +923,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     try {
       const credentialManager = getCredentialManager()
       await credentialManager.deleteLlmCredentials(connectionSlug)
+      clearChatGptAccountCatalog(connectionSlug)
       deps.platform.logger?.info('ChatGPT credentials cleared')
       return { success: true }
     } catch (error) {

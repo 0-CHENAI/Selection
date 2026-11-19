@@ -16,7 +16,10 @@ describe('models-pi filtering', () => {
   });
 
   it('exposes the full current ChatGPT OAuth catalog', () => {
-    const ids = getPiModelsForAuthProvider('openai-codex').map(model => model.id);
+    const catalog = getPiModelsForAuthProvider('openai-codex');
+    expect(catalog.find(model => model.id === 'pi/gpt-6.2-sol')?.contextWindow).toBe(500_000);
+    expect(catalog.find(model => model.id === 'pi/gpt-6.2-astra')?.contextWindow).toBe(272_000);
+    const ids = catalog.map(model => model.id);
     expect(ids).toContain('pi/gpt-6.1-sol');
     expect(ids).toContain('pi/gpt-6.1-terra');
   });

@@ -191,6 +191,12 @@ describe('groupConnectionsByProvider', () => {
 })
 
 describe('resolvePickerModels', () => {
+  test('keeps an explicitly empty ChatGPT account catalog empty', () => {
+    expect(resolvePickerModels(conn('chatgpt', 'pi', {
+      piAuthProvider: 'openai-codex', chatgptCatalogFetchedAt: 1, models: [],
+    }))).toEqual([])
+  })
+
   test('returns empty when there is no connection', () => {
     expect(resolvePickerModels(null)).toEqual([])
     expect(resolvePickerModels(undefined)).toEqual([])

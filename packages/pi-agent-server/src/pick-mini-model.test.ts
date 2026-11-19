@@ -45,7 +45,7 @@ describe('pickProviderAppropriateMiniModel', () => {
   });
 
   it('openai-codex: skips denied codex-mini variants, returns first resolvable candidate', () => {
-    // Preferred list now leads with gpt-6.1-sol. Register that id plus an
+    // An older catalog still resolves gpt-6.1-sol. Register that id plus an
     // older id that is no longer preferred so the walk stops on the first hit.
     const registry = createMockRegistry({
       'openai-codex': [
@@ -64,6 +64,11 @@ describe('pickProviderAppropriateMiniModel', () => {
     });
 
     expect(pickProviderAppropriateMiniModel('openai-codex', registry, false)).toBeUndefined();
+  });
+
+  it('openai-codex: uses a newly discovered account model for utility calls', () => {
+    const registry = createMockRegistry({ 'openai-codex': [{ id: 'future-model', name: 'Future' }] });
+    expect(pickProviderAppropriateMiniModel('openai-codex', registry, false, [{ id: 'pi/future-model' }])).toBe('pi/future-model');
   });
 
   it('openai-codex: returns undefined when no preferred candidate resolves', () => {

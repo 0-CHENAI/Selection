@@ -47,6 +47,7 @@ import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { createIsolatedPiSettings, resolveIsolatedAgentDir } from './pi-isolation.ts';
 import { applyProviderEndpointEnv } from './provider-endpoint-env.ts';
+import { withChatGptModels } from '../../shared/src/config/chatgpt-oauth-catalog.ts';
 import { piRuntimeProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 import { homedir } from 'node:os';
 
@@ -800,6 +801,10 @@ async function createAuthenticatedRuntime(): Promise<AuthenticatedRuntime> {
       if (generation !== runtimeConfigGeneration) {
         throw new Error('Runtime configuration changed during initialization');
       }
+      const codexProvider = modelRuntime.getProvider('openai-codex');
+      if (codexProvider && initConfig?.piAuth?.provider === 'openai-codex') {
+        modelRuntime.registerNativeProvider(withChatGptModels(codexProvider, () => initConfig?.customModels));
+      }
       const modelRegistry = new PiModelRegistry(modelRuntime);
 
       const hasCustomEndpoint = !!initConfig?.baseUrl?.trim();
@@ -847,15 +852,15 @@ async function ensureSession(): Promise<AgentSession> {
   // their configured endpoint.
   const resolveAnySearchApiKey = (signal?: AbortSignal) =>
     requestAnySearchApiKey(send, pendingAnySearchApiKeys, 5_000, signal);
+  const searchOptions = () => ({
+    customEndpoint: !!initConfig?.customEndpoint,
+    authType: initConfig?.authType,
+    baseUrl: initConfig?.baseUrl,
+    accountModels: initConfig?.piAuth?.provider === 'openai-codex'
+      ? initConfig.customModels?.map(entry => typeof entry === 'string' ? entry : entry.id) : undefined,
+  });
   const searchProvider = createDynamicSearchProvider(
-    () => initConfig?.piAuth,
-    () => initConfig?.model,
-    resolveAnySearchApiKey,
-    () => ({
-      customEndpoint: !!initConfig?.customEndpoint,
-      authType: initConfig?.authType,
-      baseUrl: initConfig?.baseUrl,
-    }),
+    () => initConfig?.piAuth, () => initConfig?.model, resolveAnySearchApiKey, searchOptions,
   );
   const anySearchFallback = resolveSearchProvider(undefined, undefined, resolveAnySearchApiKey);
   const orderedProviders = createOrderedProviderResolver(
@@ -871,7 +876,7 @@ async function ensureSession(): Promise<AgentSession> {
       return response.apiKey;
     },
     () => resolveSearchProvider(initConfig?.piAuth, initConfig?.model, resolveAnySearchApiKey,
-      { customEndpoint: !!initConfig?.customEndpoint, authType: initConfig?.authType, baseUrl: initConfig?.baseUrl }),
+      searchOptions()),
   );
   const searchTool = createSearchTool(searchProvider, anySearchFallback, orderedProviders);
   const webFetchTool = createWebFetchTool(() =>
@@ -1400,7 +1405,10 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
         // actually works under the user's auth.
         const providerDefault = authProvider === 'anthropic'
           ? undefined
-          : pickProviderAppropriateMiniModel(authProvider, modelRegistry, false);
+          : pickProviderAppropriateMiniModel(authProvider, modelRegistry, false, initConfig.customModels);
+        if (!providerDefault && authProvider === 'openai-codex') {
+          throw new Error('当前 ChatGPT 账户没有可用于此操作的模型，请刷新模型列表。');
+        }
         const fallback = providerDefault ?? getDefaultSummarizationModel();
         debugLog(`[queryLlm] Model ${bareModel} incompatible with ${authProvider} (resolved: ${resolvedProvider}), falling back to ${fallback}`);
         model = fallback;

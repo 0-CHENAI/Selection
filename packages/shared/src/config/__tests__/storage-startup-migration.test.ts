@@ -299,8 +299,8 @@ describe('startup migration (integration)', () => {
   it('merges new Codex catalog ids into a stale full-catalog userDefined list', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
     const catalogIds = getPiModelsForAuthProvider('openai-codex').map(model => model.id)
-    expect(catalogIds).toContain('pi/gpt-6.1-sol')
-    const staleIds = catalogIds.filter(id => id !== 'pi/gpt-6.1-sol')
+    const added = ['pi/gpt-6.2-sol', 'pi/gpt-6.2-astra']
+    const staleIds = catalogIds.filter(id => !added.includes(id))
     expect(staleIds.length).toBeGreaterThan(3)
 
     writeRootConfig(configPath, workspaceRoot, [
@@ -322,9 +322,24 @@ describe('startup migration (integration)', () => {
     const connection = findConnection(configPath, 'chatgpt-plus')
     expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
     const modelIds = modelIdsOf(connection)
-    expect(modelIds).toContain('pi/gpt-6.1-sol')
+    expect(modelIds).toEqual(expect.arrayContaining(added))
     expect(new Set(modelIds)).toEqual(new Set(catalogIds))
     expect(connection.defaultModel).toBe('pi/gpt-5.6-sol')
+  })
+
+  it('preserves a live ChatGPT catalog across offline startup, including an empty account list', () => {
+    for (const models of [['pi/future-model'], []]) {
+      const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+      writeRootConfig(configPath, workspaceRoot, [{
+        slug: 'chatgpt-plus', name: 'ChatGPT Plus', providerType: 'pi', authType: 'oauth',
+        piAuthProvider: 'openai-codex', modelSelectionMode: 'automaticallySyncedFromProvider',
+        createdAt: 1, chatgptCatalogFetchedAt: 2, models, defaultModel: models[0] ?? '',
+      }])
+      runMigration(configDir)
+      const connection = findConnection(configPath, 'chatgpt-plus')
+      expect(modelIdsOf(connection)).toEqual(models)
+      expect(connection.defaultModel).toBe(models[0] ?? '')
+    }
   })
 
   it('restores the full Codex catalog even for a saved OAuth tier list', () => {

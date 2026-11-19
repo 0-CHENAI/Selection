@@ -21,7 +21,7 @@ export interface CredentialBackend {
   get(id: CredentialId): Promise<StoredCredential | null>;
 
   /** Set/update a credential */
-  set(id: CredentialId, credential: StoredCredential): Promise<void>;
+  set(id: CredentialId, credential: StoredCredential, expected?: Pick<StoredCredential, 'value' | 'refreshToken'>): Promise<void>;
 
   /** Delete a credential */
   delete(id: CredentialId): Promise<boolean>;

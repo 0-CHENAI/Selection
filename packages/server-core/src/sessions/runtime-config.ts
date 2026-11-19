@@ -48,6 +48,8 @@ function normalizeCustomModels(connection: LlmConnection): Array<Record<string, 
         id: model.id,
         contextWindow: model.contextWindow,
         maxTokens: model.maxTokens,
+        thinkingMode: model.thinkingMode,
+        supportedThinkingLevels: model.supportedThinkingLevels,
         supportsImages: typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined,
         imageSupport: model.imageSupport === 'auto' || model.imageSupport === 'on' || model.imageSupport === 'off'
           ? model.imageSupport
@@ -109,9 +111,10 @@ export function buildBackendRuntimeSignature(input: BackendRuntimeSignatureInput
                       : undefined,
                   })
                 : undefined,
-              models: normalizeCustomModels(connection),
             }
           : {}),
+        ...((isCompatProvider(connection.providerType) || (connection.authType === 'oauth' && connection.piAuthProvider === 'openai-codex'))
+          && { models: connection.models && normalizeCustomModels(connection) }),
       })
     : null
 

@@ -80,10 +80,13 @@ export function pickProviderAppropriateMiniModel(
   authProvider: string,
   modelRegistry: PiModelRegistry,
   preferCustomEndpoint: boolean,
+  accountModels?: Array<string | { id: string }>,
 ): string | undefined {
-  const preferred = PI_PREFERRED_DEFAULTS[authProvider];
-  if (!preferred || preferred.length === 0) return undefined;
-  for (const candidate of preferred) {
+  const preferred = PI_PREFERRED_DEFAULTS[authProvider] ?? [];
+  const candidates = authProvider === 'openai-codex' && accountModels
+    ? [...preferred, ...accountModels.map(model => typeof model === 'string' ? model : model.id)]
+    : preferred;
+  for (const candidate of candidates) {
     if (isDeniedMiniModelId(candidate, authProvider)) continue;
     const resolved = resolvePiModel(modelRegistry, candidate, authProvider, preferCustomEndpoint);
     if (resolved) return candidate;

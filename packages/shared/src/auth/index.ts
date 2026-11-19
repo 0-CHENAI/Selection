@@ -4,6 +4,7 @@ export * from './oauth-flow-store.ts';
 export * from './callback-page.ts';
 export * from './callback-server.ts';
 export * from './chatgpt-oauth.ts';
+export { extractChatGptAccountId } from './chatgpt-account-id.ts';
 export * from './chatgpt-oauth-config.ts';
 export * from './google-oauth.ts';
 export * from './slack-oauth.ts';

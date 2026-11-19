@@ -13,6 +13,7 @@
  * NEVER import this file from renderer components or from files that the renderer imports.
  */
 
+import { missingChatGptModels } from './chatgpt-oauth-catalog.ts';
 import { getProviders, getModels } from '@earendil-works/pi-ai/compat';
 import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
@@ -95,12 +96,17 @@ function isBareBedrockClaudeModel(modelId: string): boolean {
   return modelId.startsWith('anthropic.claude-');
 }
 
+function getCatalogModels(provider: Parameters<typeof getModels>[0]): Model<Api>[] {
+  const models = getModels(provider);
+  return provider === 'openai-codex' ? [...models, ...missingChatGptModels(models)] : models;
+}
+
 /**
  * Get Pi models for a specific auth provider directly from the Pi SDK.
  */
 export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinition[] {
   try {
-    const models = getModels(toPiProviderId(piAuthProvider) as Parameters<typeof getModels>[0]);
+    const models = getCatalogModels(toPiProviderId(piAuthProvider) as Parameters<typeof getModels>[0]);
     if (models.length > 0) {
       return models
         .filter(m => !isExcludedPiModel(m.id))
@@ -123,7 +129,7 @@ export function getAllPiModels(): ModelDefinition[] {
   const allModels: ModelDefinition[] = [];
   for (const provider of getProviders()) {
     try {
-      const models = getModels(provider);
+      const models = getCatalogModels(provider);
       allModels.push(...models
         .filter(m => !isExcludedPiModel(m.id))
         .map(piModelToDefinition)

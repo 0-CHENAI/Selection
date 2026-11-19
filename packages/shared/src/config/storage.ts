@@ -1828,6 +1828,10 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       && connection.authType === 'oauth'
       && connection.piAuthProvider === 'github-copilot';
 
+    const preserveAccountCatalog = isCopilotOAuth || (connection.providerType === 'pi'
+      && connection.authType === 'oauth' && connection.piAuthProvider === 'openai-codex'
+      && connection.chatgptCatalogFetchedAt !== undefined);
+
     // Note: bedrock connections are migrated to pi + amazon-bedrock by migrateLegacyProviderTypes()
     // before this function runs, so no bedrock-specific normalization needed here.
 
@@ -1856,9 +1860,8 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
 
       if (mode === 'automaticallySyncedFromProvider') {
         const currentIds = normalizeModelIds(connection.models);
-        // A saved Copilot list may reflect account policy; do not replace it
-        // with the SDK's unfiltered static catalog.
-        if (!isCopilotOAuth && (!isCopilot || currentIds.length === 0) && providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
+        // Keep a saved account catalog when the bundled SDK differs.
+        if (!preserveAccountCatalog && (!isCopilot || currentIds.length === 0) && providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
           connection.models = defaultModels;
           changed = true;
         }
@@ -1903,12 +1906,12 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       }
     }
 
-    if (!isCopilotOAuth && defaultModels.length > 0 && (!connection.models || (Array.isArray(connection.models) && connection.models.length === 0))) {
+    if (!preserveAccountCatalog && defaultModels.length > 0 && (!connection.models || (Array.isArray(connection.models) && connection.models.length === 0))) {
       connection.models = defaultModels;
       changed = true;
     }
 
-    if (!isCopilotOAuth && !connection.defaultModel && defaultModel) {
+    if (!preserveAccountCatalog && !connection.defaultModel && defaultModel) {
       connection.defaultModel = defaultModel;
       changed = true;
     }
@@ -2897,6 +2900,7 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     presentationProtocol: updates.presentationProtocol ?? existing.presentationProtocol,
     models: updates.models !== undefined ? updates.models : existing.models,
     defaultModel: updates.defaultModel !== undefined ? updates.defaultModel : existing.defaultModel,
+    chatgptCatalogFetchedAt: 'chatgptCatalogFetchedAt' in updates ? updates.chatgptCatalogFetchedAt : existing.chatgptCatalogFetchedAt,
     modelSelectionMode: updates.modelSelectionMode !== undefined ? updates.modelSelectionMode : existing.modelSelectionMode,
     // Pi auth provider
     piAuthProvider: updates.piAuthProvider !== undefined ? updates.piAuthProvider : existing.piAuthProvider,

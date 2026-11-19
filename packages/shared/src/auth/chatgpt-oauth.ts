@@ -216,6 +216,7 @@ export async function refreshChatGptTokens(
         Accept: 'application/json',
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!response.ok) {
@@ -236,6 +237,8 @@ export async function refreshChatGptTokens(
       refresh_token?: string;
       expires_in?: number;
     };
+
+    if (!data.access_token) throw new Error('Token refresh returned no access token');
 
     onStatus?.('Tokens refreshed successfully!');
 

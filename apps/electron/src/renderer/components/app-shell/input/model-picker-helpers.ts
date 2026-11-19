@@ -69,9 +69,10 @@ export function isPickerModelSelected(currentModel: string, modelId: string): bo
  * Anthropic catalog — that would let users pick Claude IDs on ORDER/OpenAI.
  */
 export function resolvePickerModels(
-  connection: Pick<LlmConnection, 'providerType' | 'models' | 'defaultModel' | 'piAuthProvider'> | null | undefined,
+  connection: Pick<LlmConnection, 'providerType' | 'models' | 'defaultModel' | 'piAuthProvider' | 'chatgptCatalogFetchedAt'> | null | undefined,
 ): Array<ModelDefinition | string> {
   if (!connection) return []
+  if (connection.piAuthProvider === 'openai-codex' && connection.chatgptCatalogFetchedAt !== undefined) return connection.models ?? []
   if (connection.models && connection.models.length > 0) return connection.models
   if (connection.defaultModel) return [connection.defaultModel]
   return getModelsForProviderType(connection.providerType, connection.piAuthProvider)
@@ -168,7 +169,7 @@ export function chosenPickerModelId(
  * display-only so Settings / chat can pick models published after the SDK snapshot.
  */
 export function resolvePickerModelsWithLive(
-  connection: Pick<LlmConnection, 'providerType' | 'models' | 'defaultModel' | 'piAuthProvider'> | null | undefined,
+  connection: Pick<LlmConnection, 'providerType' | 'models' | 'defaultModel' | 'piAuthProvider' | 'chatgptCatalogFetchedAt'> | null | undefined,
   liveOpenRouter?: readonly LivePickerModel[] | null,
 ): Array<ModelDefinition | string> {
   if (isOpenRouterConnection(connection) && liveOpenRouter && liveOpenRouter.length > 0) {

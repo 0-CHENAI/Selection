@@ -1,3 +1,4 @@
+import { fetchChatGptModels } from '../../../../auth/chatgpt-models.ts';
 import type { ProviderDriver, DriverTestConnectionArgs } from '../driver-types.ts';
 import type { ModelDefinition } from '../../../../config/models.ts';
 import { thinkingFieldsFromUpstream } from '../../../thinking-capabilities.ts';
@@ -284,6 +285,9 @@ export const piDriver: ProviderDriver = {
     )),
   }),
   fetchModels: async ({ connection, credentials, timeoutMs }) => {
+    if (connection.piAuthProvider === 'openai-codex' && connection.authType === 'oauth') {
+      return { models: await fetchChatGptModels(credentials.oauthAccessToken, timeoutMs) };
+    }
     // Copilot OAuth: fetch models directly from the Copilot API via HTTP.
     // Uses the GitHub OAuth token (our refreshToken) to exchange for a
     // Copilot API token, then queries GET /models for the live model list.

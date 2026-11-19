@@ -165,7 +165,7 @@ export class SecureStorageBackend implements CredentialBackend {
     });
   }
 
-  async set(id: CredentialId, credential: StoredCredential): Promise<void> {
+  async set(id: CredentialId, credential: StoredCredential, expected?: Pick<StoredCredential, 'value' | 'refreshToken'>): Promise<void> {
     return this.runExclusive(() => {
       // Reload from disk so we merge into the latest file, not a stale cache.
       this.cachedStore = null;
@@ -188,6 +188,9 @@ export class SecureStorageBackend implements CredentialBackend {
       }
 
       const key = credentialIdToAccount(id);
+      // A slow OAuth refresh must not replace a login or recreate a logged-out account.
+      const current = store.credentials[key];
+      if (expected && (current?.value !== expected.value || current.refreshToken !== expected.refreshToken)) return;
       store.credentials[key] = credential;
       store.metadata.updatedAt = Date.now();
 

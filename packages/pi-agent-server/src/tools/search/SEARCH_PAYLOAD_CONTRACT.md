@@ -35,7 +35,7 @@ Required headers:
 - `Content-Type: application/json`
 
 Known-good body fields for search:
-- `model`: active connection model, else `PI_PREFERRED_DEFAULTS['openai-codex']` (leads with `gpt-6.1-sol`)
+- `model`: active connection model, else `PI_PREFERRED_DEFAULTS['openai-codex']` (leads with `gpt-6.2-sol`)
 - `store: false`
 - `stream: true`
 - `instructions: string`
@@ -53,5 +53,5 @@ The backend may reply with either JSON or SSE-like payloads depending on edge be
 If search starts failing again (HTTP or parse path):
 1. Verify this payload shape in tests (`providers/chatgpt.test.ts`).
 2. Compare against current upstream SDK behavior (`@earendil-works/pi-ai` codex responses provider).
-3. Confirm the model is still in the Codex ChatGPT catalog (`gpt-6.1-sol`, `gpt-6-*`, `gpt-5.6-*`). Pi 1.4.0 removed `gpt-5.5` and `gpt-5.3-codex-spark`.
+3. Confirm the model is listed in the current connection’s Codex account catalog. An empty account catalog has no native search candidates. The bundled catalog is used only before a connection catalog is available.
 4. Inspect error fingerprint in thrown error (`tool/model/stream/tool_choice/text.verbosity`) and parse metadata (`content-type`, compact response snippet).

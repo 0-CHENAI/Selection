@@ -205,11 +205,12 @@ const instance = await (async () => {
         setSearchPlatform(platform)
         setImageProcessor(platform.imageProcessor)
       },
-      initModelRefreshService: () => initModelRefreshService(async (slug: string) => {
+      initModelRefreshService: () => initModelRefreshService(async (slug, connection) => {
         const manager = getCredentialManager()
         const [apiKey, oauth] = await Promise.all([
           manager.getLlmApiKey(slug).catch(() => null),
-          manager.getLlmOAuth(slug).catch(() => null),
+          (connection.piAuthProvider === 'openai-codex' && connection.authType === 'oauth'
+            ? manager.getFreshChatGptOAuth(slug) : manager.getLlmOAuth(slug)).catch(() => null),
         ])
         return {
           apiKey: apiKey ?? undefined,

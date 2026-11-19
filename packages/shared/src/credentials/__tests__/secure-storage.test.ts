@@ -53,6 +53,18 @@ describe('SecureStorageBackend LLM key persistence', () => {
     expect((await backend.get(llmKey('conn-a')))?.value).toBe('key-a')
   })
 
+  it('drops late token rotations after a new login or logout', async () => {
+    const { backend } = isolatedBackend()
+    const id = { type: 'llm_oauth' as const, connectionSlug: 'chatgpt' }
+    const first = { value: 'access-a', refreshToken: 'refresh-a' }
+    const second = { value: 'access-b', refreshToken: 'refresh-b' }
+    await backend.set(id, first)
+    await Promise.all([backend.set(id, second), backend.set(id, stored('late-a'), first)])
+    expect(await backend.get(id)).toEqual(second)
+    await Promise.all([backend.delete(id), backend.set(id, stored('late-b'), second)])
+    expect(await backend.get(id)).toBeNull()
+  })
+
   it('deletes one key without removing siblings', async () => {
     const { backend } = isolatedBackend()
     await backend.set(llmKey('conn-a'), stored('key-a'))

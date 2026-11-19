@@ -79,9 +79,6 @@ import {
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
 
-// ChatGPT OAuth token refresh (used when Pi routes ChatGPT auth)
-import { refreshChatGptTokens } from '../auth/chatgpt-oauth.ts';
-
 // Session-scoped tool callbacks (for SubmitPlan, source auth, etc.)
 import {
   registerSessionScopedToolCallbacks,
@@ -149,6 +146,8 @@ import { saveBinaryResponse } from '../utils/binary-detection.ts';
 const PROACTIVE_OAUTH_REFRESH_PROVIDERS: ReadonlySet<string> = new Set(['github-copilot', 'kimi-coding', 'xai']);
 /** Refresh when a token has less than this much validity left. */
 const OAUTH_REFRESH_SKEW_MS = 5 * 60_000;
+
+class ChatGptCredentialError extends Error {}
 
 // ============================================================
 // PiAgent Implementation
@@ -255,6 +254,7 @@ export class PiAgent extends BaseAgent {
   // Callback server port (managed by subprocess)
   private callbackPort: number = 0;
   private modelQuota = '';
+  private chatGptAccessToken?: string;
   private readonly modelRequests = new Map<string, { controller: AbortController; lease?: ModelRequestLease }>();
 
   // State
@@ -530,7 +530,18 @@ export class PiAgent extends BaseAgent {
     if (this.workingDirectoryChanged && !this._isProcessing) await this.refreshWorkingDirectory();
     if (this.subprocessTeardown) await this.subprocessTeardown;
     if (this.subprocessStartup) return this.subprocessStartup;
-    if (this.subprocess && this.subprocessReady) return this.subprocessReady;
+    if (this.subprocess && this.subprocessReady) {
+      await this.subprocessReady;
+      if (this.config.authType === 'oauth' && getBackendRuntime(this.config).piAuthProvider === 'openai-codex') {
+        const auth = await this.getChatGptAuth();
+        if (auth.credential.key !== this.chatGptAccessToken) {
+          this.send({ type: 'token_update', piAuth: auth });
+          this.chatGptAccessToken = auth.credential.key;
+          this.modelQuota = modelQuotaIdentity(auth.provider, getBackendRuntime(this.config).baseUrl, auth.credential);
+        }
+      }
+      return;
+    }
 
     const epoch = ++this.subprocessEpoch;
     let timer: ReturnType<typeof setTimeout>;
@@ -610,6 +621,8 @@ export class PiAgent extends BaseAgent {
     // Custom endpoint mode must NOT fall back to global API keys — keyless local endpoints
     // are valid, and non-local endpoints should fail explicitly instead of using unrelated creds.
     const piAuth = await this.getPiAuth();
+    this.chatGptAccessToken = piAuth?.provider === 'openai-codex' && piAuth.credential.type === 'api_key'
+      ? piAuth.credential.key : undefined;
     const isCustomEndpointMode = !!runtime.customEndpoint;
     const legacyApiKey = (!piAuth && !isCustomEndpointMode) ? await this.getApiKey() : undefined;
     this.modelQuota = modelQuotaIdentity(piAuth?.provider ?? runtime.piAuthProvider ?? this.config.providerType ?? 'pi', runtime.baseUrl,
@@ -859,6 +872,14 @@ export class PiAgent extends BaseAgent {
     this.syncProxyTools();
   }
 
+  private async getChatGptAuth() {
+    const stored = await getCredentialManager().getFreshChatGptOAuth(this.config.connectionSlug || 'pi').catch(error => {
+      throw new ChatGptCredentialError('ChatGPT 登录凭据刷新失败。', { cause: error });
+    });
+    if (!stored?.accessToken) throw new ChatGptCredentialError('请先登录此连接的 ChatGPT 账户。');
+    return { provider: 'openai-codex', credential: { type: 'api_key' as const, key: stored.accessToken } };
+  }
+
   /**
    * Build structured Pi auth from connection config.
    * Returns a provider-aware credential object for the subprocess,
@@ -878,6 +899,7 @@ export class PiAgent extends BaseAgent {
   } | null> {
     const piAuthProvider = getBackendRuntime(this.config).piAuthProvider;
     if (!piAuthProvider) return null;
+    if (piAuthProvider === 'openai-codex' && this.config.authType === 'oauth') return this.getChatGptAuth();
 
     try {
       const credentialManager = getCredentialManager();
@@ -1091,14 +1113,7 @@ export class PiAgent extends BaseAgent {
             expiresAt: newCreds.expires,
           });
         } else {
-          // ChatGPT: use existing refresh utility
-          const newTokens = await refreshChatGptTokens(stored.refreshToken);
-          await credentialManager.setLlmOAuth(slug, {
-            accessToken: newTokens.accessToken,
-            idToken: newTokens.idToken,
-            refreshToken: newTokens.refreshToken,
-            expiresAt: newTokens.expiresAt,
-          });
+          await credentialManager.getFreshChatGptOAuth(slug, this.chatGptAccessToken ?? stored.accessToken);
         }
         this.debug('Token refresh successful');
 
@@ -2816,6 +2831,8 @@ export class PiAgent extends BaseAgent {
       try {
         await this.ensureSubprocess();
       } catch (subprocessError) {
+        // Reauthenticating should resume the same chat and its existing history.
+        if (subprocessError instanceof ChatGptCredentialError) throw subprocessError;
         const errorMsg = subprocessError instanceof Error ? subprocessError.message : String(subprocessError);
         this.debug(`Failed to spawn Pi subprocess: ${errorMsg}`);
 

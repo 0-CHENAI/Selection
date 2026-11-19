@@ -23,6 +23,7 @@ export interface SearchProviderAuthConfig {
 }
 
 export interface SearchProviderOptions {
+  accountModels?: readonly string[];
   /** True when the active model connection targets a user-defined endpoint. */
   customEndpoint?: boolean;
   /** Original connection auth type; OAuth access tokens are not API keys. */
@@ -84,7 +85,7 @@ export function resolveSearchProvider(
       return new ChatGPTBackendSearchProvider(
         accessToken,
         accountId,
-        activeModel ? { model: activeModel } : undefined,
+        { model: activeModel, accountModels: options?.accountModels },
       );
     }
   }

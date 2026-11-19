@@ -155,7 +155,9 @@ export function resolveModelImageSupportFromCatalog(input: {
       learnable: input.endpointSupportsImages,
     }
   }
-  const known = lookupKnownModelImageSupport(input.modelId, modelName)
+  // In auto mode the live catalog may declare a modality for a brand new ID.
+  const known = entry && typeof entry !== 'string' && typeof entry.supportsImages === 'boolean'
+    ? entry.supportsImages : lookupKnownModelImageSupport(input.modelId, modelName)
   if (typeof known === 'boolean') {
     return {
       supportsImages: known,

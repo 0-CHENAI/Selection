@@ -117,12 +117,13 @@ describe('getDefaultModelForConnection', () => {
     expect(defaultModel).toBe('pi/gpt-6.1-sol')
   })
 
-  it('Pi openai-codex default leads with GPT-6.1 Sol from the SDK catalog', () => {
+  it('Pi openai-codex default leads with GPT-6.2 Sol from the OAuth catalog', () => {
     const defaultModel = getDefaultModelForConnection('pi', 'openai-codex')
     const models = getDefaultModelsForConnection('pi', 'openai-codex')
     const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
-    expect(defaultModel).toBe('pi/gpt-6.1-sol')
-    expect(modelIds[0]).toBe('pi/gpt-6.1-sol')
+    expect(defaultModel).toBe('pi/gpt-6.2-sol')
+    expect(modelIds[0]).toBe(defaultModel)
+    expect(modelIds).toContain('pi/gpt-6.2-astra')
     expect(modelIds).toContain('pi/gpt-6-sol')
     expect(modelIds).toContain('pi/gpt-5.6-sol')
     // Pi 1.4.0 removed these from the Codex catalog. They stay available on

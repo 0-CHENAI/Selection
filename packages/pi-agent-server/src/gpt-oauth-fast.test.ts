@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-codex-responses'
+import { ModelRuntime } from '@earendil-works/pi-coding-agent'
+import { InMemoryCredentialStore, InMemoryModelsStore } from '@earendil-works/pi-ai'
+import { withChatGptModels } from '../../shared/src/config/chatgpt-oauth-catalog'
 import { streamSimple as streamOpenAiCompletions } from '@earendil-works/pi-ai/api/openai-completions'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { installFastServiceTier } from './gpt-oauth-fast'
@@ -31,10 +34,22 @@ test('Fast eligibility stays provider and model specific', () => {
   expect(gptOAuthServiceTier(undefined, model.id, model.provider)).toBe('default')
 })
 
-test('actual OAuth SDK sends Fast/default without changing model or reasoning, preserving payload hooks', async () => {
+test.each(['gpt-6.2-sol', 'gpt-6.2-astra', 'future-model'])('OAuth runtime sends %s with the selected tier and reasoning', async (id) => {
+  const credentials = new InMemoryCredentialStore()
+  await credentials.modify('openai-codex', async () => ({ type: 'oauth', access: token, refresh: 'fixture', expires: Date.now() + 3_600_000 }))
+  const runtime = await ModelRuntime.create({
+    credentials, modelsStore: new InMemoryModelsStore(),
+    modelsPath: null, allowModelNetwork: false,
+  })
+  const provider = runtime.getProvider('openai-codex')!
+  runtime.registerNativeProvider(withChatGptModels(provider, () => [{ id: 'pi/' + id, contextWindow: 200_000 }]))
+  const model = runtime.getModel('openai-codex', id)!
+  expect(runtime.getModel('openai-codex', 'gpt-6.1-sol')).toBeUndefined()
+  expect(model.api).toBe('openai-codex-responses')
+  expect(runtime.getModels('openai-codex').filter(item => item.id === id)).toHaveLength(1)
   const requests: Record<string, unknown>[] = []
   let enabled = false
-  const session = { agent: { streamFunction: streamSimple } } as unknown as AgentSession
+  const session = { agent: { streamFunction: runtime.streamSimple.bind(runtime) } } as unknown as AgentSession
   installFastServiceTier(session, () => enabled)
   for (const next of [false, true, false]) {
     enabled = next
@@ -50,12 +65,29 @@ test('actual OAuth SDK sends Fast/default without changing model or reasoning, p
     })
     expect((await stream.result()).errorMessage).toBeUndefined()
   }
-  expect(requests.map(body => body.service_tier)).toEqual(['default', 'priority', 'default'])
+  expect(requests.map(body => body.service_tier)).toEqual(id === 'future-model'
+    ? [undefined, undefined, undefined] : ['default', 'priority', 'default'])
   for (const body of requests) {
     expect(body.model).toBe(model.id)
     expect(body.reasoning).toMatchObject({ effort: 'high' })
     expect(body.metadata).toEqual({ fixture: 'preserved' })
   }
+})
+
+test('a running OAuth registry follows account changes including an empty catalog', async () => {
+  const runtime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(), modelsStore: new InMemoryModelsStore(),
+    modelsPath: null, allowModelNetwork: false,
+  })
+  let account: string[] | undefined
+  const provider = runtime.getProvider('openai-codex')!
+  runtime.registerNativeProvider(withChatGptModels(provider, () => account))
+  expect(runtime.getModel('openai-codex', 'gpt-6.2-sol')).toBeDefined()
+  account = ['pi/new-account-model']
+  expect(runtime.getModel('openai-codex', 'gpt-6.2-sol')).toBeUndefined()
+  expect(runtime.getModel('openai-codex', 'new-account-model')?.api).toBe('openai-codex-responses')
+  account = []
+  expect(runtime.getModels('openai-codex')).toEqual([])
 })
 
 test('xAI Grok sends the supported priority service tier', async () => {

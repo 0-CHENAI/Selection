@@ -77,6 +77,15 @@ describe('buildBackendRuntimeSignature', () => {
     expect(disabled).not.toBe(enabled)
   })
 
+  it('updates a running ChatGPT session when its account catalog or reasoning capabilities change', () => {
+    const account: LlmConnection = { slug: 'chat', name: 'Chat', providerType: 'pi',
+      authType: 'oauth', piAuthProvider: 'openai-codex', createdAt: 1, models: ['pi/new'] }
+    expect(sig(account)).not.toBe(sig({ ...account, models: [] }))
+    expect(sig({ ...account, models: undefined })).not.toBe(sig({ ...account, models: [] }))
+    expect(sig(account)).not.toBe(sig({ ...account, models: [{ id: 'pi/new', thinkingMode: 'unsupported' } as never] }))
+    expect(sig(account)).toBe(sig({ ...account, chatgptCatalogFetchedAt: 100 }))
+  })
+
   it('ignores non-runtime metadata such as lastUsedAt', () => {
     expect(sig({ ...baseCompat, lastUsedAt: 1 })).toBe(sig({ ...baseCompat, lastUsedAt: 2 }))
   })

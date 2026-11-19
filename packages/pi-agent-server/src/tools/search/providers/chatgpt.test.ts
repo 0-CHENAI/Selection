@@ -93,7 +93,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledHeaders['chatgpt-account-id']).toBe('acc_12345');
     expect(calledHeaders.originator).toBe('pi');
     expect(calledHeaders['User-Agent']).toBe(formatUserAgent());
-    expect(calledBody.model).toBe('gpt-6.1-sol');
+    expect(calledBody.model).toBe('gpt-6.2-sol');
     expect(calledBody.store).toBe(false);
     expect(calledBody.stream).toBe(true);
     expect(calledBody.instructions).toContain('web search assistant');
@@ -378,6 +378,11 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledModel).toBe('gpt-5.6-terra');
   });
 
+  it('does not try static models when the account list is empty', async () => {
+    await expect(new ChatGPTBackendSearchProvider('token', 'account', { model: 'old', accountModels: [] })
+      .search('query', 3)).rejects.toThrow('no available search models');
+  });
+
   it('moves to the next model when the account rejects the active model', async () => {
     const attempts: Array<{ model: string; tool: string }> = [];
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -400,10 +405,9 @@ describe('ChatGPTBackendSearchProvider', () => {
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }) as typeof fetch;
 
-    const results = await new ChatGPTBackendSearchProvider('token', 'acc_123', { model: 'gpt-5.6-sol' })
+    const results = await new ChatGPTBackendSearchProvider('token', 'acc_123', { model: 'gpt-5.6-sol', accountModels: ['pi/future-model', 'pi/gpt-5.6-sol'] })
       .search('query', 3);
-    expect(attempts).toHaveLength(2);
-    expect(attempts[1]?.model).not.toBe(attempts[0]?.model);
+    expect(attempts.map(attempt => attempt.model)).toEqual(['gpt-5.6-sol', 'future-model']);
     expect(attempts[1]?.tool).toBe('web_search');
     expect(results[0]?.url).toBe('https://recovered.example/');
   });

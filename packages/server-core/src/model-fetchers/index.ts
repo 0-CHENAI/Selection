@@ -10,8 +10,9 @@
  * 3. MODEL_REGISTRY — hardcoded offline seed data, last resort
  */
 
+import { isDeepStrictEqual } from 'node:util'
 import type { ModelFetcherMap, ModelFetcherCredentials, FetchableProvider } from '@craft-agent/shared/config'
-import type { ModelDefinition } from '@craft-agent/shared/config'
+import type { LlmConnection, ModelDefinition } from '@craft-agent/shared/config'
 import {
   getLlmConnections,
   getLlmConnection,
@@ -23,14 +24,45 @@ import {
 import { MODEL_FETCHERS } from './registry'
 import { handlerLog } from './runtime'
 
-/** Copilot models are server-managed — refresh every 10 minutes to pick up policy changes. */
-const COPILOT_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+/** Poll account-managed catalogs for model and policy changes. */
+const ACCOUNT_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+
+function hasAccountCatalog(connection: LlmConnection): boolean {
+  return connection.providerType === 'pi' && connection.authType === 'oauth'
+    && (connection.piAuthProvider === 'openai-codex' || connection.piAuthProvider === 'github-copilot')
+}
+
+// Model availability belongs to the account. Keep local overrides only for IDs
+// that are still visible, using the settings reread after the network request.
+function mergeChatGptModelSettings(models: ModelDefinition[], stored: LlmConnection['models']): ModelDefinition[] {
+  const previous = new Map((stored ?? []).filter((item): item is ModelDefinition => typeof item !== 'string')
+    .map(item => [item.id, item]))
+  return models.map(model => {
+    const local = previous.get(model.id)
+    if (!local) return model
+    if (local.imageSupport === 'on' || local.imageSupport === 'off') {
+      model = { ...model, imageSupport: local.imageSupport, supportsImages: local.imageSupport === 'on' }
+    } else if (local.imageSupport === 'auto' && local.learnedSupportsImages !== undefined) {
+      model = { ...model, imageSupport: 'auto', learnedSupportsImages: local.learnedSupportsImages }
+    }
+    if (local.thinkingSource === 'explicit') {
+      const { thinkingMode, supportedThinkingLevels, supportsThinking, ...other } = model
+      return {
+        ...other, thinkingSource: 'explicit',
+        ...(local.thinkingMode !== undefined && { thinkingMode: local.thinkingMode }),
+        ...(local.supportedThinkingLevels !== undefined && { supportedThinkingLevels: local.supportedThinkingLevels }),
+        ...(local.supportsThinking !== undefined && { supportsThinking: local.supportsThinking }),
+      }
+    }
+    return model
+  })
+}
 
 // ============================================================
 // Types
 // ============================================================
 
-type CredentialResolver = (slug: string) => Promise<ModelFetcherCredentials>
+type CredentialResolver = (slug: string, connection: LlmConnection) => Promise<ModelFetcherCredentials>
 
 // ============================================================
 // ModelRefreshService
@@ -38,7 +70,7 @@ type CredentialResolver = (slug: string) => Promise<ModelFetcherCredentials>
 
 class ModelRefreshService {
   private timers = new Map<string, ReturnType<typeof setInterval>>()
-  private inFlight = new Map<string, Promise<void>>()
+  private inFlight = new Map<string, Promise<string | void>>()
   private stopped = false
 
   constructor(
@@ -51,7 +83,7 @@ class ModelRefreshService {
    * Deduplicates concurrent calls for the same slug — if a refresh is already
    * in progress, callers share the same promise instead of racing.
    */
-  async refreshConnection(slug: string): Promise<void> {
+  async refreshConnection(slug: string): Promise<string | void> {
     const existing = this.inFlight.get(slug)
     if (existing) return existing
 
@@ -68,7 +100,7 @@ class ModelRefreshService {
    * Preserves user's defaultModel if still valid.
    * Updates connection.models in storage on success.
    */
-  private async _doRefresh(slug: string): Promise<void> {
+  private async _doRefresh(slug: string): Promise<string | void> {
     let connection = getLlmConnection(slug)
     if (!connection) {
       handlerLog.warn(`Model refresh: connection not found: ${slug}`)
@@ -95,11 +127,12 @@ class ModelRefreshService {
 
     let newModels: ModelDefinition[] | null = null
     let serverDefault: string | undefined
+    let discoveryError: string | undefined
     let usedCredentials: ModelFetcherCredentials | undefined
 
     // Layer 1: Provider API/SDK
     try {
-      const credentials = await this.getCredentials(slug)
+      const credentials = await this.getCredentials(slug, connection)
       usedCredentials = credentials
       handlerLog.info(`Model refresh [${slug}]: fetching (provider=${connection.providerType}, piAuth=${connection.piAuthProvider}, hasOAuthRefresh=${!!credentials.oauthRefreshToken}, hasOAuthAccess=${!!credentials.oauthAccessToken})`)
       const result = await fetcher.fetchModels(connection, credentials)
@@ -108,12 +141,14 @@ class ModelRefreshService {
       handlerLog.info(`Model refresh [${slug}]: fetched ${newModels.length} models from provider: ${newModels.map(m => m.id).join(', ')}`)
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
+      if (connection.piAuthProvider === 'openai-codex' && hasAccountCatalog(connection)) discoveryError = msg
       handlerLog.warn(`Model refresh [${slug}]: provider fetch failed: ${msg}`)
     }
 
-    if (newModels && isCopilot && connection.authType === 'oauth') {
+    const accountCatalog = hasAccountCatalog(connection)
+    if (newModels && accountCatalog) {
       try {
-        const currentCredentials = await this.getCredentials(slug)
+        const currentCredentials = await this.getCredentials(slug, connection)
         if ((usedCredentials?.oauthRefreshToken || usedCredentials?.oauthAccessToken)
           !== (currentCredentials.oauthRefreshToken || currentCredentials.oauthAccessToken)) {
           handlerLog.info(`Model refresh [${slug}]: credentials changed during fetch; discarding result`)
@@ -138,16 +173,25 @@ class ModelRefreshService {
     }
     connection = latest
 
+    const hasLiveChatGptCatalog = accountCatalog && connection.piAuthProvider === 'openai-codex' && newModels !== null
+    if (hasLiveChatGptCatalog && newModels) {
+      newModels = mergeChatGptModelSettings(newModels, connection.models)
+      const validDefault = newModels.length ? newModels.some(model => model.id === connection.defaultModel) : !connection.defaultModel
+      if (validDefault && connection.chatgptCatalogFetchedAt !== undefined
+        && connection.modelSelectionMode === 'automaticallySyncedFromProvider' && isDeepStrictEqual(connection.models, newModels)) return
+    }
+    const chatgptLive = hasLiveChatGptCatalog ? { chatgptCatalogFetchedAt: Date.now() } : {}
+
     // Layer 2: Persisted connection.models (keep what we have)
     if (!newModels && connection.models && connection.models.length > 0) {
       handlerLog.warn(`Model refresh [${slug}]: keeping ${connection.models.length} stale persisted models (live fetch failed)`)
-      return // Nothing to update
+      return discoveryError
     }
 
-    // An unfiltered SDK catalog cannot represent Copilot account policy.
-    if (!newModels && isCopilot && connection.authType === 'oauth') {
-      handlerLog.warn(`Model refresh [${slug}]: no cached Copilot policy catalog available`)
-      return
+    // An empty account catalog must survive a failed refresh.
+    if (!newModels && accountCatalog && (isCopilot || connection.chatgptCatalogFetchedAt !== undefined)) {
+      handlerLog.warn(`Model refresh [${slug}]: keeping account catalog after failed refresh`)
+      return discoveryError
     }
 
     // Layer 3: MODEL_REGISTRY hardcoded fallback
@@ -159,8 +203,9 @@ class ModelRefreshService {
       }
     }
 
-    if (newModels && newModels.length === 0 && isCopilot && connection.authType === 'oauth') {
+    if (newModels && newModels.length === 0 && accountCatalog) {
       updateLlmConnection(slug, {
+        ...chatgptLive,
         models: [],
         defaultModel: '',
         modelSelectionMode: 'automaticallySyncedFromProvider',
@@ -170,7 +215,7 @@ class ModelRefreshService {
 
     if (!newModels || newModels.length === 0) {
       handlerLog.warn(`Model refresh [${slug}]: no models available from any source`)
-      return
+      return discoveryError
     }
 
     // For Pi API-key connections with explicit user-owned selection,
@@ -195,12 +240,14 @@ class ModelRefreshService {
       : (serverDefault && newModels.some(model => model.id === serverDefault) ? serverDefault : newModels[0]?.id)
 
     updateLlmConnection(slug, {
+      ...chatgptLive,
       models: newModels,
       ...(connection.providerType === 'pi' && connection.authType === 'oauth'
         ? { modelSelectionMode: 'automaticallySyncedFromProvider' as const }
         : {}),
       ...(newDefault && !stillValid ? { defaultModel: newDefault } : {}),
     })
+    return discoveryError
   }
 
   /**
@@ -224,12 +271,8 @@ class ModelRefreshService {
         handlerLog.warn(`Initial model refresh failed for ${conn.slug}: ${err instanceof Error ? err.message : err}`)
       })
 
-      // Set up periodic refresh: Copilot connections get their own interval
-      // (models are server-managed by GitHub policy), other providers use
-      // the fetcher's generic interval (0 = no periodic refresh for static SDK models).
-      const isCopilot = conn.providerType === 'pi' && conn.piAuthProvider === 'github-copilot'
-      if (isCopilot) {
-        this.startTimer(conn.slug, COPILOT_REFRESH_INTERVAL_MS)
+      if (hasAccountCatalog(conn)) {
+        this.startTimer(conn.slug, ACCOUNT_REFRESH_INTERVAL_MS)
       } else if (fetcher.refreshIntervalMs > 0) {
         this.startTimer(conn.slug, fetcher.refreshIntervalMs)
       }
@@ -258,7 +301,7 @@ class ModelRefreshService {
     // and then fetching again prevents deduplication from losing the re-auth.
     const pending = this.inFlight.get(slug)
     if (pending) await pending
-    await this.refreshConnection(slug)
+    const discoveryError = await this.refreshConnection(slug)
 
     // Ensure periodic timer is running
     const connection = getLlmConnection(slug)
@@ -266,12 +309,12 @@ class ModelRefreshService {
 
     const providerType = connection.providerType as FetchableProvider
     const fetcher = this.fetchers[providerType]
-    const isCopilot = connection.providerType === 'pi' && connection.piAuthProvider === 'github-copilot'
-    if (isCopilot && !this.timers.has(slug)) {
-      this.startTimer(slug, COPILOT_REFRESH_INTERVAL_MS)
+    if (hasAccountCatalog(connection) && !this.timers.has(slug)) {
+      this.startTimer(slug, ACCOUNT_REFRESH_INTERVAL_MS)
     } else if (fetcher && fetcher.refreshIntervalMs > 0 && !this.timers.has(slug)) {
       this.startTimer(slug, fetcher.refreshIntervalMs)
     }
+    if (discoveryError) throw new Error(discoveryError)
   }
 
   /**

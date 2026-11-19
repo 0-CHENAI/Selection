@@ -16,6 +16,8 @@ import { stripPiPrefix } from '../../../custom-endpoint-models.ts';
 import { formatUserAgent } from '@earendil-works/pi-ai';
 import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-connections.ts';
 
+export { extractChatGptAccountId } from '../../../../../shared/src/auth/chatgpt-account-id.ts';
+
 /**
  * Codex backend request contract (search path):
  * - model: active connection first, then bounded shared-catalog fallbacks
@@ -30,12 +32,11 @@ import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-conn
  *   - ../SEARCH_PAYLOAD_CONTRACT.md
  */
 const CODEX_SEARCH_MODELS: readonly string[] = PI_PREFERRED_DEFAULTS['openai-codex'] ?? [];
-const FALLBACK_SEARCH_MODEL = CODEX_SEARCH_MODELS[0] ?? 'gpt-6.1-sol';
+const FALLBACK_SEARCH_MODEL = CODEX_SEARCH_MODELS[0] ?? 'gpt-6.2-sol';
 /** Same originator the Pi SDK sends on Codex Responses requests. */
 const CODEX_ORIGINATOR = 'pi';
 const MAX_MODEL_CANDIDATES = 4;
 const API_BASE = 'https://chatgpt.com/backend-api/codex';
-const JWT_CLAIM_PATH = 'https://api.openai.com/auth';
 const ERROR_TEXT_LIMIT = 600;
 const SEARCH_INSTRUCTIONS = 'You are a web search assistant. Return concise, factual search results with source citations when available.';
 const SEARCH_TEXT_VERBOSITY = 'medium';
@@ -50,36 +51,19 @@ const SEARCH_ATTEMPTS: SearchAttempt[] = [
   { toolType: 'web_search_preview', label: 'web_search_preview' },
 ];
 
-/**
- * Extract the `chatgpt_account_id` from a ChatGPT OAuth access token (JWT).
- * Returns null if the token is malformed or the claim is missing.
- */
-export function extractChatGptAccountId(accessToken: string): string | null {
-  try {
-    const parts = accessToken.split('.');
-    if (parts.length !== 3) return null;
-
-    const payload = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
-    const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
-
-    return typeof accountId === 'string' && accountId.length > 0 ? accountId : null;
-  } catch {
-    return null;
-  }
-}
-
 export class ChatGPTBackendSearchProvider implements WebSearchProvider {
   name = 'ChatGPT';
 
   constructor(
     private accessToken: string,
     private accountId: string,
-    private options?: { model?: string },
+    private options?: { model?: string; accountModels?: readonly string[] },
   ) {}
 
   async search(query: string, count: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
     const attemptErrors: string[] = [];
     const models = this.candidateModels();
+    if (!models.length) throw new Error('ChatGPT account has no available search models');
 
     for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
       const model = models[modelIndex]!;
@@ -160,18 +144,11 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
   }
 
   private candidateModels(): string[] {
-    const ordered = [this.options?.model, ...CODEX_SEARCH_MODELS, FALLBACK_SEARCH_MODEL];
-    const seen = new Set<string>();
-    const models: string[] = [];
-    for (const raw of ordered) {
-      if (!raw) continue;
-      const bare = stripPiPrefix(raw);
-      if (bare && !seen.has(bare)) {
-        seen.add(bare);
-        models.push(bare);
-      }
-    }
-    return models.length > 0 ? models.slice(0, MAX_MODEL_CANDIDATES) : [FALLBACK_SEARCH_MODEL];
+    const account = this.options?.accountModels?.map(stripPiPrefix);
+    const active = this.options?.model && stripPiPrefix(this.options.model);
+    const candidates = account ?? [...CODEX_SEARCH_MODELS, FALLBACK_SEARCH_MODEL];
+    const ordered = active && (!account || account.includes(active)) ? [active, ...candidates] : candidates;
+    return [...new Set(ordered)].filter(Boolean).slice(0, MAX_MODEL_CANDIDATES);
   }
 }
 

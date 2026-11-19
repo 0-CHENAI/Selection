@@ -17,6 +17,7 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
     })
     const connections = [
       connection('chatgpt', 'openai-codex'),
+      connection('race-chatgpt-settings', 'openai-codex'),
       connection('kimi', 'kimi-coding'),
       connection('xai', 'xai'),
       connection('api-key', 'openai', 'api_key'),
@@ -49,6 +50,9 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
         fetchModels: async connection => {
           if (connection.slug === 'copilot-none') return { models: [] };
           if (connection.slug.startsWith('copilot-') && connection.slug !== 'copilot-online') throw new Error('offline');
+          if (connection.slug === 'race-chatgpt-settings') updateLlmConnection(connection.slug, {
+            models: [{id: 'pi/old', imageSupport: 'off', thinkingSource: 'explicit', thinkingMode: 'unsupported'}],
+          });
           if (connection.slug === 'race-default') updateLlmConnection(connection.slug, { defaultModel: 'pi/new' });
           if (connection.slug === 'race-api') updateLlmConnection(connection.slug, { models: ['pi/user'], defaultModel: 'pi/user', modelSelectionMode: 'userDefined3Tier' });
           if (connection.slug === 'race-provider') updateLlmConnection(connection.slug, { piAuthProvider: 'kimi-coding' });
@@ -84,6 +88,10 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
     expect(stored.find((entry: { slug: string }) => entry.slug === 'api-key').models).toEqual(['pi/old'])
     expect(stored.find((entry: { slug: string }) => entry.slug === 'copilot-offline').models).toEqual(['pi/policy-cached'])
     expect(stored.find((entry: { slug: string }) => entry.slug === 'copilot-empty').models).toEqual([])
+    const preferences = stored.find((entry: { slug: string }) => entry.slug === 'race-chatgpt-settings')
+    expect(preferences.models[0]).toMatchObject({ id: 'pi/old', supportsImages: false, imageSupport: 'off',
+      thinkingSource: 'explicit', thinkingMode: 'unsupported', contextWindow: 100000 })
+    expect(preferences.models[1].id).toBe('pi/new')
     const none = stored.find((entry: { slug: string }) => entry.slug === 'copilot-none')
     expect(none.models).toEqual([])
     expect(none.defaultModel).toBe('')

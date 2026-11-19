@@ -11,7 +11,10 @@ import type { LlmAuthType, LlmProviderType } from '../config/llm-connections.ts'
 import { SecureStorageBackend } from './backends/secure-storage.ts';
 import { debug } from '../utils/debug.ts';
 
+type StoredOAuth = NonNullable<Awaited<ReturnType<CredentialManager['getLlmOAuth']>>>;
+
 export class CredentialManager {
+  private chatgptRefreshes = new Map<string, { access: string; refresh: string; result: Promise<StoredOAuth | null> }>();
   private backends: CredentialBackend[] = [];
   private writeBackend: CredentialBackend | null = null;
   private initialized = false;
@@ -130,14 +133,14 @@ export class CredentialManager {
    * Set a credential using the write backend.
    * Automatically initializes if needed.
    */
-  async set(id: CredentialId, credential: StoredCredential): Promise<void> {
+  async set(id: CredentialId, credential: StoredCredential, expected?: Pick<StoredCredential, 'value' | 'refreshToken'>): Promise<void> {
     await this.ensureInitialized();
 
     if (!this.writeBackend) {
       throw new Error('No writable credential backend available');
     }
 
-    await this.writeBackend.set(id, credential);
+    await this.writeBackend.set(id, credential, expected);
     debug(`[CredentialManager] Saved ${id.type} to ${this.writeBackend.name}`);
   }
 
@@ -408,6 +411,30 @@ export class CredentialManager {
     };
   }
 
+  /** Share token rotation between background model discovery and chat requests. */
+  async getFreshChatGptOAuth(slug: string, rejectedAccessToken?: string): Promise<StoredOAuth | null> {
+    const stored = await this.getLlmOAuth(slug);
+    if (!stored?.refreshToken) return stored;
+    const pending = this.chatgptRefreshes.get(slug);
+    if (pending?.access === stored.accessToken && pending.refresh === stored.refreshToken) return pending.result;
+    if (stored.accessToken !== rejectedAccessToken && (!stored.expiresAt || stored.expiresAt > Date.now() + 60_000)) {
+      return stored;
+    }
+    const refreshToken = stored.refreshToken;
+    const refresh = (async () => {
+      const { refreshChatGptTokens } = await import('../auth/chatgpt-oauth.ts');
+      const fresh = await refreshChatGptTokens(refreshToken);
+      await this.setLlmOAuth(slug, { ...fresh, idToken: fresh.idToken ?? stored.idToken }, stored);
+      return this.getLlmOAuth(slug);
+    })();
+    this.chatgptRefreshes.set(slug, { access: stored.accessToken, refresh: refreshToken, result: refresh });
+    try {
+      return await refresh;
+    } finally {
+      if (this.chatgptRefreshes.get(slug)?.result === refresh) this.chatgptRefreshes.delete(slug);
+    }
+  }
+
   /**
    * Set OAuth token for an LLM connection.
    * @param connectionSlug - The connection slug
@@ -419,13 +446,13 @@ export class CredentialManager {
     expiresAt?: number;
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
-  }): Promise<void> {
+  }, expected?: StoredOAuth): Promise<void> {
     await this.set({ type: 'llm_oauth', connectionSlug }, {
       value: credentials.accessToken,
       refreshToken: credentials.refreshToken,
       expiresAt: credentials.expiresAt,
       idToken: credentials.idToken,
-    });
+    }, expected && { value: expected.accessToken, refreshToken: expected.refreshToken });
   }
 
   /**

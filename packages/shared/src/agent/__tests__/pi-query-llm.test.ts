@@ -7,7 +7,8 @@
  * test below ensures the full request shape propagates end-to-end and fails loudly
  * if someone adds a new LLMQueryRequest field and forgets to plumb it through.
  */
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
+import { getCredentialManager } from '../../credentials/manager.ts';
 import { PiAgent } from '../pi-agent.ts';
 import type { BackendConfig } from '../backend/types.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../llm-tool.ts';
@@ -54,6 +55,31 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
+  it('updates a reused ChatGPT worker on account change and blocks it after logout', async () => {
+    const agent = new PiAgent(createConfig({ authType: 'oauth', runtime: { piAuthProvider: 'openai-codex' } }));
+    const internal = agent as any;
+    const sent: unknown[] = [];
+    internal.subprocess = {};
+    internal.subprocessReady = Promise.resolve();
+    internal.send = (message: unknown) => sent.push(message);
+    const credentials = spyOn(getCredentialManager(), 'getFreshChatGptOAuth');
+    try {
+      credentials.mockResolvedValue({ accessToken: 'first' });
+      await internal.ensureSubprocess();
+      await internal.ensureSubprocess();
+      credentials.mockResolvedValue({ accessToken: 'second' });
+      await internal.ensureSubprocess();
+      credentials.mockResolvedValue(null);
+      await expect(internal.ensureSubprocess()).rejects.toThrow('登录');
+      expect(sent).toEqual(['first', 'second'].map(key => ({ type: 'token_update',
+        piAuth: { provider: 'openai-codex', credential: { type: 'api_key', key } } })));
+    } finally {
+      credentials.mockRestore();
+      internal.subprocess = null;
+      agent.destroy();
+    }
+  });
+
   it('cancels the correlated subprocess request and discards a late result', async () => {
     const agent = new PiAgent(createConfig()); const { sent } = installFakeSubprocess(agent);
     const controller = new AbortController();

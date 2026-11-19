@@ -75,6 +75,15 @@ describe('resolveModelImageSupportFromCatalog precedence', () => {
     })
   })
 
+  it('uses account modalities for unknown IDs and gives learned rejections priority', () => {
+    const models: ModelImageRecord[] = [
+      { id: 'pi/future-text', imageSupport: 'auto', supportsImages: false },
+      { id: 'pi/future-vision', imageSupport: 'auto', supportsImages: true, learnedSupportsImages: false },
+    ]
+    expect(resolution({ models }, 'future-text')).toMatchObject({ supportsImages: false, source: 'known' })
+    expect(resolution({ models }, 'future-vision')).toMatchObject({ supportsImages: false, source: 'learned' })
+  })
+
   it('lets a learned rejection beat the known vision table', () => {
     const conn = {
       ...PI,

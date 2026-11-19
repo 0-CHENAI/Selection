@@ -263,7 +263,7 @@ export function fallbackThinkingCapability(modelId: string): ThinkingCapability 
   if (/^gpt-5\.2-chat/.test(id)) return levelsCapability(['medium'], 'static')
   if (/gpt-5\.(2|4|5)-pro/.test(id)) return levelsCapability(['medium', 'high', 'xhigh'], 'static')
   if (/^gpt-5\.(2|3|4|5)/.test(id)) return levelsCapability(['off', 'low', 'medium', 'high', 'xhigh'], 'static')
-  if (/^gpt-6-astra|^gpt-6\.1/.test(id)) return levelsCapability(['low', 'medium', 'high', 'xhigh', 'max'], 'static')
+  if (/^gpt-6-astra|^gpt-6\.[12]($|[-.])/.test(id)) return levelsCapability(['low', 'medium', 'high', 'xhigh', 'max'], 'static')
   if (/^gpt-5\.6|^gpt-6/.test(id)) return levelsCapability(['off', 'low', 'medium', 'high', 'xhigh', 'max'], 'static')
   if (/^o[134]($|[-.])/.test(id)) return levelsCapability(['low', 'medium', 'high'], 'static')
 
