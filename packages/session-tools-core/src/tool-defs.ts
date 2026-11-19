@@ -1002,6 +1002,12 @@ export function getToolDefsAsJsonSchema(opts?: {
     // Explicit `as any` avoids TS2589 ("type instantiation is excessively deep")
     // caused by zodToJsonSchema inferring deep generic chains from union schemas.
     const jsonSchema = zodToJsonSchema(def.inputSchema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
+    // Zod emits object unions (e.g. office_business) as a bare anyOf.
+    // Function tools need an explicit object root even when every branch implies it.
+    if (!jsonSchema.type && Array.isArray(jsonSchema.anyOf) && jsonSchema.anyOf.length > 0
+      && jsonSchema.anyOf.every(branch => branch?.type === 'object')) {
+      jsonSchema.type = 'object';
+    }
     // Strip metadata not needed by MCP/Pi consumers
     delete jsonSchema.$schema;
     delete jsonSchema.additionalProperties;

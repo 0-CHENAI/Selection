@@ -5,13 +5,13 @@ import { join, resolve } from 'node:path'
 
 /**
  * Official Kimi Code (Pi 1.3.0+) speaks OpenAI Chat Completions. This replays
- * a local stream through the production fetch interceptor with an oauth
- * credential, so CI does not need a real Kimi account.
+ * a local stream through the production fetch interceptor with both supported
+ * credential types, so CI does not need a real Kimi account.
  *
  * The Anthropic single-LF framer stays covered by kimi-anthropic-live-stream
  * for custom Messages gateways. It is not this provider.
  */
-it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus tool calls', async () => {
+it.each(['oauth', 'api_key'] as const)('sends Kimi Code %s as Chat Completions Bearer and parses reasoning plus tool calls', async (authType) => {
   const seen: Array<{ method: string; url: string; headers: Record<string, string>; body: unknown }> = []
   const server = Bun.serve({
     port: 0,
@@ -22,6 +22,10 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
       let body: unknown = text
       try { body = JSON.parse(text) } catch { /* keep the raw body in the failure */ }
       seen.push({ method: req.method, url: req.url, headers, body })
+      const tools = (body as { tools: Array<{ function: { parameters: { type?: string } } }> }).tools
+      if (tools.some(tool => tool.function.parameters.type !== 'object')) {
+        return Response.json({ message: 'tools.function.parameters.type is required and must be "object"' }, { status: 400 })
+      }
       const chunks = [
         delta({ role: 'assistant', content: '' }),
         delta({ reasoning_content: '先' }),
@@ -43,16 +47,14 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
   const code = `
     import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
     import { builtinModels } from '@earendil-works/pi-ai/providers/all';
+    const { getSessionToolProxyDefs } = await import('./packages/shared/src/agent/backend/pi/session-tool-defs.ts');
     const store = new InMemoryCredentialStore();
-    await store.modify('kimi-coding', async () => ({
-      type: 'oauth',
-      access: 'kimi-access-token',
-      refresh: '',
-      expires: Number.MAX_SAFE_INTEGER,
-    }));
+    await store.modify('kimi-coding', async () => (${JSON.stringify(authType === 'oauth'
+      ? { type: 'oauth', access: 'kimi-access-token', refresh: '', expires: Number.MAX_SAFE_INTEGER }
+      : { type: 'api_key', key: 'kimi-access-token' })}));
     const models = builtinModels({ credentials: store });
-    const catalog = models.getModel('kimi-coding', 'k3');
-    if (!catalog) throw new Error('catalog is missing k3');
+    const catalog = models.getModel('kimi-coding', 'k3.1-pro');
+    if (!catalog) throw new Error('catalog is missing k3.1-pro');
     const model = { ...catalog, baseUrl: ${JSON.stringify(baseUrl)} };
     const stream = models.stream(model, {
       systemPrompt: '你是助手',
@@ -61,7 +63,12 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
         name: 'read',
         description: 'Read a file',
         parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-      }],
+      }, {
+        name: 'mcp__session__nested_variant', description: 'Nested object constraint',
+        parameters: { type: 'object', allOf: [{ anyOf: [{ type: 'object', additionalProperties: false }] }] },
+      }, ...getSessionToolProxyDefs({ executionSession: { workMode: 'PRO' } }).map(def => ({
+        name: def.name, description: def.description, parameters: def.inputSchema,
+      }))],
     }, { reasoningEffort: 'high' });
     const message = await stream.result();
     const content = (message.content ?? []).map((block) => {
@@ -110,7 +117,7 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
       errorMessage: string | null
       content: Array<Record<string, unknown>>
     }
-    expect(parsed.stopReason).toBe('toolUse')
+    expect(parsed.stopReason, parsed.errorMessage ?? undefined).toBe('toolUse')
     expect(parsed.errorMessage).toBeNull()
     expect(parsed.content).toContainEqual({
       type: 'thinking',
@@ -144,9 +151,9 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
       max_tokens?: number
       max_completion_tokens?: number
       messages?: Array<{ role?: string }>
-      tools?: Array<{ function?: { name?: string } }>
+      tools?: Array<{ function?: { name?: string; parameters?: { type?: string; anyOf?: unknown[]; required?: string[] } } }>
     }
-    expect(body.model).toBe('k3')
+    expect(body.model).toBe('k3.1-pro')
     expect(body.stream).toBe(true)
     expect(body.reasoning_effort).toBe('high')
     expect(body.max_completion_tokens).toBeUndefined()
@@ -154,6 +161,16 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
     expect(body.messages?.some(message => message.role === 'system')).toBe(true)
     expect(body.messages?.some(message => message.role === 'user')).toBe(true)
     expect(body.tools?.[0]?.function?.name).toBe('read')
+    const office = body.tools?.find(tool => tool.function?.name === 'mcp__session__office_business')?.function?.parameters
+    expect(office?.type).toBe('object')
+    expect(office?.anyOf).toContainEqual(expect.objectContaining({
+      properties: expect.objectContaining({ command: expect.objectContaining({ const: 'metrics' }) }),
+      additionalProperties: false,
+    }))
+    expect(office?.required ?? []).not.toContain('_intent')
+    const nested = body.tools?.find(tool => tool.function?.name === 'mcp__session__nested_variant')?.function?.parameters
+    expect(nested?.type).toBe('object')
+    expect(nested?.required ?? []).not.toContain('_intent')
   } finally {
     clearTimeout(timeout)
     proc.kill()

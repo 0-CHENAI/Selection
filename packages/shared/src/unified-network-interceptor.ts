@@ -191,6 +191,13 @@ function injectMetadataFields(
   return { properties: newProperties, required: ['_displayName', '_intent', ...otherRequired] };
 }
 
+// A closed union branch rejects extra metadata even if declared at the root.
+function hasClosedObjectVariant(schema: Record<string, unknown>): boolean {
+  return [schema.anyOf, schema.oneOf, schema.allOf].some(variants =>
+    Array.isArray(variants) && variants.some(branch => branch && typeof branch === 'object'
+      && (branch.additionalProperties === false || hasClosedObjectVariant(branch))));
+}
+
 /**
  * Normalize a tool schema so metadata can always be injected, including zero-arg
  * tools whose schema may be `{ type: "object" }` without a `properties` key.
@@ -1247,6 +1254,7 @@ const anthropicAdapter: ApiAdapter = {
         continue;
       }
 
+      if (hasClosedObjectVariant(tool.input_schema)) continue;
       const updatedSchema = injectMetadataIntoToolSchema(tool.input_schema);
       tool.input_schema.properties = updatedSchema.properties;
       tool.input_schema.required = updatedSchema.required;
@@ -1729,6 +1737,7 @@ const openAiAdapter: ApiAdapter = {
       }
 
       const params = tool.function.parameters;
+      if (hasClosedObjectVariant(params)) continue;
       const updatedSchema = injectMetadataIntoToolSchema(params);
       params.properties = updatedSchema.properties;
       params.required = updatedSchema.required;
@@ -1979,6 +1988,7 @@ const openAiResponsesAdapter: ApiAdapter = {
       if (!metadataCompatible || (!richDescriptions && !isMcpTool)) continue;
 
       const params = tool.parameters;
+      if (hasClosedObjectVariant(params)) continue;
       const updatedSchema = injectMetadataIntoToolSchema(params);
       params.properties = updatedSchema.properties;
       params.required = updatedSchema.required;
