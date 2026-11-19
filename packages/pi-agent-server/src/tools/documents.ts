@@ -126,7 +126,7 @@ export async function indexOriginalDocument(directory: string, file: string, res
 }
 const indexSchema = Type.Object({ path: Type.String(), query: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) });
 const readSchema = Type.Object({ path: Type.String(), unit_id: Type.String({ description: 'Exact unit ID from document_index (chapter/paragraph, page or worksheet!cell).' }),
-  offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1 })), quote: Type.Optional(Type.String({ description: 'Optional exact literal quotation to check inside the returned original range.' })) });
+  offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1 })), quote: Type.Optional(Type.String({ minLength: 1, pattern: '\\S', description: 'Optional exact literal quotation to check inside the returned original range.' })) });
 export function createDocumentTools(getDirectory: () => string, getSourceDirectory?: () => string | undefined, research = false): ToolDefinition<any, any>[] {
   const indexDocument = (file: string) => {
     const directory = getDirectory(), path = realpathSync(resolve(directory, file));
@@ -144,7 +144,11 @@ export function createDocumentTools(getDirectory: () => string, getSourceDirecto
       return { content: [{ type: 'text', text: JSON.stringify({ path: snapshot.originalPath, sourceVersion: snapshot.version, snapshotPath: snapshot.textPath,
         total: matches.length, units: matches.slice(offset, offset + 100), next_offset: offset + 100 < matches.length ? offset + 100 : null, limitations: snapshot.limitations, readEvidence: false }) }], details: {} };
     } }, { name: 'document_read', label: '读取文档原文', description: 'Read a located unit from the current original version. Returns original lines, physical page/cell/paragraph location, limits and an exact read receipt. Quote check is literal only; semantic support and visual layout need independent review.', parameters: readSchema,
-    async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof readSchema>; signal?.throwIfAborted(); const snapshot = await indexDocument(params.path);
+    async execute(_id, rawParams, signal) {
+      const params = rawParams as Static<typeof readSchema>;
+      signal?.throwIfAborted();
+      if (params.quote !== undefined && !params.quote.trim()) throw new Error('Provide a nonempty literal quotation or omit quote.');
+      const snapshot = await indexDocument(params.path);
       const unit = snapshot.units.find(unit => unit.id === params.unit_id); if (!unit) throw new Error('Unit not found in the current file version; refresh document_index.');
       const startLine = unit.startLine + (params.offset ?? 0); if (startLine > unit.endLine) throw new Error('Offset leaves the original unit.');
       const allLines = readFileSync(snapshot.textPath, 'utf8').split('\n');

@@ -114,6 +114,7 @@ test('PRO PDF quote navigation preserves per-path provenance and credits only th
     async function find(unit: number, quote: string) {
       return read!.execute('read', { path: 'a.pdf', unit_id: `page-${unit}`, quote }, undefined, undefined, {} as any);
     }
+    await expect(find(1, '  ')).rejects.toThrow('nonempty');
     const wrong = await find(1, '1000000');
     expect(wrong.details.sourceRead).toMatchObject({ startLine: 1, endLine: 1 });
     expect(wrong.content[0]).toMatchObject({ text: expect.stringContaining('"quoteLocations":[{"id":"page-2"') });
