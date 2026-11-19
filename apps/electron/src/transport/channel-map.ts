@@ -364,6 +364,7 @@ export const CHANNEL_MAP = {
   setBrowserToolEnabled: invoke(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED),
 
   // Advanced capability settings
+  githubAppConnection: invoke(RPC_CHANNELS.settings.GITHUB_APP),
   getAdvancedSettings: invoke(RPC_CHANNELS.settings.GET_ADVANCED),
   setDagOrchestrationEnabled: invoke(RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED),
   setSwarmAgentsEnabled: invoke(RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED),

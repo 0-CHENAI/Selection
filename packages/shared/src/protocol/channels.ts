@@ -256,6 +256,7 @@ export const RPC_CHANNELS = {
     SET_SHARED_PROJECT_MEMORY_ENABLED: 'settings:setSharedProjectMemoryEnabled',
     GET_NETWORK_PROXY: 'settings:getNetworkProxy',
     SET_NETWORK_PROXY: 'settings:setNetworkProxy',
+    GITHUB_APP: 'settings:githubApp',
     GET_ADVANCED: 'settings:getAdvanced',
     SET_DAG_ORCHESTRATION_ENABLED: 'settings:setDagOrchestrationEnabled',
     SET_SWARM_AGENTS_ENABLED: 'settings:setSwarmAgentsEnabled',

@@ -256,6 +256,7 @@ const EXPECTED_CHANNELS: string[] = [
   'settings:getServerConfig',
   'settings:getServerStatus',
   'settings:getSharedProjectMemoryEnabled',
+  'settings:githubApp',
   'settings:setAnySearchApiKey',
   'settings:setDagOrchestrationEnabled',
   'settings:setDefaultThinkingLevel',

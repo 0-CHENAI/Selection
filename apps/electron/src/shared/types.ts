@@ -639,6 +639,7 @@ export interface ElectronAPI {
   setNetworkProxySettings(settings: NetworkProxySettings): Promise<void>
 
   // Advanced capability settings. The API key is write-only.
+  githubAppConnection(action: import('@craft-agent/shared/protocol').GitHubConnectionAction): Promise<import('@craft-agent/shared/protocol').GitHubConnectionStatus>
   getAdvancedSettings(): Promise<{
     dagOrchestrationEnabled: boolean
     swarmAgentsEnabled: boolean

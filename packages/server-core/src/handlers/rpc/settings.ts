@@ -40,6 +40,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.settings.GET_NETWORK_PROXY,
+  RPC_CHANNELS.settings.GITHUB_APP,
   RPC_CHANNELS.settings.GET_ADVANCED,
   RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED,
   RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED,
@@ -342,6 +343,12 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Advanced capability switches. The API key itself is never returned.
+  server.handle(RPC_CHANNELS.settings.GITHUB_APP, async (_ctx, action) => {
+    if (action !== 'status' && action !== 'connect' && action !== 'poll' && action !== 'disconnect') throw new Error('Invalid GitHub connection action')
+    const { githubAppConnection } = await import('../../services/github-app-connection')
+    return githubAppConnection(action)
+  })
+
   server.handle(RPC_CHANNELS.settings.GET_ADVANCED, async () => {
     const { getDagOrchestrationEnabled, getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
     const { getCredentialManager } = await import('@craft-agent/shared/credentials')

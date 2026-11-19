@@ -35,6 +35,7 @@ export type CredentialType =
   // Messaging gateway credentials (keyed by workspaceId + platform)
   | 'messaging_bearer'   // Messaging platform credentials
   // App-level search provider credentials
+  | 'github_app_connection'
   | 'anysearch_api_key' // AnySearch API key for built-in web search
   | 'deepseek_search_api_key'
   | 'tavily_search_api_key'
@@ -55,6 +56,7 @@ const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'source_apikey',
   'source_basic',
   'messaging_bearer',
+  'github_app_connection',
   'anysearch_api_key',
   'deepseek_search_api_key',
   'tavily_search_api_key',
@@ -97,6 +99,8 @@ export interface CredentialId {
 export interface StoredCredential {
   /** The secret value (API key, access token, or primary credential) */
   value: string;
+  githubAppOrigin?: string;
+  githubAppSlug?: string;
   /** OAuth refresh token */
   refreshToken?: string;
   /** OAuth token expiration (Unix timestamp ms) */
