@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { appPrivateKey, createGitHubAppHandler } from './server'
 import { PublishError, publishBranch, publishFailure } from './publish'
-import { isGitHubShellWrite } from '../../packages/session-tools-core/src/runtime/github-shell'
+import { isGitHubShellWrite, githubRepositoryFromUrl } from '../../packages/session-tools-core/src/runtime/github-shell'
+import { runGitHubRepositoryAction } from '../../packages/server-core/src/services/github-repository'
 import { runPreToolUseChecks, type PreToolUseInput } from '../../packages/shared/src/agent/core/pre-tool-use'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -14,6 +15,32 @@ const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
 const config = { clientId: 'test', clientSecret: 'secret', slug: 'test', privateKey: pem }
 const sha = 'a'.repeat(40)
 const input = { repository: 'owner/repo', head: 'feature', baseSha: sha, expected: sha, tip: sha, bundle: '' }
+
+test('accepts GitHub origins with ports and credentials on both routing paths', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'selection-origin-'))
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' })
+  try {
+    git('init', '-b', 'main')
+    git('remote', 'add', 'origin', 'git@github.com:owner/repo.git')
+    for (const remote of [
+      'git@github.com:owner/repo.git', 'ssh://git@github.com:22/owner/repo.git',
+      'https://user@github.com/owner/repo.git', 'https://x-access-token:test-password@github.com/owner/repo',
+    ]) {
+      git('remote', 'set-url', 'origin', remote)
+      expect(githubRepositoryFromUrl(remote)).toBe('owner/repo')
+      expect(isGitHubShellWrite([['git', 'push', 'origin']], dir)).toBe(true)
+      await expect(runGitHubRepositoryAction({ repository: 'owner/repo', action: 'commit', message: 'test' }, dir,
+        async () => { throw new Error('identity reached') })).rejects.toThrow('identity reached')
+    }
+    for (const remote of ['https://github.com.example.com/owner/repo', 'ssh://git@example.com:22/owner/repo.git', 'not a URL']) {
+      git('remote', 'set-url', 'origin', remote)
+      expect(githubRepositoryFromUrl(remote)).toBeUndefined()
+      expect(isGitHubShellWrite([['git', 'push', 'origin']], dir)).toBe(false)
+      await expect(runGitHubRepositoryAction({ repository: 'owner/repo', action: 'commit', message: 'test' }, dir,
+        async () => { throw new Error('identity reached') })).rejects.toThrow('origin')
+    }
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
 
 test('accepts PEM, escaped PEM and bare PKCS1/PKCS8 keys without exposing invalid input', () => {
   for (const type of ['pkcs1', 'pkcs8'] as const) {

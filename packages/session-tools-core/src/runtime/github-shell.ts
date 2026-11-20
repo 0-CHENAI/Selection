@@ -137,5 +137,20 @@ export function isGitHubShellWrite(commands: string[][], cwd: string): boolean {
 }
 
 function githubRemote(value: string) {
-  return /^(?:https?:\/\/(?:[^/@\s]+@)?github\.com\/|ssh:\/\/(?:git@)?github\.com(?::\d+)?\/|git@github\.com:)/i.test(value)
+  return githubRepositoryFromUrl(value) !== undefined
+}
+
+export function githubRepositoryFromUrl(value: string): string | undefined {
+  let path: string
+  const scp = /^git@github\.com:(.+)$/i.exec(value)
+  if (scp) path = scp[1]!
+  else {
+    try {
+      const url = new URL(value)
+      if (!['https:', 'http:', 'ssh:'].includes(url.protocol) || url.hostname.toLowerCase() !== 'github.com' || url.search || url.hash) return undefined
+      path = url.pathname.slice(1)
+    } catch { return undefined }
+  }
+  const repository = /^([\w-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(path)?.[1]
+  return repository && !['.', '..'].includes(repository.split('/')[1]!) ? repository : undefined
 }

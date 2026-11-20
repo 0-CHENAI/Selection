@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod/v3'
-import { branchName, GitHubRepositorySchema, pullInput, type GitHubRepositoryInput } from '@craft-agent/session-tools-core'
+import { branchName, GitHubRepositorySchema, githubRepositoryFromUrl, pullInput, type GitHubRepositoryInput } from '@craft-agent/session-tools-core'
 import { gitEnv, gitExecutable } from '../runtime/git-command'
 import { githubAppRequest } from './github-app-connection'
 
@@ -23,11 +23,11 @@ export async function runGitHubRepositoryAction(input: GitHubRepositoryInput, cw
   const git = async (args: string[], env?: NodeJS.ProcessEnv) =>
     (await promisify(execFile)(gitExecutable(), args, { cwd, env: gitEnv(env), timeout: 60000, maxBuffer: 1024 * 1024 })).stdout.trim()
   let remote = await git(['remote', 'get-url', '--push', 'origin'])
-  if (!/^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)/i.test(remote)) {
+  if (!githubRepositoryFromUrl(remote)) {
     try { remote = await git(['config', '--get', 'remote.origin.pushurl']) }
     catch { remote = await git(['config', '--get', 'remote.origin.url']) }
   }
-  const ownerRepo = /^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([\w-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(remote)?.[1]
+  const ownerRepo = githubRepositoryFromUrl(remote)
   if (ownerRepo?.toLowerCase() !== repository.toLowerCase()) throw new Error('当前工作目录的 origin 与指定的 GitHub 仓库不一致。')
   const head = branchName.parse(await git(['branch', '--show-current']))
   if (action === 'commit') {
