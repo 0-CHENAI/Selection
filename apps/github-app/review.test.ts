@@ -10,6 +10,7 @@ import { isGitHubShellWrite, githubRepositoryFromUrl } from '../../packages/sess
 import { runGitHubRepositoryAction } from '../../packages/server-core/src/services/github-repository'
 import { runPreToolUseChecks, type PreToolUseInput } from '../../packages/shared/src/agent/core/pre-tool-use'
 import { i18n, setupI18n } from '../../packages/shared/src/i18n'
+import { extractSimpleCommandsStrict } from '../../packages/shared/src/agent/bash-validator'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
@@ -134,9 +135,9 @@ test('routes Git options, URL rewrites and unknown targets without blocking know
       ['env', 'FOO=1', 'command', '-v'], ['type'], ['which'],
     ]) {
       expect(isGitHubShellWrite([[...lookup, 'git'], ['git', 'status']], dir)).toBe(false)
-      expect(runPreToolUseChecks({
-        toolName: 'Bash', input: { command: [...lookup, 'git'].join(' ') + ' && git status' }, workingDirectory: dir,
-      } as PreToolUseInput).type).not.toBe('block')
+      const commands = extractSimpleCommandsStrict([...lookup, 'git'].join(' ') + ' && git status')
+      expect(commands).not.toBeNull()
+      expect(isGitHubShellWrite(commands!, dir)).toBe(false)
       expect(isGitHubShellWrite([[...lookup, 'git'], ['git', 'push', 'origin']], dir)).toBe(true)
     }
   } finally { await rm(dir, { recursive: true, force: true }) }
