@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "セッションの読み込みに失敗しました",
   "errors.failedToLoadSessions": "セッション一覧の読み込みに失敗しました",
   "errors.failedToLoadSessionsDesc": "Selectionは接続できましたが、セッション一覧の読み込みに失敗しました。実際のバグやデータの問題を隠さないよう、空のWorkspaceとして扱っていません。",
+  "errors.githubAppWriteRequired": "GitHub Appのボットとして操作するには、github_issueまたはgithub_repositoryを使用してください。GitHubが未接続の場合は、「設定 → 外部接続」で接続してください。",
   "errors.pleaseReload": "ページを再読み込みしてください。エラーは報告されました。",
   "errors.retryLoadingSessions": "セッション一覧を再読み込み",
   "errors.sessionNotFound": "セッションが見つかりません",

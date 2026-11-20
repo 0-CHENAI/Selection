@@ -9,12 +9,28 @@ import { PublishError, publishBranch, publishFailure } from './publish'
 import { isGitHubShellWrite, githubRepositoryFromUrl } from '../../packages/session-tools-core/src/runtime/github-shell'
 import { runGitHubRepositoryAction } from '../../packages/server-core/src/services/github-repository'
 import { runPreToolUseChecks, type PreToolUseInput } from '../../packages/shared/src/agent/core/pre-tool-use'
+import { i18n, setupI18n } from '../../packages/shared/src/i18n'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
 const config = { clientId: 'test', clientSecret: 'secret', slug: 'test', privateKey: pem }
 const sha = 'a'.repeat(40)
 const input = { repository: 'owner/repo', head: 'feature', baseSha: sha, expected: sha, tip: sha, bundle: '' }
+
+test('GitHub block reasons follow the current language at invocation time', async () => {
+  setupI18n()
+  const previous = i18n.language
+  const reason = () => runPreToolUseChecks({
+    toolName: 'Bash', input: { command: 'gh issue create' },
+  } as PreToolUseInput)
+  try {
+    await i18n.changeLanguage('en')
+    expect(reason()).toEqual({ type: 'block', reason: i18n.t('errors.githubAppWriteRequired') })
+    expect((reason() as { reason: string }).reason).toContain('Use github_issue')
+    await i18n.changeLanguage('zh-Hans')
+    expect((reason() as { reason: string }).reason).toContain('请使用 github_issue')
+  } finally { await i18n.changeLanguage(previous) }
+})
 
 test('accepts GitHub origins with ports and credentials on both routing paths', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'selection-origin-'))

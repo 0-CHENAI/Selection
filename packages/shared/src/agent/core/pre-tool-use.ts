@@ -38,6 +38,7 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { i18n } from '../../i18n/index.ts';
 import { extractSimpleCommandsStrict } from '../bash-validator.ts';
 import { pptVisualQaViolation } from '../ppt-visual-qa-policy.ts';
 import { complexToolCapability, complexCapabilityError, type WorkModeSession } from '../../sessions/work-mode.ts';
@@ -754,7 +755,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
       /(?:^|[\/\\])gh(?:\.exe)?$/i.test(executable ?? '')
       && args.some((arg, i) => (arg === 'issue' && ['create', 'comment', 'close'].includes(args[i + 1] ?? '')) || (arg === 'pr' && args[i + 1] === 'create'))
     );
-    if (githubWrite || isGitHubShellWrite(commands, ctx.workingDirectory ?? ctx.workspaceRootPath ?? process.cwd())) return { type: 'block', reason: '请使用 github_issue 或 github_repository 工具以机器人身份操作。尚未授权时，请前往「设置 → 外部连接」连接 GitHub。' };
+    if (githubWrite || isGitHubShellWrite(commands, ctx.workingDirectory ?? ctx.workspaceRootPath ?? process.cwd())) return { type: 'block', reason: i18n.t('errors.githubAppWriteRequired') };
   }
 
   const visualQaBlock = pptVisualQaViolation(

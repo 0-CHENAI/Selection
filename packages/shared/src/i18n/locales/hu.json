@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "A munkamenet betöltése sikertelen",
   "errors.failedToLoadSessions": "A munkamenetek betöltése sikertelen",
   "errors.failedToLoadSessionsDesc": "A Selection kapcsolódott, de a munkamenetek listájának betöltése nem sikerült. Ez nem üres munkaterületként van kezelve, hogy ne rejtsen el egy valódi hibát vagy adatproblémát.",
+  "errors.githubAppWriteRequired": "A GitHub App botjaként a github_issue vagy github_repository eszközzel végezz műveleteket. Ha a GitHub nincs csatlakoztatva, csatlakoztasd a Beállítások → Külső kapcsolatok menüben.",
   "errors.pleaseReload": "Kérjük, töltsd újra az oldalt. A hiba jelentve lett.",
   "errors.retryLoadingSessions": "Munkamenetek újratöltése",
   "errors.sessionNotFound": "A munkamenet nem található",

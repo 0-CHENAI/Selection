@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "Sitzung konnte nicht geladen werden",
   "errors.failedToLoadSessions": "Sitzungen konnten nicht geladen werden",
   "errors.failedToLoadSessionsDesc": "Selection konnte eine Verbindung herstellen, aber das Laden der Sitzungsliste ist fehlgeschlagen. Dies wird nicht als leerer Workspace behandelt, um echte Fehler oder Datenprobleme nicht zu verbergen.",
+  "errors.githubAppWriteRequired": "Verwende github_issue oder github_repository, um als GitHub-App-Bot zu handeln. Falls GitHub noch nicht verbunden ist, verbinde es unter Einstellungen → Externe Verbindungen.",
   "errors.pleaseReload": "Bitte lade die Seite neu. Der Fehler wurde gemeldet.",
   "errors.retryLoadingSessions": "Sitzungen erneut laden",
   "errors.sessionNotFound": "Sitzung nicht gefunden",

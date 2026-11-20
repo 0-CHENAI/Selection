@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "Failed to load session",
   "errors.failedToLoadSessions": "Failed to load sessions",
   "errors.failedToLoadSessionsDesc": "Selection could connect, but loading the session list failed. This is not being treated as an empty workspace to avoid hiding a real bug or data problem.",
+  "errors.githubAppWriteRequired": "Use github_issue or github_repository to act as the GitHub App bot. If GitHub is not connected, connect it under Settings → External connections.",
   "errors.pleaseReload": "Please reload the page. The error has been reported.",
   "errors.retryLoadingSessions": "Retry loading sessions",
   "errors.sessionNotFound": "Session not found",
