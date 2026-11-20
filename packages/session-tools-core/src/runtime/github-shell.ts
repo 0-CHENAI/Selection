@@ -137,7 +137,9 @@ export function isGitHubShellWrite(commands: string[][], cwd: string): boolean {
 }
 
 function githubRemote(value: string) {
-  return githubRepositoryFromUrl(value) !== undefined
+  if (/^(?:[^@/:\s]+@)?github\.com:/i.test(value)) return true
+  try { return new URL(value).hostname.toLowerCase() === 'github.com' }
+  catch { return false }
 }
 
 export function githubRepositoryFromUrl(value: string): string | undefined {
@@ -151,6 +153,8 @@ export function githubRepositoryFromUrl(value: string): string | undefined {
       path = url.pathname.slice(1)
     } catch { return undefined }
   }
+  try { path = decodeURIComponent(path) }
+  catch { return undefined }
   const repository = /^([\w-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(path)?.[1]
   return repository && !['.', '..'].includes(repository.split('/')[1]!) ? repository : undefined
 }

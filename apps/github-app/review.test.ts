@@ -32,6 +32,27 @@ test('GitHub block reasons follow the current language at invocation time', asyn
   } finally { await i18n.changeLanguage(previous) }
 })
 
+test('routes GitHub hosts even when their repository path cannot be parsed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'selection-host-routing-'))
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' })
+  try {
+    git('init')
+    git('remote', 'add', 'origin', 'https://example.com/owner/repo.git')
+    git('config', 'url.https://proxy.test/github/.insteadOf', 'https://github.com/')
+    for (const path of ['%6f/r.git', '%ZZ/r.git', 'owner/repo/extra', '', 'owner/repo?query=1']) {
+      const url = 'https://github.com/' + path
+      git('remote', 'set-url', 'origin', url)
+      expect(isGitHubShellWrite([['git', 'push', 'origin']], dir)).toBe(true)
+      expect(isGitHubShellWrite([['git', 'push', url]], dir)).toBe(true)
+      expect(isGitHubShellWrite([['git', 'push', 'https://proxy.test/github/' + path]], dir)).toBe(true)
+    }
+    expect(githubRepositoryFromUrl('https://github.com/%6f/r.git')).toBe('o/r')
+    expect(githubRepositoryFromUrl('https://github.com/%ZZ/r.git')).toBeUndefined()
+    expect(githubRepositoryFromUrl('https://github.com.example.com/%6f/r.git')).toBeUndefined()
+    expect(isGitHubShellWrite([['git', 'push', 'https://github.com.example.com/%6f/r.git']], dir)).toBe(false)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('accepts GitHub origins with ports and credentials on both routing paths', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'selection-origin-'))
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' })
