@@ -1,5 +1,5 @@
 {
-  "version": "1.0.162",
+  "version": "1.0.163",
   "schemaCrc": "f950ee40",
   "generatedFrom": "reviewed-release-binary",
   "rootHelpSha256": "cd4d98c9ff0f27d4a2e0d0028a73c88dc23bc53bcce231a2569f64fdc72d983d",
@@ -269,7 +269,7 @@
       ]
     },
     "view": {
-      "helpSha256": "b5b99c59843d651500581fefab9b1f938456c749bb0b1cc6cd42f69e794bf3f0",
+      "helpSha256": "137fe1f70dc21c8bad91d8a736d3a270fb552ad774aa4608aa7f0ff357dde0f5",
       "flags": [
         "--browser",
         "--cols",
