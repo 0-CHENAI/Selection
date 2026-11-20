@@ -28,6 +28,7 @@ function unwrapGitCommand(command: string[], cwd: string) {
     while (words[0]?.startsWith('-')) {
       const option = words.shift()!
       if (option === '--') break
+      if (wrapper === 'command' && /^-[pvV]*[vV][pvV]*$/.test(option)) return { words: [], cwd, uncertain }
       const takesValue: Record<string, string[]> = {
         env: ['-u', '--unset', '-C', '--chdir', '-a', '--argv0'],
         command: [],

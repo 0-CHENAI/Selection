@@ -129,6 +129,16 @@ test('routes Git options, URL rewrites and unknown targets without blocking know
       } as PreToolUseInput).type).toBe('block')
     }
     expect(isGitHubShellWrite([['env', 'git', 'log']], dir)).toBe(false)
+    for (const lookup of [
+      ['command', '-v'], ['command', '-V'], ['command', '-pv'], ['command', '-p', '-V'],
+      ['env', 'FOO=1', 'command', '-v'], ['type'], ['which'],
+    ]) {
+      expect(isGitHubShellWrite([[...lookup, 'git'], ['git', 'status']], dir)).toBe(false)
+      expect(runPreToolUseChecks({
+        toolName: 'Bash', input: { command: [...lookup, 'git'].join(' ') + ' && git status' }, workingDirectory: dir,
+      } as PreToolUseInput).type).not.toBe('block')
+      expect(isGitHubShellWrite([[...lookup, 'git'], ['git', 'push', 'origin']], dir)).toBe(true)
+    }
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
