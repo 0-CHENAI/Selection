@@ -18,6 +18,19 @@ const config = { clientId: 'test', clientSecret: 'secret', slug: 'test', private
 const sha = 'a'.repeat(40)
 const input = { repository: 'owner/repo', head: 'feature', baseSha: sha, expected: sha, tip: sha, bundle: '' }
 
+test('GitHub block reasons retain English guidance before i18n initialization', () => {
+  const initialized = i18n.isInitialized
+  i18n.isInitialized = false
+  try {
+    expect(runPreToolUseChecks({
+      toolName: 'Bash', input: { command: 'gh issue create' },
+    } as PreToolUseInput)).toEqual({
+      type: 'block',
+      reason: 'Use github_issue or github_repository to act as the GitHub App bot. If GitHub is not connected, connect it under Settings → External connections.',
+    })
+  } finally { i18n.isInitialized = initialized }
+})
+
 test('GitHub block reasons follow the current language at invocation time', async () => {
   setupI18n()
   const previous = i18n.language

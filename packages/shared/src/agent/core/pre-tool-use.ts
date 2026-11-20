@@ -39,6 +39,7 @@ import {
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
 import { i18n } from '../../i18n/index.ts';
+import en from '../../i18n/locales/en.json';
 import { extractSimpleCommandsStrict } from '../bash-validator.ts';
 import { pptVisualQaViolation } from '../ppt-visual-qa-policy.ts';
 import { complexToolCapability, complexCapabilityError, type WorkModeSession } from '../../sessions/work-mode.ts';
@@ -755,7 +756,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
       /(?:^|[\/\\])gh(?:\.exe)?$/i.test(executable ?? '')
       && args.some((arg, i) => (arg === 'issue' && ['create', 'comment', 'close'].includes(args[i + 1] ?? '')) || (arg === 'pr' && args[i + 1] === 'create'))
     );
-    if (githubWrite || isGitHubShellWrite(commands, ctx.workingDirectory ?? ctx.workspaceRootPath ?? process.cwd())) return { type: 'block', reason: i18n.t('errors.githubAppWriteRequired') };
+    if (githubWrite || isGitHubShellWrite(commands, ctx.workingDirectory ?? ctx.workspaceRootPath ?? process.cwd())) return { type: 'block', reason: (i18n.isInitialized && i18n.t('errors.githubAppWriteRequired')) || en['errors.githubAppWriteRequired'] };
   }
 
   const visualQaBlock = pptVisualQaViolation(
