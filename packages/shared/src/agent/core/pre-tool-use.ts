@@ -748,7 +748,7 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
 
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
   // Route GitHub writes through the installation. Do not match quoted examples.
-  const command = ctx.input.command;
+  const command = ctx.input?.command;
   if (ctx.toolName.toLowerCase() === 'bash' && typeof command === 'string' && /\b(?:gh|git)(?:\.exe)?\s/i.test(command)) {
     const commands = extractSimpleCommandsStrict(command)
       ?? (/\bgit(?:\.exe)?\b[^\n]*\b(?:commit|push)\b/i.test(command) ? [['git', 'push']] : []);
