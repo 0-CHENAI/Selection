@@ -51,6 +51,19 @@ test('routes Git options, URL rewrites and unknown targets without blocking know
     expect(runPreToolUseChecks({
       toolName: 'Bash', input: { command: 'git push -o ci.skip origin HEAD' }, workingDirectory: dir,
     } as PreToolUseInput).type).toBe('block')
+    for (const prefix of [
+      ['env'], ['env', '-i', 'FOO=1'], ['command', '-p'], ['exec', '-a', 'git-alias'],
+      ['nice', '-n', '5'], ['nohup'], ['time', '-f', '%E'], ['sudo', '-u', 'user'],
+      ['xargs', '-0', '-n', '1'], ['env', 'FOO=1', 'nice', '-n5', 'command'],
+      ['env', '--unknown', 'value'], ['xargs', '--unknown', 'value'],
+    ]) {
+      const words = [...prefix, 'git', 'push', 'origin', 'HEAD']
+      expect(isGitHubShellWrite([words], dir)).toBe(true)
+      expect(runPreToolUseChecks({
+        toolName: 'Bash', input: { command: words.join(' ') }, workingDirectory: dir,
+      } as PreToolUseInput).type).toBe('block')
+    }
+    expect(isGitHubShellWrite([['env', 'git', 'log']], dir)).toBe(false)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
