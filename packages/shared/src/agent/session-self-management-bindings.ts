@@ -55,6 +55,16 @@ export function attachSessionSelfManagementBindings(
     configurable: true,
     enumerable: true,
   });
+  Object.defineProperty(context, 'githubRepository', {
+    get: () => getSessionScopedToolCallbacks(sessionId)?.githubRepositoryFn,
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'githubIssue', {
+    get: () => getSessionScopedToolCallbacks(sessionId)?.githubIssueFn,
+    configurable: true,
+    enumerable: true,
+  });
   Object.defineProperty(context, 'officeBusiness', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.officeBusinessFn;

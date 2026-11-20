@@ -5439,6 +5439,16 @@ export class SessionManager implements ISessionManager {
         },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         officeToolsFn: (name, args) => this.runOfficeTool(managed, name, args),
+        githubRepositoryFn: async args => {
+          if (managed.isolatedWorkspace) throw new Error('隔离工作区无法执行 GitHub 写入。')
+          const { runGitHubRepositoryAction } = await import('../services/github-repository')
+          return runGitHubRepositoryAction(args, managed.workingDirectory ?? managed.workspace.rootPath)
+        },
+        githubIssueFn: async args => {
+          if (managed.isolatedWorkspace) throw new Error('GitHub Issue writes are unavailable in isolated workspaces')
+          const { writeGitHubIssue } = await import('../services/github-app-connection')
+          return writeGitHubIssue(args)
+        },
         officeBusinessFn: async args => this.runOfficeBusiness(managed, args),
         pptToolsFn: (name, args) => this.runPptTool(managed, name, args),
         // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.

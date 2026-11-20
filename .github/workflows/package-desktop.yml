@@ -25,6 +25,7 @@ permissions:
 
 env:
   HUSKY: "0"
+  SELECTION_GITHUB_RELEASE_ORIGIN: ${{ vars.SELECTION_GITHUB_RELEASE_ORIGIN }}
 
 jobs:
   package-macos-arm64:

@@ -171,6 +171,8 @@ export interface SessionToolContext {
   /** Cancellation for this invocation, never shared across concurrent calls. */
   signal?: AbortSignal;
   /** In-process office calculations (#717): metrics, quick ratio, unit economics, data quality, infographic, minutes check. */
+  githubRepository?: (args: import('./github-repository-protocol.ts').GitHubRepositoryInput) => Promise<unknown>;
+  githubIssue?: (args: import('./handlers/github-issue.ts').GitHubIssueInput) => Promise<unknown>;
   officeBusiness?: (args: import('./handlers/office-business.ts').OfficeBusinessArgs) => Promise<unknown>;
   /** Render Office pages to PNG through the host's Office preview pipeline (desktop only). */
   officeRender?: (
