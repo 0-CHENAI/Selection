@@ -49,7 +49,8 @@ test('routes GitHub hosts even when their repository path cannot be parsed', asy
     expect(githubRepositoryFromUrl('https://github.com/%6f/r.git')).toBe('o/r')
     expect(githubRepositoryFromUrl('https://github.com/%ZZ/r.git')).toBeUndefined()
     expect(githubRepositoryFromUrl('https://github.com.example.com/%6f/r.git')).toBeUndefined()
-    expect(isGitHubShellWrite([['git', 'push', 'https://github.com.example.com/%6f/r.git']], dir)).toBe(false)
+    git('remote', 'set-url', 'origin', 'https://github.com.example.com/%6f/r.git')
+    expect(isGitHubShellWrite([['git', 'push', 'origin']], dir)).toBe(false)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
