@@ -22,7 +22,11 @@ export async function runGitHubRepositoryAction(input: GitHubRepositoryInput, cw
   }
   const git = async (args: string[], env?: NodeJS.ProcessEnv) =>
     (await promisify(execFile)(gitExecutable(), args, { cwd, env: gitEnv(env), timeout: 60000, maxBuffer: 1024 * 1024 })).stdout.trim()
-  const remote = await git(['remote', 'get-url', '--push', 'origin'])
+  let remote = await git(['remote', 'get-url', '--push', 'origin'])
+  if (!/^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)/i.test(remote)) {
+    try { remote = await git(['config', '--get', 'remote.origin.pushurl']) }
+    catch { remote = await git(['config', '--get', 'remote.origin.url']) }
+  }
   const ownerRepo = /^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([\w-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(remote)?.[1]
   if (ownerRepo?.toLowerCase() !== repository.toLowerCase()) throw new Error('当前工作目录的 origin 与指定的 GitHub 仓库不一致。')
   const head = branchName.parse(await git(['branch', '--show-current']))

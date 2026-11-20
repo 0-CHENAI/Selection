@@ -153,6 +153,8 @@ export async function githubAppRequest<T>(path: string, schema: z.ZodType<T>, in
       if (err.status === 403 || err.status === 404) throw new Error(grantHint)
       if (err.status === 409) throw new Error('推送失败，请检查远端分支是否有新提交以及仓库的分支保护规则。')
       if (err.status === 422) throw new Error('GitHub 拒绝了此操作，请检查目标、输入内容及仓库规则。')
+      if (err.status === 400) throw new Error('GitHub 请求参数无效，请检查输入内容。')
+      if (err.status === 502 || err.status === 503) throw new Error('GitHub 机器人服务暂不可用或繁忙，请稍后重试；重试推送前请确认远端分支状态。')
     }
     throw err
   }

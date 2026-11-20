@@ -22,22 +22,65 @@ export function isGitHubShellWrite(commands: string[][], cwd: string): boolean {
   for (const [executable, ...args] of commands) {
     if (executable === 'cd' && args.length === 1) cwd = resolve(cwd, args[0]!)
     if (!/(?:^|[/\\])git(?:\.exe)?$/i.test(executable ?? '')) continue
-    let dir = cwd
+    const global: string[] = []
     let i = 0
     while (args[i]?.startsWith('-')) {
-      const option = args[i++]
-      if (option === '-C' && args[i]) dir = resolve(dir, args[i++]!)
-      else if (option === '-c' || option === '--git-dir' || option === '--work-tree') i++
+      const option = args[i++]!
+      if (/^-[Cc].+/.test(option)) {
+        global.push(option.slice(0, 2), option.slice(2))
+        continue
+      }
+      global.push(option)
+      if (['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(option) && args[i]) global.push(args[i++]!)
     }
     const action = args[i++]
     if (action !== 'push' && action !== 'commit') continue
-    const target = action === 'push' ? args.slice(i).find(arg => !arg.startsWith('-')) : undefined
-    if (target && githubRemote(target)) return true
-    const remote = target && /^[\w.-]+$/.test(target) ? target : 'origin'
-    const result = spawnSync(process.env.CRAFT_GIT || 'git', ['remote', 'get-url', '--push', '--', remote], {
-      cwd: dir, encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    if (result.status === 0 && githubRemote(result.stdout.trim())) return true
+    const git = (...options: string[]) => {
+      const result = spawnSync(process.env.CRAFT_GIT || 'git', [...global, ...options], {
+        cwd, encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      return result.status === 0 ? result.stdout.trim() : undefined
+    }
+    const isGitHub = (url: string) => {
+      if (githubRemote(url)) return true
+      const rewrites = git('config', '--get-regexp', '^url\\..*\\.(insteadof|pushinsteadof)$') ?? ''
+      return rewrites.split('\n').some(line => {
+        const match = /^url\.(.*)\.(?:push)?insteadof\s+(.+)$/i.exec(line)
+        return match && url.startsWith(match[1]!) && githubRemote(match[2]! + url.slice(match[1]!.length))
+      })
+    }
+    const remotes = (git('remote') ?? '').split('\n').filter(Boolean)
+    const remoteIsGitHub = (remote: string) =>
+      [git('config', '--get', 'remote.' + remote + '.url'), git('config', '--get', 'remote.' + remote + '.pushurl'),
+        git('remote', 'get-url', '--push', '--', remote)].some(url => url && isGitHub(url))
+    let target: string | undefined
+    let uncertain = false
+    if (action === 'push') {
+      for (; i < args.length; i++) {
+        const arg = args[i]!
+        if (arg === '--') { target ??= args[++i]; break }
+        if (['-o', '--push-option', '--receive-pack', '--exec', '--recurse-submodules'].includes(arg)) { i++; continue }
+        if (arg === '--repo') { target = args[++i]; continue }
+        if (arg.startsWith('--repo=')) { target = arg.slice(7); continue }
+        if (arg.startsWith('-')) {
+          if (!/^(?:--[\w-]+(?:=.*)?|-[vfndqu]+|-o.+)$/.test(arg)) uncertain = true
+          continue
+        }
+        target ??= arg
+        break
+      }
+    }
+    if (target && isGitHub(target)) return true
+    if (target && remotes.includes(target) && !uncertain) {
+      if (remoteIsGitHub(target)) return true
+      continue
+    }
+    if (target && /[:/]/.test(target)) {
+      const expanded = git('-c', 'remote.selection-routing.url=' + target, 'remote', 'get-url', '--push', 'selection-routing')
+      if (expanded && isGitHub(expanded)) return true
+      if (!uncertain && expanded) continue
+    }
+    if (remotes.some(remoteIsGitHub)) return true
   }
   return false
 }

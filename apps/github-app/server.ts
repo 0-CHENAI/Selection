@@ -5,7 +5,7 @@ import { SELECTION_GITHUB_CLIENT_ID, SELECTION_GITHUB_APP_SLUG } from '../../pac
 import { parseGitHubIssue } from '../../packages/session-tools-core/src/handlers/github-issue'
 
 import { branchInput, pullInput, pushInput, repositoryInput } from '../../packages/session-tools-core/src/github-repository-protocol'
-import { publishBranch } from './publish'
+import { publishBranch, PublishError } from './publish'
 
 const pullReply = z.object({ number: z.number().int().positive(), html_url: z.string().url() })
 
@@ -20,8 +20,24 @@ class RequestError extends Error {
   constructor(readonly status: number, message: string) { super(message) }
 }
 
-export function createGitHubAppHandler(config: AppConfig, request: (url: string, init: RequestInit) => Promise<Response> = fetch) {
-  const key = createPrivateKey(config.privateKey)
+export function appPrivateKey(value: string) {
+  const text = value.trim().replace(/\\n/g, '\n')
+  try {
+    const key = (() => {
+      if (text.startsWith('-----BEGIN ')) return createPrivateKey(text)
+      if (!/^[A-Za-z0-9+/\s]+={0,2}$/.test(text)) throw new Error()
+      const body = Buffer.from(text.replace(/\s/g, ''), 'base64')
+      try { return createPrivateKey({ key: body, format: 'der', type: 'pkcs1' }) }
+      catch { return createPrivateKey({ key: body, format: 'der', type: 'pkcs8' }) }
+    })()
+    if (key.asymmetricKeyType !== 'rsa') throw new Error()
+    return key
+  } catch { throw new Error('Invalid GITHUB_APP_PRIVATE_KEY: expected an RSA private key in PEM or base64 DER format') }
+}
+
+export function createGitHubAppHandler(config: AppConfig, request: (url: string, init: RequestInit) => Promise<Response> = fetch, publish = publishBranch) {
+  const key = appPrivateKey(config.privateKey)
+  let pushes = 0
   const basic = 'Basic ' + Buffer.from(config.clientId + ':' + config.clientSecret).toString('base64')
   const encode = (data: object) => Buffer.from(JSON.stringify(data)).toString('base64url')
   function appJwt() {
@@ -121,8 +137,11 @@ export function createGitHubAppHandler(config: AppConfig, request: (url: string,
       return { expected: null, baseSha: await lookup(base) }
     }
     if (operation.kind === 'push') {
-      try { return await publishBranch(operation.input, grant.token) }
-      catch { throw new RequestError(409, 'Could not fast-forward the target branch. Check branch rules and refresh the remote base.') }
+      try { return await publish(operation.input, grant.token) }
+      catch (error) {
+        if (error instanceof PublishError) throw new RequestError(error.status, error.message)
+        throw new RequestError(502, 'Publish service unavailable; retry shortly.')
+      }
     }
     const input = operation.input
     const issues = repoPath + '/issues'
@@ -140,11 +159,14 @@ export function createGitHubAppHandler(config: AppConfig, request: (url: string,
 
   return async (req: Request) => {
     const headers = { 'cache-control': 'no-store' }
+    const push = req.method === 'POST' && new URL(req.url).pathname === '/push'
+    if (push && pushes >= 2) return Response.json({ error: 'Publish service busy; retry shortly.' }, { status: 503, headers: { ...headers, 'retry-after': '5' } })
+    if (push) pushes++
     try { return Response.json(await route(req), { headers }) }
     catch (err) {
       const error = err instanceof RequestError ? err : new RequestError(502, 'GitHub service unavailable')
       return Response.json({ error: error.message }, { status: error.status, headers })
-    }
+    } finally { if (push) pushes-- }
   }
 }
 

@@ -748,7 +748,8 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // Route GitHub writes through the installation. Do not match quoted examples.
   const command = ctx.input.command;
   if (ctx.toolName.toLowerCase() === 'bash' && typeof command === 'string' && /\b(?:gh|git)(?:\.exe)?\s/i.test(command)) {
-    const commands = extractSimpleCommandsStrict(command) ?? [];
+    const commands = extractSimpleCommandsStrict(command)
+      ?? (/\bgit(?:\.exe)?\b[^\n]*\b(?:commit|push)\b/i.test(command) ? [['git', 'push']] : []);
     const githubWrite = commands.some(([executable, ...args]) =>
       /(?:^|[\/\\])gh(?:\.exe)?$/i.test(executable ?? '')
       && args.some((arg, i) => (arg === 'issue' && ['create', 'comment', 'close'].includes(args[i + 1] ?? '')) || (arg === 'pr' && args[i + 1] === 'create'))

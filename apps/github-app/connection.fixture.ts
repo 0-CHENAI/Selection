@@ -13,6 +13,7 @@ let installed = false
 let polls = 0
 let refreshes = 0
 let writes = 0
+let issueStatus = 200
 const pull = { repository: 'owner/repo', action: 'create_pr', head: 'feature/fix', base: 'test', title: '修复问题' } as const
 const issue = { repository: 'owner/repo', action: 'create', title: 'Test' } as const
 globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -38,6 +39,7 @@ globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init?: RequestIn
       assert.deepEqual(data, { repository: pull.repository, head: pull.head, base: pull.base, title: pull.title })
       return Response.json({ url: 'https://github.com/owner/repo/pull/8', number: 8 })
     case origin + '/issues':
+      if (issueStatus !== 200) return Response.json({ error: 'test failure' }, { status: issueStatus })
       writes++
       assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer second')
       assert.deepEqual(data, issue)
@@ -94,6 +96,11 @@ const repoResult = await repoTool.handler!({
   githubRepository: args => runGitHubRepositoryAction(args, '/unused-for-pr'),
 } as Parameters<NonNullable<typeof repoTool.handler>>[0], pull)
 assert.equal(repoResult.isError, false)
+for (const [status, message] of [[400, /请求参数无效/], [409, /远端分支/], [422, /拒绝了此操作/], [502, /暂不可用或繁忙/], [503, /暂不可用或繁忙/]] as const) {
+  issueStatus = status
+  await assert.rejects(writeGitHubIssue(issue), message)
+}
+issueStatus = 200
 assert.equal(refreshes, 1)
 process.env.SELECTION_GITHUB_APP_URL = 'https://other.test'
 await assert.rejects(writeGitHubIssue(issue), /设置.*外部连接/)
