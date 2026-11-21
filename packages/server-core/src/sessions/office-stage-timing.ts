@@ -120,6 +120,16 @@ export class OfficeTurnTiming {
     this.modelStart = undefined
   }
 
+  async excludeFromModelWait<T>(run: () => Promise<T>): Promise<T> {
+    if (this.modelStart === undefined) return run()
+    const start = this.now()
+    try {
+      return await run()
+    } finally {
+      if (this.modelStart !== undefined) this.modelStart += this.now() - start
+    }
+  }
+
   deliveryGate(start: number, fileChanged: FileChanged): void {
     if (fileChanged) this.office = true
     if (this.office) this.record('delivery_gate', 'office_delivery_guard', start, fileChanged)

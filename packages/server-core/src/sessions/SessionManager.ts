@@ -8395,7 +8395,9 @@ export class SessionManager implements ISessionManager {
         }
         if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
           || (event.type === 'info' && event.message.startsWith('Compacted'))) {
-          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) await this.syncPptProgress(managed, true)
+          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) {
+            await officeTiming.excludeFromModelWait(() => this.syncPptProgress(managed, true))
+          }
           this.persistSession(managed)
           await this.flushSession(managed.id)
           if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
