@@ -118,7 +118,7 @@ test.each([
   ['cat draft.json | tee deck.json', 'tool'],
   ['mv draft.json deck.json', 'tool'],
   ['cp draft.json deck.json', 'tool'],
-])('classifies %s followed by a deck screenshot as %s', (before, phase) => {
+] as const)('classifies %s followed by a deck screenshot as %s', (before, phase) => {
   let now = 0
   const timing = new OfficeTurnTiming(false, '/', '/', () => now)
   timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId: 'shot',
