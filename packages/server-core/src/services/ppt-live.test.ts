@@ -407,6 +407,37 @@ test('watchPptDeck notices a page write and exports it without a tool event', as
   }
 })
 
+test('preflight returns the host output for a nested session deck', async () => {
+  const root = session()
+  try {
+    const { fixtureTheme, makeDeck, makePage, text } = await import('../../../../apps/electron/resources/skills/ppt-design/styles/kit.ts')
+    const project = join(root, 'data', 'projects', 'pilot')
+    mkdirSync(project, { recursive: true })
+    const source = join(project, 'deck.json')
+    const deck = makeDeck('Nested pilot', fixtureTheme, [makePage('p1', 'free', 'Title', '$paper', [text('title', 'Title', 48, 40, 400, 48, 24)], '')])
+    writeFileSync(source, JSON.stringify(deck))
+    const pptx = await exportIncrementalPptx(root)
+    expect(pptx).toBe(join(root, 'Nested pilot.pptx'))
+    expect(existsSync(join(root, 'data', 'ppt-output.json'))).toBe(true)
+    expect(existsSync(join(project, 'ppt-output.json'))).toBe(false)
+
+    const cli = join(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design/engine/deck-cli.mjs')
+    const preflight = Bun.spawn([process.execPath, cli, 'check', source, '--wait-for-export'], {
+      env: { ...process.env, CRAFT_SESSION_DIR: root },
+      stdout: 'pipe',
+    })
+    try {
+      expect(await new Response(preflight.stdout).json()).toMatchObject({ status: 'ok', pptx, pages: 1 })
+      expect(await preflight.exited).toBe(0)
+    } finally {
+      preflight.kill()
+      await preflight.exited
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('failed revision preserves the last checked PPTX and overrides stale passing diagnostics', async () => {
   const root = session()
   try {

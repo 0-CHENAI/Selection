@@ -22340,7 +22340,8 @@ function deckFileStamp(file) {
   return `${stat.mtimeMs}:${stat.size}`;
 }
 async function waitForHostOutput(file, stamp, timeoutMs = 1e4) {
-  const dir = dirname2(file);
+  const sessionDir = process.env.CRAFT_SESSION_DIR;
+  const dir = sessionDir ? join3(sessionDir, "data") : dirname2(file);
   const receipt = join3(dir, "ppt-output.json");
   return new Promise((resolve, reject) => {
     const watcher = watch(dir, check);

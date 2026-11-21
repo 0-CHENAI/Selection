@@ -7,7 +7,8 @@ export function deckFileStamp(file: string): string {
 }
 
 export async function waitForHostOutput(file: string, stamp: string, timeoutMs = 10_000): Promise<string> {
-  const dir = dirname(file)
+  const sessionDir = process.env.CRAFT_SESSION_DIR
+  const dir = sessionDir ? join(sessionDir, 'data') : dirname(file)
   const receipt = join(dir, 'ppt-output.json')
   return new Promise((resolve, reject) => {
     const watcher = watch(dir, check)
