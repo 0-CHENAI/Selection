@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "No se pudo cargar la sesión",
   "errors.failedToLoadSessions": "No se pudieron cargar las sesiones",
   "errors.failedToLoadSessionsDesc": "Selection pudo conectarse, pero falló al cargar la lista de sesiones. No se trata como un Workspace vacío para evitar ocultar un error real o un problema de datos.",
+  "errors.githubAppWriteRequired": "Usa github_issue o github_repository para actuar como el bot de la GitHub App. Si GitHub no está conectado, conéctalo en Configuración → Conexiones externas.",
   "errors.pleaseReload": "Por favor recarga la página. El error ha sido reportado.",
   "errors.retryLoadingSessions": "Reintentar cargar sesiones",
   "errors.sessionNotFound": "Sesión no encontrada",

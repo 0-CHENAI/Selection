@@ -38,9 +38,12 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { i18n } from '../../i18n/index.ts';
+import en from '../../i18n/locales/en.json';
+import { extractSimpleCommandsStrict } from '../bash-validator.ts';
 import { pptVisualQaViolation } from '../ppt-visual-qa-policy.ts';
 import { complexToolCapability, complexCapabilityError, type WorkModeSession } from '../../sessions/work-mode.ts';
-import { SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
+import { isGitHubShellWrite, SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
 import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, resolveBundledSkillMdPath } from '../../skills/storage.ts';
 import {
@@ -744,6 +747,18 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
 }
 
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
+  // Route GitHub writes through the installation. Do not match quoted examples.
+  const command = ctx.input?.command;
+  if (ctx.toolName.toLowerCase() === 'bash' && typeof command === 'string' && /\b(?:gh|git)(?:\.exe)?\s/i.test(command)) {
+    const commands = extractSimpleCommandsStrict(command)
+      ?? (/\bgit(?:\.exe)?\b[^\n]*\b(?:commit|push)\b/i.test(command) ? [['git', 'push']] : []);
+    const githubWrite = commands.some(([executable, ...args]) =>
+      /(?:^|[\/\\])gh(?:\.exe)?$/i.test(executable ?? '')
+      && args.some((arg, i) => (arg === 'issue' && ['create', 'comment', 'close'].includes(args[i + 1] ?? '')) || (arg === 'pr' && args[i + 1] === 'create'))
+    );
+    if (githubWrite || isGitHubShellWrite(commands, ctx.workingDirectory ?? ctx.workspaceRootPath ?? process.cwd())) return { type: 'block', reason: (i18n.isInitialized && i18n.t('errors.githubAppWriteRequired')) || en['errors.githubAppWriteRequired'] };
+  }
+
   const visualQaBlock = pptVisualQaViolation(
     ctx.toolName,
     ctx.input,

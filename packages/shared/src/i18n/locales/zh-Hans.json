@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "无法加载会话",
   "errors.failedToLoadSessions": "无法加载会话列表",
   "errors.failedToLoadSessionsDesc": "Selection 已连接，但加载会话列表失败。为避免隐藏真实错误或数据问题，此处不视为空工作区。",
+  "errors.githubAppWriteRequired": "请使用 github_issue 或 github_repository 工具以机器人身份操作。尚未授权时，请前往「设置 → 外部连接」连接 GitHub。",
   "errors.pleaseReload": "请重新加载页面。错误已被报告。",
   "errors.retryLoadingSessions": "重试加载会话",
   "errors.sessionNotFound": "未找到会话",

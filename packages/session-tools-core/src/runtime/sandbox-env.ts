@@ -2,6 +2,7 @@
  * Shared environment sanitization for script-execution tools.
  */
 
+import { githubShellEnvironment } from './github-shell.ts';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { ScriptRuntimeLanguage } from './resolve-script-runtime.ts';
@@ -50,7 +51,7 @@ export function createScriptRuntimeEnv(
   options: ScriptRuntimeEnvOptions,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env = createSanitizedEnv(baseEnv);
+  const env = githubShellEnvironment(createSanitizedEnv(baseEnv));
   const dataDir = resolve(options.dataDir);
 
   const tmpDir = join(dataDir, '.tmp');

@@ -1,9 +1,11 @@
 import { z } from 'zod/v3'
 import { getCredentialManager, type StoredCredential } from '@craft-agent/shared/credentials'
 import { SELECTION_GITHUB_APP_SLUG, SELECTION_GITHUB_CLIENT_ID, type GitHubConnectionAction, type GitHubConnectionStatus } from '@craft-agent/shared/protocol'
+import type { GitHubIssueInput } from '@craft-agent/session-tools-core'
 
 const credential = { type: 'github_app_connection' } as const
 const connectHint = '请前往「设置 → 外部连接」连接 GitHub。'
+const grantHint = '请在「设置 → 外部连接」中检查 GitHub 仓库授权和成员权限。'
 const deviceHost = 'https://github.com/login'
 declare const __SELECTION_GITHUB_BROKER_ORIGIN__: string
 const bundledBroker = typeof __SELECTION_GITHUB_BROKER_ORIGIN__ === 'string' ? __SELECTION_GITHUB_BROKER_ORIGIN__ : ''
@@ -23,6 +25,7 @@ const accountReply = z.object({ login: z.string().min(1) })
 const installationsReply = z.object({
   installations: z.array(z.object({ app_slug: z.string(), suspended_at: z.string().nullable(), permissions: z.object({ issues: z.string().optional(), pull_requests: z.string().optional(), contents: z.string().optional() }) })),
 })
+const issueReply = z.object({ number: z.number().int().positive(), url: z.string().url() })
 
 async function json<T>(schema: z.ZodType<T>, url: string, body?: object, token?: string) {
   const res = await fetch(url, {
@@ -136,4 +139,27 @@ export function githubAppConnection(action: GitHubConnectionAction): Promise<Git
     device = { broker, code: data.device_code, userCode: data.user_code, expires: Date.now() + data.expires_in * 1000, interval, nextPoll: Date.now() + interval }
     return { state: 'pending', userCode: device.userCode }
   })
+}
+
+export async function githubAppRequest<T>(path: string, schema: z.ZodType<T>, input: object) {
+  const broker = brokerOrigin()
+  const stored = await exclusive(() => activeCredential(broker))
+  if (!stored) throw new Error(connectHint)
+  if (!broker) throw new Error('GitHub 仓库已授权，SeLection 机器人服务暂不可用。')
+  try { return await json(schema, broker + path, input, stored.value) }
+  catch (err) {
+    if (err instanceof HttpError) {
+      if (err.status === 401) throw new Error(connectHint)
+      if (err.status === 403 || err.status === 404) throw new Error(grantHint)
+      if (err.status === 409) throw new Error('推送失败，请检查远端分支是否有新提交以及仓库的分支保护规则。')
+      if (err.status === 422) throw new Error('GitHub 拒绝了此操作，请检查目标、输入内容及仓库规则。')
+      if (err.status === 400) throw new Error('GitHub 请求参数无效，请检查输入内容。')
+      if (err.status === 502 || err.status === 503) throw new Error('GitHub 机器人服务暂不可用或繁忙，请稍后重试；重试推送前请确认远端分支状态。')
+    }
+    throw err
+  }
+}
+
+export function writeGitHubIssue(input: GitHubIssueInput) {
+  return githubAppRequest('/issues', issueReply, input)
 }

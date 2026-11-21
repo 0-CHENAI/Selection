@@ -30,6 +30,8 @@ export interface SessionScopedToolCallbacks {
   /** Personal PPT template projects and slot images (#714, #715). */
   pptToolsFn?: (name: import('@craft-agent/session-tools-core').PptToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** In-process office calculations. Set by SessionManager. */
+  githubRepositoryFn?: (args: import('@craft-agent/session-tools-core').GitHubRepositoryInput) => Promise<unknown>;
+  githubIssueFn?: (args: import('@craft-agent/session-tools-core').GitHubIssueInput) => Promise<unknown>;
   officeBusinessFn?: (args: import('@craft-agent/session-tools-core').OfficeBusinessArgs) => Promise<unknown>;
   /** Render Office pages for office_render. Set by SessionManager in desktop builds that have a capture host. */
   officeRenderFn?: (

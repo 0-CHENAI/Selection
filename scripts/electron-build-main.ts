@@ -59,10 +59,19 @@ function getBuildDefines(): Record<string, string> {
     "CRAFT_SWARM_PREVIEW_BUILD",
   ];
 
-  return Object.fromEntries(definedVars.map((varName) => {
+  const defines = Object.fromEntries(definedVars.map((varName) => {
     const value = process.env[varName] || "";
     return [`process.env.${varName}`, JSON.stringify(value)];
   }));
+  const broker = process.env.SELECTION_GITHUB_RELEASE_ORIGIN?.trim();
+  if (broker) {
+    const url = new URL(broker);
+    if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+      throw new Error('SELECTION_GITHUB_RELEASE_ORIGIN must be an HTTPS origin');
+    }
+    defines.__SELECTION_GITHUB_BROKER_ORIGIN__ = JSON.stringify(url.origin);
+  }
+  return defines;
 }
 
 // Wait for file to stabilize (no size changes)

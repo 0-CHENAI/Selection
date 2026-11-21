@@ -919,6 +919,7 @@
   "errors.failedToLoadSession": "Nie udało się załadować sesji",
   "errors.failedToLoadSessions": "Nie udało się załadować sesji",
   "errors.failedToLoadSessionsDesc": "Selection nawiązał połączenie, ale ładowanie listy sesji nie powiodło się. Nie jest to traktowane jako pusty Workspace, aby uniknąć ukrycia prawdziwego błędu lub problemu z danymi.",
+  "errors.githubAppWriteRequired": "Użyj github_issue lub github_repository, aby działać jako bot GitHub App. Jeśli GitHub nie jest połączony, połącz go w Ustawienia → Połączenia zewnętrzne.",
   "errors.pleaseReload": "Odśwież stronę. Błąd został zgłoszony.",
   "errors.retryLoadingSessions": "Spróbuj ponownie załadować sesje",
   "errors.sessionNotFound": "Sesja nie została znaleziona",

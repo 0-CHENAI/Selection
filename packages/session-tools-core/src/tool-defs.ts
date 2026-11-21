@@ -23,6 +23,9 @@ import { SubmitAnswerSchema, handleSubmitAnswer } from './handlers/submit-answer
 import { handleArtifactVersions } from './handlers/artifact-versions.ts';
 import { handleOfficeTemplate, handleOfficeTemplateWrite, handleXlsxRecalculate, OfficeTemplateSchema, OfficeTemplateWriteSchema, XlsxRecalculateSchema } from './handlers/office-template.ts';
 import { OFFICE_RENDER_DESCRIPTION, OfficeRenderSchema, handleOfficeRender } from './handlers/office-render.ts';
+import { GitHubRepositorySchema } from './github-repository-protocol.ts';
+import { handleGitHubRepository } from './handlers/github-repository.ts';
+import { GitHubIssueSchema, handleGitHubIssue } from './handlers/github-issue.ts';
 import { OFFICE_BUSINESS_DESCRIPTION, OfficeBusinessSchema, handleOfficeBusiness } from './handlers/office-business.ts';
 import { IMAGE_GENERATE_DESCRIPTION, ImageGenerateSchema, PPT_TEMPLATE_CREATE_DESCRIPTION, PptTemplateCreateProjectSchema, handleImageGenerate, handlePptTemplateCreateProject } from './handlers/ppt-tools.ts';
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
@@ -813,6 +816,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'skill_install', description: 'Install a public GitHub or local skill into this workspace. One call snapshots, validates, publishes and confirms loading. Use for explicit installation requests instead of WebFetch/Bash. Never replace without user intent and expectedTargetFingerprint. Do not run skill_validate afterward; installation already validates the exact content. Runtime dependencies are not tested.', inputSchema: SkillInstallSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleSkillInstall },
   { name: 'skill_validate', description: TOOL_DESCRIPTIONS.skill_validate, inputSchema: SkillValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillValidate },
   { name: 'office_render', description: OFFICE_RENDER_DESCRIPTION, inputSchema: OfficeRenderSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeRender },
+  { name: 'github_repository', description: 'Use the connected GitHub App to commit staged changes locally, publish the current branch without force, or open a same-repository pull request. Commit does not push. Push and create_pr require explicit user intent.', inputSchema: GitHubRepositorySchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleGitHubRepository },
+  { name: 'github_issue', description: 'Create, comment on, or close a GitHub issue as the connected GitHub App. Always use this tool for these actions. If unavailable, direct the user to Settings → External connections.', inputSchema: GitHubIssueSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleGitHubIssue },
   { name: 'office_business', description: OFFICE_BUSINESS_DESCRIPTION, inputSchema: OfficeBusinessSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleOfficeBusiness },
   { name: 'ppt_template_create_project', description: PPT_TEMPLATE_CREATE_DESCRIPTION, inputSchema: PptTemplateCreateProjectSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handlePptTemplateCreateProject },
   { name: 'image_generate', description: IMAGE_GENERATE_DESCRIPTION, inputSchema: ImageGenerateSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleImageGenerate },

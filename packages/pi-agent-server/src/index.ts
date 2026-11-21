@@ -41,6 +41,7 @@ import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
 import { answerExecutionError, isAnswerTool, isTurnCompletionTool, acceptsTurnCompletion, answerTurnToolNames } from './answer-delivery-guard.ts';
 import http from 'node:http';
+import { githubShellEnvironment } from '../../session-tools-core/src/runtime/github-shell.ts';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
@@ -899,7 +900,10 @@ async function ensureSession(): Promise<AgentSession> {
     denyExternalBrowsers: initConfig.denyExternalBrowsers, officeDocument: initConfig.isolatedOfficeDocument,
   }) : undefined;
   confinedShellCleanup = isolatedShell?.dispose;
-  const bashTool = registerRecoveryClass(createBashToolDefinition(cwd, isolatedShell ? { operations: isolatedShell.operations } : undefined), 'unknown');
+  const bashTool = registerRecoveryClass(createBashToolDefinition(cwd, {
+    operations: isolatedShell?.operations,
+    spawnHook: context => ({ ...context, env: githubShellEnvironment(context.env) }),
+  }), 'unknown');
   if (isolatedShell && process.platform === 'win32') {
     bashTool.description = 'Execute a Windows cmd.exe command in the current working directory. Use cmd.exe syntax, not Bash: use && for sequencing, double quotes for paths, and %NAME% for environment variables. Do not use export, source, POSIX quoting, printf, or heredocs. For complex scripts or OfficeCLI batch JSON, write a file first and invoke it with python, node, or officecli batch --input. Returns stdout and stderr; optionally provide a timeout in seconds.';
     bashTool.promptSnippet = 'Execute Windows cmd.exe commands (python, officecli, node, bun)';
