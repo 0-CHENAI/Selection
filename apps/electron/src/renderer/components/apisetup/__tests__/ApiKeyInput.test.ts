@@ -7,6 +7,7 @@ import {
   shouldAutoProbeModelCatalog,
   showCustomFormatPicker,
   showsEndpointModelLimits,
+  shouldShowSubmitError,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
 } from '../submit-helpers'
@@ -335,4 +336,22 @@ it('preserves unspecified thinking capability and distinguishes explicitly disab
   expect(legacy).not.toHaveProperty('supportsThinking')
   expect(buildCustomEndpointModelSubmission({ ...input, supportedThinkingLevels: [] }))
     .toMatchObject({ supportedThinkingLevels: [], supportsThinking: false })
+})
+
+describe('shouldShowSubmitError', () => {
+  const base = { status: 'error', errorMessage: 'Failed to parse URL', errorSignature: 'a', currentSignature: 'a' }
+
+  it('shows the error while the form still matches the submitted values', () => {
+    expect(shouldShowSubmitError(base)).toBe(true)
+    expect(shouldShowSubmitError({ ...base, errorSignature: null })).toBe(true)
+  })
+
+  it('hides the error once the form is edited after the failed submit', () => {
+    expect(shouldShowSubmitError({ ...base, currentSignature: 'b' })).toBe(false)
+  })
+
+  it('hides the error when there is no failed submit to report', () => {
+    expect(shouldShowSubmitError({ ...base, status: 'validating' })).toBe(false)
+    expect(shouldShowSubmitError({ ...base, errorMessage: undefined })).toBe(false)
+  })
 })

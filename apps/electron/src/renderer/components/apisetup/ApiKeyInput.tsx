@@ -63,6 +63,7 @@ import {
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
   showsEndpointModelLimits,
+  shouldShowSubmitError,
   type PresetKey,
 } from "./submit-helpers"
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
@@ -337,6 +338,14 @@ export function ApiKeyInput({
   const [editedContextIds, setEditedContextIds] = useState<Set<string>>(() => new Set())
   const [editedMaxTokenIds, setEditedMaxTokenIds] = useState<Set<string>>(() => new Set())
   const [limitError, setLimitError] = useState<string | null>(null)
+
+  const formSignature = JSON.stringify([
+    apiKey, baseUrl, activePreset, customApi, connectionDefaultModel,
+    bedrockAuthMethod, awsAccessKeyId, awsSecretAccessKey, awsSessionToken, awsRegion,
+    modelImageModes, modelThinkingLevels, modelContextWindows, modelMaxTokens,
+  ])
+  const [errorSignature, setErrorSignature] = useState<string | null>(null)
+  const showSubmitError = shouldShowSubmitError({ status, errorMessage, errorSignature, currentSignature: formSignature })
 
   const isDisabled = disabled || status === 'validating'
 
@@ -747,6 +756,13 @@ export function ApiKeyInput({
     }
   }
 
+  // Remember which values this submit used, so a resulting error hides once
+  // the form is edited and shows again on the next submit.
+  const submitForm: typeof onSubmit = (data) => {
+    setErrorSignature(formSignature)
+    onSubmit(data)
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -763,7 +779,7 @@ export function ApiKeyInput({
         setModelError(t('apiSetup.defaultModelRequired'))
         return
       }
-      onSubmit({
+      submitForm({
         apiKey: apiKey.trim(),
         baseUrl: baseUrl.trim() || undefined,
         connectionDefaultModel: selected[0],
@@ -799,7 +815,7 @@ export function ApiKeyInput({
           maxTokens: modelMaxTokens,
         }).map((model) => ({ ...model, ...imagePayload(model.id) }))
         : undefined
-      onSubmit({
+      submitForm({
         apiKey: '',
         piAuthProvider: effectivePiAuthProvider,
         bedrockAuthMethod,
@@ -885,7 +901,7 @@ export function ApiKeyInput({
       fallbackPiAuthProvider: effectivePiAuthProvider,
     })
 
-    onSubmit({
+    submitForm({
       apiKey: apiKey.trim(),
       baseUrl: isUsingDefaultEndpoint ? undefined : effectiveBaseUrl,
       connectionDefaultModel: parsedModels[0],
@@ -941,7 +957,7 @@ export function ApiKeyInput({
             placeholder={apiKeyPlaceholder}
             className={cn(
               "pr-10 border-0 bg-transparent shadow-none",
-              status === 'error' && "focus-visible:ring-destructive"
+              showSubmitError && "focus-visible:ring-destructive"
             )}
             disabled={isDisabled}
             autoFocus
@@ -1453,7 +1469,7 @@ export function ApiKeyInput({
       )}
 
       {/* Error message */}
-      {status === 'error' && errorMessage && (
+      {showSubmitError && (
         <p className="text-sm text-destructive">{errorMessage}</p>
       )}
     </form>
