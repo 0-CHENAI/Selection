@@ -68,6 +68,21 @@ export function shouldAutoProbeModelCatalog(activePreset: string, customApi: Cus
 }
 
 /**
+ * A submit error describes the values that were submitted. Hide it once the
+ * form no longer matches them; the next submit reports its own result.
+ * A null `errorSignature` means the error was not captured yet, so show it.
+ */
+export function shouldShowSubmitError(input: {
+  status: string
+  errorMessage?: string
+  errorSignature: string | null
+  currentSignature: string
+}): boolean {
+  if (input.status !== 'error' || !input.errorMessage) return false
+  return input.errorSignature === null || input.errorSignature === input.currentSignature
+}
+
+/**
  * Custom endpoints ask the user which wire format to use.
  * The URL is not consulted: api.anthropic.com and third-party gateways can
  * both speak either protocol, and guessing from the host gets it wrong.

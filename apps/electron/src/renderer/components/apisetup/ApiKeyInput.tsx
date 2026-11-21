@@ -63,6 +63,7 @@ import {
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
   showsEndpointModelLimits,
+  shouldShowSubmitError,
   type PresetKey,
 } from "./submit-helpers"
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
@@ -337,6 +338,19 @@ export function ApiKeyInput({
   const [editedContextIds, setEditedContextIds] = useState<Set<string>>(() => new Set())
   const [editedMaxTokenIds, setEditedMaxTokenIds] = useState<Set<string>>(() => new Set())
   const [limitError, setLimitError] = useState<string | null>(null)
+
+  const formSignature = JSON.stringify([
+    apiKey, baseUrl, activePreset, customApi, connectionDefaultModel,
+    bedrockAuthMethod, awsAccessKeyId, awsSecretAccessKey, awsSessionToken, awsRegion,
+    modelImageModes, modelThinkingLevels, modelContextWindows, modelMaxTokens,
+  ])
+  const formSignatureRef = useRef(formSignature)
+  formSignatureRef.current = formSignature
+  const [errorSignature, setErrorSignature] = useState<string | null>(null)
+  useEffect(() => {
+    setErrorSignature(status === 'error' ? formSignatureRef.current : null)
+  }, [status, errorMessage])
+  const showSubmitError = shouldShowSubmitError({ status, errorMessage, errorSignature, currentSignature: formSignature })
 
   const isDisabled = disabled || status === 'validating'
 
@@ -941,7 +955,7 @@ export function ApiKeyInput({
             placeholder={apiKeyPlaceholder}
             className={cn(
               "pr-10 border-0 bg-transparent shadow-none",
-              status === 'error' && "focus-visible:ring-destructive"
+              showSubmitError && "focus-visible:ring-destructive"
             )}
             disabled={isDisabled}
             autoFocus
@@ -1453,7 +1467,7 @@ export function ApiKeyInput({
       )}
 
       {/* Error message */}
-      {status === 'error' && errorMessage && (
+      {showSubmitError && (
         <p className="text-sm text-destructive">{errorMessage}</p>
       )}
     </form>
