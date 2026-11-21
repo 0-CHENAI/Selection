@@ -616,6 +616,12 @@ function getRedirectExplanation(op: string): string {
  * `&&`, `||`, `;`, pipelines and subshells are flattened.
  */
 export function extractSimpleCommandsStrict(command: string): string[][] | null {
+  const inspection = inspectSimpleCommands(command);
+  return inspection && !inspection.hasNonReadOnlyRedirect ? inspection.commands : null;
+}
+
+/** Like strict extraction, but reports non-read-only redirects instead of rejecting them. */
+export function inspectSimpleCommands(command: string): { commands: string[][]; hasNonReadOnlyRedirect: boolean } | null {
   if (!command.trim() || hasControlCharacters(command)) return null;
   let ast: ScriptNode;
   try {
@@ -624,6 +630,7 @@ export function extractSimpleCommandsStrict(command: string): string[][] | null 
     return null;
   }
   const out: string[][] = [];
+  let hasNonReadOnlyRedirect = false;
   const visit = (node: ASTNode): boolean => {
     switch (node.type) {
       case 'Script':
@@ -645,7 +652,7 @@ export function extractSimpleCommandsStrict(command: string): string[][] | null 
         const words = [n.name.text];
         for (const item of [...(n.prefix ?? []), ...(n.suffix ?? [])]) {
           if (item.type === 'Redirect') {
-            if (!isRedirectSafe(item as RedirectNode)) return false;
+            if (!isRedirectSafe(item as RedirectNode)) hasNonReadOnlyRedirect = true;
           } else if (item.type === 'Word') {
             const word = item as WordNode;
             if (checkWordForExpansions(word)) return false;
@@ -663,7 +670,7 @@ export function extractSimpleCommandsStrict(command: string): string[][] | null 
         return false;
     }
   };
-  return visit(ast) ? out : null;
+  return visit(ast) ? { commands: out, hasNonReadOnlyRedirect } : null;
 }
 
 /**

@@ -187,6 +187,7 @@ describe('extractSimpleCommandsStrict', () => {
   it('fails closed on unsupported constructs', () => {
     expect(extractSimpleCommandsStrict('for f in *; do rm $f; done')).toBeNull();
     expect(extractSimpleCommandsStrict('echo `whoami`')).toBeNull();
+    expect(extractSimpleCommandsStrict('cat draft.json > deck.json')).toBeNull();
     expect(extractSimpleCommandsStrict('')).toBeNull();
   });
 });
