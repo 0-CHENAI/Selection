@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { unzipSync } from 'fflate'
 import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
+import { deckFileStamp, waitForHostOutput } from '../../../../apps/electron/resources/skills/ppt-design/engine/host-output'
 import { clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, pptDeckStamp, readChartFallbacks, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from './ppt-live'
 
 function session(): string {
@@ -184,7 +185,16 @@ test('incremental export adds slides as pages are saved and does not rewrite an 
     expect(Buffer.from(unzipSync(readFileSync(first!))['ppt/slides/slide1.xml']!).toString('utf8')).toContain('name="title-el"')
     expect(readPptProgress(root, true)?.pptxPath).toBe(first)
     write(3)
+    const cli = join(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design/engine/deck-cli.mjs')
+    const deckPath = join(root, 'data', 'deck.json')
+    const stamp = deckFileStamp(deckPath)
+    await expect(waitForHostOutput(deckPath, stamp, 30)).rejects.toThrow('did not export this saved deck')
+    const waiting = waitForHostOutput(deckPath, stamp)
+    const preflight = Bun.spawn([process.execPath, cli, 'check', deckPath, '--wait-for-export'], { stdout: 'pipe' })
     const grown = await exportIncrementalPptx(root)
+    expect(await waiting).toBe(grown!)
+    expect(await new Response(preflight.stdout).json()).toMatchObject({ status: 'ok', pptx: grown!, pages: 3 })
+    expect(await preflight.exited).toBe(0)
     expect(grown).toBe(first)
     expect(slideNames(grown!).sort()).toEqual(['ppt/slides/slide1.xml', 'ppt/slides/slide2.xml', 'ppt/slides/slide3.xml'])
     writeFileSync(grown!, Buffer.from('KEEP'))

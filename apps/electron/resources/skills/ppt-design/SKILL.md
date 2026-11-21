@@ -61,15 +61,15 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 ```text
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" layouts
-"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" check "<dataFolderPath>/deck.json"
-"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" screenshot "<ppt-output.json 的 path>" --out "<dataFolderPath>/slides" --pages <页数>
+"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" check "<dataFolderPath>/deck.json" --wait-for-export
+"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" screenshot "<check 返回的 pptx>" --out "<dataFolderPath>/slides" --pages <页数>
 ```
 
 从 `CRAFT_BUN` 取得应用附带 Bun 的绝对路径，用参数数组调用。`<skill>` 是本技能的绝对路径。`--platform` 按用户机器选择 `mac`、`win` 或 `linux`。
 
 标准输出是一行 JSON。退出码 0 是通过，2 是 `needs_revision`，1 是文件或用法错误。`needs_revision` 时不写 PPTX。一次看完 `issues` 里的全部问题，按 `pageId` 和 `elementId` 修改后再查。溢出时整理换行或几何、换版式、拆页；不删除限定条件，不把整页栅格化。
 
-每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题，不叫 `deck.pptx`。绝对路径记在 `data/ppt-output.json` 的 `path`。不要自己再写或复制第二份 PPTX，也不要把 PPTX 放进 `dataFolderPath`。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名改某页版式或叙事时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图；仅改文字或数据仍走 `office_edit`。预览里点选后的修改走 OfficeCLI。
+每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题；若用户指定文件名，首次保存前把 deck 标题设成不带 .pptx 的文件名，封面标题可不同。用上面的 `check` 命令拿到本次保存对应的绝对 `pptx` 路径，不要轮询或搜索，也不要另行改名或生成第二份。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名改某页版式或叙事时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图；仅改文字或数据仍走 `office_edit`。预览里点选后的修改走 OfficeCLI。
 
 用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。PPTX 以 `source.pptx`、`theme.json`、`slots.json`、`previews/` 和 `project/` 为准。`deck.json` 上传以同目录的 `deck.json`、`project/` 和几何预览为准。不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败或上传的是 deck.json 时才是几何 SVG。选中个人模板后调用 `ppt_template_create_project`，把 `project/` 复制到工作区新目录。源模板和原 PPTX 的 sha256 必须保持不变。在副本上按内容关系选页、用用户材料重写，然后 `deck_check` 和 `office_render`。每次最多读 12 页参考，参考页不能当输出背景。样例页只写返回的 `sampleExtensionDir`。诊断里的「不支持」要告诉用户人工复核。母版连续使用同一版式只提醒，不拦截。
 
@@ -136,7 +136,7 @@ Do not OCR or run a Swift/Vision/tesseract script in place of image input. For s
 ## 交付
 
 - 用户要求 Morph 或 3D 时，只增加对象配对和运动检查，不另做一套静态设计。静态截图不能证明播放效果。
-- 中间文件放在 `dataFolderPath`（`deck.json`、截图、检查结果）。可见的 PPTX 只有 `ppt-output.json` 里的那一份：没有工作目录时在会话文件夹，有工作目录时在该目录。不要复制第二份，也不要覆盖同目录里无关的已有文件。
+- 中间文件放在 `dataFolderPath`（`deck.json`、截图、检查结果）。可见的 PPTX 只有预检结果中 `pptx` 指向的那一份：没有工作目录时在会话文件夹，有工作目录时在该目录。不要复制第二份，也不要覆盖同目录里无关的已有文件。
 - 只交付这一份 `.pptx` 和一段事实说明。许可与适配来源见 [ATTRIBUTION](ATTRIBUTION.md)。
 
 ### 外来稿先读 brief，再决定要不要导入

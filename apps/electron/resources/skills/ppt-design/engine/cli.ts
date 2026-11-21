@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { argumentLayoutCatalog } from './argument-layouts.ts'
 import { checkDeck, formatNeedsRevision, revisionStatus } from './check.ts'
 import { exportDeck, platformFromProcess } from './export-pptx.ts'
+import { deckFileStamp, waitForHostOutput } from './host-output.ts'
 import { importPptxFile, loadRetained } from './import/project.ts'
 import { mergeRetained } from './import/retained.ts'
 import { loadDeckFile } from './schema.ts'
@@ -19,12 +20,13 @@ type Flags = {
   pages?: number
   pageNumbers?: number[]
   maxSlides?: number
+  waitForExport?: boolean
 }
 
 function usage(): never {
   console.log(JSON.stringify({
     status: 'error',
-    message: '用法：deck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4] | import <file.pptx> --out <工程目录> [--max-slides N]',
+    message: '用法：deck-cli.mjs layouts | check <deck.json> [--wait-for-export] | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4] | import <file.pptx> --out <工程目录> [--max-slides N]',
   }))
   process.exit(1)
 }
@@ -45,6 +47,7 @@ function parseArgs(argv: string[]): Flags {
     } else if (token === '--officecli') flags.officecli = rest[++i]
     else if (token === '--pages') flags.pages = Number(rest[++i])
     else if (token === '--max-slides') flags.maxSlides = Number(rest[++i])
+    else if (token === '--wait-for-export') flags.waitForExport = true
     else if (token === '--only-pages') {
       const value = rest[++i]
       if (!value || !/^\d+(,\d+)*$/.test(value)) usage()
@@ -63,6 +66,7 @@ function emit(status: RenderStatus, body: Record<string, unknown>, code: number)
 
 const flags = parseArgs(process.argv.slice(2))
 if (flags.pageNumbers && flags.command !== 'screenshot') usage()
+if (flags.waitForExport && flags.command !== 'check') usage()
 if (flags.command === 'import') {
   if (!flags.file || !flags.out) usage()
   try {
@@ -98,13 +102,26 @@ if (flags.command === 'screenshot') {
   emit(result.available ? 'ok' : 'error', { screenshots: result }, result.available ? 0 : 1)
 }
 
+let stamp: string | undefined
+if (flags.waitForExport) {
+  try { stamp = deckFileStamp(file) } catch { /* loadDeckFile reports unreadable sources */ }
+}
 const loaded = loadDeckFile(file)
 if (!loaded.deck) emit('error', { issues: loaded.issues }, 1)
 
 if (flags.command === 'check') {
   const issues = [...loaded.issues, ...checkDeck(loaded.deck)]
   const revision = revisionStatus(issues)
+  let pptx: string | undefined
+  if (flags.waitForExport && revision.status === 'ok') {
+    try {
+      pptx = await waitForHostOutput(file, stamp ?? '')
+    } catch (error) {
+      emit('error', { issues, message: error instanceof Error ? error.message : String(error) }, 1)
+    }
+  }
   emit(revision.status, {
+    ...(pptx ? { pptx } : {}),
     issues,
     pages: loaded.deck.pages.length,
     errorCount: revision.errorCount,
