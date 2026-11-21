@@ -78,3 +78,27 @@ test('labels variable-expanded shell commands without guessing which file change
     { phase: 'tool', type: 'officecli:shell', durationMs: 30, fileChanged: null, commandTypes: ['batch'] },
   ])
 })
+
+test('times direct and indirect deck-cli screenshots without splitting compound shell time', () => {
+  let now = 0
+  const timing = new OfficeTurnTiming(false, '/', '/', () => now)
+  const run = (toolUseId: string, command: string, duration: number) => {
+    timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId, input: { command } })
+    now += duration
+    timing.observe({ type: 'tool_result', toolUseId, result: '', isError: false })
+  }
+  run('echo', 'echo \'bun engine/deck-cli.mjs screenshot anything.pptx\'', 1)
+  run('check', 'bun engine/deck-cli.mjs check deck.json', 1)
+  expect(timing.finish()).toBeUndefined()
+
+  run('direct', 'bun engine/deck-cli.mjs screenshot home.pptx --out slides --pages 5', 100)
+  run('indirect', 'cd data && sleep 3 && cat ppt-output.json && "$CRAFT_BUN" "engine/deck-cli.mjs" screenshot "$FILE" --out "$PWD/slides" --pages 5; echo EXIT=$?', 500)
+  run('readback', 'cd data && "$CRAFT_BUN" engine/deck-cli.mjs screenshot home.pptx --out "$PWD/slides" --pages 5 >/dev/null && export OFFICECLI_SKIP_UPDATE=1 && officecli view home.pptx text 2>&1 | head -5', 200)
+  run('mixed', 'officecli validate home.pptx && node engine/deck-cli.mjs screenshot home.pptx --out slides --pages 5', 300)
+  expect(timing.finish()?.stages).toEqual([
+    { phase: 'readback_render', type: 'deck-cli:screenshot', durationMs: 100, fileChanged: false },
+    { phase: 'readback_render', type: 'deck-cli:shell', durationMs: 500, fileChanged: null, commandTypes: ['screenshot'] },
+    { phase: 'readback_render', type: 'deck-cli:shell', durationMs: 200, fileChanged: null, commandTypes: ['screenshot'] },
+    { phase: 'tool', type: 'deck-cli:shell', durationMs: 300, fileChanged: null, commandTypes: ['screenshot'] },
+  ])
+})

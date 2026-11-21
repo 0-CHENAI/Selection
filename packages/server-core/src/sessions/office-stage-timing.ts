@@ -28,6 +28,27 @@ const tools = new Map<string, Phase>([
   ['office_render', 'readback_render'], ['office_business', 'tool'], ['ppt_template_create_project', 'tool'],
 ])
 
+const officeCliExecutable = /(?:^|[/\\])officecli(?:\.exe|\.cmd)?$/i
+const shellReadbackHelpers = new Set(['cat', 'cd', 'echo', 'export', 'grep', 'head', 'ls', 'printf', 'pwd', 'sed', 'sleep', 'tail'])
+
+function isDeckScreenshot([runner, script, command]: string[]): boolean {
+  return /(?:^|[/\\])(?:bun|node)(?:\.exe)?$/i.test(runner ?? '')
+    && /(?:^|[/\\])deck-cli\.mjs$/.test(script ?? '') && command === 'screenshot'
+}
+
+function classifyDeckScreenshot(shell: string, simple: string[][] | null): ClassifiedTool | undefined {
+  if (!shell.includes('deck-cli.mjs')) return
+  const commands = simple ?? extractSimpleCommandsStrict(shell
+    .replace(/\$(?:\{CRAFT_BUN\}|CRAFT_BUN\b)/g, 'bun')
+    .replace(/\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*|\?)/g, 'shell-variable'))
+  if (!commands?.some(isDeckScreenshot)) return
+  if (simple?.length === 1) return { phase: 'readback_render', type: 'deck-cli:screenshot', file: simple[0]?.[3] }
+  const readback = commands.every(command => isDeckScreenshot(command)
+    || shellReadbackHelpers.has(command[0] ?? '')
+    || (officeCliExecutable.test(command[0] ?? '') && cliPhases.get(command[1]?.toLowerCase()) === 'readback_render'))
+  return { phase: readback ? 'readback_render' : 'tool', type: 'deck-cli:shell', commandTypes: ['screenshot'] }
+}
+
 export function isTimedOfficeFile(path: string): boolean {
   return /\.(?:docx|docm|xlsx|xlsm|pptx|pptm)$/i.test(path)
 }
@@ -63,10 +84,13 @@ function classify(event: Extract<AgentEvent, { type: 'tool_start' }>): Classifie
   }
   if (tool !== 'Bash' || typeof event.input.command !== 'string') return
   const shell = event.input.command
-  if (!isOfficecliShellCommand(shell) && !/\bofficecli(?:\.exe|\.cmd)?\b/i.test(shell)) return
+  const directCli = isOfficecliShellCommand(shell)
+  if (!directCli && !/\bofficecli(?:\.exe|\.cmd)?\b/i.test(shell) && !shell.includes('deck-cli.mjs')) return
   const simple = extractSimpleCommandsStrict(shell)
-  const cli = simple?.filter(([exe]) => /(?:^|[/\\])officecli(?:\.exe|\.cmd)?$/i.test(exe ?? '')) ?? []
-  if (!cli.length && (simple || !isOfficecliShellCommand(shell))) return
+  const screenshot = classifyDeckScreenshot(shell, simple)
+  if (screenshot) return screenshot
+  const cli = simple?.filter(([exe]) => officeCliExecutable.test(exe ?? '')) ?? []
+  if (!cli.length && (simple || !directCli)) return
   const knownVerb = (raw?: string) => {
     const verb = raw?.toLowerCase() ?? ''
     return cliPhases.has(verb) ? verb : 'other'
