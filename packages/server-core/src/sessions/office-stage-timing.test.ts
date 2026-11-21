@@ -89,16 +89,19 @@ test('times direct and indirect deck-cli screenshots without splitting compound 
   }
   run('echo', 'echo \'bun engine/deck-cli.mjs screenshot anything.pptx\'', 1)
   run('check', 'bun engine/deck-cli.mjs check deck.json', 1)
+  run('heredoc-data', "cat <<'EOF'\nbun engine/deck-cli.mjs screenshot anything.pptx\nEOF", 1)
   expect(timing.finish()).toBeUndefined()
 
   run('direct', 'bun engine/deck-cli.mjs screenshot home.pptx --out slides --pages 5', 100)
   run('indirect', 'cd data && sleep 3 && cat ppt-output.json && "$CRAFT_BUN" "engine/deck-cli.mjs" screenshot "$FILE" --out "$PWD/slides" --pages 5; echo EXIT=$?', 500)
-  run('readback', 'cd data && "$CRAFT_BUN" engine/deck-cli.mjs screenshot home.pptx --out "$PWD/slides" --pages 5 >/dev/null && export OFFICECLI_SKIP_UPDATE=1 && officecli view home.pptx text 2>&1 | head -5', 200)
+  run('readback', 'cd data && OFFICECLI_SKIP_UPDATE=1 "$CRAFT_BUN" engine/deck-cli.mjs screenshot home.pptx --out "$PWD/slides" --pages 5 >/dev/null && OFFICECLI_SKIP_UPDATE=1 officecli view home.pptx text 2>&1 | head -5', 200)
   run('mixed', 'officecli validate home.pptx && node engine/deck-cli.mjs screenshot home.pptx --out slides --pages 5', 300)
+  run('heredoc', 'OFFICECLI_SKIP_UPDATE=1 "$CRAFT_BUN" engine/deck-cli.mjs screenshot home.pptx | head; python3 - <<\'EOF\'\nprint("inspect screenshots")\nEOF', 400)
   expect(timing.finish()?.stages).toEqual([
     { phase: 'readback_render', type: 'deck-cli:screenshot', durationMs: 100, fileChanged: false },
     { phase: 'readback_render', type: 'deck-cli:shell', durationMs: 500, fileChanged: null, commandTypes: ['screenshot'] },
     { phase: 'readback_render', type: 'deck-cli:shell', durationMs: 200, fileChanged: null, commandTypes: ['screenshot'] },
     { phase: 'tool', type: 'deck-cli:shell', durationMs: 300, fileChanged: null, commandTypes: ['screenshot'] },
+    { phase: 'tool', type: 'deck-cli:shell', durationMs: 400, fileChanged: null, commandTypes: ['screenshot'] },
   ])
 })

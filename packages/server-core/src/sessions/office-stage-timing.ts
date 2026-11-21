@@ -38,12 +38,15 @@ function isDeckScreenshot([runner, script, command]: string[]): boolean {
 
 function classifyDeckScreenshot(shell: string, simple: string[][] | null): ClassifiedTool | undefined {
   if (!shell.includes('deck-cli.mjs')) return
-  const commands = simple ?? extractSimpleCommandsStrict(shell
+  const normalized = shell
+    .replace(/(^|[;&|\s])OFFICECLI_SKIP_UPDATE=1[ \t]+(?=[^;&|\s])/g, '$1')
     .replace(/\$(?:\{CRAFT_BUN\}|CRAFT_BUN\b)/g, 'bun')
-    .replace(/\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*|\?)/g, 'shell-variable'))
-  if (!commands?.some(isDeckScreenshot)) return
+    .replace(/\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*|\?)/g, 'shell-variable')
+  const commands = simple ?? extractSimpleCommandsStrict(normalized)
+  const prefix = !commands && /^([^\r\n]*?)<<-?[ \t]*(?:'\w+'|"\w+"|\w+)[ \t]*\r?\n/.exec(normalized)?.[1]
+  if (!commands?.some(isDeckScreenshot) && !(prefix && extractSimpleCommandsStrict(prefix)?.some(isDeckScreenshot))) return
   if (simple?.length === 1) return { phase: 'readback_render', type: 'deck-cli:screenshot', file: simple[0]?.[3] }
-  const readback = commands.every(command => isDeckScreenshot(command)
+  const readback = commands?.every(command => isDeckScreenshot(command)
     || shellReadbackHelpers.has(command[0] ?? '')
     || (officeCliExecutable.test(command[0] ?? '') && cliPhases.get(command[1]?.toLowerCase()) === 'readback_render'))
   return { phase: readback ? 'readback_render' : 'tool', type: 'deck-cli:shell', commandTypes: ['screenshot'] }
