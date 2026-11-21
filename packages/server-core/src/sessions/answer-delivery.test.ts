@@ -9,6 +9,7 @@ import type { AnswerDeliveryControl } from '@craft-agent/shared/agent/backend/ty
 import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
+import { OfficeTurnTiming } from './office-stage-timing'
 import { ArtifactVersions, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
 import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
@@ -53,6 +54,42 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     }]
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
+
+  it('excludes awaited PPT progress validation without ending model timing at intermediate text', async () => {
+    managed.workMode = 'PRO'
+    let now = 0
+    let summary: ReturnType<OfficeTurnTiming['finish']>
+    const clock = spyOn(performance, 'now').mockImplementation(() => now)
+    const originalFinish = OfficeTurnTiming.prototype.finish
+    const finish = spyOn(OfficeTurnTiming.prototype, 'finish').mockImplementation(function (this: OfficeTurnTiming) {
+      summary = originalFinish.call(this)
+      return summary
+    })
+    const sync = spyOn(manager as any, 'syncPptProgress').mockImplementation(async (session: typeof managed, generating: boolean) => {
+      if (generating) await (manager as any).timeOfficeCheck(session, 'validation', 'ppt_progress_check', async () => { now += 600 })
+    })
+    install(async function* () {
+      yield { type: 'model_call_start' }
+      now += 100
+      yield { type: 'text_complete', text: 'Drafting', isIntermediate: true }
+      now += 50
+      yield { type: 'text_complete', text: 'Deck ready', isIntermediate: false }
+      yield { type: 'usage_update', usage: { inputTokens: 1, outputTokens: 1 } }
+      yield { type: 'complete' }
+    })
+    try {
+      await manager.sendMessage(managed.id, 'Create a PPT', undefined, undefined, { ppt: {} })
+      expect(summary?.stages).toEqual(expect.arrayContaining([
+        { phase: 'model_wait', type: 'model', durationMs: 150, fileChanged: false },
+      ]))
+      expect(summary?.stages.filter(stage => stage.type === 'ppt_progress_check')
+        .map(stage => stage.durationMs)).toEqual([600, 600])
+    } finally {
+      sync.mockRestore()
+      finish.mockRestore()
+      clock.mockRestore()
+    }
+  })
 
   for (const mode of ['question', 'edit', 'queued-reload'] as const) it(`uses optional Office context in ordinary chat (${mode})`, async () => {
     // An upload outside scanned roots proves the active document is tracked

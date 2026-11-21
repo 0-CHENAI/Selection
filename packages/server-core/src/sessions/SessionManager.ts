@@ -92,6 +92,7 @@ import { resolveSourceActivationRetry, sourceActivationRetryMessage } from './so
 import { collectSourceSyncFailures, nextSourceSyncNotices, sourceSyncModelReminder } from './source-sync-failures.ts'
 import { completionStopReason } from './completion-outcome.ts'
 import { toolCallBypassesWorkspaceCache } from './session-tool-usage.ts'
+import { isTimedOfficeFile, OfficeTurnTiming } from './office-stage-timing'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -1649,6 +1650,7 @@ setBackendModelRequestLimiter((quota, owner, signal) => hostModelRequestPool.acq
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private officeTurnTimings = new WeakMap<ManagedSession, { generation: number; timing: OfficeTurnTiming }>()
   private pendingUserSubmissions = new Map<string, Promise<void>>()
   private executionOwners = new Map<string, { release: () => void; calls: number; completion?: SessionCompletionEvent }>()
   private startupRecoveryClaims = new Set<string>()
@@ -1823,7 +1825,9 @@ export class SessionManager implements ISessionManager {
     }
     if (!ownsUpdate()) return
     // Never publish a successful page state before the current deck has been checked.
-    try { await ensurePptChecks(dir) } catch { /* uncached pages remain unverified */ }
+    try {
+      await this.timeOfficeCheck(managed, 'validation', 'ppt_progress_check', () => ensurePptChecks(dir))
+    } catch { /* uncached pages remain unverified */ }
     if (!ownsUpdate()) return
     this.emitPptProgress(managed, dir, generating && managed.isProcessing && isPptGenerating(dir))
   }
@@ -7962,6 +7966,7 @@ export class SessionManager implements ISessionManager {
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
+    let officeTiming: OfficeTurnTiming | undefined
     await this.transitionAnnotationFeedback(managed, userMessage.id, 'running')
 
     // Pre-enable sources required by invoked, hard-loaded, or glob-matched skills (#249, #117).
@@ -8345,6 +8350,13 @@ export class SessionManager implements ISessionManager {
       const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
         ? `${currentInput}${imageSkipNote}${sourceFailNote}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
         : `${currentInput}${imageSkipNote}${sourceFailNote}`
+      officeTiming = new OfficeTurnTiming(
+        !!(managed.office || pptRun || userMessage.officeDocumentPath || managed.isolatedWorkspace?.officeDocumentPath
+          || [...(attachments ?? []), ...(storedAttachments ?? [])].some(file => isTimedOfficeFile(file.name))),
+        managed.isolatedWorkspace?.directory ?? managed.workingDirectory ?? managed.workspace.rootPath,
+        managed.workingDirectory ?? chatSessionDir,
+      )
+      this.officeTurnTimings.set(managed, { generation: myGeneration, timing: officeTiming })
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -8383,7 +8395,9 @@ export class SessionManager implements ISessionManager {
         }
         if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
           || (event.type === 'info' && event.message.startsWith('Compacted'))) {
-          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) await this.syncPptProgress(managed, true)
+          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) {
+            await officeTiming.excludeFromModelWait(() => this.syncPptProgress(managed, true))
+          }
           this.persistSession(managed)
           await this.flushSession(managed.id)
           if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
@@ -8592,6 +8606,11 @@ export class SessionManager implements ISessionManager {
         await this.onProcessingStopped(sessionId, 'error', myGeneration)
       }
     } finally {
+      if (officeTiming) {
+        if (this.officeTurnTimings.get(managed)?.timing === officeTiming) this.officeTurnTimings.delete(managed)
+        const summary = officeTiming.finish()
+        if (summary) sessionLog.info('office_turn_timing', JSON.stringify({ sessionId, generation: myGeneration, ...summary }))
+      }
       // Only handle cleanup for unexpected exits (loop break without complete event)
       // Normal completion returns early after calling onProcessingStopped
       // Errors are handled in catch block
@@ -8743,7 +8762,9 @@ export class SessionManager implements ISessionManager {
           const candidate = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'validation', randomUUID(), feedbackBasename(file.path))
           atomicWrite(candidate, file.content)
           try {
-            const validation = await validateCandidateFile(candidate)
+            const validation = await (isTimedOfficeFile(candidate)
+              ? this.timeOfficeCheck(managed, 'validation', 'office_candidate_format', () => validateCandidateFile(candidate))
+              : validateCandidateFile(candidate))
             checks.push(...validation.checks)
           } catch (error) {
             return { passed: false, checks: [...checks, `Output "${file.path}": ${error instanceof Error ? error.message : String(error)}`] }
@@ -9238,7 +9259,8 @@ export class SessionManager implements ISessionManager {
       this.officePreviews.assertCaptured(parent.id, operation.officeSelection)
       if (operation.officeSelection.artifactId !== artifact.id || operation.officeSelection.baseVersion !== operation.baseVersion
         || operation.officeSelection.path !== artifact.path) throw new Error('Office selection belongs to another file or version')
-      await verifyOfficeSelection(artifact.path, operation.officeSelection)
+      const selection = operation.officeSelection
+      await this.timeOfficeCheck(parent, 'readback_render', 'office_selection_readback', () => verifyOfficeSelection(artifact.path, selection))
     }
     // Bind relative validation inputs before the asynchronous revision starts.
     // A later session-directory change must not select a different project.
@@ -9313,8 +9335,9 @@ export class SessionManager implements ISessionManager {
         cancellationWatch.unref?.()
         if (feedbackCancelled()) return
         if (feedback.officeSelection) {
-          await verifyOfficeSelection(artifact.path, feedback.officeSelection)
-          await verifyOfficeSelection(candidate, feedback.officeSelection)
+          const selection = feedback.officeSelection
+          await this.timeOfficeCheck(managed, 'readback_render', 'office_selection_readback', () => verifyOfficeSelection(artifact.path, selection))
+          await this.timeOfficeCheck(managed, 'readback_render', 'office_selection_readback', () => verifyOfficeSelection(candidate, selection))
           this.officeProgressParents.set(child.id, parent.id)
           this.officeRevisionCandidates.set(parent.id, { artifactId: artifact.id, path: candidate, childSessionId: child.id })
         }
@@ -9332,7 +9355,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         }
         if (revisionCancelled() || managed.messages.some(m => m.role === 'error')) throw new Error('Revision execution did not complete successfully')
         feedback.status = 'validating'; store.save(feedback)
-        const validation = await validateCandidateFile(candidate)
+        const validation = await (isTimedOfficeFile(candidate)
+          ? this.timeOfficeCheck(managed, 'validation', 'office_candidate_format', () => validateCandidateFile(candidate))
+          : validateCandidateFile(candidate))
         if (validation.hash === createHash('sha256').update(bytes).digest('hex')) throw new Error('No file changes were produced; the original and candidate are preserved')
         feedback.validation = [...validation.checks, 'File/format checks only; semantic correctness has not been verified']
         if (requiresProjectValidation(artifact.path)) {
@@ -9635,12 +9660,19 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     managed: ManagedSession, agent: AgentInstance, message: string,
     attachments: FileAttachment[] | undefined, options: ChatOptions,
   ): AsyncGenerator<AgentEvent> {
+    const timing = this.activeOfficeTiming(managed)
+    const chat = async function* (prompt: string) {
+      for await (const event of agent.chat(prompt, attachments, options)) {
+        timing?.observe(event)
+        yield event
+      }
+    }
     // Backends without a drain barrier cannot safely support automatic intervention.
-    if (!agent.interruptForProgress) { yield* agent.chat(message, attachments, options); return }
+    if (!agent.interruptForProgress) { yield* chat(message); return }
     const generation = managed.processingGeneration
     managed.progressLiveEvaluationTokens = 0
     const user = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
-    if (!user) { yield* agent.chat(message, attachments, options); return }
+    if (!user) { yield* chat(message); return }
     const dag = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
     const root = this.sessions.get(dag?.orchestratorSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? managed.id) ?? managed
     const taskId = dag?.runId ?? managed.taskRunId ?? root.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id ?? user.id
@@ -9773,7 +9805,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     try {
       while (active()) {
         let completed: Extract<AgentEvent, { type: 'complete' }> | undefined
-        for await (const event of agent.chat(prompt, attachments, options)) {
+        for await (const event of chat(prompt)) {
           if (event.type === 'model_activity') activity = { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes, toolInputBytes: event.toolInputBytes }
           if (event.type === 'model_call_start') { modelInFlight = true; call++; began = Date.now(); status = 'model'; activity = { reasoningBytes: 0, textBytes: 0 } }
           if (event.type === 'usage_update' || event.type === 'complete') modelInFlight = false
@@ -10056,20 +10088,47 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     })
   }
 
+  private activeOfficeTiming(managed: ManagedSession): OfficeTurnTiming | undefined {
+    const active = this.officeTurnTimings.get(managed)
+    return active?.generation === managed.processingGeneration ? active.timing : undefined
+  }
+
+  private async timeOfficeCheck<T>(
+    managed: ManagedSession, phase: 'validation' | 'readback_render', type: string, run: () => Promise<T>,
+  ): Promise<T> {
+    const generation = managed.processingGeneration
+    const timing = this.activeOfficeTiming(managed)
+    const finish = timing?.start(phase, type, () => false)
+    const start = performance.now()
+    try {
+      return await run()
+    } finally {
+      if (finish) finish()
+      else sessionLog.info('office_stage_timing', JSON.stringify({ sessionId: managed.id, generation,
+        phase, type, durationMs: Math.round(performance.now() - start), fileChanged: false }))
+    }
+  }
+
   /**
    * Pre-delivery guard (#711). Files changed in this turn that came from the selected Word case must keep its
    * layout; Excel workbooks with formulas must be recalculated. Failure denies the answer and returns the
    * needs_revision list to the model for another round.
    */
   private officeDeliveryBlock(managed: ManagedSession): string | undefined {
+    const timing = this.activeOfficeTiming(managed)
+    const start = performance.now()
     const changed = managed.artifactCandidateInventory?.changed() ?? []
-    if (!changed.length) return undefined
     try {
-      const issues = officeDeliveryIssues(this.officeToolSession(managed), changed)
-      return issues.length ? formatDeliveryIssues(issues) : undefined
-    } catch (error) {
-      sessionLog.warn('Office delivery guard failed to run', { sessionId: managed.id, error })
-      return undefined
+      if (!changed.length) return undefined
+      try {
+        const issues = officeDeliveryIssues(this.officeToolSession(managed), changed)
+        return issues.length ? formatDeliveryIssues(issues) : undefined
+      } catch (error) {
+        sessionLog.warn('Office delivery guard failed to run', { sessionId: managed.id, error })
+        return undefined
+      }
+    } finally {
+      timing?.deliveryGate(start, managed.artifactCandidateInventory ? changed.some(isTimedOfficeFile) : null)
     }
   }
 
