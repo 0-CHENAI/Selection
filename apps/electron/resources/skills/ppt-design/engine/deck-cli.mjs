@@ -18,15 +18,13 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  if (mod && typeof mod === "object" || typeof mod === "function") {
-    for (let key of __getOwnPropNames(mod))
-      if (!__hasOwnProp.call(to, key))
-        __defProp(to, key, {
-          get: __accessProp.bind(mod, key),
-          enumerable: true
-        });
-  }
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: __accessProp.bind(mod, key),
+        enumerable: true
+      });
   if (canCache)
     cache.set(mod, to);
   return to;
@@ -35,7 +33,7 @@ var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, 
 var __require = import.meta.require;
 
 // node_modules/process-nextick-args/index.js
-var require_process_nextick_args = __commonJS(function(exports, module) {
+var require_process_nextick_args = __commonJS((exports, module) => {
   if (typeof process === "undefined" || !process.version || process.version.indexOf("v0.") === 0 || process.version.indexOf("v1.") === 0 && process.version.indexOf("v1.8.") !== 0) {
     module.exports = { nextTick };
   } else {
@@ -46,7 +44,7 @@ var require_process_nextick_args = __commonJS(function(exports, module) {
       throw new TypeError('"callback" argument must be a function');
     }
     var len = arguments.length;
-    var args, i;
+    var args, i2;
     switch (len) {
       case 0:
       case 1:
@@ -65,9 +63,9 @@ var require_process_nextick_args = __commonJS(function(exports, module) {
         });
       default:
         args = new Array(len - 1);
-        i = 0;
-        while (i < args.length) {
-          args[i++] = arguments[i];
+        i2 = 0;
+        while (i2 < args.length) {
+          args[i2++] = arguments[i2];
         }
         return process.nextTick(function afterTick() {
           fn.apply(null, args);
@@ -77,15 +75,15 @@ var require_process_nextick_args = __commonJS(function(exports, module) {
 });
 
 // node_modules/readable-stream/node_modules/isarray/index.js
-var require_isarray = __commonJS(function(exports, module) {
-  var toString = {}.toString;
+var require_isarray = __commonJS((exports, module) => {
+  var toString2 = {}.toString;
   module.exports = Array.isArray || function(arr) {
-    return toString.call(arr) == "[object Array]";
+    return toString2.call(arr) == "[object Array]";
   };
 });
 
 // node_modules/readable-stream/node_modules/safe-buffer/index.js
-var require_safe_buffer = __commonJS(function(exports, module) {
+var require_safe_buffer = __commonJS((exports, module) => {
   var buffer = __require("buffer");
   var Buffer2 = buffer.Buffer;
   function copyProps(src, dst) {
@@ -140,7 +138,7 @@ var require_safe_buffer = __commonJS(function(exports, module) {
 });
 
 // node_modules/core-util-is/lib/util.js
-var require_util = __commonJS(function(exports) {
+var require_util = __commonJS((exports) => {
   function isArray(arg) {
     if (Array.isArray) {
       return Array.isArray(arg);
@@ -148,14 +146,14 @@ var require_util = __commonJS(function(exports) {
     return objectToString(arg) === "[object Array]";
   }
   exports.isArray = isArray;
-  function isBoolean(arg) {
+  function isBoolean2(arg) {
     return typeof arg === "boolean";
   }
-  exports.isBoolean = isBoolean;
-  function isNull(arg) {
+  exports.isBoolean = isBoolean2;
+  function isNull2(arg) {
     return arg === null;
   }
-  exports.isNull = isNull;
+  exports.isNull = isNull2;
   function isNullOrUndefined(arg) {
     return arg == null;
   }
@@ -180,10 +178,10 @@ var require_util = __commonJS(function(exports) {
     return objectToString(re) === "[object RegExp]";
   }
   exports.isRegExp = isRegExp;
-  function isObject(arg) {
+  function isObject3(arg) {
     return typeof arg === "object" && arg !== null;
   }
-  exports.isObject = isObject;
+  exports.isObject = isObject3;
   function isDate(d) {
     return objectToString(d) === "[object Date]";
   }
@@ -207,7 +205,7 @@ var require_util = __commonJS(function(exports) {
 });
 
 // node_modules/inherits/inherits_browser.js
-var require_inherits_browser = __commonJS(function(exports, module) {
+var require_inherits_browser = __commonJS((exports, module) => {
   if (typeof Object.create === "function") {
     module.exports = function inherits(ctor, superCtor) {
       if (superCtor) {
@@ -236,7 +234,7 @@ var require_inherits_browser = __commonJS(function(exports, module) {
 });
 
 // node_modules/inherits/inherits.js
-var require_inherits = __commonJS(function(exports, module) {
+var require_inherits = __commonJS((exports, module) => {
   try {
     util = __require("util");
     if (typeof util.inherits !== "function")
@@ -249,7 +247,7 @@ var require_inherits = __commonJS(function(exports, module) {
 });
 
 // node_modules/readable-stream/lib/internal/streams/BufferList.js
-var require_BufferList = __commonJS(function(exports, module) {
+var require_BufferList = __commonJS((exports, module) => {
   function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) {
       throw new TypeError("Cannot call a class as a function");
@@ -313,10 +311,10 @@ var require_BufferList = __commonJS(function(exports, module) {
         return Buffer2.alloc(0);
       var ret = Buffer2.allocUnsafe(n >>> 0);
       var p = this.head;
-      var i = 0;
+      var i2 = 0;
       while (p) {
-        copyBuffer(p.data, ret, i);
-        i += p.data.length;
+        copyBuffer(p.data, ret, i2);
+        i2 += p.data.length;
         p = p.next;
       }
       return ret;
@@ -332,7 +330,7 @@ var require_BufferList = __commonJS(function(exports, module) {
 });
 
 // node_modules/readable-stream/lib/internal/streams/destroy.js
-var require_destroy = __commonJS(function(exports, module) {
+var require_destroy = __commonJS((exports, module) => {
   var pna = require_process_nextick_args();
   function destroy(err, cb) {
     var _this = this;
@@ -357,16 +355,16 @@ var require_destroy = __commonJS(function(exports, module) {
     if (this._writableState) {
       this._writableState.destroyed = true;
     }
-    this._destroy(err || null, function(err) {
-      if (!cb && err) {
+    this._destroy(err || null, function(err2) {
+      if (!cb && err2) {
         if (!_this._writableState) {
-          pna.nextTick(emitErrorNT, _this, err);
+          pna.nextTick(emitErrorNT, _this, err2);
         } else if (!_this._writableState.errorEmitted) {
           _this._writableState.errorEmitted = true;
-          pna.nextTick(emitErrorNT, _this, err);
+          pna.nextTick(emitErrorNT, _this, err2);
         }
       } else if (cb) {
-        cb(err);
+        cb(err2);
       }
     });
     return this;
@@ -398,12 +396,12 @@ var require_destroy = __commonJS(function(exports, module) {
 });
 
 // node_modules/util-deprecate/node.js
-var require_node = __commonJS(function(exports, module) {
+var require_node = __commonJS((exports, module) => {
   module.exports = __require("util").deprecate;
 });
 
 // node_modules/readable-stream/lib/_stream_writable.js
-var require__stream_writable = __commonJS(function(exports, module) {
+var require__stream_writable = __commonJS((exports, module) => {
   var pna = require_process_nextick_args();
   module.exports = Writable;
   function CorkedRequest(state) {
@@ -806,15 +804,15 @@ var require__stream_writable = __commonJS(function(exports, module) {
     }
   }
   function finishMaybe(stream, state) {
-    var need = needFinish(state);
-    if (need) {
+    var need2 = needFinish(state);
+    if (need2) {
       prefinish(stream, state);
       if (state.pendingcb === 0) {
         state.finished = true;
         stream.emit("finish");
       }
     }
-    return need;
+    return need2;
   }
   function endWritable(stream, state, cb) {
     state.ending = true;
@@ -862,14 +860,14 @@ var require__stream_writable = __commonJS(function(exports, module) {
 });
 
 // node_modules/readable-stream/lib/_stream_duplex.js
-var require__stream_duplex = __commonJS(function(exports, module) {
+var require__stream_duplex = __commonJS((exports, module) => {
   var pna = require_process_nextick_args();
   var objectKeys = Object.keys || function(obj) {
-    var keys = [];
+    var keys2 = [];
     for (var key in obj) {
-      keys.push(key);
+      keys2.push(key);
     }
-    return keys;
+    return keys2;
   };
   module.exports = Duplex;
   var util = Object.create(require_util());
@@ -939,7 +937,7 @@ var require__stream_duplex = __commonJS(function(exports, module) {
 });
 
 // node_modules/string_decoder/node_modules/safe-buffer/index.js
-var require_safe_buffer2 = __commonJS(function(exports, module) {
+var require_safe_buffer2 = __commonJS((exports, module) => {
   var buffer = __require("buffer");
   var Buffer2 = buffer.Buffer;
   function copyProps(src, dst) {
@@ -994,7 +992,7 @@ var require_safe_buffer2 = __commonJS(function(exports, module) {
 });
 
 // node_modules/string_decoder/lib/string_decoder.js
-var require_string_decoder = __commonJS(function(exports) {
+var require_string_decoder = __commonJS((exports) => {
   var Buffer2 = require_safe_buffer2().Buffer;
   var isEncoding = Buffer2.isEncoding || function(encoding) {
     encoding = "" + encoding;
@@ -1082,18 +1080,18 @@ var require_string_decoder = __commonJS(function(exports) {
     if (buf.length === 0)
       return "";
     var r;
-    var i;
+    var i2;
     if (this.lastNeed) {
       r = this.fillLast(buf);
       if (r === undefined)
         return "";
-      i = this.lastNeed;
+      i2 = this.lastNeed;
       this.lastNeed = 0;
     } else {
-      i = 0;
+      i2 = 0;
     }
-    if (i < buf.length)
-      return r ? r + this.text(buf, i) : this.text(buf, i);
+    if (i2 < buf.length)
+      return r ? r + this.text(buf, i2) : this.text(buf, i2);
     return r || "";
   };
   StringDecoder.prototype.end = utf8End;
@@ -1117,9 +1115,9 @@ var require_string_decoder = __commonJS(function(exports) {
       return 4;
     return byte >> 6 === 2 ? -1 : -2;
   }
-  function utf8CheckIncomplete(self2, buf, i) {
+  function utf8CheckIncomplete(self2, buf, i2) {
     var j = buf.length - 1;
-    if (j < i)
+    if (j < i2)
       return 0;
     var nb = utf8CheckByte(buf[j]);
     if (nb >= 0) {
@@ -1127,7 +1125,7 @@ var require_string_decoder = __commonJS(function(exports) {
         self2.lastNeed = nb - 1;
       return nb;
     }
-    if (--j < i || nb === -2)
+    if (--j < i2 || nb === -2)
       return 0;
     nb = utf8CheckByte(buf[j]);
     if (nb >= 0) {
@@ -1135,7 +1133,7 @@ var require_string_decoder = __commonJS(function(exports) {
         self2.lastNeed = nb - 2;
       return nb;
     }
-    if (--j < i || nb === -2)
+    if (--j < i2 || nb === -2)
       return 0;
     nb = utf8CheckByte(buf[j]);
     if (nb >= 0) {
@@ -1179,14 +1177,14 @@ var require_string_decoder = __commonJS(function(exports) {
     buf.copy(this.lastChar, p, 0, buf.length);
     this.lastNeed -= buf.length;
   }
-  function utf8Text(buf, i) {
-    var total = utf8CheckIncomplete(this, buf, i);
+  function utf8Text(buf, i2) {
+    var total = utf8CheckIncomplete(this, buf, i2);
     if (!this.lastNeed)
-      return buf.toString("utf8", i);
+      return buf.toString("utf8", i2);
     this.lastTotal = total;
     var end = buf.length - (total - this.lastNeed);
     buf.copy(this.lastChar, 0, end);
-    return buf.toString("utf8", i, end);
+    return buf.toString("utf8", i2, end);
   }
   function utf8End(buf) {
     var r = buf && buf.length ? this.write(buf) : "";
@@ -1194,9 +1192,9 @@ var require_string_decoder = __commonJS(function(exports) {
       return r + "\uFFFD";
     return r;
   }
-  function utf16Text(buf, i) {
-    if ((buf.length - i) % 2 === 0) {
-      var r = buf.toString("utf16le", i);
+  function utf16Text(buf, i2) {
+    if ((buf.length - i2) % 2 === 0) {
+      var r = buf.toString("utf16le", i2);
       if (r) {
         var c = r.charCodeAt(r.length - 1);
         if (c >= 55296 && c <= 56319) {
@@ -1212,7 +1210,7 @@ var require_string_decoder = __commonJS(function(exports) {
     this.lastNeed = 1;
     this.lastTotal = 2;
     this.lastChar[0] = buf[buf.length - 1];
-    return buf.toString("utf16le", i, buf.length - 1);
+    return buf.toString("utf16le", i2, buf.length - 1);
   }
   function utf16End(buf) {
     var r = buf && buf.length ? this.write(buf) : "";
@@ -1222,10 +1220,10 @@ var require_string_decoder = __commonJS(function(exports) {
     }
     return r;
   }
-  function base64Text(buf, i) {
-    var n = (buf.length - i) % 3;
+  function base64Text(buf, i2) {
+    var n = (buf.length - i2) % 3;
     if (n === 0)
-      return buf.toString("base64", i);
+      return buf.toString("base64", i2);
     this.lastNeed = 3 - n;
     this.lastTotal = 3;
     if (n === 1) {
@@ -1234,7 +1232,7 @@ var require_string_decoder = __commonJS(function(exports) {
       this.lastChar[0] = buf[buf.length - 2];
       this.lastChar[1] = buf[buf.length - 1];
     }
-    return buf.toString("base64", i, buf.length - n);
+    return buf.toString("base64", i2, buf.length - n);
   }
   function base64End(buf) {
     var r = buf && buf.length ? this.write(buf) : "";
@@ -1251,15 +1249,15 @@ var require_string_decoder = __commonJS(function(exports) {
 });
 
 // node_modules/readable-stream/lib/_stream_readable.js
-var require__stream_readable = __commonJS(function(exports, module) {
+var require__stream_readable = __commonJS((exports, module) => {
   var pna = require_process_nextick_args();
   module.exports = Readable;
   var isArray = require_isarray();
   var Duplex;
   Readable.ReadableState = ReadableState;
   var EE = __require("events").EventEmitter;
-  var EElistenerCount = function(emitter, type) {
-    return emitter.listeners(type).length;
+  var EElistenerCount = function(emitter, type2) {
+    return emitter.listeners(type2).length;
   };
   var Stream = __require("stream");
   var Buffer2 = require_safe_buffer().Buffer;
@@ -1748,8 +1746,8 @@ var require__stream_readable = __commonJS(function(exports, module) {
       state.pipes = null;
       state.pipesCount = 0;
       state.flowing = false;
-      for (var i = 0;i < len; i++) {
-        dests[i].emit("unpipe", this, { hasUnpiped: false });
+      for (var i2 = 0;i2 < len; i2++) {
+        dests[i2].emit("unpipe", this, { hasUnpiped: false });
       }
       return this;
     }
@@ -1855,20 +1853,20 @@ var require__stream_readable = __commonJS(function(exports, module) {
         stream.pause();
       }
     });
-    for (var i in stream) {
-      if (this[i] === undefined && typeof stream[i] === "function") {
-        this[i] = function(method) {
+    for (var i2 in stream) {
+      if (this[i2] === undefined && typeof stream[i2] === "function") {
+        this[i2] = function(method) {
           return function() {
             return stream[method].apply(stream, arguments);
           };
-        }(i);
+        }(i2);
       }
     }
     for (var n = 0;n < kProxyEvents.length; n++) {
       stream.on(kProxyEvents[n], this.emit.bind(this, kProxyEvents[n]));
     }
-    this._read = function(n) {
-      debug("wrapped _read", n);
+    this._read = function(n2) {
+      debug("wrapped _read", n2);
       if (paused) {
         paused = false;
         stream.resume();
@@ -1920,15 +1918,15 @@ var require__stream_readable = __commonJS(function(exports, module) {
     var ret = p.data;
     n -= ret.length;
     while (p = p.next) {
-      var str = p.data;
-      var nb = n > str.length ? str.length : n;
-      if (nb === str.length)
-        ret += str;
+      var str2 = p.data;
+      var nb = n > str2.length ? str2.length : n;
+      if (nb === str2.length)
+        ret += str2;
       else
-        ret += str.slice(0, n);
+        ret += str2.slice(0, n);
       n -= nb;
       if (n === 0) {
-        if (nb === str.length) {
+        if (nb === str2.length) {
           ++c;
           if (p.next)
             list.head = p.next;
@@ -1936,7 +1934,7 @@ var require__stream_readable = __commonJS(function(exports, module) {
             list.head = list.tail = null;
         } else {
           list.head = p;
-          p.data = str.slice(nb);
+          p.data = str2.slice(nb);
         }
         break;
       }
@@ -1991,16 +1989,16 @@ var require__stream_readable = __commonJS(function(exports, module) {
     }
   }
   function indexOf(xs, x) {
-    for (var i = 0, l = xs.length;i < l; i++) {
-      if (xs[i] === x)
-        return i;
+    for (var i2 = 0, l = xs.length;i2 < l; i2++) {
+      if (xs[i2] === x)
+        return i2;
     }
     return -1;
   }
 });
 
 // node_modules/readable-stream/lib/_stream_transform.js
-var require__stream_transform = __commonJS(function(exports, module) {
+var require__stream_transform = __commonJS((exports, module) => {
   module.exports = Transform;
   var Duplex = require__stream_duplex();
   var util = Object.create(require_util());
@@ -2104,7 +2102,7 @@ var require__stream_transform = __commonJS(function(exports, module) {
 });
 
 // node_modules/readable-stream/lib/_stream_passthrough.js
-var require__stream_passthrough = __commonJS(function(exports, module) {
+var require__stream_passthrough = __commonJS((exports, module) => {
   module.exports = PassThrough;
   var Transform = require__stream_transform();
   var util = Object.create(require_util());
@@ -2121,7 +2119,7 @@ var require__stream_passthrough = __commonJS(function(exports, module) {
 });
 
 // node_modules/readable-stream/readable.js
-var require_readable = __commonJS(function(exports, module) {
+var require_readable = __commonJS((exports, module) => {
   var Stream = __require("stream");
   if (process.env.READABLE_STREAM === "disable" && Stream) {
     module.exports = Stream;
@@ -2144,7 +2142,7 @@ var require_readable = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/support.js
-var require_support = __commonJS(function(exports) {
+var require_support = __commonJS((exports) => {
   exports.base64 = true;
   exports.array = true;
   exports.string = true;
@@ -2165,7 +2163,7 @@ var require_support = __commonJS(function(exports) {
         builder = new Builder;
         builder.append(buffer);
         exports.blob = builder.getBlob("application/zip").size === 0;
-      } catch (e) {
+      } catch (e2) {
         exports.blob = false;
       }
     }
@@ -2181,25 +2179,25 @@ var require_support = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/base64.js
-var require_base64 = __commonJS(function(exports) {
+var require_base64 = __commonJS((exports) => {
   var utils = require_utils();
   var support = require_support();
   var _keyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
   exports.encode = function(input) {
     var output = [];
     var chr1, chr2, chr3, enc1, enc2, enc3, enc4;
-    var i = 0, len = input.length, remainingBytes = len;
+    var i2 = 0, len = input.length, remainingBytes = len;
     var isArray = utils.getTypeOf(input) !== "string";
-    while (i < input.length) {
-      remainingBytes = len - i;
+    while (i2 < input.length) {
+      remainingBytes = len - i2;
       if (!isArray) {
-        chr1 = input.charCodeAt(i++);
-        chr2 = i < len ? input.charCodeAt(i++) : 0;
-        chr3 = i < len ? input.charCodeAt(i++) : 0;
+        chr1 = input.charCodeAt(i2++);
+        chr2 = i2 < len ? input.charCodeAt(i2++) : 0;
+        chr3 = i2 < len ? input.charCodeAt(i2++) : 0;
       } else {
-        chr1 = input[i++];
-        chr2 = i < len ? input[i++] : 0;
-        chr3 = i < len ? input[i++] : 0;
+        chr1 = input[i2++];
+        chr2 = i2 < len ? input[i2++] : 0;
+        chr3 = i2 < len ? input[i2++] : 0;
       }
       enc1 = chr1 >> 2;
       enc2 = (chr1 & 3) << 4 | chr2 >> 4;
@@ -2212,7 +2210,7 @@ var require_base64 = __commonJS(function(exports) {
   exports.decode = function(input) {
     var chr1, chr2, chr3;
     var enc1, enc2, enc3, enc4;
-    var i = 0, resultIndex = 0;
+    var i2 = 0, resultIndex = 0;
     var dataUrlPrefix = "data:";
     if (input.substr(0, dataUrlPrefix.length) === dataUrlPrefix) {
       throw new Error("Invalid base64 input, it looks like a data url.");
@@ -2234,11 +2232,11 @@ var require_base64 = __commonJS(function(exports) {
     } else {
       output = new Array(totalLength | 0);
     }
-    while (i < input.length) {
-      enc1 = _keyStr.indexOf(input.charAt(i++));
-      enc2 = _keyStr.indexOf(input.charAt(i++));
-      enc3 = _keyStr.indexOf(input.charAt(i++));
-      enc4 = _keyStr.indexOf(input.charAt(i++));
+    while (i2 < input.length) {
+      enc1 = _keyStr.indexOf(input.charAt(i2++));
+      enc2 = _keyStr.indexOf(input.charAt(i2++));
+      enc3 = _keyStr.indexOf(input.charAt(i2++));
+      enc4 = _keyStr.indexOf(input.charAt(i2++));
       chr1 = enc1 << 2 | enc2 >> 4;
       chr2 = (enc2 & 15) << 4 | enc3 >> 2;
       chr3 = (enc3 & 3) << 6 | enc4;
@@ -2255,7 +2253,7 @@ var require_base64 = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/nodejsUtils.js
-var require_nodejsUtils = __commonJS(function(exports, module) {
+var require_nodejsUtils = __commonJS((exports, module) => {
   module.exports = {
     isNode: typeof Buffer !== "undefined",
     newBufferFrom: function(data, encoding) {
@@ -2287,7 +2285,7 @@ var require_nodejsUtils = __commonJS(function(exports, module) {
 });
 
 // node_modules/immediate/lib/index.js
-var require_lib = __commonJS(function(exports, module) {
+var require_lib = __commonJS((exports, module) => {
   var Mutation = global.MutationObserver || global.WebKitMutationObserver;
   var scheduleDrain;
   if (false) {} else {
@@ -2298,19 +2296,19 @@ var require_lib = __commonJS(function(exports, module) {
   var called;
   var observer;
   var element;
-  var channel;
+  var channel2;
   var draining;
   var queue = [];
   function nextTick() {
     draining = true;
-    var i, oldQueue;
+    var i2, oldQueue;
     var len = queue.length;
     while (len) {
       oldQueue = queue;
       queue = [];
-      i = -1;
-      while (++i < len) {
-        oldQueue[i]();
+      i2 = -1;
+      while (++i2 < len) {
+        oldQueue[i2]();
       }
       len = queue.length;
     }
@@ -2325,7 +2323,7 @@ var require_lib = __commonJS(function(exports, module) {
 });
 
 // node_modules/lie/lib/index.js
-var require_lib2 = __commonJS(function(exports, module) {
+var require_lib2 = __commonJS((exports, module) => {
   var immediate = require_lib();
   function INTERNAL() {}
   var handlers = {};
@@ -2356,14 +2354,14 @@ var require_lib2 = __commonJS(function(exports, module) {
       return this;
     }
     var p = this.constructor;
-    return this.then(resolve, reject);
-    function resolve(value) {
+    return this.then(resolve2, reject2);
+    function resolve2(value) {
       function yes() {
         return value;
       }
       return p.resolve(callback()).then(yes);
     }
-    function reject(reason) {
+    function reject2(reason) {
       function no() {
         throw reason;
       }
@@ -2440,10 +2438,10 @@ var require_lib2 = __commonJS(function(exports, module) {
     } else {
       self2.state = FULFILLED;
       self2.outcome = value;
-      var i = -1;
+      var i2 = -1;
       var len = self2.queue.length;
-      while (++i < len) {
-        self2.queue[i].callFulfilled(value);
+      while (++i2 < len) {
+        self2.queue[i2].callFulfilled(value);
       }
     }
     return self2;
@@ -2460,10 +2458,10 @@ var require_lib2 = __commonJS(function(exports, module) {
         });
       }
     }
-    var i = -1;
+    var i2 = -1;
     var len = self2.queue.length;
-    while (++i < len) {
-      self2.queue[i].callRejected(error);
+    while (++i2 < len) {
+      self2.queue[i2].callRejected(error);
     }
     return self2;
   };
@@ -2535,13 +2533,13 @@ var require_lib2 = __commonJS(function(exports, module) {
     }
     var values = new Array(len);
     var resolved = 0;
-    var i = -1;
+    var i2 = -1;
     var promise = new this(INTERNAL);
-    while (++i < len) {
-      allResolver(iterable[i], i);
+    while (++i2 < len) {
+      allResolver(iterable[i2], i2);
     }
     return promise;
-    function allResolver(value, i) {
+    function allResolver(value, i3) {
       self2.resolve(value).then(resolveFromAll, function(error) {
         if (!called) {
           called = true;
@@ -2549,7 +2547,7 @@ var require_lib2 = __commonJS(function(exports, module) {
         }
       });
       function resolveFromAll(outValue) {
-        values[i] = outValue;
+        values[i3] = outValue;
         if (++resolved === len && !called) {
           called = true;
           handlers.resolve(promise, values);
@@ -2568,10 +2566,10 @@ var require_lib2 = __commonJS(function(exports, module) {
     if (!len) {
       return this.resolve([]);
     }
-    var i = -1;
+    var i2 = -1;
     var promise = new this(INTERNAL);
-    while (++i < len) {
-      resolver(iterable[i]);
+    while (++i2 < len) {
+      resolver(iterable[i2]);
     }
     return promise;
     function resolver(value) {
@@ -2591,7 +2589,7 @@ var require_lib2 = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/external.js
-var require_external = __commonJS(function(exports, module) {
+var require_external = __commonJS((exports, module) => {
   var ES6Promise = null;
   if (typeof Promise !== "undefined") {
     ES6Promise = Promise;
@@ -2604,7 +2602,7 @@ var require_external = __commonJS(function(exports, module) {
 });
 
 // node_modules/setimmediate/setImmediate.js
-var require_setImmediate = __commonJS(function(exports) {
+var require_setImmediate = __commonJS((exports) => {
   (function(global2, undefined2) {
     if (global2.setImmediate) {
       return;
@@ -2619,8 +2617,8 @@ var require_setImmediate = __commonJS(function(exports) {
         callback = new Function("" + callback);
       }
       var args = new Array(arguments.length - 1);
-      for (var i = 0;i < args.length; i++) {
-        args[i] = arguments[i + 1];
+      for (var i2 = 0;i2 < args.length; i2++) {
+        args[i2] = arguments[i2 + 1];
       }
       var task = { callback, args };
       tasksByHandle[nextHandle] = task;
@@ -2703,13 +2701,13 @@ var require_setImmediate = __commonJS(function(exports) {
       };
     }
     function installMessageChannelImplementation() {
-      var channel = new MessageChannel;
-      channel.port1.onmessage = function(event) {
+      var channel2 = new MessageChannel;
+      channel2.port1.onmessage = function(event) {
         var handle = event.data;
         runIfPresent(handle);
       };
       registerImmediate = function(handle) {
-        channel.port2.postMessage(handle);
+        channel2.port2.postMessage(handle);
       };
     }
     function installReadyStateChangeImplementation() {
@@ -2749,34 +2747,34 @@ var require_setImmediate = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/utils.js
-var require_utils = __commonJS(function(exports) {
+var require_utils = __commonJS((exports) => {
   var support = require_support();
   var base64 = require_base64();
   var nodejsUtils = require_nodejsUtils();
   var external = require_external();
   require_setImmediate();
-  function string2binary(str) {
+  function string2binary(str2) {
     var result = null;
     if (support.uint8array) {
-      result = new Uint8Array(str.length);
+      result = new Uint8Array(str2.length);
     } else {
-      result = new Array(str.length);
+      result = new Array(str2.length);
     }
-    return stringToArrayLike(str, result);
+    return stringToArrayLike(str2, result);
   }
-  exports.newBlob = function(part, type) {
+  exports.newBlob = function(part, type2) {
     exports.checkSupport("blob");
     try {
       return new Blob([part], {
-        type
+        type: type2
       });
     } catch (e) {
       try {
         var Builder = self.BlobBuilder || self.WebKitBlobBuilder || self.MozBlobBuilder || self.MSBlobBuilder;
         var builder = new Builder;
         builder.append(part);
-        return builder.getBlob(type);
-      } catch (e) {
+        return builder.getBlob(type2);
+      } catch (e2) {
         throw new Error("Bug : can't construct the Blob.");
       }
     }
@@ -2784,20 +2782,20 @@ var require_utils = __commonJS(function(exports) {
   function identity(input) {
     return input;
   }
-  function stringToArrayLike(str, array) {
-    for (var i = 0;i < str.length; ++i) {
-      array[i] = str.charCodeAt(i) & 255;
+  function stringToArrayLike(str2, array) {
+    for (var i2 = 0;i2 < str2.length; ++i2) {
+      array[i2] = str2.charCodeAt(i2) & 255;
     }
     return array;
   }
   var arrayToStringHelper = {
-    stringifyByChunk: function(array, type, chunk) {
+    stringifyByChunk: function(array, type2, chunk) {
       var result = [], k = 0, len = array.length;
       if (len <= chunk) {
         return String.fromCharCode.apply(null, array);
       }
       while (k < len) {
-        if (type === "array" || type === "nodebuffer") {
+        if (type2 === "array" || type2 === "nodebuffer") {
           result.push(String.fromCharCode.apply(null, array.slice(k, Math.min(k + chunk, len))));
         } else {
           result.push(String.fromCharCode.apply(null, array.subarray(k, Math.min(k + chunk, len))));
@@ -2808,8 +2806,8 @@ var require_utils = __commonJS(function(exports) {
     },
     stringifyByChar: function(array) {
       var resultStr = "";
-      for (var i = 0;i < array.length; i++) {
-        resultStr += String.fromCharCode(array[i]);
+      for (var i2 = 0;i2 < array.length; i2++) {
+        resultStr += String.fromCharCode(array[i2]);
       }
       return resultStr;
     },
@@ -2831,16 +2829,16 @@ var require_utils = __commonJS(function(exports) {
     }
   };
   function arrayLikeToString(array) {
-    var chunk = 65536, type = exports.getTypeOf(array), canUseApply = true;
-    if (type === "uint8array") {
+    var chunk = 65536, type2 = exports.getTypeOf(array), canUseApply = true;
+    if (type2 === "uint8array") {
       canUseApply = arrayToStringHelper.applyCanBeUsed.uint8array;
-    } else if (type === "nodebuffer") {
+    } else if (type2 === "nodebuffer") {
       canUseApply = arrayToStringHelper.applyCanBeUsed.nodebuffer;
     }
     if (canUseApply) {
       while (chunk > 1) {
         try {
-          return arrayToStringHelper.stringifyByChunk(array, type, chunk);
+          return arrayToStringHelper.stringifyByChunk(array, type2, chunk);
         } catch (e) {
           chunk = Math.floor(chunk / 2);
         }
@@ -2850,8 +2848,8 @@ var require_utils = __commonJS(function(exports) {
   }
   exports.applyFromCharCode = arrayLikeToString;
   function arrayLikeToArrayLike(arrayFrom, arrayTo) {
-    for (var i = 0;i < arrayFrom.length; i++) {
-      arrayTo[i] = arrayFrom[i];
+    for (var i2 = 0;i2 < arrayFrom.length; i2++) {
+      arrayTo[i2] = arrayFrom[i2];
     }
     return arrayTo;
   }
@@ -2969,18 +2967,18 @@ var require_utils = __commonJS(function(exports) {
       return "arraybuffer";
     }
   };
-  exports.checkSupport = function(type) {
-    var supported = support[type.toLowerCase()];
+  exports.checkSupport = function(type2) {
+    var supported = support[type2.toLowerCase()];
     if (!supported) {
-      throw new Error(type + " is not supported by this platform");
+      throw new Error(type2 + " is not supported by this platform");
     }
   };
   exports.MAX_VALUE_16BITS = 65535;
   exports.MAX_VALUE_32BITS = -1;
-  exports.pretty = function(str) {
-    var res = "", code, i;
-    for (i = 0;i < (str || "").length; i++) {
-      code = str.charCodeAt(i);
+  exports.pretty = function(str2) {
+    var res = "", code, i2;
+    for (i2 = 0;i2 < (str2 || "").length; i2++) {
+      code = str2.charCodeAt(i2);
       res += "\\x" + (code < 16 ? "0" : "") + code.toString(16).toUpperCase();
     }
     return res;
@@ -2996,17 +2994,17 @@ var require_utils = __commonJS(function(exports) {
     ctor.prototype = new Obj;
   };
   exports.extend = function() {
-    var result = {}, i, attr;
-    for (i = 0;i < arguments.length; i++) {
-      for (attr in arguments[i]) {
-        if (Object.prototype.hasOwnProperty.call(arguments[i], attr) && typeof result[attr] === "undefined") {
-          result[attr] = arguments[i][attr];
+    var result = {}, i2, attr;
+    for (i2 = 0;i2 < arguments.length; i2++) {
+      for (attr in arguments[i2]) {
+        if (Object.prototype.hasOwnProperty.call(arguments[i2], attr) && typeof result[attr] === "undefined") {
+          result[attr] = arguments[i2][attr];
         }
       }
     }
     return result;
   };
-  exports.prepareContent = function(name, inputData, isBinary, isOptimizedBinaryString, isBase64) {
+  exports.prepareContent = function(name, inputData, isBinary2, isOptimizedBinaryString, isBase64) {
     var promise = external.Promise.resolve(inputData).then(function(data) {
       var isBlob = support.blob && (data instanceof Blob || ["[object File]", "[object Blob]"].indexOf(Object.prototype.toString.call(data)) !== -1);
       if (isBlob && typeof FileReader !== "undefined") {
@@ -3034,7 +3032,7 @@ var require_utils = __commonJS(function(exports) {
       } else if (dataType === "string") {
         if (isBase64) {
           data = base64.decode(data);
-        } else if (isBinary) {
+        } else if (isBinary2) {
           if (isOptimizedBinaryString !== true) {
             data = string2binary(data);
           }
@@ -3046,7 +3044,7 @@ var require_utils = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/stream/GenericWorker.js
-var require_GenericWorker = __commonJS(function(exports, module) {
+var require_GenericWorker = __commonJS((exports, module) => {
   function GenericWorker(name) {
     this.name = name || "default";
     this.streamInfo = {};
@@ -3106,8 +3104,8 @@ var require_GenericWorker = __commonJS(function(exports, module) {
     },
     emit: function(name, arg) {
       if (this._listeners[name]) {
-        for (var i = 0;i < this._listeners[name].length; i++) {
-          this._listeners[name][i].call(this, arg);
+        for (var i2 = 0;i2 < this._listeners[name].length; i2++) {
+          this._listeners[name][i2].call(this, arg);
         }
       }
     },
@@ -3197,23 +3195,23 @@ var require_GenericWorker = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/utf8.js
-var require_utf8 = __commonJS(function(exports) {
+var require_utf8 = __commonJS((exports) => {
   var utils = require_utils();
   var support = require_support();
   var nodejsUtils = require_nodejsUtils();
   var GenericWorker = require_GenericWorker();
   var _utf8len = new Array(256);
-  for (i = 0;i < 256; i++) {
-    _utf8len[i] = i >= 252 ? 6 : i >= 248 ? 5 : i >= 240 ? 4 : i >= 224 ? 3 : i >= 192 ? 2 : 1;
+  for (i2 = 0;i2 < 256; i2++) {
+    _utf8len[i2] = i2 >= 252 ? 6 : i2 >= 248 ? 5 : i2 >= 240 ? 4 : i2 >= 224 ? 3 : i2 >= 192 ? 2 : 1;
   }
-  var i;
+  var i2;
   _utf8len[254] = _utf8len[254] = 1;
-  var string2buf = function(str) {
-    var buf, c, c2, m_pos, i, str_len = str.length, buf_len = 0;
+  var string2buf = function(str2) {
+    var buf, c, c2, m_pos, i3, str_len = str2.length, buf_len = 0;
     for (m_pos = 0;m_pos < str_len; m_pos++) {
-      c = str.charCodeAt(m_pos);
+      c = str2.charCodeAt(m_pos);
       if ((c & 64512) === 55296 && m_pos + 1 < str_len) {
-        c2 = str.charCodeAt(m_pos + 1);
+        c2 = str2.charCodeAt(m_pos + 1);
         if ((c2 & 64512) === 56320) {
           c = 65536 + (c - 55296 << 10) + (c2 - 56320);
           m_pos++;
@@ -3226,29 +3224,29 @@ var require_utf8 = __commonJS(function(exports) {
     } else {
       buf = new Array(buf_len);
     }
-    for (i = 0, m_pos = 0;i < buf_len; m_pos++) {
-      c = str.charCodeAt(m_pos);
+    for (i3 = 0, m_pos = 0;i3 < buf_len; m_pos++) {
+      c = str2.charCodeAt(m_pos);
       if ((c & 64512) === 55296 && m_pos + 1 < str_len) {
-        c2 = str.charCodeAt(m_pos + 1);
+        c2 = str2.charCodeAt(m_pos + 1);
         if ((c2 & 64512) === 56320) {
           c = 65536 + (c - 55296 << 10) + (c2 - 56320);
           m_pos++;
         }
       }
       if (c < 128) {
-        buf[i++] = c;
+        buf[i3++] = c;
       } else if (c < 2048) {
-        buf[i++] = 192 | c >>> 6;
-        buf[i++] = 128 | c & 63;
+        buf[i3++] = 192 | c >>> 6;
+        buf[i3++] = 128 | c & 63;
       } else if (c < 65536) {
-        buf[i++] = 224 | c >>> 12;
-        buf[i++] = 128 | c >>> 6 & 63;
-        buf[i++] = 128 | c & 63;
+        buf[i3++] = 224 | c >>> 12;
+        buf[i3++] = 128 | c >>> 6 & 63;
+        buf[i3++] = 128 | c & 63;
       } else {
-        buf[i++] = 240 | c >>> 18;
-        buf[i++] = 128 | c >>> 12 & 63;
-        buf[i++] = 128 | c >>> 6 & 63;
-        buf[i++] = 128 | c & 63;
+        buf[i3++] = 240 | c >>> 18;
+        buf[i3++] = 128 | c >>> 12 & 63;
+        buf[i3++] = 128 | c >>> 6 & 63;
+        buf[i3++] = 128 | c & 63;
       }
     }
     return buf;
@@ -3272,11 +3270,11 @@ var require_utf8 = __commonJS(function(exports) {
     return pos + _utf8len[buf[pos]] > max ? pos : max;
   };
   var buf2string = function(buf) {
-    var i, out, c, c_len;
+    var i3, out, c, c_len;
     var len = buf.length;
     var utf16buf = new Array(len * 2);
-    for (out = 0, i = 0;i < len; ) {
-      c = buf[i++];
+    for (out = 0, i3 = 0;i3 < len; ) {
+      c = buf[i3++];
       if (c < 128) {
         utf16buf[out++] = c;
         continue;
@@ -3284,12 +3282,12 @@ var require_utf8 = __commonJS(function(exports) {
       c_len = _utf8len[c];
       if (c_len > 4) {
         utf16buf[out++] = 65533;
-        i += c_len - 1;
+        i3 += c_len - 1;
         continue;
       }
       c &= c_len === 2 ? 31 : c_len === 3 ? 15 : 7;
-      while (c_len > 1 && i < len) {
-        c = c << 6 | buf[i++] & 63;
+      while (c_len > 1 && i3 < len) {
+        c = c << 6 | buf[i3++] & 63;
         c_len--;
       }
       if (c_len > 1) {
@@ -3313,11 +3311,11 @@ var require_utf8 = __commonJS(function(exports) {
     }
     return utils.applyFromCharCode(utf16buf);
   };
-  exports.utf8encode = function utf8encode(str) {
+  exports.utf8encode = function utf8encode(str2) {
     if (support.nodebuffer) {
-      return nodejsUtils.newBufferFrom(str, "utf-8");
+      return nodejsUtils.newBufferFrom(str2, "utf-8");
     }
-    return string2buf(str);
+    return string2buf(str2);
   };
   exports.utf8decode = function utf8decode(buf) {
     if (support.nodebuffer) {
@@ -3384,7 +3382,7 @@ var require_utf8 = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/stream/ConvertWorker.js
-var require_ConvertWorker = __commonJS(function(exports, module) {
+var require_ConvertWorker = __commonJS((exports, module) => {
   var GenericWorker = require_GenericWorker();
   var utils = require_utils();
   function ConvertWorker(destType) {
@@ -3402,7 +3400,7 @@ var require_ConvertWorker = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/nodejs/NodejsStreamOutputAdapter.js
-var require_NodejsStreamOutputAdapter = __commonJS(function(exports, module) {
+var require_NodejsStreamOutputAdapter = __commonJS((exports, module) => {
   var Readable = require_readable().Readable;
   var utils = require_utils();
   utils.inherits(NodejsStreamOutputAdapter, Readable);
@@ -3430,7 +3428,7 @@ var require_NodejsStreamOutputAdapter = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/stream/StreamHelper.js
-var require_StreamHelper = __commonJS(function(exports, module) {
+var require_StreamHelper = __commonJS((exports, module) => {
   var utils = require_utils();
   var ConvertWorker = require_ConvertWorker();
   var GenericWorker = require_GenericWorker();
@@ -3443,37 +3441,37 @@ var require_StreamHelper = __commonJS(function(exports, module) {
       NodejsStreamOutputAdapter = require_NodejsStreamOutputAdapter();
     } catch (e) {}
   }
-  function transformZipOutput(type, content, mimeType) {
-    switch (type) {
+  function transformZipOutput(type2, content, mimeType) {
+    switch (type2) {
       case "blob":
         return utils.newBlob(utils.transformTo("arraybuffer", content), mimeType);
       case "base64":
         return base64.encode(content);
       default:
-        return utils.transformTo(type, content);
+        return utils.transformTo(type2, content);
     }
   }
-  function concat(type, dataArray) {
-    var i, index = 0, res = null, totalLength = 0;
-    for (i = 0;i < dataArray.length; i++) {
-      totalLength += dataArray[i].length;
+  function concat(type2, dataArray) {
+    var i2, index = 0, res = null, totalLength = 0;
+    for (i2 = 0;i2 < dataArray.length; i2++) {
+      totalLength += dataArray[i2].length;
     }
-    switch (type) {
+    switch (type2) {
       case "string":
         return dataArray.join("");
       case "array":
         return Array.prototype.concat.apply([], dataArray);
       case "uint8array":
         res = new Uint8Array(totalLength);
-        for (i = 0;i < dataArray.length; i++) {
-          res.set(dataArray[i], index);
-          index += dataArray[i].length;
+        for (i2 = 0;i2 < dataArray.length; i2++) {
+          res.set(dataArray[i2], index);
+          index += dataArray[i2].length;
         }
         return res;
       case "nodebuffer":
         return Buffer.concat(dataArray);
       default:
-        throw new Error("concat : unsupported type '" + type + "'");
+        throw new Error("concat : unsupported type '" + type2 + "'");
     }
   }
   function accumulate(helper, updateCallback) {
@@ -3561,7 +3559,7 @@ var require_StreamHelper = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/defaults.js
-var require_defaults = __commonJS(function(exports) {
+var require_defaults = __commonJS((exports) => {
   exports.base64 = false;
   exports.binary = false;
   exports.dir = false;
@@ -3575,7 +3573,7 @@ var require_defaults = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/stream/DataWorker.js
-var require_DataWorker = __commonJS(function(exports, module) {
+var require_DataWorker = __commonJS((exports, module) => {
   var utils = require_utils();
   var GenericWorker = require_GenericWorker();
   var DEFAULT_BLOCK_SIZE = 16 * 1024;
@@ -3660,7 +3658,7 @@ var require_DataWorker = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/crc32.js
-var require_crc32 = __commonJS(function(exports, module) {
+var require_crc32 = __commonJS((exports, module) => {
   var utils = require_utils();
   function makeTable() {
     var c, table = [];
@@ -3677,16 +3675,16 @@ var require_crc32 = __commonJS(function(exports, module) {
   function crc32(crc, buf, len, pos) {
     var t = crcTable, end = pos + len;
     crc = crc ^ -1;
-    for (var i = pos;i < end; i++) {
-      crc = crc >>> 8 ^ t[(crc ^ buf[i]) & 255];
+    for (var i2 = pos;i2 < end; i2++) {
+      crc = crc >>> 8 ^ t[(crc ^ buf[i2]) & 255];
     }
     return crc ^ -1;
   }
-  function crc32str(crc, str, len, pos) {
+  function crc32str(crc, str2, len, pos) {
     var t = crcTable, end = pos + len;
     crc = crc ^ -1;
-    for (var i = pos;i < end; i++) {
-      crc = crc >>> 8 ^ t[(crc ^ str.charCodeAt(i)) & 255];
+    for (var i2 = pos;i2 < end; i2++) {
+      crc = crc >>> 8 ^ t[(crc ^ str2.charCodeAt(i2)) & 255];
     }
     return crc ^ -1;
   }
@@ -3704,7 +3702,7 @@ var require_crc32 = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/stream/Crc32Probe.js
-var require_Crc32Probe = __commonJS(function(exports, module) {
+var require_Crc32Probe = __commonJS((exports, module) => {
   var GenericWorker = require_GenericWorker();
   var crc32 = require_crc32();
   var utils = require_utils();
@@ -3721,7 +3719,7 @@ var require_Crc32Probe = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/stream/DataLengthProbe.js
-var require_DataLengthProbe = __commonJS(function(exports, module) {
+var require_DataLengthProbe = __commonJS((exports, module) => {
   var utils = require_utils();
   var GenericWorker = require_GenericWorker();
   function DataLengthProbe(propName) {
@@ -3741,7 +3739,7 @@ var require_DataLengthProbe = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/compressedObject.js
-var require_compressedObject = __commonJS(function(exports, module) {
+var require_compressedObject = __commonJS((exports, module) => {
   var external = require_external();
   var DataWorker = require_DataWorker();
   var Crc32Probe = require_Crc32Probe();
@@ -3775,7 +3773,7 @@ var require_compressedObject = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/zipObject.js
-var require_zipObject = __commonJS(function(exports, module) {
+var require_zipObject = __commonJS((exports, module) => {
   var StreamHelper = require_StreamHelper();
   var DataWorker = require_DataWorker();
   var utf8 = require_utf8();
@@ -3796,13 +3794,13 @@ var require_zipObject = __commonJS(function(exports, module) {
     };
   };
   ZipObject.prototype = {
-    internalStream: function(type) {
+    internalStream: function(type2) {
       var result = null, outputType = "string";
       try {
-        if (!type) {
+        if (!type2) {
           throw new Error("No output type specified.");
         }
-        outputType = type.toLowerCase();
+        outputType = type2.toLowerCase();
         var askUnicodeString = outputType === "string" || outputType === "text";
         if (outputType === "binarystring" || outputType === "text") {
           outputType = "string";
@@ -3821,11 +3819,11 @@ var require_zipObject = __commonJS(function(exports, module) {
       }
       return new StreamHelper(result, outputType, "");
     },
-    async: function(type, onUpdate) {
-      return this.internalStream(type).accumulate(onUpdate);
+    async: function(type2, onUpdate) {
+      return this.internalStream(type2).accumulate(onUpdate);
     },
-    nodeStream: function(type, onUpdate) {
-      return this.internalStream(type || "nodebuffer").toNodejsStream(onUpdate);
+    nodeStream: function(type2, onUpdate) {
+      return this.internalStream(type2 || "nodebuffer").toNodejsStream(onUpdate);
     },
     _compressWorker: function(compression, compressionOptions) {
       if (this._data instanceof CompressedObject && this._data.compression.magic === compression.magic) {
@@ -3852,15 +3850,15 @@ var require_zipObject = __commonJS(function(exports, module) {
   var removedFn = function() {
     throw new Error("This method has been removed in JSZip 3.0, please check the upgrade guide.");
   };
-  for (i = 0;i < removedMethods.length; i++) {
-    ZipObject.prototype[removedMethods[i]] = removedFn;
+  for (i2 = 0;i2 < removedMethods.length; i2++) {
+    ZipObject.prototype[removedMethods[i2]] = removedFn;
   }
-  var i;
+  var i2;
   module.exports = ZipObject;
 });
 
 // node_modules/pako/lib/utils/common.js
-var require_common = __commonJS(function(exports) {
+var require_common = __commonJS((exports) => {
   var TYPED_OK = typeof Uint8Array !== "undefined" && typeof Uint16Array !== "undefined" && typeof Int32Array !== "undefined";
   function _has(obj, key) {
     return Object.prototype.hasOwnProperty.call(obj, key);
@@ -3899,20 +3897,20 @@ var require_common = __commonJS(function(exports) {
         dest.set(src.subarray(src_offs, src_offs + len), dest_offs);
         return;
       }
-      for (var i = 0;i < len; i++) {
-        dest[dest_offs + i] = src[src_offs + i];
+      for (var i2 = 0;i2 < len; i2++) {
+        dest[dest_offs + i2] = src[src_offs + i2];
       }
     },
     flattenChunks: function(chunks) {
-      var i, l, len, pos, chunk, result;
+      var i2, l, len, pos, chunk, result;
       len = 0;
-      for (i = 0, l = chunks.length;i < l; i++) {
-        len += chunks[i].length;
+      for (i2 = 0, l = chunks.length;i2 < l; i2++) {
+        len += chunks[i2].length;
       }
       result = new Uint8Array(len);
       pos = 0;
-      for (i = 0, l = chunks.length;i < l; i++) {
-        chunk = chunks[i];
+      for (i2 = 0, l = chunks.length;i2 < l; i2++) {
+        chunk = chunks[i2];
         result.set(chunk, pos);
         pos += chunk.length;
       }
@@ -3921,8 +3919,8 @@ var require_common = __commonJS(function(exports) {
   };
   var fnUntyped = {
     arraySet: function(dest, src, src_offs, len, dest_offs) {
-      for (var i = 0;i < len; i++) {
-        dest[dest_offs + i] = src[src_offs + i];
+      for (var i2 = 0;i2 < len; i2++) {
+        dest[dest_offs + i2] = src[src_offs + i2];
       }
     },
     flattenChunks: function(chunks) {
@@ -3946,7 +3944,7 @@ var require_common = __commonJS(function(exports) {
 });
 
 // node_modules/pako/lib/zlib/trees.js
-var require_trees = __commonJS(function(exports) {
+var require_trees = __commonJS((exports) => {
   var utils = require_common();
   var Z_FIXED = 4;
   var Z_BINARY = 0;
@@ -4546,7 +4544,7 @@ var require_trees = __commonJS(function(exports) {
 });
 
 // node_modules/pako/lib/zlib/adler32.js
-var require_adler32 = __commonJS(function(exports, module) {
+var require_adler32 = __commonJS((exports, module) => {
   function adler32(adler, buf, len, pos) {
     var s1 = adler & 65535 | 0, s2 = adler >>> 16 & 65535 | 0, n = 0;
     while (len !== 0) {
@@ -4565,7 +4563,7 @@ var require_adler32 = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/zlib/crc32.js
-var require_crc322 = __commonJS(function(exports, module) {
+var require_crc322 = __commonJS((exports, module) => {
   function makeTable() {
     var c, table = [];
     for (var n = 0;n < 256; n++) {
@@ -4581,8 +4579,8 @@ var require_crc322 = __commonJS(function(exports, module) {
   function crc32(crc, buf, len, pos) {
     var t = crcTable, end = pos + len;
     crc ^= -1;
-    for (var i = pos;i < end; i++) {
-      crc = crc >>> 8 ^ t[(crc ^ buf[i]) & 255];
+    for (var i2 = pos;i2 < end; i2++) {
+      crc = crc >>> 8 ^ t[(crc ^ buf[i2]) & 255];
     }
     return crc ^ -1;
   }
@@ -4590,7 +4588,7 @@ var require_crc322 = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/zlib/messages.js
-var require_messages = __commonJS(function(exports, module) {
+var require_messages = __commonJS((exports, module) => {
   module.exports = {
     2: "need dictionary",
     1: "stream end",
@@ -4605,7 +4603,7 @@ var require_messages = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/zlib/deflate.js
-var require_deflate = __commonJS(function(exports) {
+var require_deflate = __commonJS((exports) => {
   var utils = require_common();
   var trees = require_trees();
   var adler32 = require_adler32();
@@ -4765,7 +4763,7 @@ var require_deflate = __commonJS(function(exports) {
   }
   function fill_window(s) {
     var _w_size = s.w_size;
-    var p, n, m, more, str;
+    var p, n, m, more, str2;
     do {
       more = s.window_size - s.lookahead - s.strstart;
       if (s.strstart >= _w_size + (_w_size - MIN_LOOKAHEAD)) {
@@ -4793,14 +4791,14 @@ var require_deflate = __commonJS(function(exports) {
       n = read_buf(s.strm, s.window, s.strstart + s.lookahead, more);
       s.lookahead += n;
       if (s.lookahead + s.insert >= MIN_MATCH) {
-        str = s.strstart - s.insert;
-        s.ins_h = s.window[str];
-        s.ins_h = (s.ins_h << s.hash_shift ^ s.window[str + 1]) & s.hash_mask;
+        str2 = s.strstart - s.insert;
+        s.ins_h = s.window[str2];
+        s.ins_h = (s.ins_h << s.hash_shift ^ s.window[str2 + 1]) & s.hash_mask;
         while (s.insert) {
-          s.ins_h = (s.ins_h << s.hash_shift ^ s.window[str + MIN_MATCH - 1]) & s.hash_mask;
-          s.prev[str & s.w_mask] = s.head[s.ins_h];
-          s.head[s.ins_h] = str;
-          str++;
+          s.ins_h = (s.ins_h << s.hash_shift ^ s.window[str2 + MIN_MATCH - 1]) & s.hash_mask;
+          s.prev[str2 & s.w_mask] = s.head[s.ins_h];
+          s.head[s.ins_h] = str2;
+          str2++;
           s.insert--;
           if (s.lookahead + s.insert < MIN_MATCH) {
             break;
@@ -5561,7 +5559,7 @@ var require_deflate = __commonJS(function(exports) {
   function deflateSetDictionary(strm, dictionary) {
     var dictLength = dictionary.length;
     var s;
-    var str, n;
+    var str2, n;
     var wrap;
     var avail;
     var next;
@@ -5599,15 +5597,15 @@ var require_deflate = __commonJS(function(exports) {
     strm.input = dictionary;
     fill_window(s);
     while (s.lookahead >= MIN_MATCH) {
-      str = s.strstart;
+      str2 = s.strstart;
       n = s.lookahead - (MIN_MATCH - 1);
       do {
-        s.ins_h = (s.ins_h << s.hash_shift ^ s.window[str + MIN_MATCH - 1]) & s.hash_mask;
-        s.prev[str & s.w_mask] = s.head[s.ins_h];
-        s.head[s.ins_h] = str;
-        str++;
+        s.ins_h = (s.ins_h << s.hash_shift ^ s.window[str2 + MIN_MATCH - 1]) & s.hash_mask;
+        s.prev[str2 & s.w_mask] = s.head[s.ins_h];
+        s.head[s.ins_h] = str2;
+        str2++;
       } while (--n);
-      s.strstart = str;
+      s.strstart = str2;
       s.lookahead = MIN_MATCH - 1;
       fill_window(s);
     }
@@ -5635,7 +5633,7 @@ var require_deflate = __commonJS(function(exports) {
 });
 
 // node_modules/pako/lib/utils/strings.js
-var require_strings = __commonJS(function(exports) {
+var require_strings = __commonJS((exports) => {
   var utils = require_common();
   var STR_APPLY_OK = true;
   var STR_APPLY_UIA_OK = true;
@@ -5655,12 +5653,12 @@ var require_strings = __commonJS(function(exports) {
   }
   var q;
   _utf8len[254] = _utf8len[254] = 1;
-  exports.string2buf = function(str) {
-    var buf, c, c2, m_pos, i, str_len = str.length, buf_len = 0;
+  exports.string2buf = function(str2) {
+    var buf, c, c2, m_pos, i2, str_len = str2.length, buf_len = 0;
     for (m_pos = 0;m_pos < str_len; m_pos++) {
-      c = str.charCodeAt(m_pos);
+      c = str2.charCodeAt(m_pos);
       if ((c & 64512) === 55296 && m_pos + 1 < str_len) {
-        c2 = str.charCodeAt(m_pos + 1);
+        c2 = str2.charCodeAt(m_pos + 1);
         if ((c2 & 64512) === 56320) {
           c = 65536 + (c - 55296 << 10) + (c2 - 56320);
           m_pos++;
@@ -5669,29 +5667,29 @@ var require_strings = __commonJS(function(exports) {
       buf_len += c < 128 ? 1 : c < 2048 ? 2 : c < 65536 ? 3 : 4;
     }
     buf = new utils.Buf8(buf_len);
-    for (i = 0, m_pos = 0;i < buf_len; m_pos++) {
-      c = str.charCodeAt(m_pos);
+    for (i2 = 0, m_pos = 0;i2 < buf_len; m_pos++) {
+      c = str2.charCodeAt(m_pos);
       if ((c & 64512) === 55296 && m_pos + 1 < str_len) {
-        c2 = str.charCodeAt(m_pos + 1);
+        c2 = str2.charCodeAt(m_pos + 1);
         if ((c2 & 64512) === 56320) {
           c = 65536 + (c - 55296 << 10) + (c2 - 56320);
           m_pos++;
         }
       }
       if (c < 128) {
-        buf[i++] = c;
+        buf[i2++] = c;
       } else if (c < 2048) {
-        buf[i++] = 192 | c >>> 6;
-        buf[i++] = 128 | c & 63;
+        buf[i2++] = 192 | c >>> 6;
+        buf[i2++] = 128 | c & 63;
       } else if (c < 65536) {
-        buf[i++] = 224 | c >>> 12;
-        buf[i++] = 128 | c >>> 6 & 63;
-        buf[i++] = 128 | c & 63;
+        buf[i2++] = 224 | c >>> 12;
+        buf[i2++] = 128 | c >>> 6 & 63;
+        buf[i2++] = 128 | c & 63;
       } else {
-        buf[i++] = 240 | c >>> 18;
-        buf[i++] = 128 | c >>> 12 & 63;
-        buf[i++] = 128 | c >>> 6 & 63;
-        buf[i++] = 128 | c & 63;
+        buf[i2++] = 240 | c >>> 18;
+        buf[i2++] = 128 | c >>> 12 & 63;
+        buf[i2++] = 128 | c >>> 6 & 63;
+        buf[i2++] = 128 | c & 63;
       }
     }
     return buf;
@@ -5703,27 +5701,27 @@ var require_strings = __commonJS(function(exports) {
       }
     }
     var result = "";
-    for (var i = 0;i < len; i++) {
-      result += String.fromCharCode(buf[i]);
+    for (var i2 = 0;i2 < len; i2++) {
+      result += String.fromCharCode(buf[i2]);
     }
     return result;
   }
   exports.buf2binstring = function(buf) {
     return buf2binstring(buf, buf.length);
   };
-  exports.binstring2buf = function(str) {
-    var buf = new utils.Buf8(str.length);
-    for (var i = 0, len = buf.length;i < len; i++) {
-      buf[i] = str.charCodeAt(i);
+  exports.binstring2buf = function(str2) {
+    var buf = new utils.Buf8(str2.length);
+    for (var i2 = 0, len = buf.length;i2 < len; i2++) {
+      buf[i2] = str2.charCodeAt(i2);
     }
     return buf;
   };
   exports.buf2string = function(buf, max) {
-    var i, out, c, c_len;
+    var i2, out, c, c_len;
     var len = max || buf.length;
     var utf16buf = new Array(len * 2);
-    for (out = 0, i = 0;i < len; ) {
-      c = buf[i++];
+    for (out = 0, i2 = 0;i2 < len; ) {
+      c = buf[i2++];
       if (c < 128) {
         utf16buf[out++] = c;
         continue;
@@ -5731,12 +5729,12 @@ var require_strings = __commonJS(function(exports) {
       c_len = _utf8len[c];
       if (c_len > 4) {
         utf16buf[out++] = 65533;
-        i += c_len - 1;
+        i2 += c_len - 1;
         continue;
       }
       c &= c_len === 2 ? 31 : c_len === 3 ? 15 : 7;
-      while (c_len > 1 && i < len) {
-        c = c << 6 | buf[i++] & 63;
+      while (c_len > 1 && i2 < len) {
+        c = c << 6 | buf[i2++] & 63;
         c_len--;
       }
       if (c_len > 1) {
@@ -5774,7 +5772,7 @@ var require_strings = __commonJS(function(exports) {
 });
 
 // node_modules/pako/lib/zlib/zstream.js
-var require_zstream = __commonJS(function(exports, module) {
+var require_zstream = __commonJS((exports, module) => {
   function ZStream() {
     this.input = null;
     this.next_in = 0;
@@ -5793,13 +5791,13 @@ var require_zstream = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/deflate.js
-var require_deflate2 = __commonJS(function(exports) {
+var require_deflate2 = __commonJS((exports) => {
   var zlib_deflate = require_deflate();
   var utils = require_common();
   var strings = require_strings();
   var msg = require_messages();
   var ZStream = require_zstream();
-  var toString = Object.prototype.toString;
+  var toString2 = Object.prototype.toString;
   var Z_NO_FLUSH = 0;
   var Z_FINISH = 4;
   var Z_OK = 0;
@@ -5843,7 +5841,7 @@ var require_deflate2 = __commonJS(function(exports) {
       var dict;
       if (typeof opt.dictionary === "string") {
         dict = strings.string2buf(opt.dictionary);
-      } else if (toString.call(opt.dictionary) === "[object ArrayBuffer]") {
+      } else if (toString2.call(opt.dictionary) === "[object ArrayBuffer]") {
         dict = new Uint8Array(opt.dictionary);
       } else {
         dict = opt.dictionary;
@@ -5865,7 +5863,7 @@ var require_deflate2 = __commonJS(function(exports) {
     _mode = mode === ~~mode ? mode : mode === true ? Z_FINISH : Z_NO_FLUSH;
     if (typeof data === "string") {
       strm.input = strings.string2buf(data);
-    } else if (toString.call(data) === "[object ArrayBuffer]") {
+    } else if (toString2.call(data) === "[object ArrayBuffer]") {
       strm.input = new Uint8Array(data);
     } else {
       strm.input = data;
@@ -5945,7 +5943,7 @@ var require_deflate2 = __commonJS(function(exports) {
 });
 
 // node_modules/pako/lib/zlib/inffast.js
-var require_inffast = __commonJS(function(exports, module) {
+var require_inffast = __commonJS((exports, module) => {
   var BAD = 30;
   var TYPE = 12;
   module.exports = function inflate_fast(strm, start) {
@@ -6171,7 +6169,7 @@ var require_inffast = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/zlib/inftrees.js
-var require_inftrees = __commonJS(function(exports, module) {
+var require_inftrees = __commonJS((exports, module) => {
   var utils = require_common();
   var MAXBITS = 15;
   var ENOUGH_LENS = 852;
@@ -6313,7 +6311,7 @@ var require_inftrees = __commonJS(function(exports, module) {
     64,
     64
   ];
-  module.exports = function inflate_table(type, lens, lens_index, codes, table, table_index, work, opts) {
+  module.exports = function inflate_table(type2, lens, lens_index, codes, table, table_index, work, opts) {
     var bits = opts.bits;
     var len = 0;
     var sym = 0;
@@ -6374,7 +6372,7 @@ var require_inftrees = __commonJS(function(exports, module) {
         return -1;
       }
     }
-    if (left > 0 && (type === CODES || max !== 1)) {
+    if (left > 0 && (type2 === CODES || max !== 1)) {
       return -1;
     }
     offs[1] = 0;
@@ -6386,10 +6384,10 @@ var require_inftrees = __commonJS(function(exports, module) {
         work[offs[lens[lens_index + sym]]++] = sym;
       }
     }
-    if (type === CODES) {
+    if (type2 === CODES) {
       base = extra = work;
       end = 19;
-    } else if (type === LENS) {
+    } else if (type2 === LENS) {
       base = lbase;
       base_index -= 257;
       extra = lext;
@@ -6409,7 +6407,7 @@ var require_inftrees = __commonJS(function(exports, module) {
     low = -1;
     used = 1 << root;
     mask = used - 1;
-    if (type === LENS && used > ENOUGH_LENS || type === DISTS && used > ENOUGH_DISTS) {
+    if (type2 === LENS && used > ENOUGH_LENS || type2 === DISTS && used > ENOUGH_DISTS) {
       return 1;
     }
     for (;; ) {
@@ -6464,7 +6462,7 @@ var require_inftrees = __commonJS(function(exports, module) {
           left <<= 1;
         }
         used += 1 << curr;
-        if (type === LENS && used > ENOUGH_LENS || type === DISTS && used > ENOUGH_DISTS) {
+        if (type2 === LENS && used > ENOUGH_LENS || type2 === DISTS && used > ENOUGH_DISTS) {
           return 1;
         }
         low = huff & mask;
@@ -6480,7 +6478,7 @@ var require_inftrees = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/zlib/inflate.js
-var require_inflate = __commonJS(function(exports) {
+var require_inflate = __commonJS((exports) => {
   var utils = require_common();
   var adler32 = require_adler32();
   var crc32 = require_crc322();
@@ -7678,7 +7676,7 @@ var require_inflate = __commonJS(function(exports) {
 });
 
 // node_modules/pako/lib/zlib/constants.js
-var require_constants = __commonJS(function(exports, module) {
+var require_constants = __commonJS((exports, module) => {
   module.exports = {
     Z_NO_FLUSH: 0,
     Z_PARTIAL_FLUSH: 1,
@@ -7711,7 +7709,7 @@ var require_constants = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/zlib/gzheader.js
-var require_gzheader = __commonJS(function(exports, module) {
+var require_gzheader = __commonJS((exports, module) => {
   function GZheader() {
     this.text = 0;
     this.time = 0;
@@ -7728,7 +7726,7 @@ var require_gzheader = __commonJS(function(exports, module) {
 });
 
 // node_modules/pako/lib/inflate.js
-var require_inflate2 = __commonJS(function(exports) {
+var require_inflate2 = __commonJS((exports) => {
   var zlib_inflate = require_inflate();
   var utils = require_common();
   var strings = require_strings();
@@ -7736,7 +7734,7 @@ var require_inflate2 = __commonJS(function(exports) {
   var msg = require_messages();
   var ZStream = require_zstream();
   var GZheader = require_gzheader();
-  var toString = Object.prototype.toString;
+  var toString2 = Object.prototype.toString;
   function Inflate(options) {
     if (!(this instanceof Inflate))
       return new Inflate(options);
@@ -7775,7 +7773,7 @@ var require_inflate2 = __commonJS(function(exports) {
     if (opt.dictionary) {
       if (typeof opt.dictionary === "string") {
         opt.dictionary = strings.string2buf(opt.dictionary);
-      } else if (toString.call(opt.dictionary) === "[object ArrayBuffer]") {
+      } else if (toString2.call(opt.dictionary) === "[object ArrayBuffer]") {
         opt.dictionary = new Uint8Array(opt.dictionary);
       }
       if (opt.raw) {
@@ -7799,7 +7797,7 @@ var require_inflate2 = __commonJS(function(exports) {
     _mode = mode === ~~mode ? mode : mode === true ? c.Z_FINISH : c.Z_NO_FLUSH;
     if (typeof data === "string") {
       strm.input = strings.binstring2buf(data);
-    } else if (toString.call(data) === "[object ArrayBuffer]") {
+    } else if (toString2.call(data) === "[object ArrayBuffer]") {
       strm.input = new Uint8Array(data);
     } else {
       strm.input = data;
@@ -7897,7 +7895,7 @@ var require_inflate2 = __commonJS(function(exports) {
 });
 
 // node_modules/pako/index.js
-var require_pako = __commonJS(function(exports, module) {
+var require_pako = __commonJS((exports, module) => {
   var assign = require_common().assign;
   var deflate = require_deflate2();
   var inflate = require_inflate2();
@@ -7908,7 +7906,7 @@ var require_pako = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/flate.js
-var require_flate = __commonJS(function(exports) {
+var require_flate = __commonJS((exports) => {
   var USE_TYPEDARRAY = typeof Uint8Array !== "undefined" && typeof Uint16Array !== "undefined" && typeof Uint32Array !== "undefined";
   var pako = require_pako();
   var utils = require_utils();
@@ -7963,7 +7961,7 @@ var require_flate = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/compressions.js
-var require_compressions = __commonJS(function(exports) {
+var require_compressions = __commonJS((exports) => {
   var GenericWorker = require_GenericWorker();
   exports.STORE = {
     magic: "\x00\x00",
@@ -7978,7 +7976,7 @@ var require_compressions = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/signature.js
-var require_signature = __commonJS(function(exports) {
+var require_signature = __commonJS((exports) => {
   exports.LOCAL_FILE_HEADER = "PK\x03\x04";
   exports.CENTRAL_FILE_HEADER = "PK\x01\x02";
   exports.CENTRAL_DIRECTORY_END = "PK\x05\x06";
@@ -7988,15 +7986,15 @@ var require_signature = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/generate/ZipFileWorker.js
-var require_ZipFileWorker = __commonJS(function(exports, module) {
+var require_ZipFileWorker = __commonJS((exports, module) => {
   var utils = require_utils();
   var GenericWorker = require_GenericWorker();
   var utf8 = require_utf8();
   var crc32 = require_crc32();
   var signature = require_signature();
   var decToHex = function(dec, bytes) {
-    var hex = "", i;
-    for (i = 0;i < bytes; i++) {
+    var hex = "", i2;
+    for (i2 = 0;i2 < bytes; i2++) {
       hex += String.fromCharCode(dec & 255);
       dec = dec >>> 8;
     }
@@ -8013,7 +8011,7 @@ var require_ZipFileWorker = __commonJS(function(exports, module) {
     return (dosPermissions || 0) & 63;
   };
   var generateZipParts = function(streamInfo, streamedContent, streamingEnded, offset, platform, encodeFileName) {
-    var file = streamInfo["file"], compression = streamInfo["compression"], useCustomEncoding = encodeFileName !== utf8.utf8encode, encodedFileName = utils.transformTo("string", encodeFileName(file.name)), utfEncodedFileName = utils.transformTo("string", utf8.utf8encode(file.name)), comment = file.comment, encodedComment = utils.transformTo("string", encodeFileName(comment)), utfEncodedComment = utils.transformTo("string", utf8.utf8encode(comment)), useUTF8ForFileName = utfEncodedFileName.length !== file.name.length, useUTF8ForComment = utfEncodedComment.length !== comment.length, dosTime, dosDate, extraFields = "", unicodePathExtraField = "", unicodeCommentExtraField = "", { dir, date } = file;
+    var file = streamInfo["file"], compression = streamInfo["compression"], useCustomEncoding = encodeFileName !== utf8.utf8encode, encodedFileName = utils.transformTo("string", encodeFileName(file.name)), utfEncodedFileName = utils.transformTo("string", utf8.utf8encode(file.name)), comment = file.comment, encodedComment = utils.transformTo("string", encodeFileName(comment)), utfEncodedComment = utils.transformTo("string", utf8.utf8encode(comment)), useUTF8ForFileName = utfEncodedFileName.length !== file.name.length, useUTF8ForComment = utfEncodedComment.length !== comment.length, dosTime, dosDate, extraFields = "", unicodePathExtraField = "", unicodeCommentExtraField = "", dir = file.dir, date = file.date;
     var dataInfo = {
       crc32: 0,
       compressedSize: 0,
@@ -8161,9 +8159,9 @@ var require_ZipFileWorker = __commonJS(function(exports, module) {
   };
   ZipFileWorker.prototype.flush = function() {
     var localDirLength = this.bytesWritten;
-    for (var i = 0;i < this.dirRecords.length; i++) {
+    for (var i2 = 0;i2 < this.dirRecords.length; i2++) {
       this.push({
-        data: this.dirRecords[i],
+        data: this.dirRecords[i2],
         meta: { percent: 100 }
       });
     }
@@ -8220,25 +8218,25 @@ var require_ZipFileWorker = __commonJS(function(exports, module) {
     if (!GenericWorker.prototype.error.call(this, e)) {
       return false;
     }
-    for (var i = 0;i < sources.length; i++) {
+    for (var i2 = 0;i2 < sources.length; i2++) {
       try {
-        sources[i].error(e);
-      } catch (e) {}
+        sources[i2].error(e);
+      } catch (e2) {}
     }
     return true;
   };
   ZipFileWorker.prototype.lock = function() {
     GenericWorker.prototype.lock.call(this);
     var sources = this._sources;
-    for (var i = 0;i < sources.length; i++) {
-      sources[i].lock();
+    for (var i2 = 0;i2 < sources.length; i2++) {
+      sources[i2].lock();
     }
   };
   module.exports = ZipFileWorker;
 });
 
 // node_modules/jszip/lib/generate/index.js
-var require_generate = __commonJS(function(exports) {
+var require_generate = __commonJS((exports) => {
   var compressions = require_compressions();
   var ZipFileWorker = require_ZipFileWorker();
   var getCompression = function(fileCompression, zipCompression) {
@@ -8276,7 +8274,7 @@ var require_generate = __commonJS(function(exports) {
 });
 
 // node_modules/jszip/lib/nodejs/NodejsStreamInputAdapter.js
-var require_NodejsStreamInputAdapter = __commonJS(function(exports, module) {
+var require_NodejsStreamInputAdapter = __commonJS((exports, module) => {
   var utils = require_utils();
   var GenericWorker = require_GenericWorker();
   function NodejsStreamInputAdapter(filename, stream) {
@@ -8332,7 +8330,7 @@ var require_NodejsStreamInputAdapter = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/object.js
-var require_object = __commonJS(function(exports, module) {
+var require_object = __commonJS((exports, module) => {
   var utf8 = require_utf8();
   var utils = require_utils();
   var GenericWorker = require_GenericWorker();
@@ -8486,11 +8484,11 @@ var require_object = __commonJS(function(exports, module) {
       if (file && !file.dir) {
         delete this.files[name];
       } else {
-        var kids = this.filter(function(relativePath, file) {
-          return file.name.slice(0, name.length) === name;
+        var kids = this.filter(function(relativePath, file2) {
+          return file2.name.slice(0, name.length) === name;
         });
-        for (var i = 0;i < kids.length; i++) {
-          delete this.files[kids[i].name];
+        for (var i2 = 0;i2 < kids.length; i2++) {
+          delete this.files[kids[i2].name];
         }
       }
       return this;
@@ -8549,7 +8547,7 @@ var require_object = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/reader/DataReader.js
-var require_DataReader = __commonJS(function(exports, module) {
+var require_DataReader = __commonJS((exports, module) => {
   var utils = require_utils();
   function DataReader(data) {
     this.data = data;
@@ -8575,10 +8573,10 @@ var require_DataReader = __commonJS(function(exports, module) {
     },
     byteAt: function() {},
     readInt: function(size) {
-      var result = 0, i;
+      var result = 0, i2;
       this.checkOffset(size);
-      for (i = this.index + size - 1;i >= this.index; i--) {
-        result = (result << 8) + this.byteAt(i);
+      for (i2 = this.index + size - 1;i2 >= this.index; i2--) {
+        result = (result << 8) + this.byteAt(i2);
       }
       this.index += size;
       return result;
@@ -8598,24 +8596,24 @@ var require_DataReader = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/reader/ArrayReader.js
-var require_ArrayReader = __commonJS(function(exports, module) {
+var require_ArrayReader = __commonJS((exports, module) => {
   var DataReader = require_DataReader();
   var utils = require_utils();
   function ArrayReader(data) {
     DataReader.call(this, data);
-    for (var i = 0;i < this.data.length; i++) {
-      data[i] = data[i] & 255;
+    for (var i2 = 0;i2 < this.data.length; i2++) {
+      data[i2] = data[i2] & 255;
     }
   }
   utils.inherits(ArrayReader, DataReader);
-  ArrayReader.prototype.byteAt = function(i) {
-    return this.data[this.zero + i];
+  ArrayReader.prototype.byteAt = function(i2) {
+    return this.data[this.zero + i2];
   };
   ArrayReader.prototype.lastIndexOfSignature = function(sig) {
     var sig0 = sig.charCodeAt(0), sig1 = sig.charCodeAt(1), sig2 = sig.charCodeAt(2), sig3 = sig.charCodeAt(3);
-    for (var i = this.length - 4;i >= 0; --i) {
-      if (this.data[i] === sig0 && this.data[i + 1] === sig1 && this.data[i + 2] === sig2 && this.data[i + 3] === sig3) {
-        return i - this.zero;
+    for (var i2 = this.length - 4;i2 >= 0; --i2) {
+      if (this.data[i2] === sig0 && this.data[i2 + 1] === sig1 && this.data[i2 + 2] === sig2 && this.data[i2 + 3] === sig3) {
+        return i2 - this.zero;
       }
     }
     return -1;
@@ -8637,15 +8635,15 @@ var require_ArrayReader = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/reader/StringReader.js
-var require_StringReader = __commonJS(function(exports, module) {
+var require_StringReader = __commonJS((exports, module) => {
   var DataReader = require_DataReader();
   var utils = require_utils();
   function StringReader(data) {
     DataReader.call(this, data);
   }
   utils.inherits(StringReader, DataReader);
-  StringReader.prototype.byteAt = function(i) {
-    return this.data.charCodeAt(this.zero + i);
+  StringReader.prototype.byteAt = function(i2) {
+    return this.data.charCodeAt(this.zero + i2);
   };
   StringReader.prototype.lastIndexOfSignature = function(sig) {
     return this.data.lastIndexOf(sig) - this.zero;
@@ -8664,7 +8662,7 @@ var require_StringReader = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/reader/Uint8ArrayReader.js
-var require_Uint8ArrayReader = __commonJS(function(exports, module) {
+var require_Uint8ArrayReader = __commonJS((exports, module) => {
   var ArrayReader = require_ArrayReader();
   var utils = require_utils();
   function Uint8ArrayReader(data) {
@@ -8684,7 +8682,7 @@ var require_Uint8ArrayReader = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/reader/NodeBufferReader.js
-var require_NodeBufferReader = __commonJS(function(exports, module) {
+var require_NodeBufferReader = __commonJS((exports, module) => {
   var Uint8ArrayReader = require_Uint8ArrayReader();
   var utils = require_utils();
   function NodeBufferReader(data) {
@@ -8701,7 +8699,7 @@ var require_NodeBufferReader = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/reader/readerFor.js
-var require_readerFor = __commonJS(function(exports, module) {
+var require_readerFor = __commonJS((exports, module) => {
   var utils = require_utils();
   var support = require_support();
   var ArrayReader = require_ArrayReader();
@@ -8709,12 +8707,12 @@ var require_readerFor = __commonJS(function(exports, module) {
   var NodeBufferReader = require_NodeBufferReader();
   var Uint8ArrayReader = require_Uint8ArrayReader();
   module.exports = function(data) {
-    var type = utils.getTypeOf(data);
-    utils.checkSupport(type);
-    if (type === "string" && !support.uint8array) {
+    var type2 = utils.getTypeOf(data);
+    utils.checkSupport(type2);
+    if (type2 === "string" && !support.uint8array) {
       return new StringReader(data);
     }
-    if (type === "nodebuffer") {
+    if (type2 === "nodebuffer") {
       return new NodeBufferReader(data);
     }
     if (support.uint8array) {
@@ -8725,7 +8723,7 @@ var require_readerFor = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/zipEntry.js
-var require_zipEntry = __commonJS(function(exports, module) {
+var require_zipEntry = __commonJS((exports, module) => {
   var readerFor = require_readerFor();
   var utils = require_utils();
   var CompressedObject = require_compressedObject();
@@ -8902,7 +8900,7 @@ var require_zipEntry = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/zipEntries.js
-var require_zipEntries = __commonJS(function(exports, module) {
+var require_zipEntries = __commonJS((exports, module) => {
   var readerFor = require_readerFor();
   var utils = require_utils();
   var sig = require_signature();
@@ -8972,9 +8970,9 @@ var require_zipEntries = __commonJS(function(exports, module) {
       }
     },
     readLocalFiles: function() {
-      var i, file;
-      for (i = 0;i < this.files.length; i++) {
-        file = this.files[i];
+      var i2, file;
+      for (i2 = 0;i2 < this.files.length; i2++) {
+        file = this.files[i2];
         this.reader.setIndex(file.localHeaderOffset);
         this.checkSignature(sig.LOCAL_FILE_HEADER);
         file.readLocalPart(this.reader);
@@ -8995,7 +8993,7 @@ var require_zipEntries = __commonJS(function(exports, module) {
       if (this.centralDirRecords !== this.files.length) {
         if (this.centralDirRecords !== 0 && this.files.length === 0) {
           throw new Error("Corrupted zip or bug: expected " + this.centralDirRecords + " records in central dir, got " + this.files.length);
-        }
+        } else {}
       }
     },
     readEndOfCentral: function() {
@@ -9059,7 +9057,7 @@ var require_zipEntries = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/load.js
-var require_load = __commonJS(function(exports, module) {
+var require_load = __commonJS((exports, module) => {
   var utils = require_utils();
   var external = require_external();
   var utf8 = require_utf8();
@@ -9092,24 +9090,24 @@ var require_load = __commonJS(function(exports, module) {
     if (nodejsUtils.isNode && nodejsUtils.isStream(data)) {
       return external.Promise.reject(new Error("JSZip can't accept a stream when loading a zip file."));
     }
-    return utils.prepareContent("the loaded zip file", data, true, options.optimizedBinaryString, options.base64).then(function(data) {
+    return utils.prepareContent("the loaded zip file", data, true, options.optimizedBinaryString, options.base64).then(function(data2) {
       var zipEntries = new ZipEntries(options);
-      zipEntries.load(data);
+      zipEntries.load(data2);
       return zipEntries;
     }).then(function checkCRC32(zipEntries) {
       var promises = [external.Promise.resolve(zipEntries)];
       var files = zipEntries.files;
       if (options.checkCRC32) {
-        for (var i = 0;i < files.length; i++) {
-          promises.push(checkEntryCRC32(files[i]));
+        for (var i2 = 0;i2 < files.length; i2++) {
+          promises.push(checkEntryCRC32(files[i2]));
         }
       }
       return external.Promise.all(promises);
     }).then(function addFiles(results) {
       var zipEntries = results.shift();
       var files = zipEntries.files;
-      for (var i = 0;i < files.length; i++) {
-        var input = files[i];
+      for (var i2 = 0;i2 < files.length; i2++) {
+        var input = files[i2];
         var unsafeName = input.fileNameStr;
         var safeName = utils.resolve(input.fileNameStr);
         zip.file(safeName, input.decompressed, {
@@ -9135,7 +9133,7 @@ var require_load = __commonJS(function(exports, module) {
 });
 
 // node_modules/jszip/lib/index.js
-var require_lib3 = __commonJS(function(exports, module) {
+var require_lib3 = __commonJS((exports, module) => {
   function JSZip() {
     if (!(this instanceof JSZip)) {
       return new JSZip;
@@ -9148,9 +9146,9 @@ var require_lib3 = __commonJS(function(exports, module) {
     this.root = "";
     this.clone = function() {
       var newObj = new JSZip;
-      for (var i in this) {
-        if (typeof this[i] !== "function") {
-          newObj[i] = this[i];
+      for (var i2 in this) {
+        if (typeof this[i2] !== "function") {
+          newObj[i2] = this[i2];
         }
       }
       return newObj;
@@ -10043,12 +10041,12 @@ function compileMap() {
       fallback: []
     }
   }, index, length;
-  function collectType(type) {
-    if (type.multi) {
-      result.multi[type.kind].push(type);
-      result.multi["fallback"].push(type);
+  function collectType(type2) {
+    if (type2.multi) {
+      result.multi[type2.kind].push(type2);
+      result.multi["fallback"].push(type2);
     } else {
-      result[type.kind][type.tag] = result["fallback"][type.tag] = type;
+      result[type2.kind][type2.tag] = result["fallback"][type2.tag] = type2;
     }
   }
   for (index = 0, length = arguments.length;index < length; index += 1) {
@@ -10059,7 +10057,7 @@ function compileMap() {
 function Schema$1(definition) {
   return this.extend(definition);
 }
-Schema$1.prototype.extend = function extend(definition) {
+Schema$1.prototype.extend = function extend2(definition) {
   var implicit = [];
   var explicit = [];
   if (definition instanceof type) {
@@ -10466,9 +10464,9 @@ var BASE64_MAP = `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 function resolveYamlBinary(data) {
   if (data === null)
     return false;
-  var code, idx, bitlen = 0, max = data.length, map = BASE64_MAP;
+  var code, idx, bitlen = 0, max = data.length, map2 = BASE64_MAP;
   for (idx = 0;idx < max; idx++) {
-    code = map.indexOf(data.charAt(idx));
+    code = map2.indexOf(data.charAt(idx));
     if (code > 64)
       continue;
     if (code < 0)
@@ -10478,14 +10476,14 @@ function resolveYamlBinary(data) {
   return bitlen % 8 === 0;
 }
 function constructYamlBinary(data) {
-  var idx, tailbits, input = data.replace(/[\r\n=]/g, ""), max = input.length, map = BASE64_MAP, bits = 0, result = [];
+  var idx, tailbits, input = data.replace(/[\r\n=]/g, ""), max = input.length, map2 = BASE64_MAP, bits = 0, result = [];
   for (idx = 0;idx < max; idx++) {
     if (idx % 4 === 0 && idx) {
       result.push(bits >> 16 & 255);
       result.push(bits >> 8 & 255);
       result.push(bits & 255);
     }
-    bits = bits << 6 | map.indexOf(input.charAt(idx));
+    bits = bits << 6 | map2.indexOf(input.charAt(idx));
   }
   tailbits = max % 4 * 6;
   if (tailbits === 0) {
@@ -10501,32 +10499,32 @@ function constructYamlBinary(data) {
   return new Uint8Array(result);
 }
 function representYamlBinary(object) {
-  var result = "", bits = 0, idx, tail, max = object.length, map = BASE64_MAP;
+  var result = "", bits = 0, idx, tail, max = object.length, map2 = BASE64_MAP;
   for (idx = 0;idx < max; idx++) {
     if (idx % 3 === 0 && idx) {
-      result += map[bits >> 18 & 63];
-      result += map[bits >> 12 & 63];
-      result += map[bits >> 6 & 63];
-      result += map[bits & 63];
+      result += map2[bits >> 18 & 63];
+      result += map2[bits >> 12 & 63];
+      result += map2[bits >> 6 & 63];
+      result += map2[bits & 63];
     }
     bits = (bits << 8) + object[idx];
   }
   tail = max % 3;
   if (tail === 0) {
-    result += map[bits >> 18 & 63];
-    result += map[bits >> 12 & 63];
-    result += map[bits >> 6 & 63];
-    result += map[bits & 63];
+    result += map2[bits >> 18 & 63];
+    result += map2[bits >> 12 & 63];
+    result += map2[bits >> 6 & 63];
+    result += map2[bits & 63];
   } else if (tail === 2) {
-    result += map[bits >> 10 & 63];
-    result += map[bits >> 4 & 63];
-    result += map[bits << 2 & 63];
-    result += map[64];
+    result += map2[bits >> 10 & 63];
+    result += map2[bits >> 4 & 63];
+    result += map2[bits << 2 & 63];
+    result += map2[64];
   } else if (tail === 1) {
-    result += map[bits >> 2 & 63];
-    result += map[bits << 4 & 63];
-    result += map[64];
-    result += map[64];
+    result += map2[bits >> 2 & 63];
+    result += map2[bits << 4 & 63];
+    result += map2[64];
+    result += map2[64];
   }
   return result;
 }
@@ -10955,7 +10953,7 @@ function writeFoldedLines(state, count) {
   }
 }
 function readPlainScalar(state, nodeIndent, withinFlowCollection) {
-  var preceding, following, captureStart, captureEnd, hasPendingContent, _line, _lineStart, _lineIndent, { kind: _kind, result: _result } = state, ch;
+  var preceding, following, captureStart, captureEnd, hasPendingContent, _line, _lineStart, _lineIndent, _kind = state.kind, _result = state.result, ch;
   ch = state.input.charCodeAt(state.position);
   if (is_WS_OR_EOL(ch) || is_FLOW_INDICATOR(ch) || ch === 35 || ch === 38 || ch === 42 || ch === 33 || ch === 124 || ch === 62 || ch === 39 || ch === 34 || ch === 37 || ch === 64 || ch === 96) {
     return false;
@@ -11285,7 +11283,7 @@ function readBlockScalar(state, nodeIndent) {
   return true;
 }
 function readBlockSequence(state, nodeIndent) {
-  var _line, { tag: _tag, anchor: _anchor } = state, _result = [], following, detected = false, ch;
+  var _line, _tag = state.tag, _anchor = state.anchor, _result = [], following, detected = false, ch;
   if (state.firstTabInLine !== -1)
     return false;
   if (state.anchor !== null) {
@@ -11334,7 +11332,7 @@ function readBlockSequence(state, nodeIndent) {
   return false;
 }
 function readBlockMapping(state, nodeIndent, flowIndent) {
-  var following, allowCompact, _line, _keyLine, _keyLineStart, _keyPos, { tag: _tag, anchor: _anchor } = state, _result = {}, overridableKeys = Object.create(null), keyTag = null, keyNode = null, valueNode = null, atExplicitKey = false, detected = false, ch;
+  var following, allowCompact, _line, _keyLine, _keyLineStart, _keyPos, _tag = state.tag, _anchor = state.anchor, _result = {}, overridableKeys = Object.create(null), keyTag = null, keyNode = null, valueNode = null, atExplicitKey = false, detected = false, ch;
   if (state.firstTabInLine !== -1)
     return false;
   if (state.anchor !== null) {
@@ -11556,7 +11554,7 @@ function readAlias(state) {
   return true;
 }
 function composeNode(state, parentIndent, nodeContext, allowToSeek, allowCompact) {
-  var allowBlockStyles, allowBlockScalars, allowBlockCollections, indentStatus = 1, atNewLine = false, hasContent = false, typeIndex, typeQuantity, typeList, type, flowIndent, blockIndent;
+  var allowBlockStyles, allowBlockScalars, allowBlockCollections, indentStatus = 1, atNewLine = false, hasContent = false, typeIndex, typeQuantity, typeList, type2, flowIndent, blockIndent;
   if (state.listener !== null) {
     state.listener("open", state);
   }
@@ -11638,10 +11636,10 @@ function composeNode(state, parentIndent, nodeContext, allowToSeek, allowCompact
       throwError(state, 'unacceptable node kind for !<?> tag; it should be "scalar", not "' + state.kind + '"');
     }
     for (typeIndex = 0, typeQuantity = state.implicitTypes.length;typeIndex < typeQuantity; typeIndex += 1) {
-      type = state.implicitTypes[typeIndex];
-      if (type.resolve(state.result)) {
-        state.result = type.construct(state.result);
-        state.tag = type.tag;
+      type2 = state.implicitTypes[typeIndex];
+      if (type2.resolve(state.result)) {
+        state.result = type2.construct(state.result);
+        state.tag = type2.tag;
         if (state.anchor !== null) {
           state.anchorMap[state.anchor] = state.result;
         }
@@ -11650,27 +11648,27 @@ function composeNode(state, parentIndent, nodeContext, allowToSeek, allowCompact
     }
   } else if (state.tag !== "!") {
     if (_hasOwnProperty$1.call(state.typeMap[state.kind || "fallback"], state.tag)) {
-      type = state.typeMap[state.kind || "fallback"][state.tag];
+      type2 = state.typeMap[state.kind || "fallback"][state.tag];
     } else {
-      type = null;
+      type2 = null;
       typeList = state.typeMap.multi[state.kind || "fallback"];
       for (typeIndex = 0, typeQuantity = typeList.length;typeIndex < typeQuantity; typeIndex += 1) {
         if (state.tag.slice(0, typeList[typeIndex].tag.length) === typeList[typeIndex].tag) {
-          type = typeList[typeIndex];
+          type2 = typeList[typeIndex];
           break;
         }
       }
     }
-    if (!type) {
+    if (!type2) {
       throwError(state, "unknown tag !<" + state.tag + ">");
     }
-    if (state.result !== null && type.kind !== state.kind) {
-      throwError(state, "unacceptable node kind for !<" + state.tag + '> tag; it should be "' + type.kind + '", not "' + state.kind + '"');
+    if (state.result !== null && type2.kind !== state.kind) {
+      throwError(state, "unacceptable node kind for !<" + state.tag + '> tag; it should be "' + type2.kind + '", not "' + state.kind + '"');
     }
-    if (!type.resolve(state.result, state.tag)) {
+    if (!type2.resolve(state.result, state.tag)) {
       throwError(state, "cannot resolve a node with !<" + state.tag + "> explicit tag");
     } else {
-      state.result = type.construct(state.result, state.tag);
+      state.result = type2.construct(state.result, state.tag);
       if (state.anchor !== null) {
         state.anchorMap[state.anchor] = state.result;
       }
@@ -11874,21 +11872,21 @@ var DEPRECATED_BOOLEANS_SYNTAX = [
   "OFF"
 ];
 var DEPRECATED_BASE60_SYNTAX = /^[-+]?[0-9_]+(?::[0-9_]+)+(?:\.[0-9_]*)?$/;
-function compileStyleMap(schema, map) {
-  var result, keys, index, length, tag, style, type;
-  if (map === null)
+function compileStyleMap(schema2, map2) {
+  var result, keys, index, length, tag, style, type2;
+  if (map2 === null)
     return {};
   result = {};
-  keys = Object.keys(map);
+  keys = Object.keys(map2);
   for (index = 0, length = keys.length;index < length; index += 1) {
     tag = keys[index];
-    style = String(map[tag]);
+    style = String(map2[tag]);
     if (tag.slice(0, 2) === "!!") {
       tag = "tag:yaml.org,2002:" + tag.slice(2);
     }
-    type = schema.compiledTypeMap["fallback"][tag];
-    if (type && _hasOwnProperty.call(type.styleAliases, style)) {
-      style = type.styleAliases[style];
+    type2 = schema2.compiledTypeMap["fallback"][tag];
+    if (type2 && _hasOwnProperty.call(type2.styleAliases, style)) {
+      style = type2.styleAliases[style];
     }
     result[tag] = style;
   }
@@ -11958,11 +11956,11 @@ function generateNextLine(state, level) {
   return `
 ` + common.repeat(" ", state.indent * level);
 }
-function testImplicitResolving(state, str) {
-  var index, length, type;
+function testImplicitResolving(state, str2) {
+  var index, length, type2;
   for (index = 0, length = state.implicitTypes.length;index < length; index += 1) {
-    type = state.implicitTypes[index];
-    if (type.resolve(str)) {
+    type2 = state.implicitTypes[index];
+    if (type2.resolve(str2)) {
       return true;
     }
   }
@@ -12008,7 +12006,7 @@ var STYLE_LITERAL = 3;
 var STYLE_FOLDED = 4;
 var STYLE_DOUBLE = 5;
 function chooseScalarStyle(string, singleLineOnly, indentPerLevel, lineWidth, testAmbiguousType, quotingType, forceQuotes, inblock) {
-  var i;
+  var i2;
   var char = 0;
   var prevChar = null;
   var hasLineBreak = false;
@@ -12017,8 +12015,8 @@ function chooseScalarStyle(string, singleLineOnly, indentPerLevel, lineWidth, te
   var previousLineBreak = -1;
   var plain = isPlainSafeFirst(codePointAt(string, 0)) && isPlainSafeLast(codePointAt(string, string.length - 1));
   if (singleLineOnly || forceQuotes) {
-    for (i = 0;i < string.length; char >= 65536 ? i += 2 : i++) {
-      char = codePointAt(string, i);
+    for (i2 = 0;i2 < string.length; char >= 65536 ? i2 += 2 : i2++) {
+      char = codePointAt(string, i2);
       if (!isPrintable(char)) {
         return STYLE_DOUBLE;
       }
@@ -12026,13 +12024,13 @@ function chooseScalarStyle(string, singleLineOnly, indentPerLevel, lineWidth, te
       prevChar = char;
     }
   } else {
-    for (i = 0;i < string.length; char >= 65536 ? i += 2 : i++) {
-      char = codePointAt(string, i);
+    for (i2 = 0;i2 < string.length; char >= 65536 ? i2 += 2 : i2++) {
+      char = codePointAt(string, i2);
       if (char === CHAR_LINE_FEED) {
         hasLineBreak = true;
         if (shouldTrackWidth) {
-          hasFoldableLine = hasFoldableLine || i - previousLineBreak - 1 > lineWidth && string[previousLineBreak + 1] !== " ";
-          previousLineBreak = i;
+          hasFoldableLine = hasFoldableLine || i2 - previousLineBreak - 1 > lineWidth && string[previousLineBreak + 1] !== " ";
+          previousLineBreak = i2;
         }
       } else if (!isPrintable(char)) {
         return STYLE_DOUBLE;
@@ -12040,7 +12038,7 @@ function chooseScalarStyle(string, singleLineOnly, indentPerLevel, lineWidth, te
       plain = plain && isPlainSafe(char, prevChar, inblock);
       prevChar = char;
     }
-    hasFoldableLine = hasFoldableLine || shouldTrackWidth && (i - previousLineBreak - 1 > lineWidth && string[previousLineBreak + 1] !== " ");
+    hasFoldableLine = hasFoldableLine || shouldTrackWidth && (i2 - previousLineBreak - 1 > lineWidth && string[previousLineBreak + 1] !== " ");
   }
   if (!hasLineBreak && !hasFoldableLine) {
     if (plain && !forceQuotes && !testAmbiguousType(string)) {
@@ -12069,8 +12067,8 @@ function writeScalar(state, string, level, iskey, inblock) {
     var indent = state.indent * Math.max(1, level);
     var lineWidth = state.lineWidth === -1 ? -1 : Math.max(Math.min(state.lineWidth, 40), state.lineWidth - indent);
     var singleLineOnly = iskey || state.flowLevel > -1 && level >= state.flowLevel;
-    function testAmbiguity(string) {
-      return testImplicitResolving(state, string);
+    function testAmbiguity(string2) {
+      return testImplicitResolving(state, string2);
     }
     switch (chooseScalarStyle(string, singleLineOnly, state.indent, lineWidth, testAmbiguity, state.quotingType, state.forceQuotes && !iskey, inblock)) {
       case STYLE_PLAIN:
@@ -12156,13 +12154,13 @@ function escapeString(string) {
   var result = "";
   var char = 0;
   var escapeSeq;
-  for (var i = 0;i < string.length; char >= 65536 ? i += 2 : i++) {
-    char = codePointAt(string, i);
+  for (var i2 = 0;i2 < string.length; char >= 65536 ? i2 += 2 : i2++) {
+    char = codePointAt(string, i2);
     escapeSeq = ESCAPE_SEQUENCES[char];
     if (!escapeSeq && isPrintable(char)) {
-      result += string[i];
+      result += string[i2];
       if (char >= 65536)
-        result += string[i + 1];
+        result += string[i2 + 1];
     } else {
       result += escapeSeq || encodeHex(char);
     }
@@ -12284,28 +12282,28 @@ function writeBlockMapping(state, level, object, compact) {
   state.dump = _result || "{}";
 }
 function detectType(state, object, explicit) {
-  var _result, typeList, index, length, type, style;
+  var _result, typeList, index, length, type2, style;
   typeList = explicit ? state.explicitTypes : state.implicitTypes;
   for (index = 0, length = typeList.length;index < length; index += 1) {
-    type = typeList[index];
-    if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object === "object" && object instanceof type.instanceOf) && (!type.predicate || type.predicate(object))) {
+    type2 = typeList[index];
+    if ((type2.instanceOf || type2.predicate) && (!type2.instanceOf || typeof object === "object" && object instanceof type2.instanceOf) && (!type2.predicate || type2.predicate(object))) {
       if (explicit) {
-        if (type.multi && type.representName) {
-          state.tag = type.representName(object);
+        if (type2.multi && type2.representName) {
+          state.tag = type2.representName(object);
         } else {
-          state.tag = type.tag;
+          state.tag = type2.tag;
         }
       } else {
         state.tag = "?";
       }
-      if (type.represent) {
-        style = state.styleMap[type.tag] || type.defaultStyle;
-        if (_toString.call(type.represent) === "[object Function]") {
-          _result = type.represent(object, style);
-        } else if (_hasOwnProperty.call(type.represent, style)) {
-          _result = type.represent[style](object, style);
+      if (type2.represent) {
+        style = state.styleMap[type2.tag] || type2.defaultStyle;
+        if (_toString.call(type2.represent) === "[object Function]") {
+          _result = type2.represent(object, style);
+        } else if (_hasOwnProperty.call(type2.represent, style)) {
+          _result = type2.represent[style](object, style);
         } else {
-          throw new exception("!<" + type.tag + '> tag resolver accepts not "' + style + '" style');
+          throw new exception("!<" + type2.tag + '> tag resolver accepts not "' + style + '" style');
         }
         state.dump = _result;
       }
@@ -12320,13 +12318,13 @@ function writeNode(state, level, object, block, compact, iskey, isblockseq) {
   if (!detectType(state, object, false)) {
     detectType(state, object, true);
   }
-  var type = _toString.call(state.dump);
+  var type2 = _toString.call(state.dump);
   var inblock = block;
   var tagStr;
   if (block) {
     block = state.flowLevel < 0 || state.flowLevel > level;
   }
-  var objectOrArray = type === "[object Object]" || type === "[object Array]", duplicateIndex, duplicate;
+  var objectOrArray = type2 === "[object Object]" || type2 === "[object Array]", duplicateIndex, duplicate;
   if (objectOrArray) {
     duplicateIndex = state.duplicates.indexOf(object);
     duplicate = duplicateIndex !== -1;
@@ -12340,7 +12338,7 @@ function writeNode(state, level, object, block, compact, iskey, isblockseq) {
     if (objectOrArray && duplicate && !state.usedDuplicates[duplicateIndex]) {
       state.usedDuplicates[duplicateIndex] = true;
     }
-    if (type === "[object Object]") {
+    if (type2 === "[object Object]") {
       if (block && Object.keys(state.dump).length !== 0) {
         writeBlockMapping(state, level, state.dump, compact);
         if (duplicate) {
@@ -12352,7 +12350,7 @@ function writeNode(state, level, object, block, compact, iskey, isblockseq) {
           state.dump = "&ref_" + duplicateIndex + " " + state.dump;
         }
       }
-    } else if (type === "[object Array]") {
+    } else if (type2 === "[object Array]") {
       if (block && state.dump.length !== 0) {
         if (state.noArrayIndent && !isblockseq && level > 0) {
           writeBlockSequence(state, level - 1, state.dump, compact);
@@ -12368,16 +12366,16 @@ function writeNode(state, level, object, block, compact, iskey, isblockseq) {
           state.dump = "&ref_" + duplicateIndex + " " + state.dump;
         }
       }
-    } else if (type === "[object String]") {
+    } else if (type2 === "[object String]") {
       if (state.tag !== "?") {
         writeScalar(state, state.dump, level, iskey, inblock);
       }
-    } else if (type === "[object Undefined]") {
+    } else if (type2 === "[object Undefined]") {
       return false;
     } else {
       if (state.skipInvalid)
         return false;
-      throw new exception("unacceptable kind of an object to dump " + type);
+      throw new exception("unacceptable kind of an object to dump " + type2);
     }
     if (state.tag !== null && state.tag !== "?") {
       tagStr = encodeURI(state.tag[0] === "!" ? state.tag.slice(1) : state.tag).replace(/!/g, "%21");
@@ -12656,7 +12654,7 @@ function parseTheme(value, issues) {
   const margin = need(value, "margin", "theme", issues);
   const colors = need(value, "colors", "theme", issues);
   const fonts = need(value, "fonts", "theme", issues);
-  const type = need(value, "type", "theme", issues);
+  const type2 = need(value, "type", "theme", issues);
   const source = need(value, "source", "theme", issues);
   if (typeof id !== "string" || !id.trim())
     issues.push(issue("schema", "theme.id \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32"));
@@ -12684,7 +12682,7 @@ function parseTheme(value, issues) {
     }
   }
   const parsedFonts = parseFonts(fonts, issues);
-  const parsedType = parseType(type, issues);
+  const parsedType = parseType(type2, issues);
   if (issues.some((item) => item.message.startsWith("theme")) && (!parsedFonts || !parsedType || typeof id !== "string"))
     return null;
   if (!parsedFonts || !parsedType || typeof id !== "string" || typeof name !== "string" || typeof margin !== "number" || typeof source !== "string")
@@ -13663,12 +13661,12 @@ function parseSource(value, issues) {
     sha256: typeof value.sha256 === "string" ? value.sha256 : undefined
   };
 }
-function parseDeckSource(text) {
-  const trimmed = text.trim();
+function parseDeckSource(text2) {
+  const trimmed = text2.trim();
   if (!trimmed)
     return { deck: null, issues: [issue("schema", "deck \u6587\u4EF6\u662F\u7A7A\u7684")] };
   try {
-    const value = trimmed.startsWith("{") || trimmed.startsWith("[") ? JSON.parse(text) : jsYaml.load(text);
+    const value = trimmed.startsWith("{") || trimmed.startsWith("[") ? JSON.parse(text2) : jsYaml.load(text2);
     return parseDeckDocument(value);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -13755,13 +13753,13 @@ function contains(outer, inner, slack = 0.5) {
 }
 function glyphBox(element) {
   const font = element.font;
-  const text = element.text ?? "";
-  if (!font || !text.trim())
+  const text2 = element.text ?? "";
+  if (!font || !text2.trim())
     return element.bounds;
   const bold = font.weight === "bold";
   const tracking = font.tracking ?? 0;
   const leading = font.leading ?? defaultLeading(font.size);
-  const lines = wrapText(text, element.bounds.w, font.size, bold, tracking);
+  const lines = wrapText(text2, element.bounds.w, font.size, bold, tracking);
   const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0);
   const height = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
   const width = Math.min(widest, element.bounds.w);
@@ -13772,14 +13770,14 @@ function glyphBox(element) {
   const y = valign === "middle" ? element.bounds.y + (element.bounds.h - usedHeight) / 2 : valign === "bottom" ? element.bounds.y + element.bounds.h - usedHeight : element.bounds.y;
   return { x, y, w: width, h: usedHeight };
 }
-function lineCuts(rule, box) {
-  const points = rule.line?.points;
+function lineCuts(rule2, box) {
+  const points = rule2.line?.points;
   if (!points)
-    return overlaps(rule.bounds, box);
-  const x1 = rule.bounds.x + points.x1;
-  const y1 = rule.bounds.y + points.y1;
-  const x2 = rule.bounds.x + points.x2;
-  const y2 = rule.bounds.y + points.y2;
+    return overlaps(rule2.bounds, box);
+  const x1 = rule2.bounds.x + points.x1;
+  const y1 = rule2.bounds.y + points.y1;
+  const x2 = rule2.bounds.x + points.x2;
+  const y2 = rule2.bounds.y + points.y2;
   const inside = (x, y) => x > box.x && x < box.x + box.w && y > box.y && y < box.y + box.h;
   if (inside(x1, y1) || inside(x2, y2))
     return true;
@@ -13922,25 +13920,25 @@ function checkPage(deck, page, options) {
 }
 function checkText(deck, page, element, pageBackground) {
   const issues = [];
-  const text = element.text ?? "";
+  const text2 = element.text ?? "";
   const font = element.font;
-  const capacity = element.textCapacity;
+  const capacity2 = element.textCapacity;
   const bold = font.weight === "bold";
-  if (literalNewline(text)) {
+  if (literalNewline(text2)) {
     issues.push(issue("literal_newline", "\u6587\u672C\u542B\u6709\u5B57\u9762\u91CF \\n\u3001\\r \u6216 \\t\u3002\u6362\u884C\u8BF7\u4F7F\u7528\u771F\u5B9E\u6362\u884C\uFF0C\u4E0D\u8981\u5199\u53CD\u659C\u6760 n", page.id, element.id));
   }
-  if (containsCjk(text) && font.family === "$latin") {
+  if (containsCjk(text2) && font.family === "$latin") {
     issues.push(issue("font", "\u542B\u4E2D\u6587\u7684\u6587\u672C\u5E94\u4F7F\u7528 $cjk\uFF0C\u4EE5\u4FBF\u8D70 mac / win / linux \u56DE\u9000", page.id, element.id));
   }
-  const glyphs = Array.from(text.replace(/\n/g, "")).length;
-  if (glyphs > capacity.maxChars) {
-    issues.push(issue("over_capacity", `\u6587\u5B57 ${glyphs} \u5B57\uFF0C\u8D85\u8FC7 textCapacity.maxChars ${capacity.maxChars}`, page.id, element.id));
+  const glyphs = Array.from(text2.replace(/\n/g, "")).length;
+  if (glyphs > capacity2.maxChars) {
+    issues.push(issue("over_capacity", `\u6587\u5B57 ${glyphs} \u5B57\uFF0C\u8D85\u8FC7 textCapacity.maxChars ${capacity2.maxChars}`, page.id, element.id));
   }
   const leading = font.leading ?? defaultLeading(font.size);
   const tracking = font.tracking ?? 0;
-  const lines = wrapText(text, element.bounds.w, font.size, bold, tracking);
-  if (lines.length > capacity.maxLines) {
-    issues.push(issue("over_capacity", `\u6309\u5B57\u5BBD\u4F30\u8BA1\u9700\u8981 ${lines.length} \u884C\uFF0CtextCapacity.maxLines \u4E3A ${capacity.maxLines}`, page.id, element.id));
+  const lines = wrapText(text2, element.bounds.w, font.size, bold, tracking);
+  if (lines.length > capacity2.maxLines) {
+    issues.push(issue("over_capacity", `\u6309\u5B57\u5BBD\u4F30\u8BA1\u9700\u8981 ${lines.length} \u884C\uFF0CtextCapacity.maxLines \u4E3A ${capacity2.maxLines}`, page.id, element.id));
   }
   const needed = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
   if (needed > element.bounds.h + 1.5) {
@@ -14034,9 +14032,9 @@ function checkOverlap(page, skipContent) {
   const panels = items.filter((item) => item.role === "panel");
   const rules = items.filter((item) => item.role === "rule");
   const content = items.filter((item) => item.role === "content");
-  for (let i = 0;i < panels.length; i++) {
-    for (let j = i + 1;j < panels.length; j++) {
-      const a = panels[i];
+  for (let i2 = 0;i2 < panels.length; i2++) {
+    for (let j = i2 + 1;j < panels.length; j++) {
+      const a = panels[i2];
       const b = panels[j];
       if (!overlaps(a.element.bounds, b.element.bounds))
         continue;
@@ -14046,9 +14044,9 @@ function checkOverlap(page, skipContent) {
     }
   }
   if (!skipContent)
-    for (let i = 0;i < content.length; i++) {
-      for (let j = i + 1;j < content.length; j++) {
-        const a = content[i];
+    for (let i2 = 0;i2 < content.length; i2++) {
+      for (let j = i2 + 1;j < content.length; j++) {
+        const a = content[i2];
         const b = content[j];
         const boxA = a.element.type === "text" ? glyphBox(a.element) : a.element.bounds;
         const boxB = b.element.type === "text" ? glyphBox(b.element) : b.element.bounds;
@@ -14056,30 +14054,30 @@ function checkOverlap(page, skipContent) {
           issues.push(issue("overlap", `\u5185\u5BB9 ${a.element.id} \u4E0E ${b.element.id} \u91CD\u53E0`, page.id, a.element.id));
         }
       }
-      for (const panel of panels) {
-        const box = content[i].element.type === "text" ? glyphBox(content[i].element) : content[i].element.bounds;
-        const ix = Math.min(box.x + box.w, panel.element.bounds.x + panel.element.bounds.w) - Math.max(box.x, panel.element.bounds.x);
-        const iy = Math.min(box.y + box.h, panel.element.bounds.y + panel.element.bounds.h) - Math.max(box.y, panel.element.bounds.y);
+      for (const panel2 of panels) {
+        const box = content[i2].element.type === "text" ? glyphBox(content[i2].element) : content[i2].element.bounds;
+        const ix = Math.min(box.x + box.w, panel2.element.bounds.x + panel2.element.bounds.w) - Math.max(box.x, panel2.element.bounds.x);
+        const iy = Math.min(box.y + box.h, panel2.element.bounds.y + panel2.element.bounds.h) - Math.max(box.y, panel2.element.bounds.y);
         if (ix <= 12 || iy <= 12)
           continue;
-        if (!contains(panel.element.bounds, box, 8)) {
-          issues.push(issue("overlap", `\u5185\u5BB9 ${content[i].element.id} \u538B\u5728\u8272\u5757 ${panel.element.id} \u7684\u8FB9\u7F18\u4E0A`, page.id, content[i].element.id));
+        if (!contains(panel2.element.bounds, box, 8)) {
+          issues.push(issue("overlap", `\u5185\u5BB9 ${content[i2].element.id} \u538B\u5728\u8272\u5757 ${panel2.element.id} \u7684\u8FB9\u7F18\u4E0A`, page.id, content[i2].element.id));
         }
       }
     }
-  for (const rule of rules) {
+  for (const rule2 of rules) {
     for (const item of content) {
       if (item.element.type !== "text")
         continue;
       const inner = inset(glyphBox(item.element), 1.5);
       if (inner.w <= 0 || inner.h <= 0)
         continue;
-      if (!lineCuts(rule.element, inner))
+      if (!lineCuts(rule2.element, inner))
         continue;
-      const length = Math.max(rule.element.bounds.w, rule.element.bounds.h);
+      const length = Math.max(rule2.element.bounds.w, rule2.element.bounds.h);
       if (length < 20)
         continue;
-      issues.push(issue("overlap", `\u7EBF\u6761 ${rule.element.id} \u7A7F\u8FC7\u6587\u5B57 ${item.element.id}`, page.id, rule.element.id));
+      issues.push(issue("overlap", `\u7EBF\u6761 ${rule2.element.id} \u7A7F\u8FC7\u6587\u5B57 ${item.element.id}`, page.id, rule2.element.id));
     }
   }
   return issues;
@@ -14120,7 +14118,7 @@ function checkLayoutRepetition(deck) {
   const issues = [];
   let runStart = 0;
   let runLayout;
-  const finish = (end) => {
+  const finish2 = (end) => {
     if (!runLayout || end - runStart < LAYOUT_REPETITION_RUN)
       return;
     const first = deck.pages[runStart];
@@ -14132,18 +14130,18 @@ function checkLayoutRepetition(deck) {
     const layout = page.layout?.trim() ?? "";
     const counted = layout.length > 0 && layout !== "free" && !BOOKEND_LAYOUT.test(layout);
     if (!counted) {
-      finish(index);
+      finish2(index);
       runStart = index + 1;
       runLayout = undefined;
       return;
     }
     if (layout === runLayout)
       return;
-    finish(index);
+    finish2(index);
     runStart = index;
     runLayout = layout;
   });
-  finish(deck.pages.length);
+  finish2(deck.pages.length);
   return issues;
 }
 function checkCoverFocus(deck) {
@@ -14152,12 +14150,12 @@ function checkCoverFocus(deck) {
   for (const page of deck.pages) {
     if (!COVER_LAYOUT.test(page.layout?.trim() ?? ""))
       continue;
-    const visual = page.elements.reduce((largest, element) => {
+    const visual = page.elements.reduce((largest2, element) => {
       if (element.type !== "image" && element.type !== "chart" && element.type !== "table")
-        return largest;
+        return largest2;
       if (canvas <= 0)
-        return largest;
-      return Math.max(largest, element.bounds.w * element.bounds.h / canvas);
+        return largest2;
+      return Math.max(largest2, element.bounds.w * element.bounds.h / canvas);
     }, 0);
     if (visual >= 0.25)
       continue;
@@ -14251,12 +14249,12 @@ function checkPictureCarriers(page) {
 }
 function inkBox(element) {
   const font = element.font;
-  const text = element.text ?? "";
+  const text2 = element.text ?? "";
   const bold = font.weight === "bold";
   const tracking = font.tracking ?? 0;
   const leading = font.leading ?? defaultLeading(font.size);
   const wrap = (element.textCapacity?.maxLines ?? 1) > 1;
-  const lines = wrap ? wrapText(text, element.bounds.w, font.size, bold, tracking) : text.split(`
+  const lines = wrap ? wrapText(text2, element.bounds.w, font.size, bold, tracking) : text2.split(`
 `);
   const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0);
   const w = wrap ? Math.min(widest, element.bounds.w) : widest;
@@ -14270,9 +14268,9 @@ function inkBox(element) {
 function checkTextCollision(page) {
   const issues = [];
   const texts = page.elements.filter((element) => element.type === "text" && element.font && element.text?.trim() && !element.retained && !element.rotate && element.role !== "decoration");
-  for (let i = 0;i < texts.length; i++) {
-    for (let j = i + 1;j < texts.length; j++) {
-      const a = texts[i];
+  for (let i2 = 0;i2 < texts.length; i2++) {
+    for (let j = i2 + 1;j < texts.length; j++) {
+      const a = texts[i2];
       const b = texts[j];
       const big = Math.max(a.font.size, b.font.size);
       const small = Math.min(a.font.size, b.font.size);
@@ -14338,11 +14336,11 @@ import { dirname, join as join2 } from "path";
 import { fileURLToPath } from "url";
 
 // node_modules/pptxgenjs/dist/pptxgen.es.js
-var import_jszip = __toESM(require_lib3());
+var import_jszip = __toESM(require_lib3(), 1);
 var __assign = function() {
-  __assign = Object.assign || function __assign(t) {
-    for (var s, i = 1, n = arguments.length;i < n; i++) {
-      s = arguments[i];
+  __assign = Object.assign || function __assign2(t) {
+    for (var s, i2 = 1, n = arguments.length;i2 < n; i2++) {
+      s = arguments[i2];
       for (var p in s)
         if (Object.prototype.hasOwnProperty.call(s, p))
           t[p] = s[p];
@@ -14456,11 +14454,11 @@ function __generator(thisArg, body) {
 }
 function __spreadArray(to, from, pack) {
   if (pack || arguments.length === 2)
-    for (var i = 0, l = from.length, ar;i < l; i++) {
-      if (ar || !(i in from)) {
+    for (var i2 = 0, l = from.length, ar;i2 < l; i2++) {
+      if (ar || !(i2 in from)) {
         if (!ar)
-          ar = Array.prototype.slice.call(from, 0, i);
-        ar[i] = from[i];
+          ar = Array.prototype.slice.call(from, 0, i2);
+        ar[i2] = from[i2];
       }
     }
   return to.concat(ar || Array.prototype.slice.call(from));
@@ -14532,499 +14530,499 @@ var PIECHART_COLORS = [
   "A7A7A7"
 ];
 var TEXT_HALIGN;
-(function(TEXT_HALIGN) {
-  TEXT_HALIGN["left"] = "left";
-  TEXT_HALIGN["center"] = "center";
-  TEXT_HALIGN["right"] = "right";
-  TEXT_HALIGN["justify"] = "justify";
+(function(TEXT_HALIGN2) {
+  TEXT_HALIGN2["left"] = "left";
+  TEXT_HALIGN2["center"] = "center";
+  TEXT_HALIGN2["right"] = "right";
+  TEXT_HALIGN2["justify"] = "justify";
 })(TEXT_HALIGN || (TEXT_HALIGN = {}));
 var TEXT_VALIGN;
-(function(TEXT_VALIGN) {
-  TEXT_VALIGN["b"] = "b";
-  TEXT_VALIGN["ctr"] = "ctr";
-  TEXT_VALIGN["t"] = "t";
+(function(TEXT_VALIGN2) {
+  TEXT_VALIGN2["b"] = "b";
+  TEXT_VALIGN2["ctr"] = "ctr";
+  TEXT_VALIGN2["t"] = "t";
 })(TEXT_VALIGN || (TEXT_VALIGN = {}));
 var SLDNUMFLDID = "{F7021451-1387-4CA6-816F-3879F97B5CBC}";
 var OutputType;
-(function(OutputType) {
-  OutputType["arraybuffer"] = "arraybuffer";
-  OutputType["base64"] = "base64";
-  OutputType["binarystring"] = "binarystring";
-  OutputType["blob"] = "blob";
-  OutputType["nodebuffer"] = "nodebuffer";
-  OutputType["uint8array"] = "uint8array";
+(function(OutputType2) {
+  OutputType2["arraybuffer"] = "arraybuffer";
+  OutputType2["base64"] = "base64";
+  OutputType2["binarystring"] = "binarystring";
+  OutputType2["blob"] = "blob";
+  OutputType2["nodebuffer"] = "nodebuffer";
+  OutputType2["uint8array"] = "uint8array";
 })(OutputType || (OutputType = {}));
 var ChartType;
-(function(ChartType) {
-  ChartType["area"] = "area";
-  ChartType["bar"] = "bar";
-  ChartType["bar3d"] = "bar3D";
-  ChartType["bubble"] = "bubble";
-  ChartType["bubble3d"] = "bubble3D";
-  ChartType["doughnut"] = "doughnut";
-  ChartType["line"] = "line";
-  ChartType["pie"] = "pie";
-  ChartType["radar"] = "radar";
-  ChartType["scatter"] = "scatter";
+(function(ChartType2) {
+  ChartType2["area"] = "area";
+  ChartType2["bar"] = "bar";
+  ChartType2["bar3d"] = "bar3D";
+  ChartType2["bubble"] = "bubble";
+  ChartType2["bubble3d"] = "bubble3D";
+  ChartType2["doughnut"] = "doughnut";
+  ChartType2["line"] = "line";
+  ChartType2["pie"] = "pie";
+  ChartType2["radar"] = "radar";
+  ChartType2["scatter"] = "scatter";
 })(ChartType || (ChartType = {}));
 var ShapeType;
-(function(ShapeType) {
-  ShapeType["accentBorderCallout1"] = "accentBorderCallout1";
-  ShapeType["accentBorderCallout2"] = "accentBorderCallout2";
-  ShapeType["accentBorderCallout3"] = "accentBorderCallout3";
-  ShapeType["accentCallout1"] = "accentCallout1";
-  ShapeType["accentCallout2"] = "accentCallout2";
-  ShapeType["accentCallout3"] = "accentCallout3";
-  ShapeType["actionButtonBackPrevious"] = "actionButtonBackPrevious";
-  ShapeType["actionButtonBeginning"] = "actionButtonBeginning";
-  ShapeType["actionButtonBlank"] = "actionButtonBlank";
-  ShapeType["actionButtonDocument"] = "actionButtonDocument";
-  ShapeType["actionButtonEnd"] = "actionButtonEnd";
-  ShapeType["actionButtonForwardNext"] = "actionButtonForwardNext";
-  ShapeType["actionButtonHelp"] = "actionButtonHelp";
-  ShapeType["actionButtonHome"] = "actionButtonHome";
-  ShapeType["actionButtonInformation"] = "actionButtonInformation";
-  ShapeType["actionButtonMovie"] = "actionButtonMovie";
-  ShapeType["actionButtonReturn"] = "actionButtonReturn";
-  ShapeType["actionButtonSound"] = "actionButtonSound";
-  ShapeType["arc"] = "arc";
-  ShapeType["bentArrow"] = "bentArrow";
-  ShapeType["bentUpArrow"] = "bentUpArrow";
-  ShapeType["bevel"] = "bevel";
-  ShapeType["blockArc"] = "blockArc";
-  ShapeType["borderCallout1"] = "borderCallout1";
-  ShapeType["borderCallout2"] = "borderCallout2";
-  ShapeType["borderCallout3"] = "borderCallout3";
-  ShapeType["bracePair"] = "bracePair";
-  ShapeType["bracketPair"] = "bracketPair";
-  ShapeType["callout1"] = "callout1";
-  ShapeType["callout2"] = "callout2";
-  ShapeType["callout3"] = "callout3";
-  ShapeType["can"] = "can";
-  ShapeType["chartPlus"] = "chartPlus";
-  ShapeType["chartStar"] = "chartStar";
-  ShapeType["chartX"] = "chartX";
-  ShapeType["chevron"] = "chevron";
-  ShapeType["chord"] = "chord";
-  ShapeType["circularArrow"] = "circularArrow";
-  ShapeType["cloud"] = "cloud";
-  ShapeType["cloudCallout"] = "cloudCallout";
-  ShapeType["corner"] = "corner";
-  ShapeType["cornerTabs"] = "cornerTabs";
-  ShapeType["cube"] = "cube";
-  ShapeType["curvedDownArrow"] = "curvedDownArrow";
-  ShapeType["curvedLeftArrow"] = "curvedLeftArrow";
-  ShapeType["curvedRightArrow"] = "curvedRightArrow";
-  ShapeType["curvedUpArrow"] = "curvedUpArrow";
-  ShapeType["custGeom"] = "custGeom";
-  ShapeType["decagon"] = "decagon";
-  ShapeType["diagStripe"] = "diagStripe";
-  ShapeType["diamond"] = "diamond";
-  ShapeType["dodecagon"] = "dodecagon";
-  ShapeType["donut"] = "donut";
-  ShapeType["doubleWave"] = "doubleWave";
-  ShapeType["downArrow"] = "downArrow";
-  ShapeType["downArrowCallout"] = "downArrowCallout";
-  ShapeType["ellipse"] = "ellipse";
-  ShapeType["ellipseRibbon"] = "ellipseRibbon";
-  ShapeType["ellipseRibbon2"] = "ellipseRibbon2";
-  ShapeType["flowChartAlternateProcess"] = "flowChartAlternateProcess";
-  ShapeType["flowChartCollate"] = "flowChartCollate";
-  ShapeType["flowChartConnector"] = "flowChartConnector";
-  ShapeType["flowChartDecision"] = "flowChartDecision";
-  ShapeType["flowChartDelay"] = "flowChartDelay";
-  ShapeType["flowChartDisplay"] = "flowChartDisplay";
-  ShapeType["flowChartDocument"] = "flowChartDocument";
-  ShapeType["flowChartExtract"] = "flowChartExtract";
-  ShapeType["flowChartInputOutput"] = "flowChartInputOutput";
-  ShapeType["flowChartInternalStorage"] = "flowChartInternalStorage";
-  ShapeType["flowChartMagneticDisk"] = "flowChartMagneticDisk";
-  ShapeType["flowChartMagneticDrum"] = "flowChartMagneticDrum";
-  ShapeType["flowChartMagneticTape"] = "flowChartMagneticTape";
-  ShapeType["flowChartManualInput"] = "flowChartManualInput";
-  ShapeType["flowChartManualOperation"] = "flowChartManualOperation";
-  ShapeType["flowChartMerge"] = "flowChartMerge";
-  ShapeType["flowChartMultidocument"] = "flowChartMultidocument";
-  ShapeType["flowChartOfflineStorage"] = "flowChartOfflineStorage";
-  ShapeType["flowChartOffpageConnector"] = "flowChartOffpageConnector";
-  ShapeType["flowChartOnlineStorage"] = "flowChartOnlineStorage";
-  ShapeType["flowChartOr"] = "flowChartOr";
-  ShapeType["flowChartPredefinedProcess"] = "flowChartPredefinedProcess";
-  ShapeType["flowChartPreparation"] = "flowChartPreparation";
-  ShapeType["flowChartProcess"] = "flowChartProcess";
-  ShapeType["flowChartPunchedCard"] = "flowChartPunchedCard";
-  ShapeType["flowChartPunchedTape"] = "flowChartPunchedTape";
-  ShapeType["flowChartSort"] = "flowChartSort";
-  ShapeType["flowChartSummingJunction"] = "flowChartSummingJunction";
-  ShapeType["flowChartTerminator"] = "flowChartTerminator";
-  ShapeType["folderCorner"] = "folderCorner";
-  ShapeType["frame"] = "frame";
-  ShapeType["funnel"] = "funnel";
-  ShapeType["gear6"] = "gear6";
-  ShapeType["gear9"] = "gear9";
-  ShapeType["halfFrame"] = "halfFrame";
-  ShapeType["heart"] = "heart";
-  ShapeType["heptagon"] = "heptagon";
-  ShapeType["hexagon"] = "hexagon";
-  ShapeType["homePlate"] = "homePlate";
-  ShapeType["horizontalScroll"] = "horizontalScroll";
-  ShapeType["irregularSeal1"] = "irregularSeal1";
-  ShapeType["irregularSeal2"] = "irregularSeal2";
-  ShapeType["leftArrow"] = "leftArrow";
-  ShapeType["leftArrowCallout"] = "leftArrowCallout";
-  ShapeType["leftBrace"] = "leftBrace";
-  ShapeType["leftBracket"] = "leftBracket";
-  ShapeType["leftCircularArrow"] = "leftCircularArrow";
-  ShapeType["leftRightArrow"] = "leftRightArrow";
-  ShapeType["leftRightArrowCallout"] = "leftRightArrowCallout";
-  ShapeType["leftRightCircularArrow"] = "leftRightCircularArrow";
-  ShapeType["leftRightRibbon"] = "leftRightRibbon";
-  ShapeType["leftRightUpArrow"] = "leftRightUpArrow";
-  ShapeType["leftUpArrow"] = "leftUpArrow";
-  ShapeType["lightningBolt"] = "lightningBolt";
-  ShapeType["line"] = "line";
-  ShapeType["lineInv"] = "lineInv";
-  ShapeType["mathDivide"] = "mathDivide";
-  ShapeType["mathEqual"] = "mathEqual";
-  ShapeType["mathMinus"] = "mathMinus";
-  ShapeType["mathMultiply"] = "mathMultiply";
-  ShapeType["mathNotEqual"] = "mathNotEqual";
-  ShapeType["mathPlus"] = "mathPlus";
-  ShapeType["moon"] = "moon";
-  ShapeType["noSmoking"] = "noSmoking";
-  ShapeType["nonIsoscelesTrapezoid"] = "nonIsoscelesTrapezoid";
-  ShapeType["notchedRightArrow"] = "notchedRightArrow";
-  ShapeType["octagon"] = "octagon";
-  ShapeType["parallelogram"] = "parallelogram";
-  ShapeType["pentagon"] = "pentagon";
-  ShapeType["pie"] = "pie";
-  ShapeType["pieWedge"] = "pieWedge";
-  ShapeType["plaque"] = "plaque";
-  ShapeType["plaqueTabs"] = "plaqueTabs";
-  ShapeType["plus"] = "plus";
-  ShapeType["quadArrow"] = "quadArrow";
-  ShapeType["quadArrowCallout"] = "quadArrowCallout";
-  ShapeType["rect"] = "rect";
-  ShapeType["ribbon"] = "ribbon";
-  ShapeType["ribbon2"] = "ribbon2";
-  ShapeType["rightArrow"] = "rightArrow";
-  ShapeType["rightArrowCallout"] = "rightArrowCallout";
-  ShapeType["rightBrace"] = "rightBrace";
-  ShapeType["rightBracket"] = "rightBracket";
-  ShapeType["round1Rect"] = "round1Rect";
-  ShapeType["round2DiagRect"] = "round2DiagRect";
-  ShapeType["round2SameRect"] = "round2SameRect";
-  ShapeType["roundRect"] = "roundRect";
-  ShapeType["rtTriangle"] = "rtTriangle";
-  ShapeType["smileyFace"] = "smileyFace";
-  ShapeType["snip1Rect"] = "snip1Rect";
-  ShapeType["snip2DiagRect"] = "snip2DiagRect";
-  ShapeType["snip2SameRect"] = "snip2SameRect";
-  ShapeType["snipRoundRect"] = "snipRoundRect";
-  ShapeType["squareTabs"] = "squareTabs";
-  ShapeType["star10"] = "star10";
-  ShapeType["star12"] = "star12";
-  ShapeType["star16"] = "star16";
-  ShapeType["star24"] = "star24";
-  ShapeType["star32"] = "star32";
-  ShapeType["star4"] = "star4";
-  ShapeType["star5"] = "star5";
-  ShapeType["star6"] = "star6";
-  ShapeType["star7"] = "star7";
-  ShapeType["star8"] = "star8";
-  ShapeType["stripedRightArrow"] = "stripedRightArrow";
-  ShapeType["sun"] = "sun";
-  ShapeType["swooshArrow"] = "swooshArrow";
-  ShapeType["teardrop"] = "teardrop";
-  ShapeType["trapezoid"] = "trapezoid";
-  ShapeType["triangle"] = "triangle";
-  ShapeType["upArrow"] = "upArrow";
-  ShapeType["upArrowCallout"] = "upArrowCallout";
-  ShapeType["upDownArrow"] = "upDownArrow";
-  ShapeType["upDownArrowCallout"] = "upDownArrowCallout";
-  ShapeType["uturnArrow"] = "uturnArrow";
-  ShapeType["verticalScroll"] = "verticalScroll";
-  ShapeType["wave"] = "wave";
-  ShapeType["wedgeEllipseCallout"] = "wedgeEllipseCallout";
-  ShapeType["wedgeRectCallout"] = "wedgeRectCallout";
-  ShapeType["wedgeRoundRectCallout"] = "wedgeRoundRectCallout";
+(function(ShapeType2) {
+  ShapeType2["accentBorderCallout1"] = "accentBorderCallout1";
+  ShapeType2["accentBorderCallout2"] = "accentBorderCallout2";
+  ShapeType2["accentBorderCallout3"] = "accentBorderCallout3";
+  ShapeType2["accentCallout1"] = "accentCallout1";
+  ShapeType2["accentCallout2"] = "accentCallout2";
+  ShapeType2["accentCallout3"] = "accentCallout3";
+  ShapeType2["actionButtonBackPrevious"] = "actionButtonBackPrevious";
+  ShapeType2["actionButtonBeginning"] = "actionButtonBeginning";
+  ShapeType2["actionButtonBlank"] = "actionButtonBlank";
+  ShapeType2["actionButtonDocument"] = "actionButtonDocument";
+  ShapeType2["actionButtonEnd"] = "actionButtonEnd";
+  ShapeType2["actionButtonForwardNext"] = "actionButtonForwardNext";
+  ShapeType2["actionButtonHelp"] = "actionButtonHelp";
+  ShapeType2["actionButtonHome"] = "actionButtonHome";
+  ShapeType2["actionButtonInformation"] = "actionButtonInformation";
+  ShapeType2["actionButtonMovie"] = "actionButtonMovie";
+  ShapeType2["actionButtonReturn"] = "actionButtonReturn";
+  ShapeType2["actionButtonSound"] = "actionButtonSound";
+  ShapeType2["arc"] = "arc";
+  ShapeType2["bentArrow"] = "bentArrow";
+  ShapeType2["bentUpArrow"] = "bentUpArrow";
+  ShapeType2["bevel"] = "bevel";
+  ShapeType2["blockArc"] = "blockArc";
+  ShapeType2["borderCallout1"] = "borderCallout1";
+  ShapeType2["borderCallout2"] = "borderCallout2";
+  ShapeType2["borderCallout3"] = "borderCallout3";
+  ShapeType2["bracePair"] = "bracePair";
+  ShapeType2["bracketPair"] = "bracketPair";
+  ShapeType2["callout1"] = "callout1";
+  ShapeType2["callout2"] = "callout2";
+  ShapeType2["callout3"] = "callout3";
+  ShapeType2["can"] = "can";
+  ShapeType2["chartPlus"] = "chartPlus";
+  ShapeType2["chartStar"] = "chartStar";
+  ShapeType2["chartX"] = "chartX";
+  ShapeType2["chevron"] = "chevron";
+  ShapeType2["chord"] = "chord";
+  ShapeType2["circularArrow"] = "circularArrow";
+  ShapeType2["cloud"] = "cloud";
+  ShapeType2["cloudCallout"] = "cloudCallout";
+  ShapeType2["corner"] = "corner";
+  ShapeType2["cornerTabs"] = "cornerTabs";
+  ShapeType2["cube"] = "cube";
+  ShapeType2["curvedDownArrow"] = "curvedDownArrow";
+  ShapeType2["curvedLeftArrow"] = "curvedLeftArrow";
+  ShapeType2["curvedRightArrow"] = "curvedRightArrow";
+  ShapeType2["curvedUpArrow"] = "curvedUpArrow";
+  ShapeType2["custGeom"] = "custGeom";
+  ShapeType2["decagon"] = "decagon";
+  ShapeType2["diagStripe"] = "diagStripe";
+  ShapeType2["diamond"] = "diamond";
+  ShapeType2["dodecagon"] = "dodecagon";
+  ShapeType2["donut"] = "donut";
+  ShapeType2["doubleWave"] = "doubleWave";
+  ShapeType2["downArrow"] = "downArrow";
+  ShapeType2["downArrowCallout"] = "downArrowCallout";
+  ShapeType2["ellipse"] = "ellipse";
+  ShapeType2["ellipseRibbon"] = "ellipseRibbon";
+  ShapeType2["ellipseRibbon2"] = "ellipseRibbon2";
+  ShapeType2["flowChartAlternateProcess"] = "flowChartAlternateProcess";
+  ShapeType2["flowChartCollate"] = "flowChartCollate";
+  ShapeType2["flowChartConnector"] = "flowChartConnector";
+  ShapeType2["flowChartDecision"] = "flowChartDecision";
+  ShapeType2["flowChartDelay"] = "flowChartDelay";
+  ShapeType2["flowChartDisplay"] = "flowChartDisplay";
+  ShapeType2["flowChartDocument"] = "flowChartDocument";
+  ShapeType2["flowChartExtract"] = "flowChartExtract";
+  ShapeType2["flowChartInputOutput"] = "flowChartInputOutput";
+  ShapeType2["flowChartInternalStorage"] = "flowChartInternalStorage";
+  ShapeType2["flowChartMagneticDisk"] = "flowChartMagneticDisk";
+  ShapeType2["flowChartMagneticDrum"] = "flowChartMagneticDrum";
+  ShapeType2["flowChartMagneticTape"] = "flowChartMagneticTape";
+  ShapeType2["flowChartManualInput"] = "flowChartManualInput";
+  ShapeType2["flowChartManualOperation"] = "flowChartManualOperation";
+  ShapeType2["flowChartMerge"] = "flowChartMerge";
+  ShapeType2["flowChartMultidocument"] = "flowChartMultidocument";
+  ShapeType2["flowChartOfflineStorage"] = "flowChartOfflineStorage";
+  ShapeType2["flowChartOffpageConnector"] = "flowChartOffpageConnector";
+  ShapeType2["flowChartOnlineStorage"] = "flowChartOnlineStorage";
+  ShapeType2["flowChartOr"] = "flowChartOr";
+  ShapeType2["flowChartPredefinedProcess"] = "flowChartPredefinedProcess";
+  ShapeType2["flowChartPreparation"] = "flowChartPreparation";
+  ShapeType2["flowChartProcess"] = "flowChartProcess";
+  ShapeType2["flowChartPunchedCard"] = "flowChartPunchedCard";
+  ShapeType2["flowChartPunchedTape"] = "flowChartPunchedTape";
+  ShapeType2["flowChartSort"] = "flowChartSort";
+  ShapeType2["flowChartSummingJunction"] = "flowChartSummingJunction";
+  ShapeType2["flowChartTerminator"] = "flowChartTerminator";
+  ShapeType2["folderCorner"] = "folderCorner";
+  ShapeType2["frame"] = "frame";
+  ShapeType2["funnel"] = "funnel";
+  ShapeType2["gear6"] = "gear6";
+  ShapeType2["gear9"] = "gear9";
+  ShapeType2["halfFrame"] = "halfFrame";
+  ShapeType2["heart"] = "heart";
+  ShapeType2["heptagon"] = "heptagon";
+  ShapeType2["hexagon"] = "hexagon";
+  ShapeType2["homePlate"] = "homePlate";
+  ShapeType2["horizontalScroll"] = "horizontalScroll";
+  ShapeType2["irregularSeal1"] = "irregularSeal1";
+  ShapeType2["irregularSeal2"] = "irregularSeal2";
+  ShapeType2["leftArrow"] = "leftArrow";
+  ShapeType2["leftArrowCallout"] = "leftArrowCallout";
+  ShapeType2["leftBrace"] = "leftBrace";
+  ShapeType2["leftBracket"] = "leftBracket";
+  ShapeType2["leftCircularArrow"] = "leftCircularArrow";
+  ShapeType2["leftRightArrow"] = "leftRightArrow";
+  ShapeType2["leftRightArrowCallout"] = "leftRightArrowCallout";
+  ShapeType2["leftRightCircularArrow"] = "leftRightCircularArrow";
+  ShapeType2["leftRightRibbon"] = "leftRightRibbon";
+  ShapeType2["leftRightUpArrow"] = "leftRightUpArrow";
+  ShapeType2["leftUpArrow"] = "leftUpArrow";
+  ShapeType2["lightningBolt"] = "lightningBolt";
+  ShapeType2["line"] = "line";
+  ShapeType2["lineInv"] = "lineInv";
+  ShapeType2["mathDivide"] = "mathDivide";
+  ShapeType2["mathEqual"] = "mathEqual";
+  ShapeType2["mathMinus"] = "mathMinus";
+  ShapeType2["mathMultiply"] = "mathMultiply";
+  ShapeType2["mathNotEqual"] = "mathNotEqual";
+  ShapeType2["mathPlus"] = "mathPlus";
+  ShapeType2["moon"] = "moon";
+  ShapeType2["noSmoking"] = "noSmoking";
+  ShapeType2["nonIsoscelesTrapezoid"] = "nonIsoscelesTrapezoid";
+  ShapeType2["notchedRightArrow"] = "notchedRightArrow";
+  ShapeType2["octagon"] = "octagon";
+  ShapeType2["parallelogram"] = "parallelogram";
+  ShapeType2["pentagon"] = "pentagon";
+  ShapeType2["pie"] = "pie";
+  ShapeType2["pieWedge"] = "pieWedge";
+  ShapeType2["plaque"] = "plaque";
+  ShapeType2["plaqueTabs"] = "plaqueTabs";
+  ShapeType2["plus"] = "plus";
+  ShapeType2["quadArrow"] = "quadArrow";
+  ShapeType2["quadArrowCallout"] = "quadArrowCallout";
+  ShapeType2["rect"] = "rect";
+  ShapeType2["ribbon"] = "ribbon";
+  ShapeType2["ribbon2"] = "ribbon2";
+  ShapeType2["rightArrow"] = "rightArrow";
+  ShapeType2["rightArrowCallout"] = "rightArrowCallout";
+  ShapeType2["rightBrace"] = "rightBrace";
+  ShapeType2["rightBracket"] = "rightBracket";
+  ShapeType2["round1Rect"] = "round1Rect";
+  ShapeType2["round2DiagRect"] = "round2DiagRect";
+  ShapeType2["round2SameRect"] = "round2SameRect";
+  ShapeType2["roundRect"] = "roundRect";
+  ShapeType2["rtTriangle"] = "rtTriangle";
+  ShapeType2["smileyFace"] = "smileyFace";
+  ShapeType2["snip1Rect"] = "snip1Rect";
+  ShapeType2["snip2DiagRect"] = "snip2DiagRect";
+  ShapeType2["snip2SameRect"] = "snip2SameRect";
+  ShapeType2["snipRoundRect"] = "snipRoundRect";
+  ShapeType2["squareTabs"] = "squareTabs";
+  ShapeType2["star10"] = "star10";
+  ShapeType2["star12"] = "star12";
+  ShapeType2["star16"] = "star16";
+  ShapeType2["star24"] = "star24";
+  ShapeType2["star32"] = "star32";
+  ShapeType2["star4"] = "star4";
+  ShapeType2["star5"] = "star5";
+  ShapeType2["star6"] = "star6";
+  ShapeType2["star7"] = "star7";
+  ShapeType2["star8"] = "star8";
+  ShapeType2["stripedRightArrow"] = "stripedRightArrow";
+  ShapeType2["sun"] = "sun";
+  ShapeType2["swooshArrow"] = "swooshArrow";
+  ShapeType2["teardrop"] = "teardrop";
+  ShapeType2["trapezoid"] = "trapezoid";
+  ShapeType2["triangle"] = "triangle";
+  ShapeType2["upArrow"] = "upArrow";
+  ShapeType2["upArrowCallout"] = "upArrowCallout";
+  ShapeType2["upDownArrow"] = "upDownArrow";
+  ShapeType2["upDownArrowCallout"] = "upDownArrowCallout";
+  ShapeType2["uturnArrow"] = "uturnArrow";
+  ShapeType2["verticalScroll"] = "verticalScroll";
+  ShapeType2["wave"] = "wave";
+  ShapeType2["wedgeEllipseCallout"] = "wedgeEllipseCallout";
+  ShapeType2["wedgeRectCallout"] = "wedgeRectCallout";
+  ShapeType2["wedgeRoundRectCallout"] = "wedgeRoundRectCallout";
 })(ShapeType || (ShapeType = {}));
 var SchemeColor;
-(function(SchemeColor) {
-  SchemeColor["text1"] = "tx1";
-  SchemeColor["text2"] = "tx2";
-  SchemeColor["background1"] = "bg1";
-  SchemeColor["background2"] = "bg2";
-  SchemeColor["accent1"] = "accent1";
-  SchemeColor["accent2"] = "accent2";
-  SchemeColor["accent3"] = "accent3";
-  SchemeColor["accent4"] = "accent4";
-  SchemeColor["accent5"] = "accent5";
-  SchemeColor["accent6"] = "accent6";
+(function(SchemeColor2) {
+  SchemeColor2["text1"] = "tx1";
+  SchemeColor2["text2"] = "tx2";
+  SchemeColor2["background1"] = "bg1";
+  SchemeColor2["background2"] = "bg2";
+  SchemeColor2["accent1"] = "accent1";
+  SchemeColor2["accent2"] = "accent2";
+  SchemeColor2["accent3"] = "accent3";
+  SchemeColor2["accent4"] = "accent4";
+  SchemeColor2["accent5"] = "accent5";
+  SchemeColor2["accent6"] = "accent6";
 })(SchemeColor || (SchemeColor = {}));
 var AlignH;
-(function(AlignH) {
-  AlignH["left"] = "left";
-  AlignH["center"] = "center";
-  AlignH["right"] = "right";
-  AlignH["justify"] = "justify";
+(function(AlignH2) {
+  AlignH2["left"] = "left";
+  AlignH2["center"] = "center";
+  AlignH2["right"] = "right";
+  AlignH2["justify"] = "justify";
 })(AlignH || (AlignH = {}));
 var AlignV;
-(function(AlignV) {
-  AlignV["top"] = "top";
-  AlignV["middle"] = "middle";
-  AlignV["bottom"] = "bottom";
+(function(AlignV2) {
+  AlignV2["top"] = "top";
+  AlignV2["middle"] = "middle";
+  AlignV2["bottom"] = "bottom";
 })(AlignV || (AlignV = {}));
 var SHAPE_TYPE;
-(function(SHAPE_TYPE) {
-  SHAPE_TYPE["ACTION_BUTTON_BACK_OR_PREVIOUS"] = "actionButtonBackPrevious";
-  SHAPE_TYPE["ACTION_BUTTON_BEGINNING"] = "actionButtonBeginning";
-  SHAPE_TYPE["ACTION_BUTTON_CUSTOM"] = "actionButtonBlank";
-  SHAPE_TYPE["ACTION_BUTTON_DOCUMENT"] = "actionButtonDocument";
-  SHAPE_TYPE["ACTION_BUTTON_END"] = "actionButtonEnd";
-  SHAPE_TYPE["ACTION_BUTTON_FORWARD_OR_NEXT"] = "actionButtonForwardNext";
-  SHAPE_TYPE["ACTION_BUTTON_HELP"] = "actionButtonHelp";
-  SHAPE_TYPE["ACTION_BUTTON_HOME"] = "actionButtonHome";
-  SHAPE_TYPE["ACTION_BUTTON_INFORMATION"] = "actionButtonInformation";
-  SHAPE_TYPE["ACTION_BUTTON_MOVIE"] = "actionButtonMovie";
-  SHAPE_TYPE["ACTION_BUTTON_RETURN"] = "actionButtonReturn";
-  SHAPE_TYPE["ACTION_BUTTON_SOUND"] = "actionButtonSound";
-  SHAPE_TYPE["ARC"] = "arc";
-  SHAPE_TYPE["BALLOON"] = "wedgeRoundRectCallout";
-  SHAPE_TYPE["BENT_ARROW"] = "bentArrow";
-  SHAPE_TYPE["BENT_UP_ARROW"] = "bentUpArrow";
-  SHAPE_TYPE["BEVEL"] = "bevel";
-  SHAPE_TYPE["BLOCK_ARC"] = "blockArc";
-  SHAPE_TYPE["CAN"] = "can";
-  SHAPE_TYPE["CHART_PLUS"] = "chartPlus";
-  SHAPE_TYPE["CHART_STAR"] = "chartStar";
-  SHAPE_TYPE["CHART_X"] = "chartX";
-  SHAPE_TYPE["CHEVRON"] = "chevron";
-  SHAPE_TYPE["CHORD"] = "chord";
-  SHAPE_TYPE["CIRCULAR_ARROW"] = "circularArrow";
-  SHAPE_TYPE["CLOUD"] = "cloud";
-  SHAPE_TYPE["CLOUD_CALLOUT"] = "cloudCallout";
-  SHAPE_TYPE["CORNER"] = "corner";
-  SHAPE_TYPE["CORNER_TABS"] = "cornerTabs";
-  SHAPE_TYPE["CROSS"] = "plus";
-  SHAPE_TYPE["CUBE"] = "cube";
-  SHAPE_TYPE["CURVED_DOWN_ARROW"] = "curvedDownArrow";
-  SHAPE_TYPE["CURVED_DOWN_RIBBON"] = "ellipseRibbon";
-  SHAPE_TYPE["CURVED_LEFT_ARROW"] = "curvedLeftArrow";
-  SHAPE_TYPE["CURVED_RIGHT_ARROW"] = "curvedRightArrow";
-  SHAPE_TYPE["CURVED_UP_ARROW"] = "curvedUpArrow";
-  SHAPE_TYPE["CURVED_UP_RIBBON"] = "ellipseRibbon2";
-  SHAPE_TYPE["CUSTOM_GEOMETRY"] = "custGeom";
-  SHAPE_TYPE["DECAGON"] = "decagon";
-  SHAPE_TYPE["DIAGONAL_STRIPE"] = "diagStripe";
-  SHAPE_TYPE["DIAMOND"] = "diamond";
-  SHAPE_TYPE["DODECAGON"] = "dodecagon";
-  SHAPE_TYPE["DONUT"] = "donut";
-  SHAPE_TYPE["DOUBLE_BRACE"] = "bracePair";
-  SHAPE_TYPE["DOUBLE_BRACKET"] = "bracketPair";
-  SHAPE_TYPE["DOUBLE_WAVE"] = "doubleWave";
-  SHAPE_TYPE["DOWN_ARROW"] = "downArrow";
-  SHAPE_TYPE["DOWN_ARROW_CALLOUT"] = "downArrowCallout";
-  SHAPE_TYPE["DOWN_RIBBON"] = "ribbon";
-  SHAPE_TYPE["EXPLOSION1"] = "irregularSeal1";
-  SHAPE_TYPE["EXPLOSION2"] = "irregularSeal2";
-  SHAPE_TYPE["FLOWCHART_ALTERNATE_PROCESS"] = "flowChartAlternateProcess";
-  SHAPE_TYPE["FLOWCHART_CARD"] = "flowChartPunchedCard";
-  SHAPE_TYPE["FLOWCHART_COLLATE"] = "flowChartCollate";
-  SHAPE_TYPE["FLOWCHART_CONNECTOR"] = "flowChartConnector";
-  SHAPE_TYPE["FLOWCHART_DATA"] = "flowChartInputOutput";
-  SHAPE_TYPE["FLOWCHART_DECISION"] = "flowChartDecision";
-  SHAPE_TYPE["FLOWCHART_DELAY"] = "flowChartDelay";
-  SHAPE_TYPE["FLOWCHART_DIRECT_ACCESS_STORAGE"] = "flowChartMagneticDrum";
-  SHAPE_TYPE["FLOWCHART_DISPLAY"] = "flowChartDisplay";
-  SHAPE_TYPE["FLOWCHART_DOCUMENT"] = "flowChartDocument";
-  SHAPE_TYPE["FLOWCHART_EXTRACT"] = "flowChartExtract";
-  SHAPE_TYPE["FLOWCHART_INTERNAL_STORAGE"] = "flowChartInternalStorage";
-  SHAPE_TYPE["FLOWCHART_MAGNETIC_DISK"] = "flowChartMagneticDisk";
-  SHAPE_TYPE["FLOWCHART_MANUAL_INPUT"] = "flowChartManualInput";
-  SHAPE_TYPE["FLOWCHART_MANUAL_OPERATION"] = "flowChartManualOperation";
-  SHAPE_TYPE["FLOWCHART_MERGE"] = "flowChartMerge";
-  SHAPE_TYPE["FLOWCHART_MULTIDOCUMENT"] = "flowChartMultidocument";
-  SHAPE_TYPE["FLOWCHART_OFFLINE_STORAGE"] = "flowChartOfflineStorage";
-  SHAPE_TYPE["FLOWCHART_OFFPAGE_CONNECTOR"] = "flowChartOffpageConnector";
-  SHAPE_TYPE["FLOWCHART_OR"] = "flowChartOr";
-  SHAPE_TYPE["FLOWCHART_PREDEFINED_PROCESS"] = "flowChartPredefinedProcess";
-  SHAPE_TYPE["FLOWCHART_PREPARATION"] = "flowChartPreparation";
-  SHAPE_TYPE["FLOWCHART_PROCESS"] = "flowChartProcess";
-  SHAPE_TYPE["FLOWCHART_PUNCHED_TAPE"] = "flowChartPunchedTape";
-  SHAPE_TYPE["FLOWCHART_SEQUENTIAL_ACCESS_STORAGE"] = "flowChartMagneticTape";
-  SHAPE_TYPE["FLOWCHART_SORT"] = "flowChartSort";
-  SHAPE_TYPE["FLOWCHART_STORED_DATA"] = "flowChartOnlineStorage";
-  SHAPE_TYPE["FLOWCHART_SUMMING_JUNCTION"] = "flowChartSummingJunction";
-  SHAPE_TYPE["FLOWCHART_TERMINATOR"] = "flowChartTerminator";
-  SHAPE_TYPE["FOLDED_CORNER"] = "folderCorner";
-  SHAPE_TYPE["FRAME"] = "frame";
-  SHAPE_TYPE["FUNNEL"] = "funnel";
-  SHAPE_TYPE["GEAR_6"] = "gear6";
-  SHAPE_TYPE["GEAR_9"] = "gear9";
-  SHAPE_TYPE["HALF_FRAME"] = "halfFrame";
-  SHAPE_TYPE["HEART"] = "heart";
-  SHAPE_TYPE["HEPTAGON"] = "heptagon";
-  SHAPE_TYPE["HEXAGON"] = "hexagon";
-  SHAPE_TYPE["HORIZONTAL_SCROLL"] = "horizontalScroll";
-  SHAPE_TYPE["ISOSCELES_TRIANGLE"] = "triangle";
-  SHAPE_TYPE["LEFT_ARROW"] = "leftArrow";
-  SHAPE_TYPE["LEFT_ARROW_CALLOUT"] = "leftArrowCallout";
-  SHAPE_TYPE["LEFT_BRACE"] = "leftBrace";
-  SHAPE_TYPE["LEFT_BRACKET"] = "leftBracket";
-  SHAPE_TYPE["LEFT_CIRCULAR_ARROW"] = "leftCircularArrow";
-  SHAPE_TYPE["LEFT_RIGHT_ARROW"] = "leftRightArrow";
-  SHAPE_TYPE["LEFT_RIGHT_ARROW_CALLOUT"] = "leftRightArrowCallout";
-  SHAPE_TYPE["LEFT_RIGHT_CIRCULAR_ARROW"] = "leftRightCircularArrow";
-  SHAPE_TYPE["LEFT_RIGHT_RIBBON"] = "leftRightRibbon";
-  SHAPE_TYPE["LEFT_RIGHT_UP_ARROW"] = "leftRightUpArrow";
-  SHAPE_TYPE["LEFT_UP_ARROW"] = "leftUpArrow";
-  SHAPE_TYPE["LIGHTNING_BOLT"] = "lightningBolt";
-  SHAPE_TYPE["LINE_CALLOUT_1"] = "borderCallout1";
-  SHAPE_TYPE["LINE_CALLOUT_1_ACCENT_BAR"] = "accentCallout1";
-  SHAPE_TYPE["LINE_CALLOUT_1_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout1";
-  SHAPE_TYPE["LINE_CALLOUT_1_NO_BORDER"] = "callout1";
-  SHAPE_TYPE["LINE_CALLOUT_2"] = "borderCallout2";
-  SHAPE_TYPE["LINE_CALLOUT_2_ACCENT_BAR"] = "accentCallout2";
-  SHAPE_TYPE["LINE_CALLOUT_2_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout2";
-  SHAPE_TYPE["LINE_CALLOUT_2_NO_BORDER"] = "callout2";
-  SHAPE_TYPE["LINE_CALLOUT_3"] = "borderCallout3";
-  SHAPE_TYPE["LINE_CALLOUT_3_ACCENT_BAR"] = "accentCallout3";
-  SHAPE_TYPE["LINE_CALLOUT_3_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout3";
-  SHAPE_TYPE["LINE_CALLOUT_3_NO_BORDER"] = "callout3";
-  SHAPE_TYPE["LINE_CALLOUT_4"] = "borderCallout3";
-  SHAPE_TYPE["LINE_CALLOUT_4_ACCENT_BAR"] = "accentCallout3";
-  SHAPE_TYPE["LINE_CALLOUT_4_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout3";
-  SHAPE_TYPE["LINE_CALLOUT_4_NO_BORDER"] = "callout3";
-  SHAPE_TYPE["LINE"] = "line";
-  SHAPE_TYPE["LINE_INVERSE"] = "lineInv";
-  SHAPE_TYPE["MATH_DIVIDE"] = "mathDivide";
-  SHAPE_TYPE["MATH_EQUAL"] = "mathEqual";
-  SHAPE_TYPE["MATH_MINUS"] = "mathMinus";
-  SHAPE_TYPE["MATH_MULTIPLY"] = "mathMultiply";
-  SHAPE_TYPE["MATH_NOT_EQUAL"] = "mathNotEqual";
-  SHAPE_TYPE["MATH_PLUS"] = "mathPlus";
-  SHAPE_TYPE["MOON"] = "moon";
-  SHAPE_TYPE["NON_ISOSCELES_TRAPEZOID"] = "nonIsoscelesTrapezoid";
-  SHAPE_TYPE["NOTCHED_RIGHT_ARROW"] = "notchedRightArrow";
-  SHAPE_TYPE["NO_SYMBOL"] = "noSmoking";
-  SHAPE_TYPE["OCTAGON"] = "octagon";
-  SHAPE_TYPE["OVAL"] = "ellipse";
-  SHAPE_TYPE["OVAL_CALLOUT"] = "wedgeEllipseCallout";
-  SHAPE_TYPE["PARALLELOGRAM"] = "parallelogram";
-  SHAPE_TYPE["PENTAGON"] = "homePlate";
-  SHAPE_TYPE["PIE"] = "pie";
-  SHAPE_TYPE["PIE_WEDGE"] = "pieWedge";
-  SHAPE_TYPE["PLAQUE"] = "plaque";
-  SHAPE_TYPE["PLAQUE_TABS"] = "plaqueTabs";
-  SHAPE_TYPE["QUAD_ARROW"] = "quadArrow";
-  SHAPE_TYPE["QUAD_ARROW_CALLOUT"] = "quadArrowCallout";
-  SHAPE_TYPE["RECTANGLE"] = "rect";
-  SHAPE_TYPE["RECTANGULAR_CALLOUT"] = "wedgeRectCallout";
-  SHAPE_TYPE["REGULAR_PENTAGON"] = "pentagon";
-  SHAPE_TYPE["RIGHT_ARROW"] = "rightArrow";
-  SHAPE_TYPE["RIGHT_ARROW_CALLOUT"] = "rightArrowCallout";
-  SHAPE_TYPE["RIGHT_BRACE"] = "rightBrace";
-  SHAPE_TYPE["RIGHT_BRACKET"] = "rightBracket";
-  SHAPE_TYPE["RIGHT_TRIANGLE"] = "rtTriangle";
-  SHAPE_TYPE["ROUNDED_RECTANGLE"] = "roundRect";
-  SHAPE_TYPE["ROUNDED_RECTANGULAR_CALLOUT"] = "wedgeRoundRectCallout";
-  SHAPE_TYPE["ROUND_1_RECTANGLE"] = "round1Rect";
-  SHAPE_TYPE["ROUND_2_DIAG_RECTANGLE"] = "round2DiagRect";
-  SHAPE_TYPE["ROUND_2_SAME_RECTANGLE"] = "round2SameRect";
-  SHAPE_TYPE["SMILEY_FACE"] = "smileyFace";
-  SHAPE_TYPE["SNIP_1_RECTANGLE"] = "snip1Rect";
-  SHAPE_TYPE["SNIP_2_DIAG_RECTANGLE"] = "snip2DiagRect";
-  SHAPE_TYPE["SNIP_2_SAME_RECTANGLE"] = "snip2SameRect";
-  SHAPE_TYPE["SNIP_ROUND_RECTANGLE"] = "snipRoundRect";
-  SHAPE_TYPE["SQUARE_TABS"] = "squareTabs";
-  SHAPE_TYPE["STAR_10_POINT"] = "star10";
-  SHAPE_TYPE["STAR_12_POINT"] = "star12";
-  SHAPE_TYPE["STAR_16_POINT"] = "star16";
-  SHAPE_TYPE["STAR_24_POINT"] = "star24";
-  SHAPE_TYPE["STAR_32_POINT"] = "star32";
-  SHAPE_TYPE["STAR_4_POINT"] = "star4";
-  SHAPE_TYPE["STAR_5_POINT"] = "star5";
-  SHAPE_TYPE["STAR_6_POINT"] = "star6";
-  SHAPE_TYPE["STAR_7_POINT"] = "star7";
-  SHAPE_TYPE["STAR_8_POINT"] = "star8";
-  SHAPE_TYPE["STRIPED_RIGHT_ARROW"] = "stripedRightArrow";
-  SHAPE_TYPE["SUN"] = "sun";
-  SHAPE_TYPE["SWOOSH_ARROW"] = "swooshArrow";
-  SHAPE_TYPE["TEAR"] = "teardrop";
-  SHAPE_TYPE["TRAPEZOID"] = "trapezoid";
-  SHAPE_TYPE["UP_ARROW"] = "upArrow";
-  SHAPE_TYPE["UP_ARROW_CALLOUT"] = "upArrowCallout";
-  SHAPE_TYPE["UP_DOWN_ARROW"] = "upDownArrow";
-  SHAPE_TYPE["UP_DOWN_ARROW_CALLOUT"] = "upDownArrowCallout";
-  SHAPE_TYPE["UP_RIBBON"] = "ribbon2";
-  SHAPE_TYPE["U_TURN_ARROW"] = "uturnArrow";
-  SHAPE_TYPE["VERTICAL_SCROLL"] = "verticalScroll";
-  SHAPE_TYPE["WAVE"] = "wave";
+(function(SHAPE_TYPE2) {
+  SHAPE_TYPE2["ACTION_BUTTON_BACK_OR_PREVIOUS"] = "actionButtonBackPrevious";
+  SHAPE_TYPE2["ACTION_BUTTON_BEGINNING"] = "actionButtonBeginning";
+  SHAPE_TYPE2["ACTION_BUTTON_CUSTOM"] = "actionButtonBlank";
+  SHAPE_TYPE2["ACTION_BUTTON_DOCUMENT"] = "actionButtonDocument";
+  SHAPE_TYPE2["ACTION_BUTTON_END"] = "actionButtonEnd";
+  SHAPE_TYPE2["ACTION_BUTTON_FORWARD_OR_NEXT"] = "actionButtonForwardNext";
+  SHAPE_TYPE2["ACTION_BUTTON_HELP"] = "actionButtonHelp";
+  SHAPE_TYPE2["ACTION_BUTTON_HOME"] = "actionButtonHome";
+  SHAPE_TYPE2["ACTION_BUTTON_INFORMATION"] = "actionButtonInformation";
+  SHAPE_TYPE2["ACTION_BUTTON_MOVIE"] = "actionButtonMovie";
+  SHAPE_TYPE2["ACTION_BUTTON_RETURN"] = "actionButtonReturn";
+  SHAPE_TYPE2["ACTION_BUTTON_SOUND"] = "actionButtonSound";
+  SHAPE_TYPE2["ARC"] = "arc";
+  SHAPE_TYPE2["BALLOON"] = "wedgeRoundRectCallout";
+  SHAPE_TYPE2["BENT_ARROW"] = "bentArrow";
+  SHAPE_TYPE2["BENT_UP_ARROW"] = "bentUpArrow";
+  SHAPE_TYPE2["BEVEL"] = "bevel";
+  SHAPE_TYPE2["BLOCK_ARC"] = "blockArc";
+  SHAPE_TYPE2["CAN"] = "can";
+  SHAPE_TYPE2["CHART_PLUS"] = "chartPlus";
+  SHAPE_TYPE2["CHART_STAR"] = "chartStar";
+  SHAPE_TYPE2["CHART_X"] = "chartX";
+  SHAPE_TYPE2["CHEVRON"] = "chevron";
+  SHAPE_TYPE2["CHORD"] = "chord";
+  SHAPE_TYPE2["CIRCULAR_ARROW"] = "circularArrow";
+  SHAPE_TYPE2["CLOUD"] = "cloud";
+  SHAPE_TYPE2["CLOUD_CALLOUT"] = "cloudCallout";
+  SHAPE_TYPE2["CORNER"] = "corner";
+  SHAPE_TYPE2["CORNER_TABS"] = "cornerTabs";
+  SHAPE_TYPE2["CROSS"] = "plus";
+  SHAPE_TYPE2["CUBE"] = "cube";
+  SHAPE_TYPE2["CURVED_DOWN_ARROW"] = "curvedDownArrow";
+  SHAPE_TYPE2["CURVED_DOWN_RIBBON"] = "ellipseRibbon";
+  SHAPE_TYPE2["CURVED_LEFT_ARROW"] = "curvedLeftArrow";
+  SHAPE_TYPE2["CURVED_RIGHT_ARROW"] = "curvedRightArrow";
+  SHAPE_TYPE2["CURVED_UP_ARROW"] = "curvedUpArrow";
+  SHAPE_TYPE2["CURVED_UP_RIBBON"] = "ellipseRibbon2";
+  SHAPE_TYPE2["CUSTOM_GEOMETRY"] = "custGeom";
+  SHAPE_TYPE2["DECAGON"] = "decagon";
+  SHAPE_TYPE2["DIAGONAL_STRIPE"] = "diagStripe";
+  SHAPE_TYPE2["DIAMOND"] = "diamond";
+  SHAPE_TYPE2["DODECAGON"] = "dodecagon";
+  SHAPE_TYPE2["DONUT"] = "donut";
+  SHAPE_TYPE2["DOUBLE_BRACE"] = "bracePair";
+  SHAPE_TYPE2["DOUBLE_BRACKET"] = "bracketPair";
+  SHAPE_TYPE2["DOUBLE_WAVE"] = "doubleWave";
+  SHAPE_TYPE2["DOWN_ARROW"] = "downArrow";
+  SHAPE_TYPE2["DOWN_ARROW_CALLOUT"] = "downArrowCallout";
+  SHAPE_TYPE2["DOWN_RIBBON"] = "ribbon";
+  SHAPE_TYPE2["EXPLOSION1"] = "irregularSeal1";
+  SHAPE_TYPE2["EXPLOSION2"] = "irregularSeal2";
+  SHAPE_TYPE2["FLOWCHART_ALTERNATE_PROCESS"] = "flowChartAlternateProcess";
+  SHAPE_TYPE2["FLOWCHART_CARD"] = "flowChartPunchedCard";
+  SHAPE_TYPE2["FLOWCHART_COLLATE"] = "flowChartCollate";
+  SHAPE_TYPE2["FLOWCHART_CONNECTOR"] = "flowChartConnector";
+  SHAPE_TYPE2["FLOWCHART_DATA"] = "flowChartInputOutput";
+  SHAPE_TYPE2["FLOWCHART_DECISION"] = "flowChartDecision";
+  SHAPE_TYPE2["FLOWCHART_DELAY"] = "flowChartDelay";
+  SHAPE_TYPE2["FLOWCHART_DIRECT_ACCESS_STORAGE"] = "flowChartMagneticDrum";
+  SHAPE_TYPE2["FLOWCHART_DISPLAY"] = "flowChartDisplay";
+  SHAPE_TYPE2["FLOWCHART_DOCUMENT"] = "flowChartDocument";
+  SHAPE_TYPE2["FLOWCHART_EXTRACT"] = "flowChartExtract";
+  SHAPE_TYPE2["FLOWCHART_INTERNAL_STORAGE"] = "flowChartInternalStorage";
+  SHAPE_TYPE2["FLOWCHART_MAGNETIC_DISK"] = "flowChartMagneticDisk";
+  SHAPE_TYPE2["FLOWCHART_MANUAL_INPUT"] = "flowChartManualInput";
+  SHAPE_TYPE2["FLOWCHART_MANUAL_OPERATION"] = "flowChartManualOperation";
+  SHAPE_TYPE2["FLOWCHART_MERGE"] = "flowChartMerge";
+  SHAPE_TYPE2["FLOWCHART_MULTIDOCUMENT"] = "flowChartMultidocument";
+  SHAPE_TYPE2["FLOWCHART_OFFLINE_STORAGE"] = "flowChartOfflineStorage";
+  SHAPE_TYPE2["FLOWCHART_OFFPAGE_CONNECTOR"] = "flowChartOffpageConnector";
+  SHAPE_TYPE2["FLOWCHART_OR"] = "flowChartOr";
+  SHAPE_TYPE2["FLOWCHART_PREDEFINED_PROCESS"] = "flowChartPredefinedProcess";
+  SHAPE_TYPE2["FLOWCHART_PREPARATION"] = "flowChartPreparation";
+  SHAPE_TYPE2["FLOWCHART_PROCESS"] = "flowChartProcess";
+  SHAPE_TYPE2["FLOWCHART_PUNCHED_TAPE"] = "flowChartPunchedTape";
+  SHAPE_TYPE2["FLOWCHART_SEQUENTIAL_ACCESS_STORAGE"] = "flowChartMagneticTape";
+  SHAPE_TYPE2["FLOWCHART_SORT"] = "flowChartSort";
+  SHAPE_TYPE2["FLOWCHART_STORED_DATA"] = "flowChartOnlineStorage";
+  SHAPE_TYPE2["FLOWCHART_SUMMING_JUNCTION"] = "flowChartSummingJunction";
+  SHAPE_TYPE2["FLOWCHART_TERMINATOR"] = "flowChartTerminator";
+  SHAPE_TYPE2["FOLDED_CORNER"] = "folderCorner";
+  SHAPE_TYPE2["FRAME"] = "frame";
+  SHAPE_TYPE2["FUNNEL"] = "funnel";
+  SHAPE_TYPE2["GEAR_6"] = "gear6";
+  SHAPE_TYPE2["GEAR_9"] = "gear9";
+  SHAPE_TYPE2["HALF_FRAME"] = "halfFrame";
+  SHAPE_TYPE2["HEART"] = "heart";
+  SHAPE_TYPE2["HEPTAGON"] = "heptagon";
+  SHAPE_TYPE2["HEXAGON"] = "hexagon";
+  SHAPE_TYPE2["HORIZONTAL_SCROLL"] = "horizontalScroll";
+  SHAPE_TYPE2["ISOSCELES_TRIANGLE"] = "triangle";
+  SHAPE_TYPE2["LEFT_ARROW"] = "leftArrow";
+  SHAPE_TYPE2["LEFT_ARROW_CALLOUT"] = "leftArrowCallout";
+  SHAPE_TYPE2["LEFT_BRACE"] = "leftBrace";
+  SHAPE_TYPE2["LEFT_BRACKET"] = "leftBracket";
+  SHAPE_TYPE2["LEFT_CIRCULAR_ARROW"] = "leftCircularArrow";
+  SHAPE_TYPE2["LEFT_RIGHT_ARROW"] = "leftRightArrow";
+  SHAPE_TYPE2["LEFT_RIGHT_ARROW_CALLOUT"] = "leftRightArrowCallout";
+  SHAPE_TYPE2["LEFT_RIGHT_CIRCULAR_ARROW"] = "leftRightCircularArrow";
+  SHAPE_TYPE2["LEFT_RIGHT_RIBBON"] = "leftRightRibbon";
+  SHAPE_TYPE2["LEFT_RIGHT_UP_ARROW"] = "leftRightUpArrow";
+  SHAPE_TYPE2["LEFT_UP_ARROW"] = "leftUpArrow";
+  SHAPE_TYPE2["LIGHTNING_BOLT"] = "lightningBolt";
+  SHAPE_TYPE2["LINE_CALLOUT_1"] = "borderCallout1";
+  SHAPE_TYPE2["LINE_CALLOUT_1_ACCENT_BAR"] = "accentCallout1";
+  SHAPE_TYPE2["LINE_CALLOUT_1_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout1";
+  SHAPE_TYPE2["LINE_CALLOUT_1_NO_BORDER"] = "callout1";
+  SHAPE_TYPE2["LINE_CALLOUT_2"] = "borderCallout2";
+  SHAPE_TYPE2["LINE_CALLOUT_2_ACCENT_BAR"] = "accentCallout2";
+  SHAPE_TYPE2["LINE_CALLOUT_2_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout2";
+  SHAPE_TYPE2["LINE_CALLOUT_2_NO_BORDER"] = "callout2";
+  SHAPE_TYPE2["LINE_CALLOUT_3"] = "borderCallout3";
+  SHAPE_TYPE2["LINE_CALLOUT_3_ACCENT_BAR"] = "accentCallout3";
+  SHAPE_TYPE2["LINE_CALLOUT_3_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout3";
+  SHAPE_TYPE2["LINE_CALLOUT_3_NO_BORDER"] = "callout3";
+  SHAPE_TYPE2["LINE_CALLOUT_4"] = "borderCallout3";
+  SHAPE_TYPE2["LINE_CALLOUT_4_ACCENT_BAR"] = "accentCallout3";
+  SHAPE_TYPE2["LINE_CALLOUT_4_BORDER_AND_ACCENT_BAR"] = "accentBorderCallout3";
+  SHAPE_TYPE2["LINE_CALLOUT_4_NO_BORDER"] = "callout3";
+  SHAPE_TYPE2["LINE"] = "line";
+  SHAPE_TYPE2["LINE_INVERSE"] = "lineInv";
+  SHAPE_TYPE2["MATH_DIVIDE"] = "mathDivide";
+  SHAPE_TYPE2["MATH_EQUAL"] = "mathEqual";
+  SHAPE_TYPE2["MATH_MINUS"] = "mathMinus";
+  SHAPE_TYPE2["MATH_MULTIPLY"] = "mathMultiply";
+  SHAPE_TYPE2["MATH_NOT_EQUAL"] = "mathNotEqual";
+  SHAPE_TYPE2["MATH_PLUS"] = "mathPlus";
+  SHAPE_TYPE2["MOON"] = "moon";
+  SHAPE_TYPE2["NON_ISOSCELES_TRAPEZOID"] = "nonIsoscelesTrapezoid";
+  SHAPE_TYPE2["NOTCHED_RIGHT_ARROW"] = "notchedRightArrow";
+  SHAPE_TYPE2["NO_SYMBOL"] = "noSmoking";
+  SHAPE_TYPE2["OCTAGON"] = "octagon";
+  SHAPE_TYPE2["OVAL"] = "ellipse";
+  SHAPE_TYPE2["OVAL_CALLOUT"] = "wedgeEllipseCallout";
+  SHAPE_TYPE2["PARALLELOGRAM"] = "parallelogram";
+  SHAPE_TYPE2["PENTAGON"] = "homePlate";
+  SHAPE_TYPE2["PIE"] = "pie";
+  SHAPE_TYPE2["PIE_WEDGE"] = "pieWedge";
+  SHAPE_TYPE2["PLAQUE"] = "plaque";
+  SHAPE_TYPE2["PLAQUE_TABS"] = "plaqueTabs";
+  SHAPE_TYPE2["QUAD_ARROW"] = "quadArrow";
+  SHAPE_TYPE2["QUAD_ARROW_CALLOUT"] = "quadArrowCallout";
+  SHAPE_TYPE2["RECTANGLE"] = "rect";
+  SHAPE_TYPE2["RECTANGULAR_CALLOUT"] = "wedgeRectCallout";
+  SHAPE_TYPE2["REGULAR_PENTAGON"] = "pentagon";
+  SHAPE_TYPE2["RIGHT_ARROW"] = "rightArrow";
+  SHAPE_TYPE2["RIGHT_ARROW_CALLOUT"] = "rightArrowCallout";
+  SHAPE_TYPE2["RIGHT_BRACE"] = "rightBrace";
+  SHAPE_TYPE2["RIGHT_BRACKET"] = "rightBracket";
+  SHAPE_TYPE2["RIGHT_TRIANGLE"] = "rtTriangle";
+  SHAPE_TYPE2["ROUNDED_RECTANGLE"] = "roundRect";
+  SHAPE_TYPE2["ROUNDED_RECTANGULAR_CALLOUT"] = "wedgeRoundRectCallout";
+  SHAPE_TYPE2["ROUND_1_RECTANGLE"] = "round1Rect";
+  SHAPE_TYPE2["ROUND_2_DIAG_RECTANGLE"] = "round2DiagRect";
+  SHAPE_TYPE2["ROUND_2_SAME_RECTANGLE"] = "round2SameRect";
+  SHAPE_TYPE2["SMILEY_FACE"] = "smileyFace";
+  SHAPE_TYPE2["SNIP_1_RECTANGLE"] = "snip1Rect";
+  SHAPE_TYPE2["SNIP_2_DIAG_RECTANGLE"] = "snip2DiagRect";
+  SHAPE_TYPE2["SNIP_2_SAME_RECTANGLE"] = "snip2SameRect";
+  SHAPE_TYPE2["SNIP_ROUND_RECTANGLE"] = "snipRoundRect";
+  SHAPE_TYPE2["SQUARE_TABS"] = "squareTabs";
+  SHAPE_TYPE2["STAR_10_POINT"] = "star10";
+  SHAPE_TYPE2["STAR_12_POINT"] = "star12";
+  SHAPE_TYPE2["STAR_16_POINT"] = "star16";
+  SHAPE_TYPE2["STAR_24_POINT"] = "star24";
+  SHAPE_TYPE2["STAR_32_POINT"] = "star32";
+  SHAPE_TYPE2["STAR_4_POINT"] = "star4";
+  SHAPE_TYPE2["STAR_5_POINT"] = "star5";
+  SHAPE_TYPE2["STAR_6_POINT"] = "star6";
+  SHAPE_TYPE2["STAR_7_POINT"] = "star7";
+  SHAPE_TYPE2["STAR_8_POINT"] = "star8";
+  SHAPE_TYPE2["STRIPED_RIGHT_ARROW"] = "stripedRightArrow";
+  SHAPE_TYPE2["SUN"] = "sun";
+  SHAPE_TYPE2["SWOOSH_ARROW"] = "swooshArrow";
+  SHAPE_TYPE2["TEAR"] = "teardrop";
+  SHAPE_TYPE2["TRAPEZOID"] = "trapezoid";
+  SHAPE_TYPE2["UP_ARROW"] = "upArrow";
+  SHAPE_TYPE2["UP_ARROW_CALLOUT"] = "upArrowCallout";
+  SHAPE_TYPE2["UP_DOWN_ARROW"] = "upDownArrow";
+  SHAPE_TYPE2["UP_DOWN_ARROW_CALLOUT"] = "upDownArrowCallout";
+  SHAPE_TYPE2["UP_RIBBON"] = "ribbon2";
+  SHAPE_TYPE2["U_TURN_ARROW"] = "uturnArrow";
+  SHAPE_TYPE2["VERTICAL_SCROLL"] = "verticalScroll";
+  SHAPE_TYPE2["WAVE"] = "wave";
 })(SHAPE_TYPE || (SHAPE_TYPE = {}));
 var CHART_TYPE;
-(function(CHART_TYPE) {
-  CHART_TYPE["AREA"] = "area";
-  CHART_TYPE["BAR"] = "bar";
-  CHART_TYPE["BAR3D"] = "bar3D";
-  CHART_TYPE["BUBBLE"] = "bubble";
-  CHART_TYPE["BUBBLE3D"] = "bubble3D";
-  CHART_TYPE["DOUGHNUT"] = "doughnut";
-  CHART_TYPE["LINE"] = "line";
-  CHART_TYPE["PIE"] = "pie";
-  CHART_TYPE["RADAR"] = "radar";
-  CHART_TYPE["SCATTER"] = "scatter";
+(function(CHART_TYPE2) {
+  CHART_TYPE2["AREA"] = "area";
+  CHART_TYPE2["BAR"] = "bar";
+  CHART_TYPE2["BAR3D"] = "bar3D";
+  CHART_TYPE2["BUBBLE"] = "bubble";
+  CHART_TYPE2["BUBBLE3D"] = "bubble3D";
+  CHART_TYPE2["DOUGHNUT"] = "doughnut";
+  CHART_TYPE2["LINE"] = "line";
+  CHART_TYPE2["PIE"] = "pie";
+  CHART_TYPE2["RADAR"] = "radar";
+  CHART_TYPE2["SCATTER"] = "scatter";
 })(CHART_TYPE || (CHART_TYPE = {}));
 var SCHEME_COLOR_NAMES;
-(function(SCHEME_COLOR_NAMES) {
-  SCHEME_COLOR_NAMES["TEXT1"] = "tx1";
-  SCHEME_COLOR_NAMES["TEXT2"] = "tx2";
-  SCHEME_COLOR_NAMES["BACKGROUND1"] = "bg1";
-  SCHEME_COLOR_NAMES["BACKGROUND2"] = "bg2";
-  SCHEME_COLOR_NAMES["ACCENT1"] = "accent1";
-  SCHEME_COLOR_NAMES["ACCENT2"] = "accent2";
-  SCHEME_COLOR_NAMES["ACCENT3"] = "accent3";
-  SCHEME_COLOR_NAMES["ACCENT4"] = "accent4";
-  SCHEME_COLOR_NAMES["ACCENT5"] = "accent5";
-  SCHEME_COLOR_NAMES["ACCENT6"] = "accent6";
+(function(SCHEME_COLOR_NAMES2) {
+  SCHEME_COLOR_NAMES2["TEXT1"] = "tx1";
+  SCHEME_COLOR_NAMES2["TEXT2"] = "tx2";
+  SCHEME_COLOR_NAMES2["BACKGROUND1"] = "bg1";
+  SCHEME_COLOR_NAMES2["BACKGROUND2"] = "bg2";
+  SCHEME_COLOR_NAMES2["ACCENT1"] = "accent1";
+  SCHEME_COLOR_NAMES2["ACCENT2"] = "accent2";
+  SCHEME_COLOR_NAMES2["ACCENT3"] = "accent3";
+  SCHEME_COLOR_NAMES2["ACCENT4"] = "accent4";
+  SCHEME_COLOR_NAMES2["ACCENT5"] = "accent5";
+  SCHEME_COLOR_NAMES2["ACCENT6"] = "accent6";
 })(SCHEME_COLOR_NAMES || (SCHEME_COLOR_NAMES = {}));
 var MASTER_OBJECTS;
-(function(MASTER_OBJECTS) {
-  MASTER_OBJECTS["chart"] = "chart";
-  MASTER_OBJECTS["image"] = "image";
-  MASTER_OBJECTS["line"] = "line";
-  MASTER_OBJECTS["rect"] = "rect";
-  MASTER_OBJECTS["text"] = "text";
-  MASTER_OBJECTS["placeholder"] = "placeholder";
+(function(MASTER_OBJECTS2) {
+  MASTER_OBJECTS2["chart"] = "chart";
+  MASTER_OBJECTS2["image"] = "image";
+  MASTER_OBJECTS2["line"] = "line";
+  MASTER_OBJECTS2["rect"] = "rect";
+  MASTER_OBJECTS2["text"] = "text";
+  MASTER_OBJECTS2["placeholder"] = "placeholder";
 })(MASTER_OBJECTS || (MASTER_OBJECTS = {}));
 var SLIDE_OBJECT_TYPES;
-(function(SLIDE_OBJECT_TYPES) {
-  SLIDE_OBJECT_TYPES["chart"] = "chart";
-  SLIDE_OBJECT_TYPES["hyperlink"] = "hyperlink";
-  SLIDE_OBJECT_TYPES["image"] = "image";
-  SLIDE_OBJECT_TYPES["media"] = "media";
-  SLIDE_OBJECT_TYPES["online"] = "online";
-  SLIDE_OBJECT_TYPES["placeholder"] = "placeholder";
-  SLIDE_OBJECT_TYPES["table"] = "table";
-  SLIDE_OBJECT_TYPES["tablecell"] = "tablecell";
-  SLIDE_OBJECT_TYPES["text"] = "text";
-  SLIDE_OBJECT_TYPES["notes"] = "notes";
+(function(SLIDE_OBJECT_TYPES2) {
+  SLIDE_OBJECT_TYPES2["chart"] = "chart";
+  SLIDE_OBJECT_TYPES2["hyperlink"] = "hyperlink";
+  SLIDE_OBJECT_TYPES2["image"] = "image";
+  SLIDE_OBJECT_TYPES2["media"] = "media";
+  SLIDE_OBJECT_TYPES2["online"] = "online";
+  SLIDE_OBJECT_TYPES2["placeholder"] = "placeholder";
+  SLIDE_OBJECT_TYPES2["table"] = "table";
+  SLIDE_OBJECT_TYPES2["tablecell"] = "tablecell";
+  SLIDE_OBJECT_TYPES2["text"] = "text";
+  SLIDE_OBJECT_TYPES2["notes"] = "notes";
 })(SLIDE_OBJECT_TYPES || (SLIDE_OBJECT_TYPES = {}));
 var PLACEHOLDER_TYPES;
-(function(PLACEHOLDER_TYPES) {
-  PLACEHOLDER_TYPES["title"] = "title";
-  PLACEHOLDER_TYPES["body"] = "body";
-  PLACEHOLDER_TYPES["image"] = "pic";
-  PLACEHOLDER_TYPES["chart"] = "chart";
-  PLACEHOLDER_TYPES["table"] = "tbl";
-  PLACEHOLDER_TYPES["media"] = "media";
+(function(PLACEHOLDER_TYPES2) {
+  PLACEHOLDER_TYPES2["title"] = "title";
+  PLACEHOLDER_TYPES2["body"] = "body";
+  PLACEHOLDER_TYPES2["image"] = "pic";
+  PLACEHOLDER_TYPES2["chart"] = "chart";
+  PLACEHOLDER_TYPES2["table"] = "tbl";
+  PLACEHOLDER_TYPES2["media"] = "media";
 })(PLACEHOLDER_TYPES || (PLACEHOLDER_TYPES = {}));
 var BULLET_TYPES;
-(function(BULLET_TYPES) {
-  BULLET_TYPES["DEFAULT"] = "&#x2022;";
-  BULLET_TYPES["CHECK"] = "&#x2713;";
-  BULLET_TYPES["STAR"] = "&#x2605;";
-  BULLET_TYPES["TRIANGLE"] = "&#x25B6;";
+(function(BULLET_TYPES2) {
+  BULLET_TYPES2["DEFAULT"] = "&#x2022;";
+  BULLET_TYPES2["CHECK"] = "&#x2713;";
+  BULLET_TYPES2["STAR"] = "&#x2605;";
+  BULLET_TYPES2["TRIANGLE"] = "&#x25B6;";
 })(BULLET_TYPES || (BULLET_TYPES = {}));
 var IMG_BROKEN = "data:image/png;base64,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";
 var IMG_PLAYBTN = "data:image/png;base64,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AAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKSEAhgAAAAAAAAgJRTAAAAAAAAAACmhAAYAAAAAAABICQUwAAAAAAAAQEoogAEAAAAAAABSQgEMAAAAAAAAkBIKYAAAAAAAAICUUAADAAAAAAAApIQCGAAAAAAAACAlFMAAAAAAAAAAKaEABgAAAAAAAEgJBTAAAAAAAABASiiAAQAAAAAAAFJCAQwAAAAAAACQEgpgAAAAAAAAgJRQAAMAAAAAAACkhAIYAAAAAAAAICUUwAAAAAAAAAApoQAGAAAAAAAASAkFMAAAAAAAAEBKKIABAAAAAAAAUkIBDAAAAAAAAJASCmAAAAAAAACAlFAAAwAAAAAAAKREkRUAAACwrUpLSwuGDRvWfMCAAS26du3avKysrLiioqKkZcuWzZs1a1bcvHnz0tLS0rJsNtusuLi4ebNmzUoLCgo+8/eijY2N9Zs3b66pra2tqqur21xTU1NdVVVVs2nTptqNGzdWbdiwoeYvf/nL5hUrVlQtWLBgw6xZs6pqamoaJQYAAEDaKYABAACIiIghQ4aUHnTQQW379u3bql27dq3at2/fpkWLFq2bN29eWVpa2qpZs2bNCwsLm2ez2fLCwsLyoqKi8sLCwtKknK+hoaG6vr6+qqGh4S91dXV/aWhoqNq8eXNVTU3NuqqqqvUbNmxYu2rVqjWrV69e99Zbb6177rnnPpgzZ06NTwYAAABJogAGAADIA8OGDWt+xBFHdBwwYECnLl26dGjdunXHFi1adCgtLe1YUlLSvlmzZq0KCgqK07yDwsLCssLCwrKIaPdp/zuNjY21mzdvXrdp06ZVNTU172/YsGHl2rVr31+2bNnKBQsWrHjyySffnzVrVpVPGAAAAE1Fpuexsd9HfaF+ZcSal0ptCAAAIAE6deqUPf744zvtueeeXbp3796lbdu2XSorKzuXlpZ2KS0t7VBYWFhhSztGQ0PDxpqampU1NTXL169fv+yDDz5Y9s477yybPXv2sj/96U8rVqxYUWdLAAAAbE9t9q6Jog4f/TUFMAAAQEJks9nMt7/97Y4jRozo1bdv397t2rXrXl5e3rWsrKxzcXFx+4gosKUmp7G2tnZVTU3Nso0bNy5btWrV0tdff/2tJ598cvG999672noAAADYFgpgAACAhPne977X6a9Fb/v27Xu1bNmyV1lZWa8kvXOXLauvr9/wl7/8ZdG6desWL1u2bNHChQsX/fGPf1w8derUjbYDAADAliiAAQAAmqhsNps59dRTuxx66KH9+/Tp87n27dv3Ly8v719UVOSRzXlq06ZNKzZu3Pj6+++//8abb775xqOPPvrG3XffvcpmAAAA+CsFMAAAQBNx6qmndvniF784qHfv3v3btWv3uYqKis8VFhaW2wxbUl9fv37Dhg1vfPDBB68vXrz4jccee2z+jTfeuNxmAAAA8pMCGAAAYBc45phjWn/rW9/aq3///kPatGnTv6Kiop9HOLO9NDQ0VG/cuPGtNWvWLFy4cOGcO+6445WHHnporc0AAACknwIYAABgJzjjjDO6f+lLX9qrV69eg1u3bj2orKysR0RkbIadJFddXb103bp18xcvXjz30UcffeXqq69+x1oAAADSRwEMAACwnZWWlhb86le/2u3QQw8d1r17931btmw5qLCwsMxmaEoaGhqqP/zww/nvvPPOzGeeeWbW2LFj36ipqWm0GQAAgGRTAAMAAGwHP/7xj7t+9atf3bdXr15D27Ztu1c2m21jKyRJXV3dmg8++OCVRYsWvfznP/95xh/+8IdltgIAAJA8CmAAAIBtcOKJJ7Y75ZRTDujXr9+w1q1bD81ms61shTSpq6tbt3bt2pfffPPNWbfccsvUe++9d7WtAAAANH0KYAAAgE+hoqKi4IILLhg0YsSI/bp27bpfy5YtB2YymUKbIR/kcrmGDz/8cP6777474/nnn59x4YUXvrZx40aPiwYAAGiCFMAAAAAf4/jjj2/7/e9//8D+/fsf2Lp1630KCgpKbAUiGhsbN61fv37eW2+9NeWGG2545u67715lKwAAAE2DAhgAAOB/ZLPZzAUXXPC5I4888sDu3bsfWFFRsVtEFNgMbFl1dfWSd999d8qsWbNmnnvuuS+vW7euwVYAAAB2DQUwAACQ10pLSwsuvfTSQYcccsjBXbt2HVFWVtbDVmDb1dbWrnr//fdfmDp16uRf/vKXL65evbreVgAAAHYeBTAAAJB3Bg0aVHrBBRd8fs899zywQ4cOBxQVFbWwFdj+Ghsba9euXTtrzpw5T59//vmTX3755WpbAQAA2LEUwAAAQF4YNmxY8/POO+/gIUOGHOZ9vrDz/W0ZfNFFFz07a9asKlsBAADY/hTAAABAarVq1arwyiuv3HfEiBEjO3TocFBhYWGZrcCu19DQUP3+++8/O2XKlIk/+clPZm7cuLHRVgAAALYPBTAAAJAqrVq1Kvztb3+7/3777Xd4x44dRxQWFpbbCjRdDQ0NG99///0pM2bMeOqHP/zhC8pgAACAz0YBDAAApMJZZ53V45vf/OaRvXr1GllaWtrVRiB5ampq3l28ePHEO++8c9LVV1/9jo0AAABsPQUwAACQWMOHDy+/6KKLvjB48OCjW7RoMdBGID0+/PDDV+fNmzfhvPPOe3L69Ol/sREAAIBPRwEMAAAkSqtWrQpvuOGGQ/bbb79/atOmzX6ZTCZrK5BeuVyubs2aNTNmzJjx2JgxYyavW7euwVYAAAA+ngIYAABIhB//+Mddv/e9732lZ8+e/1RcXNzWRiD/1NbWfvD2228/dssttzz029/+9l0bAQAA+L8UwAAAQJNVUVFRcO21137+4IMPPrZ169b7ZTKZAlsBIqJxzZo1M59//vnxp5122hR3BQMAAPx/CmAAAKDJOeWUUzqefvrpx/bu3ftL2Wy2jY0AH6e+vn7j0qVLH/vd7373x+uvv36ZjQAAAPlOAQwAADQJ2Ww2c+uttx5wyCGHnNC6deu9I8LdvsDWaFy7du1L06ZN+/OPfvSjZ1evXl1vJQAAQD5SAAMAALtU//79S6655pp/2nPPPY8tLy/vayPAZ1VTU7NswYIF488999wHp06dutFGAACAfKIABgAAdomf//znPU855ZQTu3btemRhYWGZjQDbW2NjY92KFSuevOWWW+689NJLF9kIAACQDxTAAADATuMxz8Cusn79+rlPP/30f5188slT6+rqcjYCAACklQIYAADY4fr27Vv8hz/84a+Pee5nI8CuUlNT8+68efPu/8EPfvDgwoULN9kIAACQNgpgAABghxkyZEjpNddc89XBgwefWFxc3MFGgKaitrZ21dy5c+/5yU9+8uc5c+bU2AgAAJAWWyqAPYoNAADYJqNHj+4wb968n06ZMuXRYcOGnaH8BZqa4uLi9sOGDTtjypQpj86bN++nJ510UntbAQAA0s4dwAAAwFY599xze33/+9//dufOnY/IZDJZGwGSIpfL1S1fvvzJG2644fbLLrvsbRsBAACSyiOgAQCAz+y8887r+53vfOfbHTt2PDyTyRTaCJBUuVyuYcWKFU/cdNNN//XrX/96sY0AAABJowAGAAC22WWXXTboG9/4xg9at249zDaAtFm7du2su++++9pzzjnnNdsAAACSQgEMAABsNcUvkE8UwQAAQJIogAEAgE9N8Qvks7Vr18665557rvv5z38+3zYAAICmaksFcGHlwOj6UV9orIqoWZG1PQAAyBO/+MUvet9xxx3nHHrooT8pLS3tYiNAPiotLe2y7777HvP973+/X1lZ2ZIpU6assxUAAKCpKetcHwXlH/01BTAAAOS5M844o/u99957zpe//OWflZeX94qIjK0AeS5TXl7e8+CDDx71/e9/v3dEvDVjxowPrQUAAGgqFMAAAMD/ceKJJ7a77777fjJq1Kh/KS8v7xOKX4B/lCkvL+99+OGHj/rWt77VfvXq1Qvnz59fbS0AAMCutqUC2DuAAQAgzwwdOrTs+uuvP6l///4nFRYWltkI20NjY2Ns2rQpqquro6amJurr62PTpk2xefPmqK+vj+rq6qivr4/NmzfHpk2boqGhYZv/fxUWFkZJSUk0a9YsioqKoqysLIqKiqJZs2ZRUlISRUVFUVpa+r9/FRQUCIjtoqGhoeq11167a8yYMffMmTOnxkYAAIBdZUvvAFYAAwBAnujUqVP2nnvuGbXXXnudnM1mK22Ej9PQ0BAbN26MDRs2/J+/Nm7cGBs3boyamprYtGlTbNq0KWpqaqK2trbJnqe4uDhKSkqitLT0f/9eUVERFRUV0aJFi//zV0VFRRQWFvog8LHq6urWvvjii7eceOKJf169enW9jQAAADubAhgAAPLcXXfdddAXv/jF00tLS7vZRn7L5XKxYcOGWLt2baxbty7Wrl37d3+tW7cuNmzYkPd7atGiRbRu3TpatWoVrVu3jjZt2vzvf27dunW0aNHCh4morq5e+sgjj1zzne98Z6ptAAAAO5MCGAAA8tTVV189+MQTTzyzoqJioG3kj8bGxli5cmUsX748Pvjgg1i9evX//n3t2rXR2NhoSZ9RYWFhtGrVKtq1axdt27b937937tw5OnTo4LHTeWbDhg3z77333qvOPPPMebYBAADsDApgAADIM1/72tfaXHrppad27979qIjQRKVUQ0NDrFq1KlasWBHvv//+//595cqVTfqRzGlXXFwcHTp0iI4dO0bnzp2jY8eO0alTp2jXrp1HS6dYLpdrfOeddx76+c9/fv2ECRPW2QgAALAjKYABACBP9OrVq9ldd931jT322OM7hYWFZTaSHh9++GG88847sXTp0njvvfdixYoVsXr16mhoaLCchCgsLIz27dtHp06dolu3btG9e/fo3r27x0mnTENDQ9W8efNu++Y3v/nHJUuWbLYRAABgR1AAAwBAHrjrrrtG/NM//dOZJSUlXWwj2davXx9Lly6Nd955539L3w8//NBiUqqysvJ/y+C//tWqVSuLSbiamppljz322G9Gjx49xTYAAIDtTQEMAAAp9qtf/arPD3/4w5+1atVqL9tIno0bN8aSJUvirbfeikWLFsV7770XmzZtspg8V1JSEl27do0+ffpE3759o3fv3lFeXm4xCbRu3bqXr7322ivGjh27yDYAAIDtRQEMAAApNGjQoNI77rjju7vttttJBQUFWRtJhtWrV8ebb74ZixcvjiVLlsTy5cujsbHRYtiigoKC6Ny5c/Tu3Tt69+4d/fr1i7Zt21pMQjQ2Nta98cYbd33rW9+6ff78+TU2AgAAfFYKYAAASJHS0tKCBx988Jj99tvvn7PZbBsbaboaGhri7bffjrfeeisWLFgQS5YscXcv201FRUX06tUr+vbtG3379o2ePXtGYWGhxTRhdXV1a2bMmHHjV77ylYdqamr85gcAALDNFMAAAJASp59+erdf/vKX51ZWVu5jG03T6tWr47XXXouFCxfGm2++GRs3brQUdooWLVpE3759Y8CAATFw4EB3CDdh69evf/E//uM//vPqq69+xzYAAIBtoQAGAICEGzRoUOm99977w969ex+byWTc4teErF+/PubNmxcLFiyIN954Q+FLk9GiRYvo169fDBgwIPbYY4+orKy0lCYkl8s1LF68eNyJJ554rcdCAwAAW0sBDAAACXbNNdcMOemkk35RVlbWyzZ2vVwuF++++27MnTs3XnvttViyZIl3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B7lcrm7y5Mm//vKXv/yIbQAAwK63pXcAK4ABAMg7paWlBTNnzjyzT58+x9vG39uwYUOMGzcuZsyY4VHPQF7KZDKx3377xde//vWoqKiwkH+waNGiP+27775X1dTUeCwEAADsQgpgAAD4H926dctOnjz5V506dRppG/9fLpeLqVOnxp///OfYuHGjhQB5r6KiIkaNGhX777+/x0L/g+XLlz9+6KGHXvLuu+/W2QYAAOwaWyqAvQMYAIC8MXz48PInnnjiynbt2o2wjf/vnXfeiWuvvTaee+652Lx5s4UARMTmzZtjzpw58dprr0XPnj2jRYsWlvI/Kioq+n7rW98aMnXq1Ofee+89f3AAAMAusKV3ACuAAQDIC9/+9rc73n777X9o0aLFANv4b1VVVXHXXXfFvffeG+vXr7cQgI+wbt26eP7552P9+vWx2267RVFRkaVERElJSefjjjvuoA8++GDKK6+88hcbAQCAnUsBDABAXjv//PP7XXzxxX8oKSnpbBv/bfr06XHttdfGokWLLAPgU3jnnXdi2rRp0bp16+jc2R8nERHZbLbyC1/4whElJSUvTp48eY2NAADAzqMABgAgb/3ud7/b60c/+tFVRUVFrWwjYs2aNXHzzTfHpEmTora21kIAtkJtbW289NJL8c4770Tfvn2jtLQ073dSWFhYNnz48C/26dNn4UMPPbTMpwQAAHYOBTAAAHnp1ltv3f+b3/zmfxYWFjbP913kcrl4/vnn4/rrr4/ly5f7cAB8BitXroxp06ZFRUVFdOvWLTKZTF7vo6CgIDto0KBDBw0atOiBBx54xycEAAB2vC0VwJmex8Z+H/WF+pURa17ym6wAACTTww8//KXDDjvsXzKZTN6/rPGDDz6I22+/Pd544w0fDIDtbMCAAfGtb30r2rRpk/e7yOVyjVOmTPn1yJEjH/LJAACAHavN3jVR1OGjv6YABgAgdV555ZXTPve5z30r3/fQ0NAQjz32WDz++ONRV1fngwGwg2Sz2Tj66KPjC1/4QhQUFOT9Pl5//fU79tprr9/7ZAAAwI6jAAYAIC9ks9nMyy+/fFafPn2Oz/ddvPvuu3HbbbfFe++954MBsJN069YtvvOd70S3bt3yfhdLliy5f5999rmypqam0ScDAAC2PwUwAACpV1paWjBr1qyzevfufVw+7yGXy8WTTz4ZDz74oLt+AXaBbDYbxxxzTBxxxBF5fzfw0qVLHxg6dOjlSmAAANj+FMAAAKRar169mk2ePHlsu3btDsrnPaxcuTJuueWWePvtt30oAHaxnj17ximnnBIdOnTI6z2sXr16yiGHHPIvS5Ys2exTAQAA28+WCuDCyoHR9aO+0FgVUbMia3sAADRpQ4cOLXvqqacub9Omzf75uoNcLhfPPPNMXH/99bF27VofCoAmYP369TFlypQoKSmJnj17RiaTycs9NG/evPtJJ500ZPLkyc+sWLHCoykAAGA7KetcHwXlH/01BTAAAIk1ZMiQ0kceeeSKVq1a7Z2vO6iuro7bb789nnjiiWhs9IRNgKaksbEx5s+fH++//34MGDAgstn8/DlLaWlpp6997WuDn3rqqadXrlxZ75MBAACfnQIYAIDUOfTQQ1s8+OCDv2/ZsuUe+bqDOXPmxNVXX+2RzwBN3PLly+OFF16Ijh075u0joUtLSzudcMIJ+7/00ktPv/3227U+FQAA8NkogAEASJVhw4Y1v++++37TsmXLQfl4/vr6+hg/fnz88Y9/jNpaP0MHSILNmzfHiy++GJs3b47ddtstCgoK8m4HxcXFbY866qg9n3vuuaeXL1/ucdAAAPAZKIABAEiNI488snLcuHG/b9GixcB8PP97770XV111VcyZM8eHASCBFi1aFC+//HL069cvWrRokXfnLykp6XDcccftP2fOnGcWLVq0yScCAAC2jQIYAIBUOPLIIyvvvPPO35aXl++Wj+d/+umn48Ybb4wPP/zQhwEgwf7yl7/ECy+8ECUlJdGrV6+8O3+zZs3aHHXUUfspgQEAYNspgAEASLxjjz227W233faH5s2b98m3s1dVVcXNN98cTz31VDQ2NvowAKRAY2NjzJ8/P5YtWxYDBgyIZs2a5dX5mzVr1uaYY4458M0333xm4cKFNT4RAACwdRTAAAAk2qGHHtritttuuzofy9+33347rrnmmli8eLEPAkAKvf/++/HKK69Enz59orKyMq/Ons1mK4888sh9Zs6c+dTSpUs3+zQAAMCnpwAGACCxjjjiiJb33nvvteXl5f3y6dy5XC4mTZoUN998c1RVVfkgAKRYVVVVTJ06NbLZbPTp0ycymUzenL24uLjtV7/61c+/8sorTy1evLjWpwEAAD4dBTAAAIl06KGHtrj33nt/l2/lb3V1ddx0000xefLkyOVyPggAeSCXy8WCBQvi3Xffjd133z2y2fz5mUyzZs1aH3300fvNmDHjSXcCAwDAp6MABgAgcYYOHVo2fvz4qysqKgbk07mXLVsWV111lUc+A+SplStXxiuvvBKf+9znoqKiIm/O3axZszZHH3300GeeeebJFStW1PkkAADAlimAAQBIlCFDhpQ++uij17Rs2XL3fDr31KlT49prr42NGzf6EADksaqqqpg+fXq0bds2unTpkjfnLikpaT9q1KihTz755JMrV66s90kAAICPt6UCuMB6AABoSjp16pSdMGHCv1dWVu6RL2dubGyMcePGxR133BF1dW56AiCitrY2br755hg/fnw0NjbmzbkrKyv3mDBhwr9369bNXQkAALCNFMAAADQZrVq1Kpw+ffolbdq02T9fzlxdXR2/+93vYtKkSd73C8DfyeVy8fjjj8fvf//7qK6uzptzt2nTZv8pU6Zc0qpVq0KfAgAA2HoKYAAAmoSKioqC2bNnX9KuXbuD8uXMS5cujYsuuijmz5/vAwDAx3r11VfjoosuiqVLl+bNmdu1a3fQ7Nmz/72iosLPrgAAYCu5iAYAoEmYOXPmz9q1a3dIvpz35ZdfjiuuuCLWrVsnfAA+0bp16+KKK66Il19+OW/O3K5du4Nnzpz5M+kDAMDWUQADALDLvfjii2N69OgxKh/Omsvl4oEHHogbbrghamtrhQ/Ap1ZbWxs33HBDPPDAA3nz2oAePXqMevHFF8dIHwAAPj0FMAAAu9SkSZO+NnDgwFPy4ax1dXVx8803x8SJE73vF4BtksvlYuLEiXHLLbdEXV1dXpx54MCBJ0+aNOlr0gcAgE9HAQwAwC7z6KOPHnXggQeekw9nXbduXfz617+OWbNmCR6Az2zmzJnx61//Ol9eJZA58MADz3n00UePkjwAAHyywsqB0fWjvtBYFVGzImtDAADsEDfeeOO+Rx999EWZTKYw7Wddvnx5XHXVVbFy5UrBA7DdbNiwIWbPnh0DBw6MioqKtB8307179/179uz56sMPP7xc+gAA5LuyzvVRUP7RX1MAAwCw011xxRV7fPe7372qoKCgWdrPOmfOnPjtb38bGzduFDwA2111dXVMmzYtOnfuHB07dkz1WTOZTOHuu+9+eJs2bV6aNGnSKukDAJDPFMAAADQZZ5xxRvef/exnvy0sLCxP+1knTJgQd999d9TX1wsegB2moaEhXnrppchms9G3b99UnzWTyRTttddeB/3lL395dubMmRukDwBAvlIAAwDQJBx00EEVf/jDH64pLi7ulOZz5nK5eOCBB+Kxxx4TOgA77c+eBQsWRF1dXfTv3z8ymUxqz1pQUFBywAEHDJs+ffqkpUuXbpY+AAD5aEsFcIH1AACwMwwaNKj0vvvuu7qsrKxXms9ZV1cX1113XUyaNEnoAOx0EydOjOuvvz7q6upSfc6ysrJef/rTn67u379/idQBAODvKYABANjhKioqCh577LGLKyoqBqb5nNXV1XHNNdfE7NmzhQ7ALvPKK6/ElVdeGVVVVak+Z4sWLQZOnDhxbEVFhZ9vAQDA33CBDADADjdz5syftW3b9sA0n3HdunVx2WWXxRtvvCFwAHa5xYsXx2WXXRZr165N9TnbtWt34MyZM38mcQAA+P8UwAAA7FBPPvnkqB49eoxK8xlXrVoVV1xxRSxfvlzgADQZK1asiCuuuCJWrlyZ6nP26NFj1KRJk0ZJHAAA/lth5cDo+lFfaKyKqFmRtSEAALbZjTfeuO+XvvSlCzOZTGp/8fDdd9+NK6+8MtatWydwAJqc6urqmDVrVvTv3z8qKytTe85u3boN79mz57yHH37Yb2MBAJAXyjrXR0H5R39NAQwAwA5x3nnn9T311FOvLigoKE7rGV977bW45pprorq6WuAANFmbN2+OGTNmRI8ePaJ9+/apPGMmkykYNGjQIYWFhVOee+45v5UFAEDqKYABANipjjrqqFb/8R//8YdmzZq1SusZX3755bj++uujrq5O4AA0eQ0NDfHSSy9Fp06dolOnTqk8Y0FBQXbYsGGfnz9//qQ33nhjk9QBAEizLRXA3gEMAMB21a1bt+wNN9zwnyUlJR3TesYpU6bEjTfeGPX19QIHIDHq6+vjxhtvjKlTp6b2jCUlJZ1uuOGG/+jWrZu7GgAAyFsKYAAAtqunn376XyorK/dI6/kmTZoUd955ZzQ2NgobgMRpbGyMO+64I5588snUnrGysnLw008//UtpAwCQrxTAAABsN88///w3unTp8k9pPd/EiRNj3LhxkcvlhA1AYuVyubj//vtTXQJ36dLlS88+++yJ0gYAIB95BzAAANvFTTfdNPzII488L5PJZNJ4vsceeyzGjx8vaABS47XXXotmzZpF3759U3m+zp0779urV695Dz/88DJpAwCQNlt6B7ACGACAz+wXv/hF7x/+8IdXFxQUNEvj+R544IF45JFHBA1A6ixYsCDq6upiwIABqTtbJpPJDBo06ODGxsbnpk6dul7aAACkiQIYAIAd5oADDqj43e9+99tmzZq1TeP5xo0bF5MmTRI0AKm1aNGi2Lx5cwwcODB1ZysoKMjut99+w5577rnH33vvvc3SBgAgLbZUAHsHMAAA2yybzWbuvPPOfyktLe2exvNNmDBB+QtAXpg0aVI89NBDqTxbaWlpj3vuuedfstlsRtIAAOQDBTAAANvs+eef/06HDh0OTePZHn744Xj44YeFDEDeeOSRR+LPf/5zKs/WoUOHw5599tlvSxkAgHygAAYAYJvcd999hw8ePPjUNJ7t/vvvjwkTJggZgLzz2GOPxX333ZfKs+25554/+NOf/nSYlAEASDvvAAYAYKudccYZ3ceMGXN5QUFBcdrONnHixHjkkUeEDEDeWrx4cWSz2ejbt2/ajpbp06fPvn/5y18mz5w5c4OkAQBIsi29A1gBDADAVhk2bFjzG2+88Q/NmjVrl7azPfroo6l99CUAbI2FCxdGUVFR9OvXL1XnKigoKD7wwAP3e/LJJx9dsWJFnaQBAEiqLRXAHgENAMBWuffee39ZWlraPW3nevzxx+PBBx8UMAD8jz//+c8xceLE1J2rtLS0x3333fdLCQMAkFYKYAAAPrVJkyaN6tSp0xEpPFeMHz9ewADwD8aPHx+TJ09O3bk6der0hUmTJn1VwgAApJFHQAMA8Kmcd955fU888cR/z2QyRWk618yZM+Puu+8WMAB8jNdeey06duwYnTt3TtW5unbtuk9BQcHzzz333DopAwCQNN4BDADAZ3LEEUe0vOKKK67NZrOVaTrXyy+/HDfffHPkcjkhA8DHyOVyMXv27OjSpUt06tQpNefKZDJF++yzz/CpU6c+9u67726WNAAASeIdwAAAbLNsNpu55ZZb/q2kpKRjms61YMGCuPnmm6OxsVHIAPAJGhsb4+abb44333wzVecqLS3tcvfdd5+fzWYzUgYAIC0UwAAAbNGkSZO+3rZt2wPTdKZly5bFDTfcEPX19QIGgE+prq4urr322li+fHmqztWuXbsDH3/88VESBgAgLTwCGgCAj3XZZZcN+upXvzo2k8mk5hcH33///bjyyiujqqpKwACwlerq6uLll1+OIUOGRHl5eWrO1aVLl31LS0unPvPMM2ukDABAEngENAAAW61///4lJ5988q8ymUxRWs60YcOG+P3vfx8bN24UMABso40bN8bvfve7VP15WlBQkP3hD394ft++fYslDABA4q9vrQAAgI/y4IMPnl1WVtYrLeeprq6O3/zmN7Fq1SrhAsBntGrVqrjyyiujuro6NWcqKyvr8/DDD58lXQAAkk4BDADA/zF+/Pgju3XrdnRazlNfX5/KdxYCwK60fPnyuO6666K+vj41Z+rRo8dXx40bd4R0AQBIMgUwAAB/53vf+16nI4444py0nCeXy8Vtt90Wb7zxhnABYDt7/fXX47bbbotcLpeaMx155JHnfvvb3+4oXQAAkkoBDADA/6qoqCi4+OKLLywsLCxPy5nGjx8fs2bNEi4A7CCzZs2Khx56KDXnKSwsrPj1r399QUVFhZ+bAQCQSC5kAQD4XxMnThxdWVk5OC3nef7552PixImCBYAd7LHHHosXXnghNeeprKzc89FHHz1RsgAAJFFh5cDo+lFfaKyKqFmRtSEAgDxxwQUX7DZq1KgLM5lMYRrO8+qrr8Ytt9ySqkdSAkBT/7O3d+/e0a5du1Scp2PHjkNzudxzU6ZMWSddAACamrLO9VHwMc/wcwcwAADRt2/f4h//+McXZzKZVPwG4HvvvRc33HBDNDY2ChcAdpKGhoa47rrrYtmyZak4T0FBQfbss88e27dv32LpAgCQqGtZKwAAYPz48T8qKyvrkYazbNiwIX7/+99HbW2tYAFgJ9u0aVP8/ve/j40bN6biPGVlZb3GjRs3RrIAACSJAhgAIM/ddNNNw/v06XN8Gs5SX18f1157baxdu1awALCLrFmzJq699tqor69PxXn69ev3jd///vdDJQsAQFIogAEA8thBBx1Uceyxx/5rRGTScJ477rgjFi9eLFgA2MUWLVoUd955Z1qOU/CNb3zj34YNG9ZcsgAAJOIC1goAAPLXzTfffFZxcXG7NJxl4sSJMX36dKECQBMxbdq0mDRpUirOUlJS0unOO+88Q6oAACSBAhgAIE/913/914FdunT5UhrO8tprr8Wf//xnoQJAEzN+/PhYsGBBKs7SrVu3o2+66abhUgUAoKlTAAMA5KEvfelLlV/5yld+lYazrFixIq6//vpobGwULAA0MY2NjXHdddfFihUr0nCczHHHHfergw46qEKyAAA0ZQpgAIA8dPXVV5+ezWYrk36OmpqauPbaa2PTpk1CBYAmatOmTXHttddGTU1N4s+SzWbb3njjjT+RKgAATZkCGAAgz9x6663Du3Tp8uWknyOXy8Utt9wSK1euFCoANHErV66MW2+9NXK5XOLP4lHQAAA0dQpgAIA8MnTo0LKvfvWrv0jDWSZMmBBz584VKgAkxJw5c+Kxxx5LxVlGjRr1i6FDh5ZJFQCApkgBDACQR+64444fFRcXd0z6OV5++eV45JFHBAoACfPQQw+l4he4SkpKOt5xxx0/lCgAAE2RAhgAIE9cfvnlu/fs2XNU0s/xwQcfxB133JGKR0gCQL7J5XJx2223xZo1axJ/lp49ex57+eWX7y5VAACaGgUwAEAe6NatW/a73/3uv2YymURf/9XX18cNN9wQ1dXVQgWAhKqqqoobb7wx6uvrE32OTCZT8N3vfvdX3bp1y0oVAICmRAEMAJAHxo8ff0pZWVmvpJ/jnnvuiaVLlwoUABJuyZIlcd999yX+HGVlZT3Hjx9/ikQBAGhKFMAAACn385//vOeAAQNGJ/0c06dPjylTpggUAFJi8uTJMWPGjMSfY8CAAaN//vOf95QoAABNhQIYACDFstls5qyzzjo3k8kk+tGEK1asiLvvvlugAJAyd911V6xYsSLRZ8hkMtmzzjrr3Gw2m5EoAABNgQIYACDFxo0b98XKysq9knyG2trauOGGG6K2tlagAJAyf/1zfvPmzYk+R2Vl5V7jxo0bKVEAAJoCBTAAQEoNHz68/OCDDz4t6ee4//77Y/ny5QIFgJRavnx5jBs3LvHnGDFixI+HDRvWXKIAAOxqCmAAgJS69dZbT8tms22TfIYZM2bEc889J0wASLnJkyfHzJkzE32G4uLitrfffvtp0gQAYFdTAAMApNBVV121R48ePb6S5DOsXLky7rrrLmECQJ64++6744MPPkj0GXr27PnVK664Yg9pAgCwKymAAQBSprS0tOAb3/jGT5N8rdfY2Bi333679/4CQB6pqamJ2267LRobG5N8jIJvfvObZ5aWlvqZGwAAu+6i1AoAANJlwoQJX6uoqBiQ5DOMHz8+Fi1aJEwAyDNvvvlmPPjgg4k+Q4sWLQY9+OCDx0gTAIBdRQEMAJAiRx55ZOWwYcN+kOQzzJ07N5544glhAkCemjhxYixYsCDRZxg+fPiPjjjiiJbSBABgV1AAAwCkyBVXXHFyUVFRRVLnr6qqijvvvDNyuZwwASBP5XK5uP3226O6ujqxZygqKmrxm9/85mRpAgCwKyiAAQBS4vzzz+/Xu3fv45J8httvvz0+/PBDYQJAnlu3bl3cfvvtiT5D7969jz///PP7SRMAgJ1NAQwAkALZbDZz6qmn/jyTyST2+m769OkxZ84cYQIAERExe/bsmDFjRmLnz2QyBaeeeurPs9lsRpoAAOxMCmAAgBT44x//eERlZeXgpM6/du3auPfeewUJAPyde+65J9atW5fY+SsrKwf/6U9/+oIkAQDYmRTAAAAJ17dv3+JDDjnkR0k+w9133x01NTXCBAD+Tk1NTdx9992JPsPBBx/8o759+xZLEwCAnUUBDACQcHfdddc3S0pKOiV1/smTJ8e8efMECQB8pLlz58azzz6b2PlLSko63nPPPd+SJAAAO4sCGAAgwb70pS9VDhw48KSkzr9mzZoYP368IAGALXrggQdizZo1iZ2/f//+Jx111FGtJAkAwM6gAAYASLArrrji1MLCwvIkzp7L5eK2226LTZs2CRIA2KJNmzbFbbfdFrlcLpHzFxYWll1++eU/kCQAADuDAhgAIKF+8Ytf9O7evftXkjr/s88+G2+88YYgAYBP5Y033ojnn38+sfN369bt6F/96ld9JAkAwI6mAAYASKgf/vCHP8pkMom8nvvggw/igQceECIAsFXGjRsX69atS+TsmUym4NRTT/2xFAEA2NEUwAAACXTdddcNa9eu3YFJnD2Xy8Udd9wRtbW1ggQAtsqmTZvizjvvTOz8bdq02f+mm27aT5IAAOxICmAAgIQpLS0t+NrXvnZ6Uud/4YUXYuHChYIEALbJq6++GjNmzEjs/Mccc8zpFRUVfiYHAMAO42ITACBhbr/99oMrKip2S+LsGzZsiHHjxgkRAPhM7r///qiqqkrk7OXl5X3/67/+6wgpAgCwoyiAAQASpKKiouCwww47Nanz33vvvYn9YS0A0HRs2LAh7r///sTOf9BBB/1zq1atCiUJAMCOoAAGAEiQ+++//+iysrKeSZx9zpw58dJLLwkRANguXnjhhViwYEEiZy8tLe32xz/+8StSBABgR1AAAwAkRN++fYv33Xfff07i7LW1tXHvvfcKEQDYru6+++6oq6tL5Oz77bffKf379y+RIgAA25sCGAAgIW6++eZRxcXFbZM4+yOPPBJr164VIgCwXa1atSoee+yxRM6ezWbb3njjjV+TIgAA25sCGAAgAYYOHVq21157fSeJs7/33nvxxBNPCBEA2CEmTpwYK1asSOTsQ4YM+c7QoUPLpAgAwPakAAYASIBrr732xKKiosqkzZ3L5eKee+6JxsZGIQIAO0R9fX3cddddkcvlEjd7UVFR5bXXXnuCFAEA2J4UwAAATdwBBxxQMWDAgG8kcfYZM2bEW2+9JUQAYId6880348UXX0zk7AMGDPjG8OHDy6UIAMD2ogAGAGjirrrqqhOKiooqkjb3pk2b4oEHHhAgALBT3H///VFbW5u4uYuKilpcffXV7gIGAGC7UQADADRhBx10UEX//v0Teffvww8/HB9++KEQAYCdYv369TFhwoREzj5w4MBvHHDAARVSBABge1AAAwA0Yf/5n/95bGFhYfOkzb1q1aqYPHmyAAGAnerpp5+O1atXJ27uwsLC8ssuu2yUBAEA2B4UwAAATdQBBxxQMWjQoNFJnP3uu++O+vp6IQIAO1V9fX3cddddiZx99913/+bQoUPLpAgAwGelAAYAaKIuv/zyYwsLC8uTNvfcuXNjwYIFAgQAdokFCxbE3LlzEzd3UVFRi9/97ndflyAAAJ+VAhgAoAkaOnRo2aBBgxL37t+6urr405/+JEAAYJf605/+FHV1dYmbe/fdd//mkCFDSiUIAMBnoQAGAGiCfvOb33ylqKioZdLmfu655xL53j0AIF1Wr14dzz33XOLmLioqann11VcfLUEAAD4LBTAAQBPTq1evZoMHD/5m0uaurq6ORx55RIAAQJPwyCOPRHV1deLmHjJkyLe6deuWlSAAANtKAQwA0MTcdNNNxxQXF7dN2twTJkyIqqoqAQIATUJVVVUifzmtuLi43a233uouYAAAtpkCGACgCWnVqlXhXnvtdVLS5l61alU8++yzAgQAmpTJkyfHqlWrEjf30KFDR7dq1apQggAAbAsFMABAE3LLLbccXlJS0jlpcz/44INRX18vQACgSamvr48HH3wwcXOXlJR0vummmw6VIAAA20IBDADQRGSz2cwBBxzw7aTNvWjRonjppZcECAA0SS+99FIsXrw4cXOPGDHiO9lsNiNBAAC2lgIYAKCJuOaaa/YuLy/vm7S5H3roocjlcgIEAJqkXC6XyLuAy8vL+1111VV7SRAAgK2lAAYAaCK+8pWvfDdpM8+bNy8WLlwoPACgSVu4cGG8+uqrrg8BAMgLCmAAgCbgsssuG1RZWblPkmbO5XIxfvx44QEAifDAAw8k7qklrVu33veSSy7pLz0AALaGAhgAoAkYNWrUCUmbefbs2bFs2TLhAQCJsGzZsnjllVcSN/cJJ5xwovQAANgaCmAAgF3sn//5nzt37NjxiCTN3NjYGA888IDwAIBEGT9+fDQ0NCRq5k6dOn1h9OjRHaQHAMCnpQAGANjFfvSjH30tk8kk6rps2rRpsWrVKuEBAImyatWqeOGFFxI1cyaTKfzpT386SnoAAHxaCmAAgF1o0KBBpX369Plqkmaur6+PCRMmCA8ASKQJEyZEXV1dombu27fvV/r27VssPQAAPg0FMADALnTZZZcdXlRUVJGkmadOnRpr164VHgCQSOvXr48pU6YkauaioqLK3/zmN0dIDwCAT0MBDACwi2Sz2cy+++57UpJmrqurc/cvAJB4jz76aOLuAt5///1PymazGekBAPBJFMAAALvI1VdfPbSsrKx3kmaeMmVKbNiwQXgAQKJt2LAhnn/++UTNXFZW1ueqq67aS3oAAHwSBTAAwC7y5S9/+bgkzVtfXx8TJ04UHACQCo8//nji7gL+0pe+dLzkAAD4JApgAIBdYPTo0R3atm07IkkzT5s2LdatWyc8ACAVPvzww5g+fXqiZm7fvv2I0aNHd5AeAABbogAGANgFfvrTn47KZDKFSZm3vr4+HnnkEcEBAKnyyCOPRH19fWLmzWQyhT/96U+/JjkAALZEAQwAsJN16tQp26dPn6OTNLO7fwGANFq3bl1MmzYtUTP36dPnmE6dOmWlBwDAx1EAAwDsZFddddUB2Wy2dVLmbWxsjEmTJgmOVOvYsWN06OCJmgD5aNKkSdHY2JiYebPZbOurrrrqAMkBAPBxFMAAADvZiBEjvp6keV988cVYtWqV4Ei1Ll26xIUXXhinnXZadO3a1UIA8siqVavipZdecj0JAEBqKIABAHaiM844o3tlZeXeSZk3l8vFxIkTBUdeyGQyMXjw4PjVr34VY8aMcUcwQB55/PHHI5fLJWbeysrKvc8444zukgMA4KMogAEAdqJTTjnlqxGRScq8CxYsiPfee09w5JVMJhN77713XHjhhTFmzJho3769pQCk3HvvvRcLFy5M1B9X/3NdCQAA/4cCGABgJ+nVq1ezXr16fTlJM3v3L/nsr0XwBRdcECeffHK0bdvWUgBSLGnXPb169fpyr169mkkOAIB/pAAGANhJrrjiioOLiopaJmXeBN4JAztEYWFhDB8+PC688MIYPXp0VFZWWgpACi1YsCCWLVuWmHmLiopaXnnllYdIDgCAf6QABgDYSYYPH/6VJM2btHfhwY5WVFQUI0aMiEsuuSRGjx4dLVu2tBSAFMnlcvH4448naub99tvvK5IDAOAfKYABAHaC0aNHd6isrByalHnXrl0bL7/8suDgI/y1CL744ovjhBNOiBYtWlgKQEq89NJLsW7dusTMW1lZudfo0aM7SA4AgL+lAAYA2AlOP/30o5J07fXMM89EQ0OD4GALiouL47DDDouxY8fGqFGjoqyszFIAEq6hoSGeeeaZJI1c8D/XmQAA8P8vEq0AAGDHymazmX79+n05KfPW1tbGlClTBAefUnFxcYwcOTIuvfTSGDVqVJSWlloKQII9//zzUVtbm5h5+/Xr9+VsNpuRHAAAf6UABgDYwX7zm9/sWVJS0jkp886YMSOqq6sFB1uppKQkRo4cGZdcckkcffTRUVJSYikACVRdXR0zZ85M0p8/na+44orBkgMA4K8UwAAAO9gXvvCFLyVl1lwuF08//bTQ4DNo3rx5HHXUUXHJJZfEyJEjI5vNWgpAwjz11FORy+USM++RRx75ZakBAPBXCmAAgB1oyJAhpZ07dz4iKfO+/vrrsWLFCsHBdlBeXh6jRo2KSy+9VBEMkDArVqyI119/PTHzdunS5fD+/ft79AQAABGhAAYA2KHGjh17aGFhYWJeCOruX9j+KioqYtSoUXHxxRfH4YcfHkVFRZYC4LpouyosLGz+H//xHwdLDQCACAUwAMAOteeeex6ZlFnXrl0b8+bNExrsIK1atYrjjz8+LrroohgxYkQUFPh2DKApmzdvXqxZsyYx8+61115HSg0AgAgFMADADnPMMce0bt269b5Jmfe5556LxsZGwcEO1qZNmxg9enRcfPHFimCAJqyxsTGee+65JP35MvyYY45pLTkAAPykAQBgBznzzDMPz2Qyibje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FpafffbZvaQFAJA+CmAAgE9p//3375+EOV9//XVhAXmjvLw8Ro0aFf/+7/8eI0eOjGw2aymA67FP6fOf//xAaQEApI8CGADgU+rRo8fuTX3G2traePvtt4UF5J2KiooYNWpUXHzxxXH44Yc3+XdvAum2ePHiRLySo1evXoOkBQCQPgpgAIBPqXXr1k3+DoklS5ZEQ0ODsIC81apVqzj++OPj4osvjhEjRkRBgW97gZ2voaEhlixZ0uTnbNOmjQIYACCFfCcMAPApDBkypLR58+a9m/qcb775prAAIqJ169YxevToGDt2rCIYcF32MZo3b95n0KBBpdICAEgX3wEDAHwKp556av9MJtPkr53eeustYQH8jTZt2sTo0aPjvPPOi+HDhyuCAddlfyOTyRT84Ac/+Jy0AADSxXe+AACfwuDBg5v84/Hq6+tj0aJFwgL4CJ06dYqTTz45/u3f/i323nvvyGQylgLsUIsXL07Eqzn23HPPgdICAEgXBTAAwKfQpUuXAU19xnfeeSfq6uqEBbAFnTt3jjFjxiiCgR2utrY23n333SRc53oPMABAyiiAAQA+hZYtW/Zv6jN6/DPAp9elS5cYM2ZMnHvuuTF48GALAfL2+iwJ17kAAGwdBTAAwCcYPnx4eUlJSeemPqfHPwNsvV69esVpp50W55xzTvTvrwMB8u/6rLS0tPPw4cPLpQUAkB4KYACAT/Ctb31rt4ho8s8IXbx4sbAAtlGfPn3irLPOinPOOSd22203CwG2i4T8gl7m29/+dj9pAQCkhwIYAOAT7L777k2+CVi7dm1s2LBBWACfUZ8+feLss8+OM888M3r27GkhwGfy4Ycfxrp165r8nAMHDlQAAwCkSJEVAABsWadOnZr8D8TefvttQQFsRwMGDIgBAwbEggULYvz48bF06VJLAbb5Oq1Vq1audwEA2GkUwAAAn6CyslIBDJCnBgwYEP3794958+bFQw89FO+++66lAFtlyZIlsddeezX1613PvgcASBEFMADAFnTq1CnbvHnzXk19ziVLlggLYAfJZDIxePDg2GOPPeLll1+OBx98MFauXGkxQGqu05o3b967Xbt2RatXr66XGABA8nkHMADAFowZM6ZnJpPJNuUZGxsbPZoUYCfIZDKx9957x4UXXhhjxoyJ9u3bWwrwiZYuXRqNjY1NesaCgoLsqaee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k8nE7NmzY+LEibFmzRoNAXif/VNSzJo161kTAwBongTAAAC70O233/7KOeecszU/P78022sdMGBAtG/f3tWu0My9+uqrMWnSpFi1apVmALyPjh07xgEHHJCIWhsbG6u/8Y1v/NXUAACaJwEwAMAutHLlyob169fP6tat2+hsrzWVSsXhhx8ekyZNMjhohubMmROTJ0+OJUuWaAbAh3D44YdHKpVKRK3r16+fVVFR0WhqAADNU54WAADsWq+++mpirts77LDDDAyamTfffDP+/d//PX7yk58IfwE+pFQqFSNGjEhMva+88sozpgYA0Hw5AQwAsIvddNNNz5166qnV+fn5rbO91m7dukX//v1j4cKFBgc5btmyZfHYY4/F/PnzNQPgIzrggAOic+fOiai1sbFxy4033jjL1AAAmi8BMADALrZy5cqG8vLyGT179vx0Euo9+uijBcCQw5YvXx7jxo0T/AJ8wv1SUpSXlz9TXl7eYGoAAM2XABgAYDeYMWPGUxdccEEiAuAhQ4ZE69ato7q62uAgh6xcuTImTJgQc+fOjUwmoyEAH1ObNm3i0EMPTUy9zz777FOmBgDQvPkGMADAbvDVr371lYaGhk1JqLWgoCCOOOIIQ4McsW7duvj5z38ed955Z8yZM0f4C/AJjRw5MvLz8xNRa0NDw8abbrrpVVMDAGjenAAGANgNKisrm1atWjW9T58+5ySh3qOPPjqefPJJQREk2Pr16+Oxxx6L2bNn+3cZYBdJpVIxatSoxNS7cuXKadXV1WmTAwBo3pwABgDYTaZNm5aY6/c6duwYAwYMMDRIoA0bNsSvf/3r+Nd//dd49dVXhb8Au9CAAQOiY8eOian36aefftLUAAAQAAMA7CZf+9rX5tTX11ckpd6jjjrK0CBBqqqq4v77749vf/vb8eKLL0ZTU5OmAOxiRx55ZGJqra+vX/eNb3zjdVMDAMAV0AAAu0ltbW16xYoVT++///6fT0K9hx56aLRt2zaqqqoMD7LYli1bYsqUKfHcc8/F9u3bNQRgN2nbtm0MGTIkMfUuX778qdraWtc/AwDgBDAAwO70xz/+cUJSas3Pz4/jjjvO0CBL1dTUxKOPPhq33XZb/OUvfxH+Auxmxx57bOTn5yel3Myvf/3rCaYGAECEABgAYLe66667llZXV89PSr1HH310tGjRwuAgi7wd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qATAAABZ4umnn968fPnyxF3xN3r06GjXrp0BAgBZqUOHDnH88ccnru5ly5ZNmD59+hYTBADgoxIAAwBkkbvvvvtPmUymKUk1FxYWxumnn254AEBWOvPMMxP3yYpMJtN41113/dH0AAD4OATAAABZ5Be/+MWatWvXTkta3UcccUT06tXLAAGArNK7d+847LDDEld3eXn5X+6///51JggAwMchAAYAyDIPP/zwn5JWcyqVijPPPNPwAICsMmbMmEilUomr+8EHH/yT6QEA8HEJgAEAsszXv/71NzZs2DAraXUPHDgwDj74YAMEALLCoEGDYsCAAYmru6KiYuatt966wAQBAPi4BMAAAFlo3Lhxv01i3WPGjIm8PFtMAGDvysvLizFjxiSy9j//+c+/NUEAAD7RflgLAACyz/XXXz+nqqrqr0mru1evXnHUUUcZIACwVx1zzDHRvXv3xNW9adOmV2666aa5JggAwCchAAYAyFJ/+tOf7k1i3WPGjInS0lIDBAD2ijZt2sRZZ52VyNofeOCBe00QAIBPSgAMAJClbrrpprlJPAVcXFwcZ555pgECAHvFWWedFS1btkxc3Zs2bXrl5ptvnmeCAAB8UgJgAIAsNm7cuF8lse5Ro0ZF7969DRAA2KP69OkTI0eOTGTtjz322K9MEACAXUEADACQxcaOHTu7qqrqb0mrO5VKxfnnnx+pVMoQAYA9tv/4/Oc/n8j9R2Vl5d+uueaav5kiAAC7ggAYACDLTZ069bdJrLtv374xZMgQAwQA9ojDDjsssTeQTJ48+TcmCADAriIABgDIcpdeeumLVVVVryax9s9//vNRXFxsiADAblVaWhrnn39+Imuvqqr66+WXX/6SKQIAsKsIgAEAEuChhx76WRLrLisri9NPP90AAYDd6qyzzoqSkpIklp753e9+91MTBABgVxIAAwAkwA033DB3w4YNs5JY+3HHHRd9+vQxRABgt+jbt28cddRRiay9oqJi1te//vU3TBEAgF1JAAwAkBA///nPfxoR6aTVnUql4vOf/3zk5dl6AgC7Vn5+flx00UWRSqWSWH76F7/4xX+bIgAAu5q3cAAACXHHHXe8tW7duulJrL13795xzDHHGCIAsEudcMIJ0b1790TWXl5e/pc77rjjLVMEAGBXEwADACTI3XfffW8mk2lKYu1nnXVWtG3b1hAB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onv37vEv//IvccABBzSrdWcymaYnnnji9s997nPPeAoAAODDEQADAJBYDz/88NJjjjlmY+/evY+KiGZzFKq0tDSGDx8eq1evjvXr13sQAHLcwIED45prrol27do1t6VnZsyY8YOzzjprqqcAAAA+PAEwAACJdv/99795zDHHVO6zzz5HRDMKgVu0aBGHHXZYtGzZMhYuXBjpdNrDAJBjCgoK4pxzzonzzz8/WrRo0dyWn37uuefuOuWUUyZ4EgAA4KMRAAMAkHi///3v5w8bNmxF3759j2lO10GnUqno27dvDB06NBYvXhxbtmzxMADkiJ49e8YNN9wQgwcPblbf+434x7XPU6ZM+fbpp58+2ZMAAAAfnQAYAICc8OCDDy4ZNmzYin79+jWrEDgionXr1nHEEUdEfX19LF261MMAkGCpVCpOOOGEuOKKK6JNmzbNbv07wt9vnXPOOX/xNAAAwMcjAAYAIGc89NBDS4YNG7a8X79+xza3EDg/Pz8OPvjg6NWrV8yfPz8aGho8EAAJU1JSEpdffnmccMIJkZ+f3+zWn8lkGp944olvffazn53maQAAgI9PAAwAQE556KGHlo4cOXJdnz59RqWa252ZEdG1a9cYNmxYLFu2LCorKz0QAAnRt2/fuO6662K//fZrluvPZDLpp59++rvnnHPO054GAAD4ZATAAADknD/96U+LDj300KX7779/s7sOOiKiuLg4jjzyyCgpKYk333wz0um0hwIgSxUUFMRnP/vZuPDCC6OkpKRZ9iCdTjc88sgjt5x//vnTPREAAPDJCYABAMhJDz/88NId3wQelUqlmt09mqlUKvr06RMHH3xwLFy4MLZt2+ahAMgynTt3jrFjx8bQoUOjGV5aERH/CH+feOKJ2y+88MLnPBEAALBrCIABAMhZDz300JIePXq8NmjQoGPz8vJaNMcetG3bNkaNGhVNTU2xZMkSDwVAFkilUjF69Oi48soro0OHDs22D01NTdt++9vf/stll132oqcCAAB2HQEwAAA5bdKkSeXdu3efM3jw4GYbAufn58eAAQOiV69esWDBgti+fbsHA2Avad26dVx66aVx/PHHR35+frPtQ2NjY/WvfvWrf7nuuute81QAAMCuJQAGACDnTZ48eW1jY+OMI4444uiCgoKS5tqHrl27xqhRo2Lbtm2xcuVKDwbAHpRKpWLUqFExduzY6NWrV7PuRX19/fo77rjjK9/61rcWejIAAGDXEwADANAsPP/881UbNmx45rjjjjuqsLCwrLn2obCwMAYNGhT77bdfLF68OGpraz0cALtZ+/bt44orrogTTzwxCgub9/uU2tralTfffPPVP/nJT1Z7MgAAYPcQAAMA0Gz87W9/27p27doZJ5xwwsjCwsK2zbkXnTp1ipEjR0Z1dbXTwAC70ciRI+Pqq6+OHj16NPte1NTULL/hhhuu/e1vf7vOkwEAALuPABgAgGbltdde2zpv3rynTznllKFFRUWdmnMvCgsL49BDD4399tsvFi1a5DQwwC709qnfk08+udmf+o2I2Lx587yLL774unHjxm30dAAAwO71fgFwat9zYsTOftC4LmLjq610DwCAxOrVq1fhs88++69du3Y9QTciGhoaYurUqTF58uRobGzUEICPqaCgIE499dQYPXq04HeH8vLyp4499tjvrly5skE3AABg9+swrDYKuuz8ZwJgAAByWuvWrfNeeumlm/fdd9+zdeMfVq9eHffff38sWbJEMwA+ov322y8uuugi1z2/w8KFC38/fPjwnzY0NGR0AwAA9gwBMAAAzd7zzz9/8aGHHnp1RKR0IyKTycTMmTPjz3/+c9TV1WkIwAcoKSmJ8847L0aMGBGplL9Kdki//PLL9xx77LEPagUAAOxZ7xcA+wYwAADNwn333Tfn+OOP39yrV6/DQwgcqVQqevfuHcOHD49169ZFRUWFhwTgPRxyyCExduzY6N+/v/B3h0wm0/jMM8/828knnzxONwAAYM97v28AC4ABAGg2fve7370xePDgJf369Ts6lUrl60hEcXFxjBgxInr06BFLly6N2tpaTQHYoUOHDvGFL3whzjzzzCguLtaQHZqammoeeOCBWz73uc9N1w0AANg7BMAAALDDww8/vKygoOC54cOHH1FQUFCqI//QrVu3OO6446K0tDQWL14cTU1NmgI0Wy1btoxzzjknLr300ujevbuGvENtbe2K22677arbbrvtDd0AAIC9RwAMAADv8Oyzz25avHjx0yeddNKQoqKiTjryD3l5edGnT58YOXJkbN26NVatWqUpQLNz+OGHx1e+8pUYMGBA5OXlacg7VFVV/e3CCy+8/oEHHvDdAAAA2MsEwAAA8C7z58+vefbZZ58+44wz+hcX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OigOOOCAKCoq0pQs0djYuGXmzJk/PvPMMyc2NDS4XgAAAPjQBMAAAJADjjzyyNY/+9nPrujbt++5EZGnI9mluro6Fi5cGPPnz4958+ZFZWWlprBXtGvXLg455JAYMGBA9O/fP1q39nsjWSj91ltv/fmqq676xaxZs6q1AwAA+KgEwAAAkEN++ctfjhgzZsyNrVq16q0b2SmdTsfKlStj0aJFsXDhwli8eHFs27ZNY9gtSkpKol+/ftG/f//Yf//9o1evXpGX53dEslVNTc3yRx999EdXXnnlK7oBAAB8XAJgAADIMd26dSt8+OGHPzd48ODL8vPzbdyzXCaTiTVr1sTChQtj0aJFsWjRotiyZYvG8LGUlZVF//79/xn6du/ePVKplMZkuaampprXXnvtV2PGjHmgoqKiUUcAAIBPQgAMAAA56rjjjiv7r//6r8tdC508mzdvjuXLl8eKFSti+fLlsXjx4qipqdEY/pfi4uLo169f9O7dO/bZZ5/Yd999o6ysTGMSJJPJpJcsWfLn66677pfTp0/3mx8AAMAuIQAGAIAc99Of/nTIueeee3NpaWlf3UimxsbGWLlyZSxdujSWLVsWy5cvj3Xr1kUmk9GcZiKVSkWXLl1in332iT59+kSfPn2iV69eUVBQoDkJtXXr1sUPPvjgj6699tq/6wYAALArCYABAKAZaNeuXf64cePOGTp06BUFBQWtdST56uvrY+XKlf88KbxixYpYu3ZtpNNpzUm4vLy86Nq1a+yzzz7//KdXr17RsmVLzckBjY2NW/7617/+4pxzznm0srKySUcAAIBdTQAMAADNyIknntjmnnvuuXzfffcdk0qlHB3MMdu3b481a9bEmjVrYu3atbF27dooLy+PDRs2CIazUF5eXnTs2DG6desWXbt2jW7dukW3bt2iR48eUVhYqEE5JpPJNC5ZsuRR1z0DAAC7mwAYAACaoa9+9av7Xnfdddd16NDhCN3IfY2Njf8MhNetWxfr1q2LioqKWLduXWzbtk2DdrPS0tLo3LnzP//p0qVLdO3aNbp27eoK52Ziw4YNM//rv/7rxz/60Y+W6wYAALC7CYABAKAZ++UvfznirLPOuq64uNj3gZupmpqaWL9+/T//qaioiMrKyqisrIxNmzZFY2OjJn2AgoKCaN++fbRr1y7at28fHTt2jC5dukSnTp2ic+fOUVxcrEnN1NatW98aP378PVdcccXLugEAAOwpAmAAAGjm2rVrl//ggw+eOWLEiCsLCwvb6gjvtHnz5n+GwZs2bYrKysqorq6OLVu2xJYtW6K6ujqqq6sjk8nk3NpTqVS0bt06WrduHWVlZdGmTZsoLS39X2Fvu3btok2bNh4U/peGhobKl1566efnnHPO+OrqavevAwAAe5QAGAAAiIiIoUOHFt97770XHHjggRfk5+c7ssiHlk6n/xkEV1dXR01Nzfv+k8lkora2NtLpdNTX10dTU1PU1dXt0u8U5+XlRcuWLSM/Pz+KiooiLy8vWrVqFalUKoqLi3f6T0lJSbRq1eqfgW9paWnk5eUZMB9aU1NTzYIFC/745S9/+Y+zZ8+u0REAAGBvEAADAAD/y2mnndb2rrvuurRPnz5n5+XlFeoIe9LbgfDbtm/f/r7XUBcUFESLFi3++b/fDnxhT8pkMg1LliwZd8stt/xq0qRJVToCAADsTQJgAABgp0477bS2d95554X777//5wTBAP9XJpNpWLhw4QO33nrrHwS/AABAtni/ADi/7UHRc2c/SG+LqC33/gcAAHLZokWL6u69995X0un0swcddFCnkpKS3roC8A8VFRUz/7//7/+77aKLLpq6aNGiOh0BAACyRXH3xsgr3fnPBMAAAEDMnDmz8u67736qqalpWr9+/Ypbt27dN5VKpXQGaG4ymUx6zZo1U+65555/Peeccx6cOXNmpa4AAADZRgAMAAB8KDNnzqz88Y9//Gw6nZ4uCAaak7eD37vvvvtfzz///McEvwAAQDYTAAMAAB+JIBhoLgS/AABAEgmAAQCAj+XtILisrOyFvn37diwuLu4VEYJgIBdkKioqnrv33nu/PWbMmEcEvwAAQJK8XwCc2vecGLGzHzSui9j4aivdAwAA/unqq6/u8ZWvfOX8Pn36nJWXl9dCR4CkSafT9UuXLh3/X//1Xw/84he/WKMjAABAEnUYVhsFXXb+MwEwAADwkZ1xxhntb7/99rMPPPDA8/Pz81vrCJDtmpqaqhcsWPDgd77znUcmTpzotC8AAJBoAmAAAGC3GD58eMkPf/jDzwwePPjioqKijjoCZJv6+voNr7322u9vvPHGx2fPnl2jIwAAQC4QAAMAALvV0KFDi++5556zDjnkkPOKioq66giwt9XV1a19/fXXH7z++uvHC34BAIBcIwAGAAD2iFatWuXdc889w0455ZTzO3bseJSOAHtYZsOGDbOmTJny4PXXX/9qbW1tWksAAIBcJAAGAAD2uH/913/tf/7555/dq1ev0/Ly8lroCLC7pNPp+pUrV05+4IEHHvnOd76zSEcAAIBcJwAGAAD2mjPOOKP97bfffvYBBxzw2YKCgjY6AuwqjY2NVW+++eafv/e97z06YcKETToCAAA0FwJgAABgrxs+fHjJ97///dGDBg0aU1paur+OAB9XdXX1wtdee+3Rr371q1Nfe+21Wh0BAACaGwEwAACQVb761a/ue8EFF3y6b9++ZxUUFLTWEeCDNDY2bnnrrbfG/+EPf5j4ox/9aLmOAAAAzZkAGAAAyEpDhw4t/sEPfnDy4MGDz27dunV/HQHerbq6+s2XX375weuuu+7ppUuXbtcRAAAAATAAAJDlCgsLU3ffffeQ0aNHn9G1a9fj8vLyinQFmq90Ol1XXl4+bcqUKROuvfbav+sIAADA/yYABgAAEqNPnz4t/v3f/33UyJEjz2rfvv2nIiKlK9AsZDZt2vTXF1544bGvfe1rzzntCwAA8N4EwAAAQCJddNFFXa6++uqTDzzwwLNbtmzZTUcg99TV1a1ZsGDBuJ/+9KdP3n///et0BAAA4IMJgAEAgETr1q1b4d13333k4YcffmqHDh2OyMvLK9QVSK50Ot2wcePGWbNmzZp8/fXXz6qoqGjUFQAAgA9PAAwAAOSMo48+uvWtt956/CGHHHJKu3btBkdEnq5AIqQrKytfmzdv3uQ777xz+owZM6q1BAAA4OMRAAMAADnpuOOOK/vGN75x/CGHHHJa27ZtB4bvBUO2yVRVVc2dN2/epO9///vTpk+fvkVLAAAAPjkBMAAAkPNuu+22vmedddZJffr0Oa5Vq1a9dQT2ntra2uXLly+f/uijjz51xx13vKUjAAAAu5YAGAAAaFa+9KUvdbv44ouP7t+//wlOBsMekamqqpq7cOHCv/z+97+fcd9995VrCQAAwO4jAAYAAJqtSy65pOtll112jDAYdrl0VVXVvIULF/7lV7/61bO/+93v1moJAADAniEABgAAiIirr766x/nnnz9q//33P7JNmzZDUqlUga7Ah5fJZBoqKyv/vnjx4uf+9Kc/zbr33ntX6woAAMCeJwAGAAB4l379+hV97WtfGzRy5MhRPXv2PLaoqKizrsD/VV9fv37VqlXPvPDCC8/9+7//+5zFixfX6woAAMDeJQAGAAB4H61bt8678847Bx599NFHde/efURpaen+4apomq/M1q1bF69Zs+bF5557btY3v/nNOdXV1WltAQAAyB4CYAAAgI9g8ODBrcaOHXvI8OHDD+vevfvw1q1bHxACYXJXprq6+s01a9a88sorr7z8k5/8ZN5rr71Wqy0AAADZSwAMAADwCVx//fX7nHHGGYf169dvePv27Yfm5+e31hWSrLGxsXrjxo2vvvXWWy+PHz/+lR//+McrdQUAACA5BMAAAAC70Je//OUe55xzzvA+ffoM7tix45CioqKuukI2q6+vX7t27doXFy9ePGfixImv3Xvvvat1BQAAILkEwAAAALvRl7/85R6f+cxnBvfr129Qly5dDm/ZsqVAmL2qrq5u7bp16wS+AAAAOUoADAAAsIe0atUq75prrtnn2GOPPXi//fY7uH379oeUlpb2TaVS+brDbpKuqalZtnHjxnlvvfXW3GeffXbef/3Xfy2vra1Naw0AAEBuEgADAADsRQceeGDLq6+++oAhQ4Yc3LNnz4Pbtm17sGuj+biampqqq6qqXi8vL583Z86ceb/85S/nvfjii1t1BgAAoPkQAAMAAGSZoUOHFn/xi1/cf9CgQQf26NHjwHbt2h3YqlWr3qlUKk932CFdU1OzvLKycsHq1asXzJkzZ8Gf//znJTNmzKjWGgAAgOZNAAwAAJAAxx13XNkFF1xw4MEHH3xA165dDywtLd23pKRkn1QqVag7uS2TyTRs27ZtRXV19dJ169YtfOONNxZOmDBh4YQJEzbpDgAAAO8mAAYAAEiw8847r+OJJ57Yp3///vt16dKlT5s2bfZr3bp1v/z8/GLdSZampqaa6urqxZs3b16ybt26pQsXLlzy9NNPL33ooYc26A4AAAAflgAYAAAgx7Rr1y7/kksu6TFkyJCe++67b89OnTr1Kisr61VcXNyzZcuW3VKpVL4u7R2ZTKaprq6uvKamZtWWLVtWVlRUrFy6dOnK2bNnr7r//vvXVFZWNukSAAAAn4QAGAAAoBnp1KlTwec+97luQ4cO7bnPPvv0aNeuXafWrVt3Li4u7tqyZcvORUVFnfLy8lro1MeTTqe319fXr6+rq6uoqalZW11dvb6y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AACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoIQADAAAAAAAAlBCAAQAAAAAAAEoIwAAAAAAAAAAlBGAAAAAAAACAEgIwAAAAAAAAQAkBGAAAAAAAAKCEAAwAAAAAAABQQgAGAAAAAAAAKCEAAwAAAAAAAJQQgAEAAAAAAABKCMAAAAAAAAAAJQRgAAAAAAAAgBICMAAAAAAAAEAJARgAAAAAAACghAAMAAAAAAAAUEIABgAAAAAAACghAAMAAAAAAACUEIABAAAAAAAASgjAAAAAAAAAACUEYAAAAAAAAIASAjAAAAAAAABACQEYAAAAAAAAoIQADAAAAAAAAFBCAAYAAAAAAAAoMY3JP//9K8My551lzpAk293a7QAAAAAAAAD8iIw3r+SL7TpPxuSt4/ibJJuz20QDBgAAAAAAAHhzrJPp6NvHYcyyjLl7dJTPbl/Jp6sPLufSsM+5ec7q5YOrF0OeP/SVaAAAAAAAAIA3weH7u6zfm79dWDIMSw6225w785vsx3XyzasOby5ssz69c4sAAAAAAAAAr9n69C6bC9sT93a7rKdnORin5Otxynzi1JQcfiwCAwAAAAAAALxO69O7HH68TaaT98cp85R8vbp3Nfszv8q0LHn7xMF1sjk/ZzUPmZ/MmWefhAYAAAAAAAD4oayPdjn7223Gn7x6ZrXPnetX8mBKkpv3cufDd/Pufn5FL56SzcVtNheT3dNt8tQlAwAAAAAAAHyv1sm0ySv/9XtsNWZ3I/lHkgzHi7/4XY7WYz5yiwAAAAAAAAA/Ivtcv/3nPEyS1fHa42t5+vNLyX7JoRsCAAAAAAAAePPt1/nbV3/KvePn1Xc371/NYxEYAAAAAAAA4M0yTHk2rvNo2WdzvHZqzN9v/SF3vju3evng/at5fPDLPDu1yuGyZHSVAAAAAAAAAK/XOGe4ueSvZ4e8M8xZbVe5ceuPufvy3Oqkw4+v5emDX+fuuTlLhhwsEYIBAAAAAAAAXpclGR8OuXP0TR4cPM/9z/+SRyfNDf/1TZezOp/87KdjzizJZkhO7edMy/w/nAUAAAAAAADg/zaMWcZkP8/ZLsmLacr2/MV8+cnvs/tP5/4FmLjAq1ifcioAAAAASUVORK5CYII=";
@@ -15178,32 +15176,32 @@ function parseTextToLines(cell, colWidth, verbose) {
   }
   if (verbose) {
     console.log("[1/4] inputCells");
-    inputCells.forEach(function(cell, idx) {
-      return console.log("[1/4] [".concat(idx + 1, "] cell: ").concat(JSON.stringify(cell)));
+    inputCells.forEach(function(cell2, idx) {
+      return console.log("[1/4] [".concat(idx + 1, "] cell: ").concat(JSON.stringify(cell2)));
     });
   }
   var newLine = [];
-  inputCells.forEach(function(cell) {
-    var _a;
-    if (typeof cell.text === "string") {
-      if (cell.text.split(`
+  inputCells.forEach(function(cell2) {
+    var _a2;
+    if (typeof cell2.text === "string") {
+      if (cell2.text.split(`
 `).length > 1) {
-        cell.text.split(`
+        cell2.text.split(`
 `).forEach(function(textLine) {
           newLine.push({
             _type: SLIDE_OBJECT_TYPES.tablecell,
             text: textLine,
-            options: __assign(__assign({}, cell.options), { breakLine: true })
+            options: __assign(__assign({}, cell2.options), { breakLine: true })
           });
         });
       } else {
         newLine.push({
           _type: SLIDE_OBJECT_TYPES.tablecell,
-          text: cell.text.trim(),
-          options: cell.options
+          text: cell2.text.trim(),
+          options: cell2.options
         });
       }
-      if ((_a = cell.options) === null || _a === undefined ? undefined : _a.breakLine) {
+      if ((_a2 = cell2.options) === null || _a2 === undefined ? undefined : _a2.breakLine) {
         if (verbose)
           console.log("inputCells: new line > ".concat(JSON.stringify(newLine)));
         inputLines1.push(newLine);
@@ -15222,12 +15220,12 @@ function parseTextToLines(cell, colWidth, verbose) {
     });
   }
   inputLines1.forEach(function(line) {
-    line.forEach(function(cell) {
+    line.forEach(function(cell2) {
       var lineCells = [];
-      var cellTextStr = String(cell.text);
+      var cellTextStr = String(cell2.text);
       var lineWords = cellTextStr.split(" ");
       lineWords.forEach(function(word, idx) {
-        var cellProps = __assign({}, cell.options);
+        var cellProps = __assign({}, cell2.options);
         if (cellProps === null || cellProps === undefined ? undefined : cellProps.breakLine)
           cellProps.breakLine = idx + 1 === lineWords.length;
         lineCells.push({ _type: SLIDE_OBJECT_TYPES.tablecell, text: word + (idx + 1 < lineWords.length ? " " : ""), options: cellProps });
@@ -15487,10 +15485,10 @@ function getSlidesForTableRows(tableRows, tableProps, presLayout, masterSlide) {
           console.log("| SLIDE [".concat(tableRowSlides.length, "]: emuSlideTabH ...... = ").concat((emuSlideTabH / EMU).toFixed(1), " "));
         emuTabCurrH = 0;
         if ((tableProps.addHeaderToEach || tableProps.autoPageRepeatHeader) && tableProps._arrObjTabHeadRows) {
-          tableProps._arrObjTabHeadRows.forEach(function(row) {
+          tableProps._arrObjTabHeadRows.forEach(function(row2) {
             var newHeadRow = [];
             var maxLineHeight = 0;
-            row.forEach(function(cell) {
+            row2.forEach(function(cell) {
               newHeadRow.push(cell);
               if (cell._lineHeight > maxLineHeight)
                 maxLineHeight = cell._lineHeight;
@@ -15742,7 +15740,7 @@ function createSlideMaster(props, target) {
   if (props.slideNumber && typeof props.slideNumber === "object")
     target._slideNumberProps = props.slideNumber;
 }
-function addChartDefinition(target, type, data, opt) {
+function addChartDefinition(target, type2, data, opt) {
   var _a;
   function correctGridLineOptions(glOpts) {
     if (!glOpts || glOpts.style === "none")
@@ -15769,8 +15767,8 @@ function addChartDefinition(target, type, data, opt) {
   };
   var tmpOpt = null;
   var tmpData = [];
-  if (Array.isArray(type)) {
-    type.forEach(function(obj) {
+  if (Array.isArray(type2)) {
+    type2.forEach(function(obj) {
       tmpData = tmpData.concat(obj.data);
     });
     tmpOpt = data || opt;
@@ -15778,14 +15776,14 @@ function addChartDefinition(target, type, data, opt) {
     tmpData = data;
     tmpOpt = opt;
   }
-  tmpData.forEach(function(item, i) {
-    item._dataIndex = i;
+  tmpData.forEach(function(item, i2) {
+    item._dataIndex = i2;
     if (item.labels !== undefined && !Array.isArray(item.labels[0])) {
       item.labels = [item.labels];
     }
   });
   var options = tmpOpt && typeof tmpOpt === "object" ? tmpOpt : {};
-  options._type = type;
+  options._type = type2;
   options.x = typeof options.x !== "undefined" && options.x != null && !isNaN(Number(options.x)) ? options.x : 1;
   options.y = typeof options.y !== "undefined" && options.y != null && !isNaN(Number(options.y)) ? options.y : 1;
   options.w = options.w || "50%";
@@ -16372,11 +16370,11 @@ function addTableDefinition(target, tableRows, options, slideLayout, presLayout,
   }
   return newAutoPagedSlides;
 }
-function addTextDefinition(target, text, opts, isPlaceholder) {
+function addTextDefinition(target, text2, opts, isPlaceholder) {
   var newObject = {
     _type: isPlaceholder ? SLIDE_OBJECT_TYPES.placeholder : SLIDE_OBJECT_TYPES.text,
     shape: (opts === null || opts === undefined ? undefined : opts.shape) || SHAPE_TYPE.RECTANGLE,
-    text: !text || text.length === 0 ? [{ text: "", options: null }] : text,
+    text: !text2 || text2.length === 0 ? [{ text: "", options: null }] : text2,
     options: opts || {}
   };
   function cleanOpts(itemOpts) {
@@ -16514,39 +16512,39 @@ function addBackgroundDefinition(props, target) {
     target._bkgdImgRid = intRels;
   }
 }
-function createHyperlinkRels(target, text) {
+function createHyperlinkRels(target, text2) {
   var textObjs = [];
-  if (typeof text === "string" || typeof text === "number")
+  if (typeof text2 === "string" || typeof text2 === "number")
     return;
-  else if (Array.isArray(text))
-    textObjs = text;
-  else if (typeof text === "object")
-    textObjs = [text];
-  textObjs.forEach(function(text) {
-    if (Array.isArray(text)) {
-      createHyperlinkRels(target, text);
-    } else if (Array.isArray(text.text)) {
-      createHyperlinkRels(target, text.text);
-    } else if (text && typeof text === "object" && text.options && text.options.hyperlink && !text.options.hyperlink._rId) {
-      if (typeof text.options.hyperlink !== "object")
+  else if (Array.isArray(text2))
+    textObjs = text2;
+  else if (typeof text2 === "object")
+    textObjs = [text2];
+  textObjs.forEach(function(text3) {
+    if (Array.isArray(text3)) {
+      createHyperlinkRels(target, text3);
+    } else if (Array.isArray(text3.text)) {
+      createHyperlinkRels(target, text3.text);
+    } else if (text3 && typeof text3 === "object" && text3.options && text3.options.hyperlink && !text3.options.hyperlink._rId) {
+      if (typeof text3.options.hyperlink !== "object")
         console.log("ERROR: text `hyperlink` option should be an object. Ex: `hyperlink: {url:'https://github.com'}` ");
-      else if (!text.options.hyperlink.url && !text.options.hyperlink.slide)
+      else if (!text3.options.hyperlink.url && !text3.options.hyperlink.slide)
         console.log("ERROR: 'hyperlink requires either: `url` or `slide`'");
       else {
         var relId = getNewRelId(target);
         target._rels.push({
           type: SLIDE_OBJECT_TYPES.hyperlink,
-          data: text.options.hyperlink.slide ? "slide" : "dummy",
+          data: text3.options.hyperlink.slide ? "slide" : "dummy",
           rId: relId,
-          Target: encodeXmlEntities(text.options.hyperlink.url) || text.options.hyperlink.slide.toString()
+          Target: encodeXmlEntities(text3.options.hyperlink.url) || text3.options.hyperlink.slide.toString()
         });
-        text.options.hyperlink._rId = relId;
+        text3.options.hyperlink._rId = relId;
       }
     }
   });
 }
 var Slide = function() {
-  function Slide(params) {
+  function Slide2(params) {
     var _a;
     this.addSlide = params.addSlide;
     this.getSlide = params.getSlide;
@@ -16563,7 +16561,7 @@ var Slide = function() {
     this._slideObjects = [];
     this._slideNumberProps = ((_a = this._slideLayout) === null || _a === undefined ? undefined : _a._slideNumberProps) ? this._slideLayout._slideNumberProps : null;
   }
-  Object.defineProperty(Slide.prototype, "bkgd", {
+  Object.defineProperty(Slide2.prototype, "bkgd", {
     get: function() {
       return this._bkgd;
     },
@@ -16579,7 +16577,7 @@ var Slide = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(Slide.prototype, "background", {
+  Object.defineProperty(Slide2.prototype, "background", {
     get: function() {
       return this._background;
     },
@@ -16591,7 +16589,7 @@ var Slide = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(Slide.prototype, "color", {
+  Object.defineProperty(Slide2.prototype, "color", {
     get: function() {
       return this._color;
     },
@@ -16601,7 +16599,7 @@ var Slide = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(Slide.prototype, "hidden", {
+  Object.defineProperty(Slide2.prototype, "hidden", {
     get: function() {
       return this._hidden;
     },
@@ -16611,7 +16609,7 @@ var Slide = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(Slide.prototype, "slideNumber", {
+  Object.defineProperty(Slide2.prototype, "slideNumber", {
     get: function() {
       return this._slideNumberProps;
     },
@@ -16622,45 +16620,45 @@ var Slide = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(Slide.prototype, "newAutoPagedSlides", {
+  Object.defineProperty(Slide2.prototype, "newAutoPagedSlides", {
     get: function() {
       return this._newAutoPagedSlides;
     },
     enumerable: false,
     configurable: true
   });
-  Slide.prototype.addChart = function(type, data, options) {
+  Slide2.prototype.addChart = function(type2, data, options) {
     var optionsWithType = options || {};
-    optionsWithType._type = type;
-    addChartDefinition(this, type, data, options);
+    optionsWithType._type = type2;
+    addChartDefinition(this, type2, data, options);
     return this;
   };
-  Slide.prototype.addImage = function(options) {
+  Slide2.prototype.addImage = function(options) {
     addImageDefinition(this, options);
     return this;
   };
-  Slide.prototype.addMedia = function(options) {
+  Slide2.prototype.addMedia = function(options) {
     addMediaDefinition(this, options);
     return this;
   };
-  Slide.prototype.addNotes = function(notes) {
+  Slide2.prototype.addNotes = function(notes) {
     addNotesDefinition(this, notes);
     return this;
   };
-  Slide.prototype.addShape = function(shapeName, options) {
+  Slide2.prototype.addShape = function(shapeName, options) {
     addShapeDefinition(this, shapeName, options);
     return this;
   };
-  Slide.prototype.addTable = function(tableRows, options) {
+  Slide2.prototype.addTable = function(tableRows, options) {
     this._newAutoPagedSlides = addTableDefinition(this, tableRows, options, this._slideLayout, this._presLayout, this.addSlide, this.getSlide);
     return this;
   };
-  Slide.prototype.addText = function(text, options) {
-    var textParam = typeof text === "string" || typeof text === "number" ? [{ text, options }] : text;
+  Slide2.prototype.addText = function(text2, options) {
+    var textParam = typeof text2 === "string" || typeof text2 === "number" ? [{ text: text2, options }] : text2;
     addTextDefinition(this, textParam, options, false);
     return this;
   };
-  return Slide;
+  return Slide2;
 }();
 function createExcelWorksheet(chartObject, zip) {
   return __awaiter(this, undefined, undefined, function() {
@@ -16670,10 +16668,10 @@ function createExcelWorksheet(chartObject, zip) {
         case 0:
           data = chartObject.data;
           return [4, new Promise(function(resolve, reject) {
-            var _a, _b;
+            var _a2, _b;
             var zipExcel = new import_jszip.default;
             var intBubbleCols = (data.length - 1) * 2 + 1;
-            var IS_MULTI_CAT_AXES = ((_b = (_a = data[0]) === null || _a === undefined ? undefined : _a.labels) === null || _b === undefined ? undefined : _b.length) > 1;
+            var IS_MULTI_CAT_AXES = ((_b = (_a2 = data[0]) === null || _a2 === undefined ? undefined : _a2.labels) === null || _b === undefined ? undefined : _b.length) > 1;
             zipExcel.folder("_rels");
             zipExcel.folder("docProps");
             zipExcel.folder("xl/_rels");
@@ -16720,12 +16718,12 @@ function createExcelWorksheet(chartObject, zip) {
                 strSharedStrings_1 += '<si><t xml:space="preserve"></t></si>';
               }
               if (chartObject.opts._type === CHART_TYPE.BUBBLE || chartObject.opts._type === CHART_TYPE.BUBBLE3D) {
-                data.forEach(function(objData, idx) {
-                  if (idx === 0)
+                data.forEach(function(objData, idx2) {
+                  if (idx2 === 0)
                     strSharedStrings_1 += "<si><t>X-Axis</t></si>";
                   else {
-                    strSharedStrings_1 += "<si><t>".concat(encodeXmlEntities(objData.name || "Y-Axis".concat(idx)), "</t></si>");
-                    strSharedStrings_1 += "<si><t>".concat(encodeXmlEntities("Size".concat(idx)), "</t></si>");
+                    strSharedStrings_1 += "<si><t>".concat(encodeXmlEntities(objData.name || "Y-Axis".concat(idx2)), "</t></si>");
+                    strSharedStrings_1 += "<si><t>".concat(encodeXmlEntities("Size".concat(idx2)), "</t></si>");
                   }
                 });
               } else {
@@ -16752,29 +16750,29 @@ function createExcelWorksheet(chartObject, zip) {
                 strTableXml_1 += '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:'.concat(getExcelColName(intBubbleCols)).concat(intBubbleCols, '" totalsRowShown="0">');
                 strTableXml_1 += '<tableColumns count="'.concat(intBubbleCols, '">');
                 var idxColLtr_1 = 1;
-                data.forEach(function(obj, idx) {
-                  if (idx === 0) {
-                    strTableXml_1 += '<tableColumn id="'.concat(idx + 1, '" name="X-Values"/>');
+                data.forEach(function(obj, idx2) {
+                  if (idx2 === 0) {
+                    strTableXml_1 += '<tableColumn id="'.concat(idx2 + 1, '" name="X-Values"/>');
                   } else {
-                    strTableXml_1 += '<tableColumn id="'.concat(idx + idxColLtr_1, '" name="').concat(obj.name, '"/>');
+                    strTableXml_1 += '<tableColumn id="'.concat(idx2 + idxColLtr_1, '" name="').concat(obj.name, '"/>');
                     idxColLtr_1++;
-                    strTableXml_1 += '<tableColumn id="'.concat(idx + idxColLtr_1, '" name="Size').concat(idx, '"/>');
+                    strTableXml_1 += '<tableColumn id="'.concat(idx2 + idxColLtr_1, '" name="Size').concat(idx2, '"/>');
                   }
                 });
               } else if (chartObject.opts._type === CHART_TYPE.SCATTER) {
                 strTableXml_1 += '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:'.concat(getExcelColName(data.length)).concat(data[0].values.length + 1, '" totalsRowShown="0">');
                 strTableXml_1 += '<tableColumns count="'.concat(data.length, '">');
-                data.forEach(function(_obj, idx) {
-                  strTableXml_1 += '<tableColumn id="'.concat(idx + 1, '" name="').concat(idx === 0 ? "X-Values" : "Y-Value ").concat(idx, '"/>');
+                data.forEach(function(_obj, idx2) {
+                  strTableXml_1 += '<tableColumn id="'.concat(idx2 + 1, '" name="').concat(idx2 === 0 ? "X-Values" : "Y-Value ").concat(idx2, '"/>');
                 });
               } else {
                 strTableXml_1 += '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:'.concat(getExcelColName(data.length + data[0].labels.length)).concat(data[0].labels[0].length + 1, `'" totalsRowShown="0">`);
                 strTableXml_1 += '<tableColumns count="'.concat(data.length + data[0].labels.length, '">');
-                data[0].labels.forEach(function(_labelsGroup, idx) {
-                  strTableXml_1 += '<tableColumn id="'.concat(idx + 1, '" name="Column').concat(idx + 1, '"/>');
+                data[0].labels.forEach(function(_labelsGroup, idx2) {
+                  strTableXml_1 += '<tableColumn id="'.concat(idx2 + 1, '" name="Column').concat(idx2 + 1, '"/>');
                 });
-                data.forEach(function(obj, idx) {
-                  strTableXml_1 += '<tableColumn id="'.concat(idx + data[0].labels.length + 1, '" name="').concat(encodeXmlEntities(obj.name), '"/>');
+                data.forEach(function(obj, idx2) {
+                  strTableXml_1 += '<tableColumn id="'.concat(idx2 + data[0].labels.length + 1, '" name="').concat(encodeXmlEntities(obj.name), '"/>');
                 });
               }
               strTableXml_1 += "</tableColumns>";
@@ -16802,14 +16800,14 @@ function createExcelWorksheet(chartObject, zip) {
                   strSheetXml_1 += '<c r="'.concat(getExcelColName(idx + 1), '1" t="s"><v>').concat(idx, "</v></c>");
                 }
                 strSheetXml_1 += "</row>";
-                data[0].values.forEach(function(val, idx) {
-                  strSheetXml_1 += '<row r="'.concat(idx + 2, '" spans="1:').concat(intBubbleCols, '">');
-                  strSheetXml_1 += '<c r="A'.concat(idx + 2, '"><v>').concat(val, "</v></c>");
+                data[0].values.forEach(function(val, idx2) {
+                  strSheetXml_1 += '<row r="'.concat(idx2 + 2, '" spans="1:').concat(intBubbleCols, '">');
+                  strSheetXml_1 += '<c r="A'.concat(idx2 + 2, '"><v>').concat(val, "</v></c>");
                   var idxColLtr = 2;
                   for (var idy = 1;idy < data.length; idy++) {
-                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idxColLtr)).concat(idx + 2, '"><v>').concat(data[idy].values[idx] || "", "</v></c>");
+                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idxColLtr)).concat(idx2 + 2, '"><v>').concat(data[idy].values[idx2] || "", "</v></c>");
                     idxColLtr++;
-                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idxColLtr)).concat(idx + 2, '"><v>').concat(data[idy].sizes[idx] || "", "</v></c>");
+                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idxColLtr)).concat(idx2 + 2, '"><v>').concat(data[idy].sizes[idx2] || "", "</v></c>");
                     idxColLtr++;
                   }
                   strSheetXml_1 += "</row>";
@@ -16821,11 +16819,11 @@ function createExcelWorksheet(chartObject, zip) {
                   strSheetXml_1 += '<c r="'.concat(getExcelColName(idx + 1), '1" t="s"><v>').concat(idx, "</v></c>");
                 }
                 strSheetXml_1 += "</row>";
-                data[0].values.forEach(function(val, idx) {
-                  strSheetXml_1 += '<row r="'.concat(idx + 2, '" spans="1:').concat(data.length, '">');
-                  strSheetXml_1 += '<c r="A'.concat(idx + 2, '"><v>').concat(val, "</v></c>");
+                data[0].values.forEach(function(val, idx2) {
+                  strSheetXml_1 += '<row r="'.concat(idx2 + 2, '" spans="1:').concat(data.length, '">');
+                  strSheetXml_1 += '<c r="A'.concat(idx2 + 2, '"><v>').concat(val, "</v></c>");
                   for (var idy = 1;idy < data.length; idy++) {
-                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idy + 1)).concat(idx + 2, '"><v>').concat(data[idy].values[idx] || data[idy].values[idx] === 0 ? data[idy].values[idx] : "", "</v></c>");
+                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idy + 1)).concat(idx2 + 2, '"><v>').concat(data[idy].values[idx2] || data[idy].values[idx2] === 0 ? data[idy].values[idx2] : "", "</v></c>");
                   }
                   strSheetXml_1 += "</row>";
                 });
@@ -16833,22 +16831,22 @@ function createExcelWorksheet(chartObject, zip) {
                 strSheetXml_1 += "<sheetData>";
                 if (!IS_MULTI_CAT_AXES) {
                   strSheetXml_1 += '<row r="1" spans="1:'.concat(data.length + data[0].labels.length, '">');
-                  data[0].labels.forEach(function(_labelsGroup, idx) {
-                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idx + 1), '1" t="s"><v>0</v></c>');
+                  data[0].labels.forEach(function(_labelsGroup, idx2) {
+                    strSheetXml_1 += '<c r="'.concat(getExcelColName(idx2 + 1), '1" t="s"><v>0</v></c>');
                   });
                   for (var idx = 0;idx < data.length; idx++) {
                     strSheetXml_1 += '<c r="'.concat(getExcelColName(idx + 1 + data[0].labels.length), '1" t="s"><v>').concat(idx + 1, "</v></c>");
                   }
                   strSheetXml_1 += "</row>";
-                  data[0].labels[0].forEach(function(_cat, idx) {
-                    strSheetXml_1 += '<row r="'.concat(idx + 2, '" spans="1:').concat(data.length + data[0].labels.length, '">');
-                    for (var idx2 = data[0].labels.length - 1;idx2 >= 0; idx2--) {
-                      strSheetXml_1 += '<c r="'.concat(getExcelColName(data[0].labels.length - idx2)).concat(idx + 2, '" t="s">');
-                      strSheetXml_1 += "<v>".concat(data.length + idx + 1, "</v>");
+                  data[0].labels[0].forEach(function(_cat, idx2) {
+                    strSheetXml_1 += '<row r="'.concat(idx2 + 2, '" spans="1:').concat(data.length + data[0].labels.length, '">');
+                    for (var idx22 = data[0].labels.length - 1;idx22 >= 0; idx22--) {
+                      strSheetXml_1 += '<c r="'.concat(getExcelColName(data[0].labels.length - idx22)).concat(idx2 + 2, '" t="s">');
+                      strSheetXml_1 += "<v>".concat(data.length + idx2 + 1, "</v>");
                       strSheetXml_1 += "</c>";
                     }
                     for (var idy = 0;idy < data.length; idy++) {
-                      strSheetXml_1 += '<c r="'.concat(getExcelColName(data[0].labels.length + idy + 1)).concat(idx + 2, '"><v>').concat(data[idy].values[idx] || "", "</v></c>");
+                      strSheetXml_1 += '<c r="'.concat(getExcelColName(data[0].labels.length + idy + 1)).concat(idx2 + 2, '"><v>').concat(data[idy].values[idx2] || "", "</v></c>");
                     }
                     strSheetXml_1 += "</row>";
                   });
@@ -16864,22 +16862,22 @@ function createExcelWorksheet(chartObject, zip) {
                   var TOT_SER = data.length;
                   var TOT_CAT = data[0].labels[0].length;
                   var TOT_LVL = data[0].labels.length;
-                  var _loop_1 = function(idx) {
-                    strSheetXml_1 += '<row r="'.concat(idx + 2, '" spans="1:').concat(TOT_SER + TOT_LVL, '">');
+                  var _loop_1 = function(idx2) {
+                    strSheetXml_1 += '<row r="'.concat(idx2 + 2, '" spans="1:').concat(TOT_SER + TOT_LVL, '">');
                     var totLabels = TOT_SER;
                     var revLabelGroups = data[0].labels.slice().reverse();
-                    revLabelGroups.forEach(function(labelsGroup, idy) {
-                      var colLabel = labelsGroup[idx];
+                    revLabelGroups.forEach(function(labelsGroup, idy2) {
+                      var colLabel = labelsGroup[idx2];
                       if (colLabel) {
-                        var totGrpLbls = idy === 0 ? 1 : revLabelGroups[idy - 1].filter(function(label) {
+                        var totGrpLbls = idy2 === 0 ? 1 : revLabelGroups[idy2 - 1].filter(function(label) {
                           return label && label !== "";
                         }).length;
                         totLabels += totGrpLbls;
-                        strSheetXml_1 += '<c r="'.concat(getExcelColName(idx + 1 + idy)).concat(idx + 2, '" t="s"><v>').concat(totLabels, "</v></c>");
+                        strSheetXml_1 += '<c r="'.concat(getExcelColName(idx2 + 1 + idy2)).concat(idx2 + 2, '" t="s"><v>').concat(totLabels, "</v></c>");
                       }
                     });
                     for (var idy = 0;idy < TOT_SER; idy++) {
-                      strSheetXml_1 += '<c r="'.concat(getExcelColName(TOT_LVL + idy + 1)).concat(idx + 2, '"><v>').concat(data[idy].values[idx] || 0, "</v></c>");
+                      strSheetXml_1 += '<c r="'.concat(getExcelColName(TOT_LVL + idy + 1)).concat(idx2 + 2, '"><v>').concat(data[idy].values[idx2] || 0, "</v></c>");
                     }
                     strSheetXml_1 += "</row>";
                   };
@@ -16954,12 +16952,12 @@ function makeXmlCharts(rel) {
     }
   }
   if (Array.isArray(rel.opts._type)) {
-    rel.opts._type.forEach(function(type) {
-      var options = __assign(__assign({}, rel.opts), type.options);
+    rel.opts._type.forEach(function(type2) {
+      var options = __assign(__assign({}, rel.opts), type2.options);
       var valAxisId = options.secondaryValAxis ? AXIS_ID_VALUE_SECONDARY : AXIS_ID_VALUE_PRIMARY;
       var catAxisId = options.secondaryCatAxis ? AXIS_ID_CATEGORY_SECONDARY : AXIS_ID_CATEGORY_PRIMARY;
       usesSecondaryValAxis = usesSecondaryValAxis || options.secondaryValAxis;
-      strXml += makeChartType(type.type, type.data, options, valAxisId, catAxisId);
+      strXml += makeChartType(type2.type, type2.data, options, valAxisId, catAxisId);
     });
   } else {
     strXml += makeChartType(rel.opts._type, rel.data, rel.opts, AXIS_ID_VALUE_PRIMARY, AXIS_ID_CATEGORY_PRIMARY);
@@ -17317,10 +17315,10 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
           var chartUuid_1 = getUuid("-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
           if (obj.labels[0] && (opts.dataLabelFormatScatter === "custom" || opts.dataLabelFormatScatter === "customXY")) {
             strXml += "<c:dLbls>";
-            obj.labels[0].forEach(function(label, idx) {
+            obj.labels[0].forEach(function(label, idx2) {
               if (opts.dataLabelFormatScatter === "custom" || opts.dataLabelFormatScatter === "customXY") {
                 strXml += "  <c:dLbl>";
-                strXml += '    <c:idx val="'.concat(idx, '"/>');
+                strXml += '    <c:idx val="'.concat(idx2, '"/>');
                 strXml += "    <c:tx>";
                 strXml += "      <c:rich>";
                 strXml += "            <a:bodyPr>";
@@ -17386,7 +17384,7 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
                 strXml += "    <c:extLst>";
                 strXml += '      <c:ext uri="{CE6537A1-D6FC-4f65-9D91-7224C49458BB}" xmlns:c15="http://schemas.microsoft.com/office/drawing/2012/chart"/>';
                 strXml += '      <c:ext uri="{C3380CC4-5D6E-409C-BE32-E72D297353CC}" xmlns:c16="http://schemas.microsoft.com/office/drawing/2014/chart">';
-                strXml += '            <c16:uniqueId val="{'.concat("00000000".substring(0, 8 - (idx + 1).toString().length).toString()).concat(idx + 1).concat(chartUuid_1, '}"/>');
+                strXml += '            <c16:uniqueId val="{'.concat("00000000".substring(0, 8 - (idx2 + 1).toString().length).toString()).concat(idx2 + 1).concat(chartUuid_1, '}"/>');
                 strXml += "      </c:ext>";
                 strXml += "        </c:extLst>";
                 strXml += "</c:dLbl>";
@@ -17458,8 +17456,8 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
           strXml += '      <c:ptCount val="'.concat(data[0].values.length, '"/>');
-          data[0].values.forEach(function(value, idx) {
-            strXml += '<c:pt idx="'.concat(idx, '"><c:v>').concat(value || value === 0 ? value : "", "</c:v></c:pt>");
+          data[0].values.forEach(function(value, idx2) {
+            strXml += '<c:pt idx="'.concat(idx2, '"><c:v>').concat(value || value === 0 ? value : "", "</c:v></c:pt>");
           });
           strXml += "    </c:numCache>";
           strXml += "  </c:numRef>";
@@ -17470,8 +17468,8 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
           strXml += '      <c:ptCount val="'.concat(data[0].values.length, '"/>');
-          data[0].values.forEach(function(_value, idx) {
-            strXml += '<c:pt idx="'.concat(idx, '"><c:v>').concat(obj.values[idx] || obj.values[idx] === 0 ? obj.values[idx] : "", "</c:v></c:pt>");
+          data[0].values.forEach(function(_value, idx2) {
+            strXml += '<c:pt idx="'.concat(idx2, '"><c:v>').concat(obj.values[idx2] || obj.values[idx2] === 0 ? obj.values[idx2] : "", "</c:v></c:pt>");
           });
           strXml += "    </c:numCache>";
           strXml += "  </c:numRef>";
@@ -17552,8 +17550,8 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
           strXml += '      <c:ptCount val="'.concat(data[0].values.length, '"/>');
-          data[0].values.forEach(function(value, idx) {
-            strXml += '<c:pt idx="'.concat(idx, '"><c:v>').concat(value || value === 0 ? value : "", "</c:v></c:pt>");
+          data[0].values.forEach(function(value, idx2) {
+            strXml += '<c:pt idx="'.concat(idx2, '"><c:v>').concat(value || value === 0 ? value : "", "</c:v></c:pt>");
           });
           strXml += "    </c:numCache>";
           strXml += "  </c:numRef>";
@@ -17565,8 +17563,8 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
           strXml += '      <c:ptCount val="'.concat(data[0].values.length, '"/>');
-          data[0].values.forEach(function(_value, idx) {
-            strXml += '<c:pt idx="'.concat(idx, '"><c:v>').concat(obj.values[idx] || obj.values[idx] === 0 ? obj.values[idx] : "", "</c:v></c:pt>");
+          data[0].values.forEach(function(_value, idx2) {
+            strXml += '<c:pt idx="'.concat(idx2, '"><c:v>').concat(obj.values[idx2] || obj.values[idx2] === 0 ? obj.values[idx2] : "", "</c:v></c:pt>");
           });
           strXml += "    </c:numCache>";
           strXml += "  </c:numRef>";
@@ -17579,8 +17577,8 @@ function makeChartType(chartType, data, opts, valAxisId, catAxisId, isMultiTypeC
         strXml += "      <c:numCache>";
         strXml += "        <c:formatCode>General</c:formatCode>";
         strXml += '           <c:ptCount val="'.concat(obj.sizes.length, '"/>');
-        obj.sizes.forEach(function(value, idx) {
-          strXml += '<c:pt idx="'.concat(idx, '"><c:v>').concat(value || "", "</c:v></c:pt>");
+        obj.sizes.forEach(function(value, idx2) {
+          strXml += '<c:pt idx="'.concat(idx2, '"><c:v>').concat(value || "", "</c:v></c:pt>");
         });
         strXml += "      </c:numCache>";
         strXml += "    </c:numRef>";
@@ -17898,8 +17896,8 @@ function makeValAxis(opts, valAxisId) {
     var crosses = isRight ? "max" : "autoZero";
     strXml += ' <c:crosses val="' + crosses + '"/>';
   }
-  strXml += ' <c:crossBetween val="' + (opts._type === CHART_TYPE.SCATTER || !!(Array.isArray(opts._type) && opts._type.filter(function(type) {
-    return type.type === CHART_TYPE.AREA;
+  strXml += ' <c:crossBetween val="' + (opts._type === CHART_TYPE.SCATTER || !!(Array.isArray(opts._type) && opts._type.filter(function(type2) {
+    return type2.type === CHART_TYPE.AREA;
   }).length > 0) ? "midCat" : "between") + '"/>';
   if (opts.valAxisMajorUnit)
     strXml += ' <c:majorUnit val="'.concat(opts.valAxisMajorUnit, '"/>');
@@ -18041,17 +18039,17 @@ function createShadowElement(options, defaults) {
   }
   var strXml = "<a:effectLst>";
   var opts = __assign(__assign({}, defaults), options);
-  var type = opts.type || "outer";
+  var type2 = opts.type || "outer";
   var blur = valToPts(opts.blur);
   var offset = valToPts(opts.offset);
   var angle = Math.round(opts.angle * 60000);
   var color = opts.color;
   var opacity = Math.round(opts.opacity * 1e5);
   var rotShape = opts.rotateWithShape ? 1 : 0;
-  strXml += "<a:".concat(type, 'Shdw sx="100000" sy="100000" kx="0" ky="0"  algn="bl" blurRad="').concat(blur, '" rotWithShape="').concat(rotShape, '" dist="').concat(offset, '" dir="').concat(angle, '">');
+  strXml += "<a:".concat(type2, 'Shdw sx="100000" sy="100000" kx="0" ky="0"  algn="bl" blurRad="').concat(blur, '" rotWithShape="').concat(rotShape, '" dist="').concat(offset, '" dir="').concat(angle, '">');
   strXml += '<a:srgbClr val="'.concat(color, '">');
   strXml += '<a:alpha val="'.concat(opacity, '"/></a:srgbClr>');
-  strXml += "</a:".concat(type, "Shdw>");
+  strXml += "</a:".concat(type2, "Shdw>");
   strXml += "</a:effectLst>";
   return strXml;
 }
@@ -18281,7 +18279,7 @@ function slideObjectToXml(slide) {
   strSlideXml += '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>';
   strSlideXml += '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>';
   slide._slideObjects.forEach(function(slideItemObj, idx) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a2, _b, _c, _d, _e, _f, _g, _h;
     var x = 0;
     var y = 0;
     var cx = getSmartParseNumber("75%", "X", slide._presLayout);
@@ -18294,7 +18292,7 @@ function slideObjectToXml(slide) {
     var intColW = 0;
     var cellOpts = null;
     var strXml = null;
-    var sizing = (_a = slideItemObj.options) === null || _a === undefined ? undefined : _a.sizing;
+    var sizing = (_a2 = slideItemObj.options) === null || _a2 === undefined ? undefined : _a2.sizing;
     var rounding = (_b = slideItemObj.options) === null || _b === undefined ? undefined : _b.rounding;
     if (slide._slideLayout !== undefined && slide._slideLayout._slideObjects !== undefined && slideItemObj.options && slideItemObj.options.placeholder) {
       placeholderObj = slide._slideLayout._slideObjects.filter(function(object) {
@@ -18363,21 +18361,21 @@ function slideObjectToXml(slide) {
           strXml += "</a:tblGrid>";
         }
         arrTabRows.forEach(function(cells) {
-          var _a, _b;
-          var _loop_1 = function(cIdx) {
-            var cell = cells[cIdx];
-            var colspan = (_a = cell.options) === null || _a === undefined ? undefined : _a.colspan;
-            var rowspan = (_b = cell.options) === null || _b === undefined ? undefined : _b.rowspan;
+          var _a3, _b2;
+          var _loop_1 = function(cIdx2) {
+            var cell = cells[cIdx2];
+            var colspan = (_a3 = cell.options) === null || _a3 === undefined ? undefined : _a3.colspan;
+            var rowspan = (_b2 = cell.options) === null || _b2 === undefined ? undefined : _b2.rowspan;
             if (colspan && colspan > 1) {
               var vMergeCells = new Array(colspan - 1).fill(undefined).map(function(_) {
                 return { _type: SLIDE_OBJECT_TYPES.tablecell, options: { rowspan }, _hmerge: true };
               });
-              cells.splice.apply(cells, __spreadArray([cIdx + 1, 0], vMergeCells, false));
-              cIdx += colspan;
+              cells.splice.apply(cells, __spreadArray([cIdx2 + 1, 0], vMergeCells, false));
+              cIdx2 += colspan;
             } else {
-              cIdx += 1;
+              cIdx2 += 1;
             }
-            out_cIdx_1 = cIdx;
+            out_cIdx_1 = cIdx2;
           };
           var out_cIdx_1;
           for (var cIdx = 0;cIdx < cells.length; ) {
@@ -18390,9 +18388,9 @@ function slideObjectToXml(slide) {
           if (!nextRow)
             return;
           cells.forEach(function(cell, cIdx) {
-            var _a, _b;
-            var rowspan = cell._rowContinue || ((_a = cell.options) === null || _a === undefined ? undefined : _a.rowspan);
-            var colspan = (_b = cell.options) === null || _b === undefined ? undefined : _b.colspan;
+            var _a3, _b2;
+            var rowspan = cell._rowContinue || ((_a3 = cell.options) === null || _a3 === undefined ? undefined : _a3.rowspan);
+            var colspan = (_b2 = cell.options) === null || _b2 === undefined ? undefined : _b2.colspan;
             var _hmerge = cell._hmerge;
             if (rowspan && rowspan > 1) {
               var hMergeCell = { _type: SLIDE_OBJECT_TYPES.tablecell, options: { colspan }, _rowContinue: rowspan - 1, _vmerge: true, _hmerge };
@@ -18411,22 +18409,22 @@ function slideObjectToXml(slide) {
           }
           strXml += '<a:tr h="'.concat(intRowH, '">');
           cells.forEach(function(cellObj) {
-            var _a, _b, _c, _d, _e;
+            var _a3, _b2, _c2, _d2, _e2;
             var cell = cellObj;
             var cellSpanAttrs = {
-              rowSpan: ((_a = cell.options) === null || _a === undefined ? undefined : _a.rowspan) > 1 ? cell.options.rowspan : undefined,
-              gridSpan: ((_b = cell.options) === null || _b === undefined ? undefined : _b.colspan) > 1 ? cell.options.colspan : undefined,
+              rowSpan: ((_a3 = cell.options) === null || _a3 === undefined ? undefined : _a3.rowspan) > 1 ? cell.options.rowspan : undefined,
+              gridSpan: ((_b2 = cell.options) === null || _b2 === undefined ? undefined : _b2.colspan) > 1 ? cell.options.colspan : undefined,
               vMerge: cell._vmerge ? 1 : undefined,
               hMerge: cell._hmerge ? 1 : undefined
             };
             var cellSpanAttrStr = Object.keys(cellSpanAttrs).map(function(k) {
               return [k, cellSpanAttrs[k]];
-            }).filter(function(_a) {
-              _a[0];
-              var v = _a[1];
+            }).filter(function(_a4) {
+              _a4[0];
+              var v = _a4[1];
               return !!v;
-            }).map(function(_a) {
-              var k = _a[0], v = _a[1];
+            }).map(function(_a4) {
+              var k = _a4[0], v = _a4[1];
               return "".concat(String(k), '="').concat(String(v), '"');
             }).join(" ");
             if (cellSpanAttrStr)
@@ -18435,17 +18433,17 @@ function slideObjectToXml(slide) {
               strXml += "<a:tc".concat(cellSpanAttrStr, "><a:tcPr/></a:tc>");
               return;
             }
-            var cellOpts = cell.options || {};
-            cell.options = cellOpts;
+            var cellOpts2 = cell.options || {};
+            cell.options = cellOpts2;
             ["align", "bold", "border", "color", "fill", "fontFace", "fontSize", "margin", "underline", "valign"].forEach(function(name) {
-              if (objTabOpts[name] && !cellOpts[name] && cellOpts[name] !== 0)
-                cellOpts[name] = objTabOpts[name];
+              if (objTabOpts[name] && !cellOpts2[name] && cellOpts2[name] !== 0)
+                cellOpts2[name] = objTabOpts[name];
             });
-            var cellValign = cellOpts.valign ? ' anchor="'.concat(cellOpts.valign.replace(/^c$/i, "ctr").replace(/^m$/i, "ctr").replace("center", "ctr").replace("middle", "ctr").replace("top", "t").replace("btm", "b").replace("bottom", "b"), '"') : "";
-            var fillColor = ((_d = (_c = cell._optImp) === null || _c === undefined ? undefined : _c.fill) === null || _d === undefined ? undefined : _d.color) ? cell._optImp.fill.color : ((_e = cell._optImp) === null || _e === undefined ? undefined : _e.fill) && typeof cell._optImp.fill === "string" ? cell._optImp.fill : "";
-            fillColor = fillColor || cellOpts.fill ? cellOpts.fill : "";
+            var cellValign = cellOpts2.valign ? ' anchor="'.concat(cellOpts2.valign.replace(/^c$/i, "ctr").replace(/^m$/i, "ctr").replace("center", "ctr").replace("middle", "ctr").replace("top", "t").replace("btm", "b").replace("bottom", "b"), '"') : "";
+            var fillColor = ((_d2 = (_c2 = cell._optImp) === null || _c2 === undefined ? undefined : _c2.fill) === null || _d2 === undefined ? undefined : _d2.color) ? cell._optImp.fill.color : ((_e2 = cell._optImp) === null || _e2 === undefined ? undefined : _e2.fill) && typeof cell._optImp.fill === "string" ? cell._optImp.fill : "";
+            fillColor = fillColor || cellOpts2.fill ? cellOpts2.fill : "";
             var cellFill = fillColor ? genXmlColorSelection(fillColor) : "";
-            var cellMargin = cellOpts.margin === 0 || cellOpts.margin ? cellOpts.margin : DEF_CELL_MARGIN_IN;
+            var cellMargin = cellOpts2.margin === 0 || cellOpts2.margin ? cellOpts2.margin : DEF_CELL_MARGIN_IN;
             if (!Array.isArray(cellMargin) && typeof cellMargin === "number")
               cellMargin = [cellMargin, cellMargin, cellMargin, cellMargin];
             var cellMarginXml = "";
@@ -18455,17 +18453,17 @@ function slideObjectToXml(slide) {
               cellMarginXml = ' marL="'.concat(inch2Emu(cellMargin[3]), '" marR="').concat(inch2Emu(cellMargin[1]), '" marT="').concat(inch2Emu(cellMargin[0]), '" marB="').concat(inch2Emu(cellMargin[2]), '"');
             }
             strXml += "<a:tc".concat(cellSpanAttrStr, ">").concat(genXmlTextBody(cell), "<a:tcPr").concat(cellMarginXml).concat(cellValign, ">");
-            if (cellOpts.border && Array.isArray(cellOpts.border)) {
+            if (cellOpts2.border && Array.isArray(cellOpts2.border)) {
               [
                 { idx: 3, name: "lnL" },
                 { idx: 1, name: "lnR" },
                 { idx: 0, name: "lnT" },
                 { idx: 2, name: "lnB" }
               ].forEach(function(obj) {
-                if (cellOpts.border[obj.idx].type !== "none") {
-                  strXml += "<a:".concat(obj.name, ' w="').concat(valToPts(cellOpts.border[obj.idx].pt), '" cap="flat" cmpd="sng" algn="ctr">');
-                  strXml += "<a:solidFill>".concat(createColorElement(cellOpts.border[obj.idx].color), "</a:solidFill>");
-                  strXml += '<a:prstDash val="'.concat(cellOpts.border[obj.idx].type === "dash" ? "sysDash" : "solid", '"/><a:round/><a:headEnd type="none" w="med" len="med"/><a:tailEnd type="none" w="med" len="med"/>');
+                if (cellOpts2.border[obj.idx].type !== "none") {
+                  strXml += "<a:".concat(obj.name, ' w="').concat(valToPts(cellOpts2.border[obj.idx].pt), '" cap="flat" cmpd="sng" algn="ctr">');
+                  strXml += "<a:solidFill>".concat(createColorElement(cellOpts2.border[obj.idx].color), "</a:solidFill>");
+                  strXml += '<a:prstDash val="'.concat(cellOpts2.border[obj.idx].type === "dash" ? "sysDash" : "solid", '"/><a:round/><a:headEnd type="none" w="med" len="med"/><a:tailEnd type="none" w="med" len="med"/>');
                   strXml += "</a:".concat(obj.name, ">");
                 } else {
                   strXml += "<a:".concat(obj.name, ' w="0" cap="flat" cmpd="sng" algn="ctr"><a:noFill/></a:').concat(obj.name, ">");
@@ -18527,7 +18525,7 @@ function slideObjectToXml(slide) {
           strSlideXml += '<a:rect l="l" t="t" r="r" b="b" />';
           strSlideXml += "<a:pathLst>";
           strSlideXml += '<a:path w="'.concat(cx, '" h="').concat(cy, '">');
-          (_f = slideItemObj.options.points) === null || _f === undefined || _f.forEach(function(point, i) {
+          (_f = slideItemObj.options.points) === null || _f === undefined || _f.forEach(function(point, i3) {
             if ("curve" in point) {
               switch (point.curve.type) {
                 case "arc":
@@ -18549,7 +18547,7 @@ function slideObjectToXml(slide) {
               }
             } else if ("close" in point) {
               strSlideXml += "<a:close />";
-            } else if (point.moveTo || i === 0) {
+            } else if (point.moveTo || i3 === 0) {
               strSlideXml += '<a:moveTo><a:pt x="'.concat(getSmartParseNumber(point.x, "X", slide._presLayout), '" y="').concat(getSmartParseNumber(point.y, "Y", slide._presLayout), '" /></a:moveTo>');
             } else {
               strSlideXml += '<a:lnTo><a:pt x="'.concat(getSmartParseNumber(point.x, "X", slide._presLayout), '" y="').concat(getSmartParseNumber(point.y, "Y", slide._presLayout), '" /></a:lnTo>');
@@ -18563,9 +18561,9 @@ function slideObjectToXml(slide) {
           if (slideItemObj.options.rectRadius) {
             strSlideXml += '<a:gd name="adj" fmla="val '.concat(Math.round(slideItemObj.options.rectRadius * EMU * 1e5 / Math.min(cx, cy)), '"/>');
           } else if (slideItemObj.options.angleRange) {
-            for (var i = 0;i < 2; i++) {
-              var angle = slideItemObj.options.angleRange[i];
-              strSlideXml += '<a:gd name="adj'.concat(i + 1, '" fmla="val ').concat(convertRotationDegrees(angle), '" />');
+            for (var i2 = 0;i2 < 2; i2++) {
+              var angle = slideItemObj.options.angleRange[i2];
+              strSlideXml += '<a:gd name="adj'.concat(i2 + 1, '" fmla="val ').concat(convertRotationDegrees(angle), '" />');
             }
             if (slideItemObj.options.arcThicknessRatio) {
               strSlideXml += '<a:gd name="adj3" fmla="val '.concat(Math.round(slideItemObj.options.arcThicknessRatio * 50000), '" />');
@@ -19112,12 +19110,12 @@ function genXmlTextBody(slideObj) {
       textObj.options.paraSpaceAfter = textObj.options.paraSpaceAfter || opts.paraSpaceAfter;
       paragraphPropXml = genXmlParagraphProperties(textObj, false);
       strSlideXml += paragraphPropXml.replace("<a:pPr></a:pPr>", "");
-      Object.entries(opts).filter(function(_a) {
-        var key = _a[0];
-        _a[1];
+      Object.entries(opts).filter(function(_a2) {
+        var key = _a2[0];
+        _a2[1];
         return !(textObj.options.hyperlink && key === "color");
-      }).forEach(function(_a) {
-        var key = _a[0], val = _a[1];
+      }).forEach(function(_a2) {
+        var key = _a2[0], val = _a2[1];
         if (key !== "bullet" && !textObj.options[key])
           textObj.options[key] = val;
       });
@@ -19366,9 +19364,9 @@ function makeXmlNotesMasterRel() {
 		</Relationships>`);
 }
 function getLayoutIdxForSlide(slides, slideLayouts, slideNumber) {
-  for (var i = 0;i < slideLayouts.length; i++) {
-    if (slideLayouts[i]._name === slides[slideNumber - 1]._slideLayout._name) {
-      return i + 1;
+  for (var i2 = 0;i2 < slideLayouts.length; i2++) {
+    if (slideLayouts[i2]._name === slides[slideNumber - 1]._slideLayout._name) {
+      return i2 + 1;
     }
   }
   return 1;
@@ -19423,7 +19421,7 @@ function makeXmlViewProps() {
 }
 var VERSION = "3.12.0";
 var PptxGenJS = function() {
-  function PptxGenJS() {
+  function PptxGenJS2() {
     var _this = this;
     this._version = VERSION;
     this._alignH = AlignH;
@@ -19502,7 +19500,7 @@ var PptxGenJS = function() {
     this.exportPresentation = function(props) {
       return __awaiter(_this, undefined, undefined, function() {
         var arrChartPromises, arrMediaPromises, zip;
-        var _this = this;
+        var _this2 = this;
         return __generator(this, function(_a) {
           switch (_a.label) {
             case 0:
@@ -19517,10 +19515,10 @@ var PptxGenJS = function() {
               });
               arrMediaPromises = arrMediaPromises.concat(encodeSlideMediaRels(this.masterSlide));
               return [4, Promise.all(arrMediaPromises).then(function() {
-                return __awaiter(_this, undefined, undefined, function() {
-                  var _this = this;
-                  return __generator(this, function(_a) {
-                    switch (_a.label) {
+                return __awaiter(_this2, undefined, undefined, function() {
+                  var _this3 = this;
+                  return __generator(this, function(_a2) {
+                    switch (_a2.label) {
                       case 0:
                         this.slides.forEach(function(slide) {
                           if (slide._slideLayout)
@@ -19550,11 +19548,11 @@ var PptxGenJS = function() {
                         zip.file("ppt/viewProps.xml", makeXmlViewProps());
                         this.slideLayouts.forEach(function(layout, idx) {
                           zip.file("ppt/slideLayouts/slideLayout".concat(idx + 1, ".xml"), makeXmlLayout(layout));
-                          zip.file("ppt/slideLayouts/_rels/slideLayout".concat(idx + 1, ".xml.rels"), makeXmlSlideLayoutRel(idx + 1, _this.slideLayouts));
+                          zip.file("ppt/slideLayouts/_rels/slideLayout".concat(idx + 1, ".xml.rels"), makeXmlSlideLayoutRel(idx + 1, _this3.slideLayouts));
                         });
                         this.slides.forEach(function(slide, idx) {
                           zip.file("ppt/slides/slide".concat(idx + 1, ".xml"), makeXmlSlide(slide));
-                          zip.file("ppt/slides/_rels/slide".concat(idx + 1, ".xml.rels"), makeXmlSlideRel(_this.slides, _this.slideLayouts, idx + 1));
+                          zip.file("ppt/slides/_rels/slide".concat(idx + 1, ".xml.rels"), makeXmlSlideRel(_this3.slides, _this3.slideLayouts, idx + 1));
                           zip.file("ppt/notesSlides/notesSlide".concat(idx + 1, ".xml"), makeXmlNotesSlide(slide));
                           zip.file("ppt/notesSlides/_rels/notesSlide".concat(idx + 1, ".xml.rels"), makeXmlNotesSlideRel(idx + 1));
                         });
@@ -19563,38 +19561,38 @@ var PptxGenJS = function() {
                         zip.file("ppt/notesMasters/notesMaster1.xml", makeXmlNotesMaster());
                         zip.file("ppt/notesMasters/_rels/notesMaster1.xml.rels", makeXmlNotesMasterRel());
                         this.slideLayouts.forEach(function(layout) {
-                          _this.createChartMediaRels(layout, zip, arrChartPromises);
+                          _this3.createChartMediaRels(layout, zip, arrChartPromises);
                         });
                         this.slides.forEach(function(slide) {
-                          _this.createChartMediaRels(slide, zip, arrChartPromises);
+                          _this3.createChartMediaRels(slide, zip, arrChartPromises);
                         });
                         this.createChartMediaRels(this.masterSlide, zip, arrChartPromises);
                         return [4, Promise.all(arrChartPromises).then(function() {
-                          return __awaiter(_this, undefined, undefined, function() {
-                            return __generator(this, function(_a) {
-                              switch (_a.label) {
+                          return __awaiter(_this3, undefined, undefined, function() {
+                            return __generator(this, function(_a3) {
+                              switch (_a3.label) {
                                 case 0:
                                   if (!(props.outputType === "STREAM"))
                                     return [3, 2];
                                   return [4, zip.generateAsync({ type: "nodebuffer", compression: props.compression ? "DEFLATE" : "STORE" })];
                                 case 1:
-                                  return [2, _a.sent()];
+                                  return [2, _a3.sent()];
                                 case 2:
                                   if (!props.outputType)
                                     return [3, 4];
                                   return [4, zip.generateAsync({ type: props.outputType })];
                                 case 3:
-                                  return [2, _a.sent()];
+                                  return [2, _a3.sent()];
                                 case 4:
                                   return [4, zip.generateAsync({ type: "blob", compression: props.compression ? "DEFLATE" : "STORE" })];
                                 case 5:
-                                  return [2, _a.sent()];
+                                  return [2, _a3.sent()];
                               }
                             });
                           });
                         })];
                       case 1:
-                        return [2, _a.sent()];
+                        return [2, _a2.sent()];
                     }
                   });
                 });
@@ -19665,7 +19663,7 @@ var PptxGenJS = function() {
       _slideObjects: []
     };
   }
-  Object.defineProperty(PptxGenJS.prototype, "layout", {
+  Object.defineProperty(PptxGenJS2.prototype, "layout", {
     get: function() {
       return this._layout;
     },
@@ -19681,14 +19679,14 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "version", {
+  Object.defineProperty(PptxGenJS2.prototype, "version", {
     get: function() {
       return this._version;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "author", {
+  Object.defineProperty(PptxGenJS2.prototype, "author", {
     get: function() {
       return this._author;
     },
@@ -19698,7 +19696,7 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "company", {
+  Object.defineProperty(PptxGenJS2.prototype, "company", {
     get: function() {
       return this._company;
     },
@@ -19708,7 +19706,7 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "revision", {
+  Object.defineProperty(PptxGenJS2.prototype, "revision", {
     get: function() {
       return this._revision;
     },
@@ -19718,7 +19716,7 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "subject", {
+  Object.defineProperty(PptxGenJS2.prototype, "subject", {
     get: function() {
       return this._subject;
     },
@@ -19728,7 +19726,7 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "theme", {
+  Object.defineProperty(PptxGenJS2.prototype, "theme", {
     get: function() {
       return this._theme;
     },
@@ -19738,7 +19736,7 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "title", {
+  Object.defineProperty(PptxGenJS2.prototype, "title", {
     get: function() {
       return this._title;
     },
@@ -19748,7 +19746,7 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "rtlMode", {
+  Object.defineProperty(PptxGenJS2.prototype, "rtlMode", {
     get: function() {
       return this._rtlMode;
     },
@@ -19758,105 +19756,105 @@ var PptxGenJS = function() {
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "masterSlide", {
+  Object.defineProperty(PptxGenJS2.prototype, "masterSlide", {
     get: function() {
       return this._masterSlide;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "slides", {
+  Object.defineProperty(PptxGenJS2.prototype, "slides", {
     get: function() {
       return this._slides;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "sections", {
+  Object.defineProperty(PptxGenJS2.prototype, "sections", {
     get: function() {
       return this._sections;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "slideLayouts", {
+  Object.defineProperty(PptxGenJS2.prototype, "slideLayouts", {
     get: function() {
       return this._slideLayouts;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "AlignH", {
+  Object.defineProperty(PptxGenJS2.prototype, "AlignH", {
     get: function() {
       return this._alignH;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "AlignV", {
+  Object.defineProperty(PptxGenJS2.prototype, "AlignV", {
     get: function() {
       return this._alignV;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "ChartType", {
+  Object.defineProperty(PptxGenJS2.prototype, "ChartType", {
     get: function() {
       return this._chartType;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "OutputType", {
+  Object.defineProperty(PptxGenJS2.prototype, "OutputType", {
     get: function() {
       return this._outputType;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "presLayout", {
+  Object.defineProperty(PptxGenJS2.prototype, "presLayout", {
     get: function() {
       return this._presLayout;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "SchemeColor", {
+  Object.defineProperty(PptxGenJS2.prototype, "SchemeColor", {
     get: function() {
       return this._schemeColor;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "ShapeType", {
+  Object.defineProperty(PptxGenJS2.prototype, "ShapeType", {
     get: function() {
       return this._shapeType;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "charts", {
+  Object.defineProperty(PptxGenJS2.prototype, "charts", {
     get: function() {
       return this._charts;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "colors", {
+  Object.defineProperty(PptxGenJS2.prototype, "colors", {
     get: function() {
       return this._colors;
     },
     enumerable: false,
     configurable: true
   });
-  Object.defineProperty(PptxGenJS.prototype, "shapes", {
+  Object.defineProperty(PptxGenJS2.prototype, "shapes", {
     get: function() {
       return this._shapes;
     },
     enumerable: false,
     configurable: true
   });
-  PptxGenJS.prototype.stream = function(props) {
+  PptxGenJS2.prototype.stream = function(props) {
     return __awaiter(this, undefined, undefined, function() {
       return __generator(this, function(_a) {
         switch (_a.label) {
@@ -19871,7 +19869,7 @@ var PptxGenJS = function() {
       });
     });
   };
-  PptxGenJS.prototype.write = function(props) {
+  PptxGenJS2.prototype.write = function(props) {
     return __awaiter(this, undefined, undefined, function() {
       var propsOutpType, propsCompress;
       return __generator(this, function(_a) {
@@ -19889,7 +19887,7 @@ var PptxGenJS = function() {
       });
     });
   };
-  PptxGenJS.prototype.writeFile = function(props) {
+  PptxGenJS2.prototype.writeFile = function(props) {
     return __awaiter(this, undefined, undefined, function() {
       var fs, propsExpName, propsCompress, fileName;
       var _this = this;
@@ -19907,8 +19905,8 @@ var PptxGenJS = function() {
               outputType: fs ? "nodebuffer" : null
             }).then(function(content) {
               return __awaiter(_this, undefined, undefined, function() {
-                return __generator(this, function(_a) {
-                  switch (_a.label) {
+                return __generator(this, function(_a2) {
+                  switch (_a2.label) {
                     case 0:
                       if (!fs)
                         return [3, 2];
@@ -19922,11 +19920,11 @@ var PptxGenJS = function() {
                         });
                       })];
                     case 1:
-                      return [2, _a.sent()];
+                      return [2, _a2.sent()];
                     case 2:
                       return [4, this.writeFileToBrowser(fileName, content)];
                     case 3:
-                      return [2, _a.sent()];
+                      return [2, _a2.sent()];
                   }
                 });
               });
@@ -19937,7 +19935,7 @@ var PptxGenJS = function() {
       });
     });
   };
-  PptxGenJS.prototype.addSection = function(section) {
+  PptxGenJS2.prototype.addSection = function(section) {
     if (!section)
       console.warn("addSection requires an argument");
     else if (!section.title)
@@ -19952,7 +19950,7 @@ var PptxGenJS = function() {
     else
       this._sections.push(newSection);
   };
-  PptxGenJS.prototype.addSlide = function(options) {
+  PptxGenJS2.prototype.addSlide = function(options) {
     var masterSlideName = typeof options === "string" ? options : (options === null || options === undefined ? undefined : options.masterName) ? options.masterName : "";
     var slideLayout = {
       _name: this.LAYOUTS[DEF_PRES_LAYOUT].name,
@@ -19994,8 +19992,8 @@ var PptxGenJS = function() {
         lastSect._slides.push(newSlide);
       else {
         this._sections.push({
-          title: "Default-".concat(this.sections.filter(function(sect) {
-            return sect._type === "default";
+          title: "Default-".concat(this.sections.filter(function(sect2) {
+            return sect2._type === "default";
           }).length + 1),
           _type: "default",
           _slides: [newSlide]
@@ -20004,7 +20002,7 @@ var PptxGenJS = function() {
     }
     return newSlide;
   };
-  PptxGenJS.prototype.defineLayout = function(layout) {
+  PptxGenJS2.prototype.defineLayout = function(layout) {
     if (!layout)
       console.warn("defineLayout requires `{name, width, height}`");
     else if (!layout.name)
@@ -20025,7 +20023,7 @@ var PptxGenJS = function() {
       height: Math.round(Number(layout.height) * EMU)
     };
   };
-  PptxGenJS.prototype.defineSlideMaster = function(props) {
+  PptxGenJS2.prototype.defineSlideMaster = function(props) {
     if (!props.title)
       throw new Error("defineSlideMaster() object argument requires a `title` value. (https://gitbrent.github.io/PptxGenJS/docs/masters.html)");
     var newLayout = {
@@ -20049,7 +20047,7 @@ var PptxGenJS = function() {
     if (newLayout._slideNumberProps && !this.masterSlide._slideNumberProps)
       this.masterSlide._slideNumberProps = newLayout._slideNumberProps;
   };
-  PptxGenJS.prototype.tableToSlides = function(eleId, options) {
+  PptxGenJS2.prototype.tableToSlides = function(eleId, options) {
     if (options === undefined) {
       options = {};
     }
@@ -20057,7 +20055,7 @@ var PptxGenJS = function() {
       return layout._name === options.masterSlideName;
     })[0] : null);
   };
-  return PptxGenJS;
+  return PptxGenJS2;
 }();
 
 // apps/electron/resources/skills/ppt-design/engine/svg-path.ts
@@ -20340,7 +20338,7 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
   mkdirSync(outDir, { recursive: true });
   const officecli = options.officecli === "" ? null : options.officecli ?? await commandOnPath("officecli");
   if (officecli && pageCount > 0) {
-    const files = [];
+    const files2 = [];
     let failed = false;
     for (const page of pages) {
       const target = join(outDir, `slide-${String(page).padStart(2, "0")}.png`);
@@ -20350,10 +20348,10 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
         failed = true;
         break;
       }
-      files.push(target);
+      files2.push(target);
     }
-    if (!failed && files.length === pages.length)
-      return { available: true, renderer: "officecli", files };
+    if (!failed && files2.length === pages.length)
+      return { available: true, renderer: "officecli", files: files2 };
   }
   const soffice = options.libreoffice ?? await commandOnPath("soffice") ?? await commandOnPath("libreoffice");
   const pdftoppm = options.pdftoppm ?? await commandOnPath("pdftoppm");
@@ -20380,16 +20378,16 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
   if (pdf.code !== 0)
     return { available: false, files: [], renderer: "libreoffice", reason: pdf.stderr || pdf.stdout || "LibreOffice \u8F6C\u6362\u5931\u8D25" };
   if (selected) {
-    const files = [];
+    const files2 = [];
     for (const page of selected) {
-      const prefix = join(outDir, `slide-${String(page).padStart(2, "0")}`);
-      rmSync(`${prefix}.png`, { force: true });
-      const png = await run(pdftoppm, ["-png", "-r", "108", "-f", String(page), "-l", String(page), "-singlefile", join(outDir, pptxBasename(pptx) + ".pdf"), prefix]);
-      if (png.code !== 0 || !existsSync(`${prefix}.png`))
-        return { available: false, files, renderer: "libreoffice", reason: png.stderr || "pdftoppm \u5931\u8D25" };
-      files.push(`${prefix}.png`);
+      const prefix2 = join(outDir, `slide-${String(page).padStart(2, "0")}`);
+      rmSync(`${prefix2}.png`, { force: true });
+      const png2 = await run(pdftoppm, ["-png", "-r", "108", "-f", String(page), "-l", String(page), "-singlefile", join(outDir, pptxBasename(pptx) + ".pdf"), prefix2]);
+      if (png2.code !== 0 || !existsSync(`${prefix2}.png`))
+        return { available: false, files: files2, renderer: "libreoffice", reason: png2.stderr || "pdftoppm \u5931\u8D25" };
+      files2.push(`${prefix2}.png`);
     }
-    return { available: true, renderer: "libreoffice", files };
+    return { available: true, renderer: "libreoffice", files: files2 };
   }
   const prefix = join(outDir, "slide");
   const png = await run(pdftoppm, ["-png", "-r", "108", join(outDir, pptxBasename(pptx) + ".pdf"), prefix]);
@@ -20462,13 +20460,13 @@ function children(inner) {
   while (match = tag.exec(inner)) {
     if (match[0].startsWith("<?") || match[0].startsWith("<!"))
       continue;
-    const closing = match[1] === "/";
+    const closing2 = match[1] === "/";
     const selfClosing = match[3] === "/";
-    if (!closing && depth === 0) {
+    if (!closing2 && depth === 0) {
       start = match.index;
       name = match[2];
     }
-    if (closing)
+    if (closing2)
       depth -= 1;
     else if (!selfClosing)
       depth += 1;
@@ -20558,10 +20556,10 @@ function joinsWithSpace(left, right) {
     return false;
   return true;
 }
-function runOf(element, text) {
+function runOf(element, text2) {
   const font = element.font;
   return {
-    text,
+    text: text2,
     ...font.weight === "bold" ? { bold: true } : {},
     ...font.italic ? { italic: true } : {},
     color: font.color ?? "$ink"
@@ -20592,21 +20590,21 @@ function mergeInlineRuns(elements) {
       cursor = next.get(cursor);
     }
     const runs = [];
-    let text = "";
+    let text2 = "";
     chain.forEach((item, index) => {
-      const piece = index > 0 && joinsWithSpace(text, item.text) ? ` ${item.text}` : item.text;
+      const piece = index > 0 && joinsWithSpace(text2, item.text) ? ` ${item.text}` : item.text;
       runs.push(runOf(item, piece));
-      text += piece;
+      text2 += piece;
     });
     const last = chain.at(-1);
     const baseFont = { ...head.font, weight: undefined, italic: undefined };
     merged.set(head, {
       ...head,
-      text,
+      text: text2,
       runs,
       font: baseFont,
       bounds: { ...head.bounds, w: last.bounds.x + last.bounds.w - head.bounds.x },
-      textCapacity: head.textCapacity ? { maxChars: Array.from(text).length, maxLines: 1 } : undefined
+      textCapacity: head.textCapacity ? { maxChars: Array.from(text2).length, maxLines: 1 } : undefined
     });
     for (const item of chain.slice(1))
       absorbed.add(item);
@@ -20711,14 +20709,14 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       objectName: element.id
     };
     if (element.runs && element.runs.length > 1) {
-      slide.addText(element.runs.map((run) => {
-        const runInk = paint(colorRef(run.color ?? element.font?.color, deck.theme, "$ink"));
+      slide.addText(element.runs.map((run2) => {
+        const runInk = paint(colorRef(run2.color ?? element.font?.color, deck.theme, "$ink"));
         return {
-          text: run.text,
+          text: run2.text,
           options: {
-            fontSize: run.size ?? element.font.size,
-            bold: run.bold ?? bold,
-            italic: run.italic === true ? true : undefined,
+            fontSize: run2.size ?? element.font.size,
+            bold: run2.bold ?? bold,
+            italic: run2.italic === true ? true : undefined,
             color: runInk.color
           }
         };
@@ -21042,7 +21040,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     const increase = hex(colorRef(chart.colors?.[1] ?? "$accent", deck.theme, "$accent"));
     const decrease = hex(colorRef(chart.colors?.[2] ?? "$muted", deck.theme, "$muted"));
     const peak = Math.max(...columns.base.map((value, index) => value + columns.total[index] + columns.up[index] + columns.down[index]), 0);
-    const scale = chartValueScale(chart, [peak], false);
+    const scale2 = chartValueScale(chart, [peak], false);
     slide.addChart(pres.ChartType.bar, [
       { name: "\u57FA\u5EA7", labels: chart.categories, values: columns.base },
       { name: "\u5408\u8BA1", labels: chart.categories, values: columns.total },
@@ -21057,13 +21055,13 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       showLegend: false,
       layout: chartLayout(kind, false),
       chartColors: [background, ink, increase, decrease],
-      valAxisMinVal: scale.min,
-      valAxisMaxVal: scale.max,
-      valAxisMajorUnit: scale.step
+      valAxisMinVal: scale2.min,
+      valAxisMaxVal: scale2.max,
+      valAxisMajorUnit: scale2.step
     });
     if (on)
-      addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale);
-    addValueTicks(pres, slide, element, plotBox("waterfall", false, element.bounds), scale, face, tickColor, background, "left");
+      addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale2);
+    addValueTicks(pres, slide, element, plotBox("waterfall", false, element.bounds), scale2, face, tickColor, background, "left");
     return;
   }
   if (kind === "combo") {
@@ -21075,7 +21073,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]);
     const columnScale = chartValueScale(chart, columns.flatMap((series) => series.values), true);
     const lineScale = chartValueScale(chart, lines.flatMap((series) => series.values), true);
-    const legend = chart.showLegend ?? true;
+    const legend2 = chart.showLegend ?? true;
     const axisLabel = {
       valAxisLabelColor: tickColor,
       valAxisLabelFontFace: face,
@@ -21117,7 +21115,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       ...base,
       barDir: "col",
       showLegend: false,
-      layout: chartLayout(kind, legend),
+      layout: chartLayout(kind, legend2),
       barGapWidthPct: 100,
       valAxisMinVal: undefined,
       valAxisMaxVal: undefined,
@@ -21149,7 +21147,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       lineColors,
       columnScale,
       lineScale,
-      legend,
+      legend: legend2,
       labels: on
     });
     return;
@@ -21212,11 +21210,11 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
   const pieLike = kind === "pie" || kind === "doughnut";
   const grouped = kind === "stacked" || kind === "stackedPercent";
   const bars = kind === "bar" || kind === "column" || grouped;
-  const type = kind === "line" ? pres.ChartType.line : kind === "area" ? pres.ChartType.area : kind === "pie" ? pres.ChartType.pie : kind === "doughnut" ? pres.ChartType.doughnut : kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
+  const type2 = kind === "line" ? pres.ChartType.line : kind === "area" ? pres.ChartType.area : kind === "pie" ? pres.ChartType.pie : kind === "doughnut" ? pres.ChartType.doughnut : kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
   const flat = kind === "stacked" ? columnSums(chart.series) : chart.series.flatMap((series) => series.values);
   const needsHeadroom = on && (kind === "bar" || kind === "column" || kind === "line" || kind === "area");
   const scale = kind === "stackedPercent" ? { min: 0, max: 1, step: 0.2 } : kind === "radar" ? chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, flat, false) : pieLike ? undefined : chartValueScale(chart, flat, needsHeadroom);
-  slide.addChart(type, rows, {
+  slide.addChart(type2, rows, {
     ...base,
     barDir: kind === "bar" ? "bar" : "col",
     ...kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
@@ -21298,6 +21296,15 @@ function resolveAsset(src) {
 async function finishSlideXml(bytes, deck, platform) {
   const zip = await import_jszip2.default.loadAsync(bytes);
   let changed = false;
+  const contentTypes = zip.file("[Content_Types].xml");
+  if (contentTypes) {
+    const xml = await contentTypes.async("string");
+    const next = xml.replace(/<Override PartName="\/(ppt\/slideMasters\/slideMaster\d+\.xml)" ContentType="application\/vnd\.openxmlformats-officedocument\.presentationml\.slideMaster\+xml"\/>/g, (override, part) => zip.file(part) ? override : "");
+    if (next !== xml) {
+      zip.file("[Content_Types].xml", next);
+      changed = true;
+    }
+  }
   const presentation = zip.file("ppt/presentation.xml");
   if (presentation) {
     const xml = await presentation.async("string");
@@ -21522,7 +21529,7 @@ function mixHex(from, to, toward) {
   const bytes = (value) => [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
   const start = bytes(from);
   const end = bytes(to);
-  return start.map((channel, index) => Math.round(channel * (1 - toward) + end[index] * toward).toString(16).padStart(2, "0")).join("").toUpperCase();
+  return start.map((channel2, index) => Math.round(channel2 * (1 - toward) + end[index] * toward).toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 function quietColor(foreground, background, toward) {
   return luminance(foreground) > luminance(background) ? mixHex(background, foreground, toward) : mixHex(foreground, background, toward);
@@ -21619,8 +21626,8 @@ function addLeader(pres, slide, x1, y1, x2, y2, color, name, width = 1) {
     objectName: name
   });
 }
-function addCallout(slide, text, x, y, w, h, face, color, name, bold = true, align = "center") {
-  slide.addText(text, {
+function addCallout(slide, text2, x, y, w, h, face, color, name, bold = true, align = "center") {
+  slide.addText(text2, {
     x: inches2(x),
     y: inches2(y),
     w: inches2(w),
@@ -21678,14 +21685,14 @@ function addEdgeCallouts(slide, element, chart, kind, legend, face, color) {
       const value = series.values[point];
       if (value === undefined || !Number.isFinite(value))
         continue;
-      const text = magnitude(value);
-      const boxW = Math.max(28, text.length * 8);
+      const text2 = magnitude(value);
+      const boxW = Math.max(28, text2.length * 8);
       const py = yOf(value);
       const steps = Math.round((value - scale.min) / scale.step);
       const tickY = yOf(scale.min + steps * scale.step);
       const tight = point === 0 && Math.abs(py - tickY) < 8;
       const x = point === 0 ? plot.x + (tight ? 56 : 28) : plot.x + plot.w - 28 - boxW;
-      addCallout(slide, text, x, tight ? py - 28 : py - 20, boxW, 16, face, color, point === 0 ? `${element.id}-edge-${seriesIndex}` : `${element.id}-edge-${seriesIndex}-end`);
+      addCallout(slide, text2, x, tight ? py - 28 : py - 20, boxW, 16, face, color, point === 0 ? `${element.id}-edge-${seriesIndex}` : `${element.id}-edge-${seriesIndex}-end`);
     }
   });
 }
@@ -21748,10 +21755,10 @@ function addValueTicks(pres, slide, element, plot, scale, face, color, backgroun
       });
     }
     values.forEach((value, index) => {
-      const text = format(value);
-      const boxW = Math.max(24, text.length * 8);
+      const text2 = format(value);
+      const boxW = Math.max(24, text2.length * 8);
       const y = plot.y + plot.h - (value - scale.min) / span * plot.h;
-      addCallout(slide, text, plot.x - boxW - 6, y - 8, boxW, 16, face, color, `${element.id}-ltick-${index}`, false, "right");
+      addCallout(slide, text2, plot.x - boxW - 6, y - 8, boxW, 16, face, color, `${element.id}-ltick-${index}`, false, "right");
     });
     return;
   }
@@ -21766,20 +21773,20 @@ function addValueTicks(pres, slide, element, plot, scale, face, color, backgroun
     objectName: `${element.id}-btick-cover`
   });
   values.forEach((value, index) => {
-    const text = format(value);
-    const boxW = Math.max(18, text.length * 8);
+    const text2 = format(value);
+    const boxW = Math.max(18, text2.length * 8);
     const x = plot.x + (value - scale.min) / span * plot.w;
-    addCallout(slide, text, x - boxW / 2, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-btick-${index}`, false);
+    addCallout(slide, text2, x - boxW / 2, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-btick-${index}`, false);
   });
 }
-function addComboOverlay(pres, slide, element, chart, paint) {
+function addComboOverlay(pres, slide, element, chart, paint2) {
   const roles = comboSeriesRoles(chart.series);
   const columns = chart.series.filter((_, index) => roles[index] === "column");
   const lines = chart.series.filter((_, index) => roles[index] === "line");
   const count = chart.categories.length;
   if (count === 0 || columns.length === 0)
     return;
-  const plot = plotBox("combo", paint.legend, element.bounds);
+  const plot = plotBox("combo", paint2.legend, element.bounds);
   const slot = plot.w / count;
   const yOf = (value, scale) => {
     const span = scale.max - scale.min;
@@ -21787,29 +21794,29 @@ function addComboOverlay(pres, slide, element, chart, paint) {
       return plot.y + plot.h;
     return plot.y + plot.h - (value - scale.min) / span * plot.h;
   };
-  const columnTop = (index) => yOf(Math.max(...columns.map((series) => series.values[index] ?? 0), paint.columnScale.min), paint.columnScale);
+  const columnTop = (index) => yOf(Math.max(...columns.map((series) => series.values[index] ?? 0), paint2.columnScale.min), paint2.columnScale);
   slide.addShape(pres.ShapeType.rect, {
     x: inches2(plot.x - 3),
     y: inches2(plot.y - 2),
     w: inches2(plot.w + 8),
     h: inches2(plot.h + 4),
-    fill: { color: paint.background },
-    line: { color: paint.background, pt: 0 },
+    fill: { color: paint2.background },
+    line: { color: paint2.background, pt: 0 },
     objectName: `${element.id}-plot-cover`
   });
   const barWidth = slot / (columns.length + 1);
   const cluster = barWidth * columns.length;
   const clusterStart = (slot - cluster) / 2;
   const taken = [];
-  const overlaps = (box, gap = 2) => taken.some((item) => box.x < item.x + item.w + gap && box.x + box.w + gap > item.x && box.y < item.y + item.h + gap && box.y + box.h + gap > item.y);
+  const overlaps2 = (box, gap = 2) => taken.some((item) => box.x < item.x + item.w + gap && box.x + box.w + gap > item.x && box.y < item.y + item.h + gap && box.y + box.h + gap > item.y);
   const columnBoxes = [];
   columns.forEach((series, seriesIndex) => {
-    const color = paint.columnColors[seriesIndex] ?? paint.ink;
+    const color = paint2.columnColors[seriesIndex] ?? paint2.ink;
     series.values.forEach((value, index) => {
       if (!Number.isFinite(value))
         return;
-      const top = yOf(value, paint.columnScale);
-      const bottom = yOf(paint.columnScale.min, paint.columnScale);
+      const top = yOf(value, paint2.columnScale);
+      const bottom = yOf(paint2.columnScale.min, paint2.columnScale);
       const x = plot.x + slot * index + clusterStart + seriesIndex * barWidth;
       const height = Math.max(bottom - top, 0.4);
       slide.addShape(pres.ShapeType.rect, {
@@ -21821,13 +21828,13 @@ function addComboOverlay(pres, slide, element, chart, paint) {
         line: { color, pt: 0 },
         objectName: `${element.id}-col-${seriesIndex}-${index}`
       });
-      if (!paint.labels)
+      if (!paint2.labels)
         return;
-      const text = magnitude(value);
-      const boxW = Math.max(28, text.length * 8);
+      const text2 = magnitude(value);
+      const boxW = Math.max(28, text2.length * 8);
       const lineNear = lines.some((line) => {
         const sample = line.values[index];
-        return Number.isFinite(sample) && Math.abs(yOf(sample, paint.lineScale) - top) < 36;
+        return Number.isFinite(sample) && Math.abs(yOf(sample, paint2.lineScale) - top) < 36;
       });
       const inside = lineNear && height > 24;
       const box = {
@@ -21837,13 +21844,13 @@ function addComboOverlay(pres, slide, element, chart, paint) {
         h: 16
       };
       taken.push(box);
-      columnBoxes.push({ ...box, text, color: inside ? paint.inverse : paint.ink, name: `${element.id}-col-label-${seriesIndex}-${index}` });
+      columnBoxes.push({ ...box, text: text2, color: inside ? paint2.inverse : paint2.ink, name: `${element.id}-col-label-${seriesIndex}-${index}` });
     });
   });
   const linePoints = [];
   lines.forEach((series, seriesIndex) => {
-    const color = paint.lineColors[seriesIndex] ?? paint.ink;
-    const points = series.values.map((value, index) => ({ index, value, x: plot.x + slot * (index + 0.5), y: yOf(value, paint.lineScale) })).filter((point) => Number.isFinite(point.value));
+    const color = paint2.lineColors[seriesIndex] ?? paint2.ink;
+    const points = series.values.map((value, index) => ({ index, value, x: plot.x + slot * (index + 0.5), y: yOf(value, paint2.lineScale) })).filter((point) => Number.isFinite(point.value));
     for (let index = 1;index < points.length; index++) {
       const previous = points[index - 1];
       const point = points[index];
@@ -21864,16 +21871,16 @@ function addComboOverlay(pres, slide, element, chart, paint) {
     }
   });
   for (const box of columnBoxes)
-    addCallout(slide, box.text, box.x, box.y, box.w, box.h, paint.face, box.color, box.name);
+    addCallout(slide, box.text, box.x, box.y, box.w, box.h, paint2.face, box.color, box.name);
   const segments = linePoints.map((point) => {
     const neighbors = linePoints.filter((other) => other.seriesIndex === point.seriesIndex && Math.abs(other.index - point.index) === 1);
     return { point, neighbors };
   });
   for (const { point, neighbors } of segments) {
-    if (!paint.labels)
+    if (!paint2.labels)
       continue;
-    const text = magnitude(point.value);
-    const boxW = Math.max(22, text.length * 9);
+    const text2 = magnitude(point.value);
+    const boxW = Math.max(22, text2.length * 9);
     const boxH = 16;
     const barTop = columnTop(point.index);
     const candidates = [
@@ -21882,8 +21889,8 @@ function addComboOverlay(pres, slide, element, chart, paint) {
       { x: point.x + 12, y: point.y - boxH / 2 },
       { x: point.x - boxW - 12, y: point.y - boxH / 2 }
     ];
-    const placed = candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).filter((candidate) => candidate.x >= plot.x + 1 && candidate.y >= plot.y + 1 && candidate.x + candidate.w <= plot.x + plot.w - 1 && candidate.y + candidate.h <= plot.y + plot.h - 1).filter((candidate) => !overlaps(candidate) && !lineHitsBox(candidate, point, neighbors));
-    const box = placed[0] ?? candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).find((candidate) => !overlaps(candidate)) ?? {
+    const placed = candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).filter((candidate) => candidate.x >= plot.x + 1 && candidate.y >= plot.y + 1 && candidate.x + candidate.w <= plot.x + plot.w - 1 && candidate.y + candidate.h <= plot.y + plot.h - 1).filter((candidate) => !overlaps2(candidate) && !lineHitsBox(candidate, point, neighbors));
+    const box = placed[0] ?? candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).find((candidate) => !overlaps2(candidate)) ?? {
       x: Math.max(plot.x + 1, Math.min(point.x - boxW / 2, plot.x + plot.w - boxW - 1)),
       y: Math.max(plot.y + 1, point.y - boxH - 6),
       w: boxW,
@@ -21891,7 +21898,7 @@ function addComboOverlay(pres, slide, element, chart, paint) {
     };
     taken.push(box);
     const onBar = box.y + box.h / 2 > barTop + 2;
-    addCallout(slide, text, box.x, box.y, box.w, box.h, paint.face, onBar ? paint.inverse : paint.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`);
+    addCallout(slide, text2, box.x, box.y, box.w, box.h, paint2.face, onBar ? paint2.inverse : paint2.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`);
   }
   const leftGutter = plot.x - element.bounds.x;
   if (leftGutter > 4) {
@@ -21900,8 +21907,8 @@ function addComboOverlay(pres, slide, element, chart, paint) {
       y: inches2(plot.y - 12),
       w: inches2(leftGutter - 1),
       h: inches2(plot.h + 24),
-      fill: { color: paint.background },
-      line: { color: paint.background, pt: 0 },
+      fill: { color: paint2.background },
+      line: { color: paint2.background, pt: 0 },
       objectName: `${element.id}-ltick-cover`
     });
   }
@@ -21911,29 +21918,29 @@ function addComboOverlay(pres, slide, element, chart, paint) {
     y: inches2(plot.y - 12),
     w: inches2(rightWidth),
     h: inches2(plot.h + 24),
-    fill: { color: paint.background },
-    line: { color: paint.background, pt: 0 },
+    fill: { color: paint2.background },
+    line: { color: paint2.background, pt: 0 },
     objectName: `${element.id}-rtick-cover`
   });
-  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75);
-  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75);
-  addLeader(pres, slide, plot.x + plot.w, plot.y, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-y2`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint2.axis, `${element.id}-axis-y`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint2.axis, `${element.id}-axis-x`, 0.75);
+  addLeader(pres, slide, plot.x + plot.w, plot.y, plot.x + plot.w, plot.y + plot.h, paint2.axis, `${element.id}-axis-y2`, 0.75);
   const ticks = [];
-  for (let value = paint.lineScale.min;value <= paint.lineScale.max + paint.lineScale.step * 0.001; value += paint.lineScale.step)
+  for (let value = paint2.lineScale.min;value <= paint2.lineScale.max + paint2.lineScale.step * 0.001; value += paint2.lineScale.step)
     ticks.push(cleanNumber(value));
   ticks.forEach((value, index) => {
-    addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint.face, paint.tickColor, `${element.id}-rtick-${index}`, false, "left");
+    addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint2.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint2.face, paint2.tickColor, `${element.id}-rtick-${index}`, false, "left");
   });
-  axisTicks(paint.columnScale).forEach((value, index) => {
-    const text = formatTick(value);
-    const boxW = Math.max(24, text.length * 8);
-    addCallout(slide, text, plot.x - boxW - 6, yOf(value, paint.columnScale) - 8, boxW, 16, paint.face, paint.tickColor, `${element.id}-ltick-${index}`, false, "right");
+  axisTicks(paint2.columnScale).forEach((value, index) => {
+    const text2 = formatTick(value);
+    const boxW = Math.max(24, text2.length * 8);
+    addCallout(slide, text2, plot.x - boxW - 6, yOf(value, paint2.columnScale) - 8, boxW, 16, paint2.face, paint2.tickColor, `${element.id}-ltick-${index}`, false, "right");
   });
-  if (!paint.legend)
+  if (!paint2.legend)
     return;
   const items = [
-    ...columns.map((series, index) => ({ name: series.name, color: paint.columnColors[index] ?? paint.ink, line: false })),
-    ...lines.map((series, index) => ({ name: series.name, color: paint.lineColors[index] ?? paint.ink, line: true }))
+    ...columns.map((series, index) => ({ name: series.name, color: paint2.columnColors[index] ?? paint2.ink, line: false })),
+    ...lines.map((series, index) => ({ name: series.name, color: paint2.lineColors[index] ?? paint2.ink, line: true }))
   ];
   const pieces = items.map((item) => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }));
   const total = pieces.reduce((sum, item) => sum + 18 + item.textW, 0) + Math.max(0, pieces.length - 1) * 18;
@@ -21953,7 +21960,7 @@ function addComboOverlay(pres, slide, element, chart, paint) {
         objectName: `${element.id}-legend-swatch-${index}`
       });
     }
-    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, paint.face, paint.ink, `${element.id}-legend-${index}`, false, "left");
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, paint2.face, paint2.ink, `${element.id}-legend-${index}`, false, "left");
     cursor += 18 + item.textW + 18;
   });
 }
@@ -22010,23 +22017,23 @@ function addScatterCategoryTicks(pres, slide, element, scale, face, color, backg
     objectName: `${element.id}-xtick-cover`
   });
   axisTicks(scale).forEach((value, index) => {
-    const text = formatTick(value);
-    const boxW = Math.max(22, text.length * 8);
+    const text2 = formatTick(value);
+    const boxW = Math.max(22, text2.length * 8);
     const x = plot.x + (value - scale.min) / (scale.max - scale.min) * plot.w - boxW / 2;
-    addCallout(slide, text, x, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-xtick-${index}`, false);
+    addCallout(slide, text2, x, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-xtick-${index}`, false);
   });
 }
-function addBubbleOverlay(pres, slide, element, chart, paint) {
-  const plot = plotBox("bubble", paint.legend, element.bounds);
-  const xSpan = paint.xScale.max - paint.xScale.min;
-  const ySpan = paint.yScale.max - paint.yScale.min;
+function addBubbleOverlay(pres, slide, element, chart, paint2) {
+  const plot = plotBox("bubble", paint2.legend, element.bounds);
+  const xSpan = paint2.xScale.max - paint2.xScale.min;
+  const ySpan = paint2.yScale.max - paint2.yScale.min;
   if (!(xSpan > 0) || !(ySpan > 0))
     return;
-  const xOf = (value) => plot.x + (value - paint.xScale.min) / xSpan * plot.w;
-  const yOf = (value) => plot.y + plot.h - (value - paint.yScale.min) / ySpan * plot.h;
+  const xOf = (value) => plot.x + (value - paint2.xScale.min) / xSpan * plot.w;
+  const yOf = (value) => plot.y + plot.h - (value - paint2.yScale.min) / ySpan * plot.h;
   const paper = {
-    fill: { color: paint.background },
-    line: { color: paint.background, pt: 0 }
+    fill: { color: paint2.background },
+    line: { color: paint2.background, pt: 0 }
   };
   slide.addShape(pres.ShapeType.rect, {
     ...paper,
@@ -22044,18 +22051,18 @@ function addBubbleOverlay(pres, slide, element, chart, paint) {
     h: inches2(plot.h + 20),
     objectName: `${element.id}-ytick-cover`
   });
-  for (const value of axisTicks(paint.yScale)) {
+  for (const value of axisTicks(paint2.yScale)) {
     const y = yOf(value);
-    addLeader(pres, slide, plot.x, y, plot.x + plot.w, y, paint.grid, `${element.id}-grid-y-${formatTick(value)}`, 0.75);
+    addLeader(pres, slide, plot.x, y, plot.x + plot.w, y, paint2.grid, `${element.id}-grid-y-${formatTick(value)}`, 0.75);
   }
-  for (const value of axisTicks(paint.xScale)) {
+  for (const value of axisTicks(paint2.xScale)) {
     const x = xOf(value);
-    addLeader(pres, slide, x, plot.y, x, plot.y + plot.h, paint.grid, `${element.id}-grid-x-${formatTick(value)}`, 0.75);
+    addLeader(pres, slide, x, plot.y, x, plot.y + plot.h, paint2.grid, `${element.id}-grid-x-${formatTick(value)}`, 0.75);
   }
-  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75);
-  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint2.axis, `${element.id}-axis-y`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint2.axis, `${element.id}-axis-x`, 0.75);
   chart.series.forEach((series, seriesIndex) => {
-    const color = paint.colors[seriesIndex] ?? paint.ink;
+    const color = paint2.colors[seriesIndex] ?? paint2.ink;
     series.values.forEach((value, index) => {
       const x = series.x?.[index];
       const size = series.sizes?.[index];
@@ -22073,17 +22080,17 @@ function addBubbleOverlay(pres, slide, element, chart, paint) {
       });
     });
   });
-  axisTicks(paint.yScale).forEach((value, index) => {
-    const text = formatTick(value);
-    addCallout(slide, text, plot.x - 36, yOf(value) - 8, 30, 16, paint.face, paint.tickColor, `${element.id}-ytick-${index}`, false, "right");
+  axisTicks(paint2.yScale).forEach((value, index) => {
+    const text2 = formatTick(value);
+    addCallout(slide, text2, plot.x - 36, yOf(value) - 8, 30, 16, paint2.face, paint2.tickColor, `${element.id}-ytick-${index}`, false, "right");
   });
-  axisTicks(paint.xScale).forEach((value, index) => {
-    const text = formatTick(value);
-    const boxW = Math.max(22, text.length * 8);
-    addCallout(slide, text, xOf(value) - boxW / 2, plot.y + plot.h + 4, boxW, 16, paint.face, paint.tickColor, `${element.id}-xtick-${index}`, false);
+  axisTicks(paint2.xScale).forEach((value, index) => {
+    const text2 = formatTick(value);
+    const boxW = Math.max(22, text2.length * 8);
+    addCallout(slide, text2, xOf(value) - boxW / 2, plot.y + plot.h + 4, boxW, 16, paint2.face, paint2.tickColor, `${element.id}-xtick-${index}`, false);
   });
-  if (paint.legend)
-    addSwatchLegend(pres, slide, element, paint.face, paint.ink, chart.series.map((series, index) => ({ name: series.name, color: paint.colors[index] ?? paint.ink })));
+  if (paint2.legend)
+    addSwatchLegend(pres, slide, element, paint2.face, paint2.ink, chart.series.map((series, index) => ({ name: series.name, color: paint2.colors[index] ?? paint2.ink })));
 }
 function addRadarValueLabels(pres, slide, element, chart, legend, face, color, background, ink, colors) {
   const plot = plotBox("radar", legend, element.bounds);
@@ -22098,7 +22105,7 @@ function addRadarValueLabels(pres, slide, element, chart, legend, face, color, b
     if (value <= scale.min)
       continue;
     const y = cy - (value - scale.min) / span * radius;
-    const text = formatTick(value);
+    const text2 = formatTick(value);
     const boxW = 16;
     const boxH = 14;
     const x = cx + 7;
@@ -22109,9 +22116,9 @@ function addRadarValueLabels(pres, slide, element, chart, legend, face, color, b
       h: inches2(boxH),
       fill: { color: background },
       line: { color: background, pt: 0 },
-      objectName: `${element.id}-valtick-chip-${text}`
+      objectName: `${element.id}-valtick-chip-${text2}`
     });
-    addCallout(slide, text, x, y - boxH / 2, boxW, boxH, face, color, `${element.id}-valtick-${text}`, false, "left");
+    addCallout(slide, text2, x, y - boxH / 2, boxW, boxH, face, color, `${element.id}-valtick-${text2}`, false, "left");
   }
   if (!legend)
     return;
@@ -22227,7 +22234,7 @@ function polishBarLabels(xml) {
 }
 function polishComboLines(xml, chart) {
   const roles = comboSeriesRoles(chart.series);
-  const lineCounts = chart.series.filter((_, index) => roles[index] === "line").map((series) => series.values.length);
+  const lineCounts = chart.series.filter((_, index2) => roles[index2] === "line").map((series) => series.values.length);
   let index = 0;
   return xml.replace(/<c:lineChart>[\s\S]*?<\/c:lineChart>/g, (block) => block.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (series) => {
     const count = lineCounts[index] ?? 0;
@@ -22264,8 +22271,8 @@ function polishKeyLabels(xml, chart) {
 }
 function polishScatterLabels(xml, face, color) {
   const typeface = escapeXml(face);
-  const run = `<a:rPr lang="zh-CN" b="1" sz="1200" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="${typeface}"/></a:rPr>`;
-  return xml.replace(/<a:rPr lang="[^"]*" dirty="0"\/>/g, run);
+  const run2 = `<a:rPr lang="zh-CN" b="1" sz="1200" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="${typeface}"/></a:rPr>`;
+  return xml.replace(/<a:rPr lang="[^"]*" dirty="0"\/>/g, run2);
 }
 function deletedLabel(index) {
   return `<c:dLbl><c:idx val="${index}"/><c:delete val="1"/></c:dLbl>`;
@@ -22296,8 +22303,8 @@ function waterfallParts(values) {
   base.push(0);
   up.push(Math.max(0, running));
   down.push(0);
-  for (let i = 1;i < values.length - 1; i++) {
-    const delta = values[i] ?? 0;
+  for (let i2 = 1;i2 < values.length - 1; i2++) {
+    const delta = values[i2] ?? 0;
     if (delta >= 0) {
       base.push(running);
       up.push(delta);
@@ -22325,10 +22332,52 @@ function waterfallColumns(values) {
   };
 }
 
+// apps/electron/resources/skills/ppt-design/engine/host-output.ts
+import { readFileSync as readFileSync3, statSync, watch } from "fs";
+import { dirname as dirname2, isAbsolute, join as join3 } from "path";
+function deckFileStamp(file) {
+  const stat = statSync(file);
+  return `${stat.mtimeMs}:${stat.size}`;
+}
+async function waitForHostOutput(file, stamp, timeoutMs = 1e4) {
+  const sessionDir = process.env.CRAFT_SESSION_DIR;
+  const dir = sessionDir ? join3(sessionDir, "data") : dirname2(file);
+  const receipt = join3(dir, "ppt-output.json");
+  return new Promise((resolve, reject) => {
+    const watcher = watch(dir, check);
+    const timer = setTimeout(() => finish2(undefined, new Error("Selection did not export this saved deck. Check the host export status; do not use an earlier PPTX.")), timeoutMs);
+    watcher.on("error", (error) => finish2(undefined, error));
+    check();
+    function finish2(path, error) {
+      clearTimeout(timer);
+      watcher.close();
+      if (path)
+        resolve(path);
+      else
+        reject(error);
+    }
+    function check() {
+      try {
+        if (deckFileStamp(file) !== stamp) {
+          finish2(undefined, new Error("deck.json changed during export. Check the latest saved deck."));
+          return;
+        }
+        const record = JSON.parse(readFileSync3(receipt, "utf8"));
+        const path = record.path;
+        if (record.stamp === stamp && record.ready === true && typeof path === "string" && isAbsolute(path) && /\.pptx$/i.test(path)) {
+          const stat = statSync(path);
+          if (stat.isFile() && stat.size > 0)
+            finish2(path);
+        }
+      } catch {}
+    }
+  });
+}
+
 // apps/electron/resources/skills/ppt-design/engine/import/project.ts
 import { createHash as createHash2 } from "crypto";
-import { mkdirSync as mkdirSync4, readFileSync as readFileSync4, statSync, writeFileSync as writeFileSync4 } from "fs";
-import { dirname as dirname2, join as join4, resolve, sep } from "path";
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync5, statSync as statSync2, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname3, join as join5, resolve, sep } from "path";
 
 // apps/electron/resources/skills/ppt-design/engine/import/preview-port.ts
 var RENDER_PATH_UNDECIDED = "\u9636\u6BB5 02\uFF08#705\uFF09\u5C1A\u672A\u9009\u5B9A\u6E32\u67D3\u8DEF\u5F84\u3002\u9884\u89C8\u548C PDF \u4ECD\u901A\u8FC7\u8FD9\u4E2A\u63A5\u53E3\u63A5\u5165\uFF0C\u5BFC\u5165\u672C\u8EAB\u4E0D\u751F\u6210\u753B\u9762\u3002";
@@ -22341,7 +22390,7 @@ async function previewImportedSlides(request, port) {
 // apps/electron/resources/skills/ppt-design/engine/import/pptx-to-deck.ts
 import { createHash } from "crypto";
 import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 
 // node_modules/fflate/esm/index.mjs
 import { createRequire } from "module";
@@ -22358,13 +22407,13 @@ var fdeb = new u8([0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9
 var clim = new u8([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
 var freb = function(eb, start) {
   var b = new u16(31);
-  for (var i = 0;i < 31; ++i) {
-    b[i] = start += 1 << eb[i - 1];
+  for (var i2 = 0;i2 < 31; ++i2) {
+    b[i2] = start += 1 << eb[i2 - 1];
   }
   var r = new i32(b[30]);
-  for (var i = 1;i < 30; ++i) {
-    for (var j = b[i];j < b[i + 1]; ++j) {
-      r[j] = j - b[i] << 5 | i;
+  for (var i2 = 1;i2 < 30; ++i2) {
+    for (var j = b[i2];j < b[i2 + 1]; ++j) {
+      r[j] = j - b[i2] << 5 | i2;
     }
   }
   return { b, r };
@@ -22387,25 +22436,25 @@ var x;
 var i2;
 var hMap = function(cd, mb, r) {
   var s = cd.length;
-  var i = 0;
+  var i3 = 0;
   var l = new u16(mb);
-  for (;i < s; ++i) {
-    if (cd[i])
-      ++l[cd[i] - 1];
+  for (;i3 < s; ++i3) {
+    if (cd[i3])
+      ++l[cd[i3] - 1];
   }
   var le = new u16(mb);
-  for (i = 1;i < mb; ++i) {
-    le[i] = le[i - 1] + l[i - 1] << 1;
+  for (i3 = 1;i3 < mb; ++i3) {
+    le[i3] = le[i3 - 1] + l[i3 - 1] << 1;
   }
   var co;
   if (r) {
     co = new u16(1 << mb);
     var rvb = 15 - mb;
-    for (i = 0;i < s; ++i) {
-      if (cd[i]) {
-        var sv = i << 4 | cd[i];
-        var r_1 = mb - cd[i];
-        var v = le[cd[i] - 1]++ << r_1;
+    for (i3 = 0;i3 < s; ++i3) {
+      if (cd[i3]) {
+        var sv = i3 << 4 | cd[i3];
+        var r_1 = mb - cd[i3];
+        var v = le[cd[i3] - 1]++ << r_1;
         for (var m = v | (1 << r_1) - 1;v <= m; ++v) {
           co[rev[v] >> rvb] = sv;
         }
@@ -22413,9 +22462,9 @@ var hMap = function(cd, mb, r) {
     }
   } else {
     co = new u16(s);
-    for (i = 0;i < s; ++i) {
-      if (cd[i]) {
-        co[i] = rev[le[cd[i] - 1]++] >> 15 - cd[i];
+    for (i3 = 0;i3 < s; ++i3) {
+      if (cd[i3]) {
+        co[i3] = rev[le[cd[i3] - 1]++] >> 15 - cd[i3];
       }
     }
   }
@@ -22442,9 +22491,9 @@ var flrm = /* @__PURE__ */ hMap(flt, 9, 1);
 var fdrm = /* @__PURE__ */ hMap(fdt, 5, 1);
 var max = function(a) {
   var m = a[0];
-  for (var i = 1;i < a.length; ++i) {
-    if (a[i] > m)
-      m = a[i];
+  for (var i3 = 1;i3 < a.length; ++i3) {
+    if (a[i3] > m)
+      m = a[i3];
   }
   return m;
 };
@@ -22500,22 +22549,22 @@ var inflt = function(dat, st, buf, dict) {
   var noSt = st.i;
   if (noBuf)
     buf = new u8(sl * 3);
-  var cbuf = function(l) {
+  var cbuf = function(l2) {
     var bl = buf.length;
-    if (l > bl) {
-      var nbuf = new u8(Math.max(bl * 2, l));
+    if (l2 > bl) {
+      var nbuf = new u8(Math.max(bl * 2, l2));
       nbuf.set(buf);
       buf = nbuf;
     }
   };
-  var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, { l: lm, d: dm, m: lbt, n: dbt } = st;
+  var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, lm = st.l, dm = st.d, lbt = st.m, dbt = st.n;
   var tbts = sl * 8;
   do {
     if (!lm) {
       final = bits(dat, pos, 1);
-      var type = bits(dat, pos + 1, 3);
+      var type2 = bits(dat, pos + 1, 3);
       pos += 3;
-      if (!type) {
+      if (!type2) {
         var s = shft(pos) + 4, l = dat[s - 4] | dat[s - 3] << 8, t = s + l;
         if (t > sl) {
           if (noSt)
@@ -22527,36 +22576,36 @@ var inflt = function(dat, st, buf, dict) {
         buf.set(dat.subarray(s, t), bt);
         st.b = bt += l, st.p = pos = t * 8, st.f = final;
         continue;
-      } else if (type == 1)
+      } else if (type2 == 1)
         lm = flrm, dm = fdrm, lbt = 9, dbt = 5;
-      else if (type == 2) {
+      else if (type2 == 2) {
         var hLit = bits(dat, pos, 31) + 257, hcLen = bits(dat, pos + 10, 15) + 4;
         var tl = hLit + bits(dat, pos + 5, 31) + 1;
         pos += 14;
         var ldt = new u8(tl);
         var clt = new u8(19);
-        for (var i = 0;i < hcLen; ++i) {
-          clt[clim[i]] = bits(dat, pos + i * 3, 7);
+        for (var i3 = 0;i3 < hcLen; ++i3) {
+          clt[clim[i3]] = bits(dat, pos + i3 * 3, 7);
         }
         pos += hcLen * 3;
         var clb = max(clt), clbmsk = (1 << clb) - 1;
         var clm = hMap(clt, clb, 1);
-        for (var i = 0;i < tl; ) {
+        for (var i3 = 0;i3 < tl; ) {
           var r = clm[bits(dat, pos, clbmsk)];
           pos += r & 15;
           var s = r >> 4;
           if (s < 16) {
-            ldt[i++] = s;
+            ldt[i3++] = s;
           } else {
             var c = 0, n = 0;
             if (s == 16)
-              n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i - 1];
+              n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i3 - 1];
             else if (s == 17)
               n = 3 + bits(dat, pos, 7), pos += 3;
             else if (s == 18)
               n = 11 + bits(dat, pos, 127), pos += 7;
             while (n--)
-              ldt[i++] = c;
+              ldt[i3++] = c;
           }
         }
         var lt = ldt.subarray(0, hLit), dt = ldt.subarray(hLit);
@@ -22594,8 +22643,8 @@ var inflt = function(dat, st, buf, dict) {
       } else {
         var add = sym - 254;
         if (sym > 264) {
-          var i = sym - 257, b = fleb[i];
-          add = bits(dat, pos, (1 << b) - 1) + fl[i];
+          var i3 = sym - 257, b = fleb[i3];
+          add = bits(dat, pos, (1 << b) - 1) + fl[i3];
           pos += b;
         }
         var d = dm[bits16(dat, pos) & dms], dsym = d >> 4;
@@ -22652,31 +22701,31 @@ try {
   tds = 1;
 } catch (e) {}
 var dutf8 = function(d) {
-  for (var r = "", i = 0;; ) {
-    var c = d[i++];
+  for (var r = "", i3 = 0;; ) {
+    var c = d[i3++];
     var eb = (c > 127) + (c > 223) + (c > 239);
-    if (i + eb > d.length)
-      return { s: r, r: slc(d, i - 1) };
+    if (i3 + eb > d.length)
+      return { s: r, r: slc(d, i3 - 1) };
     if (!eb)
       r += String.fromCharCode(c);
     else if (eb == 3) {
-      c = ((c & 15) << 18 | (d[i++] & 63) << 12 | (d[i++] & 63) << 6 | d[i++] & 63) - 65536, r += String.fromCharCode(55296 | c >> 10, 56320 | c & 1023);
+      c = ((c & 15) << 18 | (d[i3++] & 63) << 12 | (d[i3++] & 63) << 6 | d[i3++] & 63) - 65536, r += String.fromCharCode(55296 | c >> 10, 56320 | c & 1023);
     } else if (eb & 1)
-      r += String.fromCharCode((c & 31) << 6 | d[i++] & 63);
+      r += String.fromCharCode((c & 31) << 6 | d[i3++] & 63);
     else
-      r += String.fromCharCode((c & 15) << 12 | (d[i++] & 63) << 6 | d[i++] & 63);
+      r += String.fromCharCode((c & 15) << 12 | (d[i3++] & 63) << 6 | d[i3++] & 63);
   }
 };
 function strFromU8(dat, latin1) {
   if (latin1) {
     var r = "";
-    for (var i = 0;i < dat.length; i += 16384)
-      r += String.fromCharCode.apply(null, dat.subarray(i, i + 16384));
+    for (var i3 = 0;i3 < dat.length; i3 += 16384)
+      r += String.fromCharCode.apply(null, dat.subarray(i3, i3 + 16384));
     return r;
   } else if (td) {
     return td.decode(dat);
   } else {
-    var _a = dutf8(dat), { s, r } = _a;
+    var _a2 = dutf8(dat), s = _a2.s, r = _a2.r;
     if (r.length)
       err(8);
     return s;
@@ -22687,7 +22736,7 @@ var slzh = function(d, b) {
 };
 var zh = function(d, b, z) {
   var fnl = b2(d, b + 28), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl, bs = b4(d, b + 20);
-  var _a = z && bs == 4294967295 ? z64e(d, es) : [bs, b4(d, b + 24), b4(d, b + 42)], sc = _a[0], su = _a[1], off = _a[2];
+  var _a2 = z && bs == 4294967295 ? z64e(d, es) : [bs, b4(d, b + 24), b4(d, b + 42)], sc = _a2[0], su = _a2[1], off = _a2[2];
   return [b2(d, b + 10), sc, su, fn, es + b2(d, b + 30) + b2(d, b + 32), off];
 };
 var z64e = function(d, b) {
@@ -22716,8 +22765,8 @@ function unzipSync(data, opts) {
     }
   }
   var fltr = opts && opts.filter;
-  for (var i = 0;i < c; ++i) {
-    var _a = zh(data, o, z), c_2 = _a[0], sc = _a[1], su = _a[2], fn = _a[3], no = _a[4], off = _a[5], b = slzh(data, off);
+  for (var i3 = 0;i3 < c; ++i3) {
+    var _a2 = zh(data, o, z), c_2 = _a2[0], sc = _a2[1], su = _a2[2], fn = _a2[3], no = _a2[4], off = _a2[5], b = slzh(data, off);
     o = no;
     if (!fltr || fltr({
       name: fn,
@@ -22864,11 +22913,11 @@ function readNode(xml, start) {
   token.lastIndex = gt + 1;
   let match;
   while (match = token.exec(xml)) {
-    const closing = match[1] === "/";
-    const self2 = !closing && /\/\s*$/.test(match[3] ?? "");
+    const closing2 = match[1] === "/";
+    const self2 = !closing2 && /\/\s*$/.test(match[3] ?? "");
     if (self2)
       continue;
-    depth += closing ? -1 : 1;
+    depth += closing2 ? -1 : 1;
     if (depth === 0) {
       return { node: { local, attrs, inner: xml.slice(gt + 1, match.index), raw: xml.slice(start, token.lastIndex) }, end: token.lastIndex };
     }
@@ -22954,14 +23003,14 @@ function slideParts(files, presentation) {
 
 // apps/electron/resources/skills/ppt-design/engine/import/retained.ts
 var import_jszip3 = __toESM(require_lib3(), 1);
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "fs";
 function emptyManifest() {
   return { version: 1, slides: [] };
 }
 async function mergeRetained(pptxPath, manifest) {
   if (!manifest.slides.some((slide) => slide.fragments.length > 0 || slide.backgroundXml))
     return;
-  const zip = await import_jszip3.default.loadAsync(readFileSync3(pptxPath));
+  const zip = await import_jszip3.default.loadAsync(readFileSync4(pptxPath));
   let contentTypes = await zip.file("[Content_Types].xml")?.async("string") ?? "";
   for (let index = 0;index < manifest.slides.length; index++) {
     const slide = manifest.slides[index];
@@ -22995,8 +23044,8 @@ async function mergeRetained(pptxPath, manifest) {
         const stored = `ppt/media/retained-${index + 1}-${safeName}`;
         zip.file(stored, Buffer.from(media.base64, "base64"));
         piece = piece.split(media.relId).join(relId);
-        const type = media.type || "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
-        rels = rels.replace("</Relationships>", `<Relationship Id="${relId}" Type="${escapeAttr(type)}" Target="../media/${stored.split("/").pop()}"/></Relationships>`);
+        const type2 = media.type || "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+        rels = rels.replace("</Relationships>", `<Relationship Id="${relId}" Type="${escapeAttr(type2)}" Target="../media/${stored.split("/").pop()}"/></Relationships>`);
         contentTypes = addContentType(contentTypes, safeName);
       }
       blocks.push(piece);
@@ -23017,7 +23066,7 @@ function addContentType(xml, fileName) {
   const extension = fileName.split(".").pop()?.toLowerCase();
   if (!extension || !xml || xml.includes(`Extension="${extension}"`))
     return xml;
-  const types = {
+  const types2 = {
     emf: "image/x-emf",
     wmf: "image/x-wmf",
     png: "image/png",
@@ -23025,7 +23074,7 @@ function addContentType(xml, fileName) {
     jpeg: "image/jpeg",
     xml: "application/xml"
   };
-  const content = types[extension];
+  const content = types2[extension];
   if (!content)
     return xml;
   return xml.replace("</Types>", `<Default Extension="${extension}" ContentType="${content}"/></Types>`);
@@ -23233,15 +23282,15 @@ function expandNode(state, node, index) {
 }
 function importGroup(state, node, index, sourceKind) {
   const id = elementId(state, shapeName(node) || `group-${index}`, index);
-  const children = visualNodes(node.inner);
+  const children2 = visualNodes(node.inner);
   const frame = compose(state.frame, groupFrame(node));
-  if (children.length === 0 || !frame) {
+  if (children2.length === 0 || !frame) {
     retain(state, node, index, "group", IMPORT_USER_MESSAGES.group, sourceKind, id);
     return;
   }
   const before = state.elements.length;
   const child = { ...state, frame };
-  children.forEach((item, childIndex) => expandNode(child, item, index * 100 + childIndex));
+  children2.forEach((item, childIndex) => expandNode(child, item, index * 100 + childIndex));
   const added = state.elements.slice(before);
   if (added.length === 0) {
     retain(state, node, index, "group", IMPORT_USER_MESSAGES.group, sourceKind, id);
@@ -23301,7 +23350,7 @@ function importShape(state, node, index, sourceKind) {
     state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "placeholder", sourceKind, message: `\u5360\u4F4D\u7B26\uFF08${attr(placeholder, "type") || "body"}\uFF09\u7684\u6BCD\u7248\u6837\u5F0F\u6CA1\u6709\u5C55\u5F00\uFF0C\u6587\u672C\u6309\u672C\u9875\u76F4\u63A5\u683C\u5F0F\u5199\u5165\u3002` });
   }
   const txBody = firstLocalIn(node, "txBody");
-  const text = txBody ? readText(state, txBody.inner, id) : undefined;
+  const text2 = txBody ? readText(state, txBody.inner, id) : undefined;
   const preset = presetOf(node);
   const fillKind = fillKindOf(node);
   if (preset === "custom") {
@@ -23311,22 +23360,22 @@ function importShape(state, node, index, sourceKind) {
       return;
     }
     state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "custom-geometry", sourceKind, message: "\u81EA\u5B9A\u4E49\u5F62\u72B6\u5DF2\u8F6C\u6210\u8DEF\u5F84\u3002" });
-    pushShape(state, node, text?.value ? elementId(state, `${id}-shape`, index) : id, bounds, "path", path, fillKind, sourceKind);
+    pushShape(state, node, text2?.value ? elementId(state, `${id}-shape`, index) : id, bounds, "path", path, fillKind, sourceKind);
   } else if (preset && PRESET_SHAPE[preset]) {
-    pushShape(state, node, text ? elementId(state, `${id}-shape`, index) : id, bounds, PRESET_SHAPE[preset], undefined, fillKind, sourceKind);
+    pushShape(state, node, text2 ? elementId(state, `${id}-shape`, index) : id, bounds, PRESET_SHAPE[preset], undefined, fillKind, sourceKind);
   } else if (preset && presetPath(preset, bounds)) {
     const path = presetPath(preset, bounds);
     state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "preset-shape", sourceKind, message: `\u9884\u8BBE\u5F62\u72B6\u300C${preset}\u300D\u5DF2\u6536\u6210\u8DEF\u5F84\u3002` });
-    pushShape(state, node, text ? elementId(state, `${id}-shape`, index) : id, bounds, "path", path, fillKind, sourceKind);
+    pushShape(state, node, text2 ? elementId(state, `${id}-shape`, index) : id, bounds, "path", path, fillKind, sourceKind);
   } else if (preset) {
     retain(state, node, index, "preset-shape", `\u9884\u8BBE\u5F62\u72B6\u300C${preset}\u300D\u8FD8\u4E0D\u80FD\u6620\u5C04\uFF0C\u5DF2\u6309\u539F\u4F4D\u7F6E\u4FDD\u7559\u3002`, sourceKind);
     return;
   }
   if (fillKind === "picture")
     importPictureFill(state, node, id, bounds, preset, sourceKind);
-  if (text?.value) {
-    state.elements.push(textElement(state, id, text.value, bounds, txBody?.inner ?? "", text.runs));
-    state.diagnostics.push({ level: text.runs ? "approximate" : "faithful", slide: state.slide, elementId: id, feature: "text", sourceKind, message: "\u6587\u672C\u5DF2\u5199\u5165\u5DE5\u7A0B\u3002" });
+  if (text2?.value) {
+    state.elements.push(textElement(state, id, text2.value, bounds, txBody?.inner ?? "", text2.runs));
+    state.diagnostics.push({ level: text2.runs ? "approximate" : "faithful", slide: state.slide, elementId: id, feature: "text", sourceKind, message: "\u6587\u672C\u5DF2\u5199\u5165\u5DE5\u7A0B\u3002" });
   }
 }
 function pushShape(state, node, id, bounds, shape, path, fillKind, sourceKind) {
@@ -23358,9 +23407,9 @@ function pushShape(state, node, id, bounds, shape, path, fillKind, sourceKind) {
     element.arrow = arrow;
   if (shape === "roundRect")
     element.radius = radiusOf(node, bounds);
-  const link = linkOf(state, node);
-  if (link)
-    element.link = { href: link };
+  const link2 = linkOf(state, node);
+  if (link2)
+    element.link = { href: link2 };
   if (!element.fill && !element.gradient && !element.pattern && shape !== "line")
     element.fill = "$paper";
   state.elements.push(element);
@@ -23436,9 +23485,9 @@ function takeImage(state, node, id, bounds, sourceKind) {
   const geom = presetOf(node);
   if (geom && geom !== "rect")
     element.mask = maskOf(geom);
-  const link = linkOf(state, node);
-  if (link)
-    element.link = { href: link };
+  const link2 = linkOf(state, node);
+  if (link2)
+    element.link = { href: link2 };
   state.diagnostics.push({ level: "faithful", slide: state.slide, elementId: id, feature: "picture", sourceKind, message: "\u56FE\u7247\u5DF2\u5199\u5165\u5DE5\u7A0B\u3002" });
   return element;
 }
@@ -23591,11 +23640,11 @@ function readText(state, txBody, id) {
     if (pieces.length === 0 && bullet)
       runs.push({ text: bullet.trim() });
     pieces.forEach((piece, pieceIndex) => {
-      const text = `${pieceIndex === 0 ? bullet : ""}${decodeXml(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/.exec(piece)?.[1] ?? "")}`;
-      if (!text)
+      const text2 = `${pieceIndex === 0 ? bullet : ""}${decodeXml(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/.exec(piece)?.[1] ?? "")}`;
+      if (!text2)
         return;
       runs.push({
-        text,
+        text: text2,
         size: fontSizeOf(piece),
         bold: /\bb="(?:1|true)"/.test(piece) ? true : undefined,
         italic: /\bi="(?:1|true)"/.test(piece) ? true : undefined,
@@ -23606,7 +23655,7 @@ function readText(state, txBody, id) {
       runs[runs.length - 1].text += `
 `;
   });
-  const value = runs.map((run) => run.text).join("").trim();
+  const value = runs.map((run2) => run2.text).join("").trim();
   if (!value)
     return;
   if (/<a:hlinkClick\b/.test(txBody)) {
@@ -23620,7 +23669,7 @@ function readText(state, txBody, id) {
     state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "bullets", message: "\u9879\u76EE\u7B26\u53F7\u5DF2\u5199\u8FDB\u6B63\u6587\u3002" });
   if (/<a:spAutoFit\b|<a:normAutofit\b/.test(txBody))
     state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "autofit", message: "\u5DF2\u6309\u6587\u672C\u6846\u8BA1\u7B97\u5BB9\u91CF\uFF0C\u6CA1\u6709\u6539\u5B57\u53F7\u3002" });
-  const mixed = runs.length > 1 && new Set(runs.map((run) => `${run.size}|${run.bold}|${run.color}`)).size > 1;
+  const mixed = runs.length > 1 && new Set(runs.map((run2) => `${run2.size}|${run2.bold}|${run2.color}`)).size > 1;
   if (mixed)
     state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "rich-text", message: "\u540C\u4E00\u6587\u672C\u6846\u91CC\u7684\u4E0D\u540C\u6837\u5F0F\u5DF2\u5199\u5165 runs\u3002" });
   return { value, runs: mixed ? runs : undefined };
@@ -23634,7 +23683,7 @@ function textElement(state, id, value, bounds, txBody, runs) {
   const perLine = Math.max(1, Math.floor(bounds.w / Math.max(size, 1)));
   const glyphs = Array.from(value.replaceAll(`
 `, "")).length;
-  const link = linkOf(state, { local: "tx", attrs: "", inner: txBody, raw: txBody });
+  const link2 = linkOf(state, { local: "tx", attrs: "", inner: txBody, raw: txBody });
   return {
     id,
     type: "text",
@@ -23655,7 +23704,7 @@ function textElement(state, id, value, bounds, txBody, runs) {
       face: faceOf(txBody, state.theme)
     },
     runs,
-    link: link ? { href: link } : undefined
+    link: link2 ? { href: link2 } : undefined
   };
 }
 function backgroundOf(state, xml) {
@@ -23717,8 +23766,8 @@ function buildTheme(fileName, scheme, fonts, diagnostics) {
     source: "\u7531\u5916\u6765 PPTX \u5BFC\u5165\u3002\u914D\u8272\u6765\u81EA\u6587\u4EF6\u4E3B\u9898\u6216\u56DE\u9000\u8272\uFF0C\u4E0D\u662F\u5DF2\u53D1\u5E03\u6A21\u677F\u3002"
   };
 }
-function bindColor(state, hex, prefer) {
-  const upper = hex.toUpperCase();
+function bindColor(state, hex2, prefer) {
+  const upper = hex2.toUpperCase();
   if (prefer === "paper" && state.theme.colors.paper.toUpperCase() === upper)
     return "$paper";
   for (const key of ["ink", "accent", "muted", "line", "paper", "surface", "inverse"]) {
@@ -23750,10 +23799,10 @@ function paintOf(xml, scheme) {
 function schemeMap(theme) {
   return { dk1: theme.colors.ink, lt1: theme.colors.paper, dk2: theme.colors.muted, lt2: theme.colors.surface, accent1: theme.colors.accent, ...theme.colors };
 }
-function modulate(hex, inner) {
+function modulate(hex2, inner) {
   if (!inner || !/<a:(?:shade|tint|lumMod)\b/.test(inner))
-    return hex.toUpperCase();
-  let [r, g, b] = rgb(hex);
+    return hex2.toUpperCase();
+  let [r, g, b] = rgb(hex2);
   const shade = numberAttr(inner, "shade");
   const tint = numberAttr(inner, "tint");
   const lumMod = numberAttr(inner, "lumMod");
@@ -23772,10 +23821,10 @@ function modulate(hex, inner) {
     g *= lumMod;
     b *= lumMod;
   }
-  return `#${[r, g, b].map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  return `#${[r, g, b].map((channel2) => Math.max(0, Math.min(255, Math.round(channel2))).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
-function rgb(hex) {
-  const raw = hex.replace("#", "");
+function rgb(hex2) {
+  const raw = hex2.replace("#", "");
   return [Number.parseInt(raw.slice(0, 2), 16), Number.parseInt(raw.slice(2, 4), 16), Number.parseInt(raw.slice(4, 6), 16)];
 }
 function numberAttr(xml, name) {
@@ -23871,13 +23920,13 @@ function boundsOf(node) {
     return null;
   const off = firstLocalIn(xfrm, "off");
   const ext = firstLocalIn(xfrm, "ext");
-  const x = points(Number(attr(off?.attrs ?? "", "x")));
+  const x2 = points(Number(attr(off?.attrs ?? "", "x")));
   const y = points(Number(attr(off?.attrs ?? "", "y")));
   const w = points(Number(attr(ext?.attrs ?? "", "cx")));
   const h = points(Number(attr(ext?.attrs ?? "", "cy")));
-  if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0)
+  if (x2 === null || y === null || w === null || h === null || w <= 0 || h <= 0)
     return null;
-  return { x, y, w, h };
+  return { x: x2, y, w, h };
 }
 function groupFrame(node) {
   const xfrm = firstLocalIn(firstLocalIn(node, "grpSpPr") ?? node, "xfrm");
@@ -23934,11 +23983,11 @@ function pathFromGeom(node, bounds) {
   const commands = [];
   for (const step of topLevel(path.inner)) {
     const point = (source) => {
-      const x = Number(attr(source?.attrs ?? "", "x"));
+      const x2 = Number(attr(source?.attrs ?? "", "x"));
       const y = Number(attr(source?.attrs ?? "", "y"));
-      if (!Number.isFinite(x) || !Number.isFinite(y))
+      if (!Number.isFinite(x2) || !Number.isFinite(y))
         return null;
-      return `${round(x * sx)} ${round(y * sy)}`;
+      return `${round(x2 * sx)} ${round(y * sy)}`;
     };
     if (step.local === "moveTo")
       commands.push(`M ${point(firstLocalIn(step, "pt"))}`);
@@ -24103,16 +24152,16 @@ function faceOf(txBody, theme) {
   return { latin: west, cjk: { mac: cjk, win: cjk, linux: cjk } };
 }
 function readScheme(xml) {
-  const map = {};
+  const map2 = {};
   if (!xml)
-    return map;
+    return map2;
   for (const name of ["dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6"]) {
     const block = new RegExp(`<a:${name}\\b[^>]*>([\\s\\S]*?)</a:${name}>`).exec(xml)?.[1] ?? "";
     const color = paintOf(block, {});
     if (color)
-      map[name] = color;
+      map2[name] = color;
   }
-  return map;
+  return map2;
 }
 function readFonts(xml) {
   if (!xml)
@@ -24174,9 +24223,9 @@ function mediaKind(target, files) {
     return "audio";
   if (/\.(mp4|mov|wmv|m4v)$/.test(name))
     return "video";
-  const types = textOf(files, "[Content_Types].xml");
+  const types2 = textOf(files, "[Content_Types].xml");
   const part = target ? `/${target}` : "";
-  const content = new RegExp(`PartName="${part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*ContentType="([^"]+)"`).exec(types)?.[1] ?? "";
+  const content = new RegExp(`PartName="${part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*ContentType="([^"]+)"`).exec(types2)?.[1] ?? "";
   if (content.includes("emf"))
     return "emf";
   if (content.includes("wmf"))
@@ -24200,7 +24249,7 @@ function titleFrom(fileName) {
 }
 function writeAsset(dir, name, bytes) {
   mkdirSync3(dir, { recursive: true });
-  const path = join3(dir, name.replace(/[^\w.\u4e00-\u9fff-]+/g, "_"));
+  const path = join4(dir, name.replace(/[^\w.\u4e00-\u9fff-]+/g, "_"));
   writeFileSync3(path, bytes);
   return path;
 }
@@ -24213,29 +24262,29 @@ async function importPptxFile(sourcePath, outDir, options = {}) {
   const source = resolve(sourcePath);
   const projectDir = resolve(outDir);
   assertSafeOutput(source, projectDir);
-  const before = statSync(source);
-  const bytes = new Uint8Array(readFileSync4(source));
+  const before = statSync2(source);
+  const bytes = new Uint8Array(readFileSync5(source));
   const hash = createHash2("sha256").update(bytes).digest("hex");
-  const imported = importPptx(bytes, { fileName: options.fileName ?? source.split(/[/\\]/).pop(), maxSlides: options.maxSlides, assetDir: join4(projectDir, "assets") });
-  if (statSync(source).mtimeMs !== before.mtimeMs || createHash2("sha256").update(readFileSync4(source)).digest("hex") !== hash) {
+  const imported = importPptx(bytes, { fileName: options.fileName ?? source.split(/[/\\]/).pop(), maxSlides: options.maxSlides, assetDir: join5(projectDir, "assets") });
+  if (statSync2(source).mtimeMs !== before.mtimeMs || createHash2("sha256").update(readFileSync5(source)).digest("hex") !== hash) {
     throw new Error("\u5BFC\u5165\u6539\u52A8\u4E86\u539F\u4EF6");
   }
   mkdirSync4(projectDir, { recursive: true });
   const issues = imported.deck ? checkDeck(imported.deck) : [];
   const preview = await previewImportedSlides({ title: imported.deck?.title ?? imported.source.fileName, pageCount: imported.deck?.pages.length ?? 0, outDir: projectDir }, options.preview);
   if (imported.deck)
-    writeFileSync4(join4(projectDir, "deck.json"), `${JSON.stringify(imported.deck, null, 2)}
+    writeFileSync4(join5(projectDir, "deck.json"), `${JSON.stringify(imported.deck, null, 2)}
 `);
-  writeFileSync4(join4(projectDir, "diagnostics.json"), `${JSON.stringify({ source: imported.source, preview, ...coverageReport(imported.diagnostics) }, null, 2)}
+  writeFileSync4(join5(projectDir, "diagnostics.json"), `${JSON.stringify({ source: imported.source, preview, ...coverageReport(imported.diagnostics) }, null, 2)}
 `);
-  writeFileSync4(join4(projectDir, "retained.json"), `${JSON.stringify(imported.retained, null, 2)}
+  writeFileSync4(join5(projectDir, "retained.json"), `${JSON.stringify(imported.retained, null, 2)}
 `);
   return { deck: imported.deck, diagnostics: imported.diagnostics, issues, preview, source: imported.source, projectDir };
 }
 function loadRetained(deckPath) {
-  const file = join4(dirname2(deckPath), "retained.json");
+  const file = join5(dirname3(deckPath), "retained.json");
   try {
-    const parsed = JSON.parse(readFileSync4(file, "utf8"));
+    const parsed = JSON.parse(readFileSync5(file, "utf8"));
     if (parsed?.version !== 1 || !Array.isArray(parsed.slides))
       return;
     return parsed;
@@ -24258,7 +24307,7 @@ function assertSafeOutput(source, outDir) {
 function usage() {
   console.log(JSON.stringify({
     status: "error",
-    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4] | import <file.pptx> --out <\u5DE5\u7A0B\u76EE\u5F55> [--max-slides N]"
+    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> [--wait-for-export] | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4] | import <file.pptx> --out <\u5DE5\u7A0B\u76EE\u5F55> [--max-slides N]"
   }));
   process.exit(1);
 }
@@ -24268,25 +24317,27 @@ function parseArgs(argv) {
     usage();
   const flags = { command };
   const rest = argv.slice(1);
-  for (let i = 0;i < rest.length; i++) {
-    const token = rest[i];
+  for (let i3 = 0;i3 < rest.length; i3++) {
+    const token = rest[i3];
     if (token === "--out")
-      flags.out = rest[++i];
+      flags.out = rest[++i3];
     else if (token === "--screenshot")
-      flags.screenshot = rest[++i];
+      flags.screenshot = rest[++i3];
     else if (token === "--platform") {
-      const value = rest[++i];
+      const value = rest[++i3];
       if (value !== "mac" && value !== "win" && value !== "linux")
         usage();
       flags.platform = value;
     } else if (token === "--officecli")
-      flags.officecli = rest[++i];
+      flags.officecli = rest[++i3];
     else if (token === "--pages")
-      flags.pages = Number(rest[++i]);
+      flags.pages = Number(rest[++i3]);
     else if (token === "--max-slides")
-      flags.maxSlides = Number(rest[++i]);
+      flags.maxSlides = Number(rest[++i3]);
+    else if (token === "--wait-for-export")
+      flags.waitForExport = true;
     else if (token === "--only-pages") {
-      const value = rest[++i];
+      const value = rest[++i3];
       if (!value || !/^\d+(,\d+)*$/.test(value))
         usage();
       flags.pageNumbers = value.split(",").map(Number);
@@ -24303,6 +24354,8 @@ function emit(status, body, code) {
 }
 var flags = parseArgs(process.argv.slice(2));
 if (flags.pageNumbers && flags.command !== "screenshot")
+  usage();
+if (flags.waitForExport && flags.command !== "check")
   usage();
 if (flags.command === "import") {
   if (!flags.file || !flags.out)
@@ -24340,13 +24393,28 @@ if (flags.command === "screenshot") {
   const result = await captureSlides(file, resolve2(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
   emit(result.available ? "ok" : "error", { screenshots: result }, result.available ? 0 : 1);
 }
+var stamp;
+if (flags.waitForExport) {
+  try {
+    stamp = deckFileStamp(file);
+  } catch {}
+}
 var loaded = loadDeckFile(file);
 if (!loaded.deck)
   emit("error", { issues: loaded.issues }, 1);
 if (flags.command === "check") {
   const issues = [...loaded.issues, ...checkDeck(loaded.deck)];
   const revision = revisionStatus(issues);
+  let pptx;
+  if (flags.waitForExport && revision.status === "ok") {
+    try {
+      pptx = await waitForHostOutput(file, stamp ?? "");
+    } catch (error) {
+      emit("error", { issues, message: error instanceof Error ? error.message : String(error) }, 1);
+    }
+  }
   emit(revision.status, {
+    ...pptx ? { pptx } : {},
     issues,
     pages: loaded.deck.pages.length,
     errorCount: revision.errorCount,

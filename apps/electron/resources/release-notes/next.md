@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 预检直接返回成品路径** — 保存后可在同一次预检中拿到本次导出的文件，不用反复查找；生成文件不再声明不存在的幻灯片母版。Office 校验与验收要求不变。
+
 - **PPT 制作指南明确版式和导出位置** — 直接说明文字和表格的预检规则及成品路径，修正 OfficeCLI 读回命令的参数顺序；计时包含由 deck-cli 启动的截图。校验与验收要求不变。
 
 - **安装包内置 Git 与 Python** — Windows / macOS 安装包完整内置 Git 2.56 与 CPython 3.12，开箱即可离线使用 `git`、`python3` 和 `uv run`，无需系统已安装 Git、Python 或 Xcode 命令行工具，也不会在首次使用时再下载。Agent 终端、MCP stdio 与隔离工作区优先走内置副本；主进程 pip 写入用户数据目录，隔离沙箱把 pip 写入私有 HOME，避免泄漏。Linux x64 无头服务端同样打包这些运行时。可用 `CRAFT_PREFER_SYSTEM_GIT=1` / `CRAFT_PREFER_SYSTEM_PYTHON=1` 改用系统安装。

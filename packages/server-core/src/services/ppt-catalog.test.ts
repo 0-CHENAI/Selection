@@ -168,7 +168,8 @@ test('PRO request enables skill without changing user transport options and adds
   expect(context).toContain('#123456')
   expect(context).toContain(join(session, 'data', 'deck.json'))
   expect(context).toContain('slide-01.png')
-  expect(context).toContain('ppt-output.json')
+  expect(context).toContain(`deck-cli.mjs check "${join(session, 'data', 'deck.json')}" --wait-for-export`)
+  expect(context).toContain('before the first save')
   expect(context).not.toContain('live panel')
   expect(context).not.toContain('data/deck.pptx')
   const themeId = getPptCatalog(root).themes[0]!.id

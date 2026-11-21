@@ -744,6 +744,17 @@ function resolveAsset(src: string): string {
 async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName): Promise<Buffer> {
   const zip = await JSZip.loadAsync(bytes)
   let changed = false
+  // PptxGenJS declares a slide master per slide but writes only the shared master.
+  const contentTypes = zip.file('[Content_Types].xml')
+  if (contentTypes) {
+    const xml = await contentTypes.async('string')
+    const next = xml.replace(/<Override PartName="\/(ppt\/slideMasters\/slideMaster\d+\.xml)" ContentType="application\/vnd\.openxmlformats-officedocument\.presentationml\.slideMaster\+xml"\/>/g,
+      (override, part: string) => zip.file(part) ? override : '')
+    if (next !== xml) {
+      zip.file('[Content_Types].xml', next)
+      changed = true
+    }
+  }
   // PptxGenJS places notesMasterIdLst after sldIdLst. CT_Presentation requires
   // master lists before the slide list; preserve their contents and relationships.
   const presentation = zip.file('ppt/presentation.xml')

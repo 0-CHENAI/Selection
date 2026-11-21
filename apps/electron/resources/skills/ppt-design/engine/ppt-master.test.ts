@@ -58,6 +58,12 @@ describe('ppt-master layouts', () => {
     const presentation = await zip.file('ppt/presentation.xml')!.async('string')
     expect(presentation).toContain('cy="10287000"')
     expect(presentation).not.toContain('cy="6858000"')
+    const manifest = await zip.file('[Content_Types].xml')!.async('string')
+    expect([...manifest.matchAll(/PartName="\/(ppt\/slideMasters\/slideMaster\d+\.xml)"/g)].map(match => match[1]))
+      .toEqual(['ppt/slideMasters/slideMaster1.xml'])
+    expect(zip.file('ppt/slideMasters/slideMaster1.xml')).not.toBeNull()
+    const layoutRels = await zip.file('ppt/slideLayouts/_rels/slideLayout1.xml.rels')!.async('string')
+    expect(layoutRels).toContain('Target="../slideMasters/slideMaster1.xml"')
   })
 })
 
