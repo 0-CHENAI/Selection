@@ -1,0 +1,80 @@
+import { expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { OfficeTurnTiming } from './office-stage-timing'
+
+test('reports model, Office tool and delivery stages without logging paths, inputs or results', () => {
+  const root = mkdtempSync(join(tmpdir(), 'office-stage-'))
+  try {
+    let now = 0
+    const timing = new OfficeTurnTiming(false, root, root, () => now)
+    const bash = (id: string, command: string) => timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId: id, input: { command } })
+    const result = (id: string) => timing.observe({ type: 'tool_result', toolUseId: id, result: 'private output', isError: false })
+
+    timing.observe({ type: 'model_call_start' })
+    now = 100
+    bash('edit', 'officecli set "private spreadsheet.xlsx" --prop "cell=private text"')
+    writeFileSync(join(root, 'private spreadsheet.xlsx'), 'private document')
+    now = 230
+    result('edit')
+    bash('validate', 'officecli validate "private spreadsheet.xlsx"')
+    now = 255
+    result('validate')
+    timing.observe({ type: 'tool_start', toolName: 'mcp__session__xlsx_recalculate', toolUseId: 'recalc',
+      input: { path: 'private spreadsheet.xlsx' } })
+    now = 300
+    result('recalc')
+    timing.observe({ type: 'tool_start', toolName: 'office_render', toolUseId: 'render',
+      input: { path: 'private spreadsheet.xlsx' } })
+    now = 410
+    result('render')
+    now = 430
+    timing.deliveryGate(410, true)
+    const summary = timing.finish()
+    expect(summary).toEqual({
+      durationMs: 430,
+      incompleteToolCount: 0,
+      stages: [
+        { phase: 'model_wait', type: 'model', durationMs: 100, fileChanged: false },
+        { phase: 'tool', type: 'officecli:set', durationMs: 130, fileChanged: true },
+        { phase: 'validation', type: 'officecli:validate', durationMs: 25, fileChanged: false },
+        { phase: 'recompute', type: 'xlsx_recalculate', durationMs: 45, fileChanged: false },
+        { phase: 'readback_render', type: 'office_render', durationMs: 110, fileChanged: false },
+        { phase: 'delivery_gate', type: 'office_delivery_guard', durationMs: 20, fileChanged: true },
+      ],
+    })
+    expect(JSON.stringify(summary)).not.toContain('private')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('omits non-Office turns and does not assign a compound shell duration to individual commands', () => {
+  let now = 0
+  const timing = new OfficeTurnTiming(false, '/', '/', () => now)
+  timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId: 'echo', input: { command: 'echo "officecli validate sample.docx"' } })
+  timing.observe({ type: 'tool_result', toolUseId: 'echo', result: '', isError: false })
+  timing.deliveryGate(0, false)
+  expect(timing.finish()).toBeUndefined()
+
+  timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId: 'compound',
+    input: { command: 'officecli close sample.docx && officecli validate sample.docx && officecli get another.docx /body/p[1]' } })
+  now = 400
+  timing.observe({ type: 'tool_result', toolUseId: 'compound', result: '', isError: true })
+  expect(timing.finish()?.stages).toEqual([
+    { phase: 'tool', type: 'officecli:shell', durationMs: 400, fileChanged: null, commandTypes: ['close', 'validate', 'get'] },
+  ])
+})
+
+test('labels variable-expanded shell commands without guessing which file changed', () => {
+  let now = 0
+  const timing = new OfficeTurnTiming(false, '/', '/', () => now)
+  timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId: 'batch',
+    input: { command: 'officecli batch "$FILE" --input "$BATCH" --json' } })
+  now = 30
+  timing.observe({ type: 'tool_result', toolUseId: 'batch', result: '', isError: false })
+  expect(timing.finish()?.stages).toEqual([
+    { phase: 'tool', type: 'officecli:shell', durationMs: 30, fileChanged: null, commandTypes: ['batch'] },
+  ])
+})
