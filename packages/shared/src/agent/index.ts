@@ -1,5 +1,5 @@
 export * from './conversation-summary.ts';
-export { extractSimpleCommandsStrict } from './bash-validator.ts';
+export { extractSimpleCommandsStrict, inspectSimpleCommands } from './bash-validator.ts';
 export type { AgentEvent } from '@craft-agent/core/types';
 
 // Export PiAgent for direct use

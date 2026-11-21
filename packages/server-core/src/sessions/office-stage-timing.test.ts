@@ -105,3 +105,27 @@ test('times direct and indirect deck-cli screenshots without splitting compound 
     { phase: 'tool', type: 'deck-cli:shell', durationMs: 400, fileChanged: null, commandTypes: ['screenshot'] },
   ])
 })
+
+test.each([
+  ['sed -n "1,5p" deck.json', 'readback_render'],
+  ['sed -i "s/old/new/" deck.json', 'tool'],
+  ['sed -ni "1,5p" deck.json', 'tool'],
+  ['sed -n "1,5p" deck.json -i', 'tool'],
+  ['sed --in-place=.bak "s/old/new/" deck.json', 'tool'],
+  ['sed "w deck.json" draft.json', 'tool'],
+  ['echo updated > deck.json', 'tool'],
+  ['cat draft.json >> deck.json', 'tool'],
+  ['cat draft.json | tee deck.json', 'tool'],
+  ['mv draft.json deck.json', 'tool'],
+  ['cp draft.json deck.json', 'tool'],
+])('classifies %s followed by a deck screenshot as %s', (before, phase) => {
+  let now = 0
+  const timing = new OfficeTurnTiming(false, '/', '/', () => now)
+  timing.observe({ type: 'tool_start', toolName: 'Bash', toolUseId: 'shot',
+    input: { command: `${before} && bun engine/deck-cli.mjs screenshot home.pptx --out slides --pages 5` } })
+  now = 100
+  timing.observe({ type: 'tool_result', toolUseId: 'shot', result: '', isError: false })
+  expect(timing.finish()?.stages).toEqual([
+    { phase, type: 'deck-cli:shell', durationMs: 100, fileChanged: null, commandTypes: ['screenshot'] },
+  ])
+})

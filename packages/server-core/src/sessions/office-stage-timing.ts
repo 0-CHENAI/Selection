@@ -1,6 +1,6 @@
 import { lstatSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { extractSimpleCommandsStrict, type AgentEvent } from '@craft-agent/shared/agent'
+import { extractSimpleCommandsStrict, inspectSimpleCommands, type AgentEvent } from '@craft-agent/shared/agent'
 import { isOfficecliShellCommand } from '@craft-agent/shared/utils/officecli'
 
 type Phase = 'model_wait' | 'tool' | 'validation' | 'readback_render' | 'recompute' | 'delivery_gate'
@@ -29,11 +29,20 @@ const tools = new Map<string, Phase>([
 ])
 
 const officeCliExecutable = /(?:^|[/\\])officecli(?:\.exe|\.cmd)?$/i
-const shellReadbackHelpers = new Set(['cat', 'cd', 'echo', 'export', 'grep', 'head', 'ls', 'printf', 'pwd', 'sed', 'sleep', 'tail'])
+const shellReadbackHelpers = new Set(['cat', 'cd', 'echo', 'export', 'grep', 'head', 'ls', 'printf', 'pwd', 'sleep', 'tail'])
 
 function isDeckScreenshot([runner, script, command]: string[]): boolean {
   return /(?:^|[/\\])(?:bun|node)(?:\.exe)?$/i.test(runner ?? '')
     && /(?:^|[/\\])deck-cli\.mjs$/.test(script ?? '') && command === 'screenshot'
+}
+
+function isReadbackCommand(command: string[]): boolean {
+  const [exe, verb, script, ...files] = command
+  if (exe === 'sed') return verb === '-n' && /^(?:\d+(?:,\d+)?)?p$/.test(script ?? '')
+    && files.every(file => !file.startsWith('-'))
+  return isDeckScreenshot(command)
+    || shellReadbackHelpers.has(exe ?? '')
+    || (officeCliExecutable.test(exe ?? '') && cliPhases.get(verb?.toLowerCase()) === 'readback_render')
 }
 
 function classifyDeckScreenshot(shell: string, simple: string[][] | null): ClassifiedTool | undefined {
@@ -42,13 +51,12 @@ function classifyDeckScreenshot(shell: string, simple: string[][] | null): Class
     .replace(/(^|[;&|\s])OFFICECLI_SKIP_UPDATE=1[ \t]+(?=[^;&|\s])/g, '$1')
     .replace(/\$(?:\{CRAFT_BUN\}|CRAFT_BUN\b)/g, 'bun')
     .replace(/\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*|\?)/g, 'shell-variable')
-  const commands = simple ?? extractSimpleCommandsStrict(normalized)
+  const inspection = simple ? { commands: simple, hasNonReadOnlyRedirect: false } : inspectSimpleCommands(normalized)
+  const commands = inspection?.commands
   const prefix = !commands && /^([^\r\n]*?)<<-?[ \t]*(?:'\w+'|"\w+"|\w+)[ \t]*\r?\n/.exec(normalized)?.[1]
   if (!commands?.some(isDeckScreenshot) && !(prefix && extractSimpleCommandsStrict(prefix)?.some(isDeckScreenshot))) return
   if (simple?.length === 1) return { phase: 'readback_render', type: 'deck-cli:screenshot', file: simple[0]?.[3] }
-  const readback = commands?.every(command => isDeckScreenshot(command)
-    || shellReadbackHelpers.has(command[0] ?? '')
-    || (officeCliExecutable.test(command[0] ?? '') && cliPhases.get(command[1]?.toLowerCase()) === 'readback_render'))
+  const readback = inspection && !inspection.hasNonReadOnlyRedirect && inspection.commands.every(isReadbackCommand)
   return { phase: readback ? 'readback_render' : 'tool', type: 'deck-cli:shell', commandTypes: ['screenshot'] }
 }
 
