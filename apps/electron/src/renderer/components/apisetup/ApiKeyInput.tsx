@@ -344,12 +344,7 @@ export function ApiKeyInput({
     bedrockAuthMethod, awsAccessKeyId, awsSecretAccessKey, awsSessionToken, awsRegion,
     modelImageModes, modelThinkingLevels, modelContextWindows, modelMaxTokens,
   ])
-  const formSignatureRef = useRef(formSignature)
-  formSignatureRef.current = formSignature
   const [errorSignature, setErrorSignature] = useState<string | null>(null)
-  useEffect(() => {
-    setErrorSignature(status === 'error' ? formSignatureRef.current : null)
-  }, [status, errorMessage])
   const showSubmitError = shouldShowSubmitError({ status, errorMessage, errorSignature, currentSignature: formSignature })
 
   const isDisabled = disabled || status === 'validating'
@@ -761,6 +756,13 @@ export function ApiKeyInput({
     }
   }
 
+  // Remember which values this submit used, so a resulting error hides once
+  // the form is edited and shows again on the next submit.
+  const submitForm: typeof onSubmit = (data) => {
+    setErrorSignature(formSignature)
+    onSubmit(data)
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -777,7 +779,7 @@ export function ApiKeyInput({
         setModelError(t('apiSetup.defaultModelRequired'))
         return
       }
-      onSubmit({
+      submitForm({
         apiKey: apiKey.trim(),
         baseUrl: baseUrl.trim() || undefined,
         connectionDefaultModel: selected[0],
@@ -813,7 +815,7 @@ export function ApiKeyInput({
           maxTokens: modelMaxTokens,
         }).map((model) => ({ ...model, ...imagePayload(model.id) }))
         : undefined
-      onSubmit({
+      submitForm({
         apiKey: '',
         piAuthProvider: effectivePiAuthProvider,
         bedrockAuthMethod,
@@ -899,7 +901,7 @@ export function ApiKeyInput({
       fallbackPiAuthProvider: effectivePiAuthProvider,
     })
 
-    onSubmit({
+    submitForm({
       apiKey: apiKey.trim(),
       baseUrl: isUsingDefaultEndpoint ? undefined : effectiveBaseUrl,
       connectionDefaultModel: parsedModels[0],
