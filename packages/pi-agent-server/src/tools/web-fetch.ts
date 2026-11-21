@@ -198,7 +198,29 @@ function ensurePdfjsPolyfills(): void {
   }
 }
 
-export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
+type PdfTextItem = { str: string; dir: string; transform: number[] };
+
+/** PDF vertical writing mode runs top to bottom, with successive columns to the left. */
+export function pdfReadingOrder(items: PdfTextItem[]): string {
+  const runs: string[] = [];
+  let vertical: PdfTextItem[] = [];
+  function flushColumnText() {
+    vertical.sort((a, b) => Math.round(b.transform[4]!) - Math.round(a.transform[4]!) || b.transform[5]! - a.transform[5]!);
+    runs.push(vertical.map(item => item.str).join(''));
+    vertical = [];
+  }
+  for (const item of items) {
+    if (item.dir === 'ttb') vertical.push(item);
+    else {
+      if (vertical.length) flushColumnText();
+      if (item.str) runs.push(item.str);
+    }
+  }
+  if (vertical.length) flushColumnText();
+  return runs.join(' ');
+}
+
+export async function readPdfPages(buffer: Buffer, research: boolean) {
   ensurePdfjsPolyfills();
   // Pre-load worker on the main thread so pdfjs-dist doesn't try to resolve
   // pdf.worker.mjs from disk (fails when externalized via bun build).
@@ -206,19 +228,52 @@ export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
     (globalThis as any).pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.mjs');
   }
   const pdfjs = await import('pdfjs-dist/build/pdf.mjs');
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
-  const pages: string[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const text = content.items
-      .filter((item: any) => 'str' in item)
-      .map((item: any) => item.str)
-      .join(' ');
-    pages.push(text);
+  const doc: import('pdfjs-dist/types/src/display/api').PDFDocumentProxy = await pdfjs.getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
+  try {
+    const labels = research ? await doc.getPageLabels() : null;
+    const headings = new Map<number, string[]>();
+    const bookmarks = research ? [...(await doc.getOutline() ?? [])].reverse() : [];
+    while (bookmarks.length) {
+      const item = bookmarks.pop()!;
+      bookmarks.push(...[...item.items].reverse());
+      const dest = typeof item.dest === 'string' ? await doc.getDestination(item.dest) : item.dest;
+      if (dest?.[0] == null) continue;
+      const page = typeof dest[0] === 'number' ? dest[0] : await doc.getPageIndex(dest[0]).catch(() => -1);
+      if (page >= 0 && item.title.trim()) headings.set(page, [...(headings.get(page) ?? []), item.title]);
+    }
+    const pages: Array<{ text: string; pageLabel?: string; printedPage?: number; headings: string[] }> = [];
+    const margins: number[][] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const items = content.items.filter(item => 'str' in item);
+      const text = research && items.some(item => item.dir === 'ttb')
+        ? pdfReadingOrder(items) : items.map(item => item.str).join(' ');
+      if (research && !labels) {
+        const [left, bottom, right, top] = page.view as [number, number, number, number];
+        const margin = (top - bottom) * 0.09;
+        margins.push(items.flatMap(item => {
+          if (item.transform[5] > bottom + margin && item.transform[5] < top - margin) return [];
+          if (item.transform[4] < left || item.transform[4] > right) return [];
+          const match = /^[-–—]?\s*(\d{1,5})\s*[-–—]?$/.exec(item.str.trim());
+          return match ? [Number(match[1])] : [];
+        }));
+      }
+      pages.push({ text, pageLabel: labels?.[i - 1] || undefined, headings: headings.get(i - 1) ?? [] });
+    }
+    // Infer a printed number only when two neighbouring margins agree on the sequence.
+    for (const [i, numbers] of margins.entries()) {
+      const matches = [...new Set(numbers.filter(n => margins[i - 1]?.includes(n - 1) || margins[i + 1]?.includes(n + 1)))];
+      if (matches.length === 1) pages[i]!.printedPage = matches[0];
+    }
+    return pages;
+  } finally {
+    await doc.destroy();
   }
-  await doc.destroy();
-  return pages;
+}
+
+export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
+  return (await readPdfPages(buffer, false)).map(page => page.text);
 }
 
 async function handlePdf(

@@ -108,6 +108,14 @@ describe('system prompt guidance', () => {
     expect(on).not.toContain('qualified v2 Task')
   })
 
+  it('guides PRO co-reading without planning short readings', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('use `document_index` and `document_read`')
+    expect(prompt).toContain('Ground interpretations in cited pages or units and recheck challenged passages')
+    expect(prompt).toContain('Stay in this chat unless independent lines or a durable report are needed')
+  })
+
   it('keeps scratch artifacts out of the user-selected working directory (#163)', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/deliverables')
 
@@ -199,8 +207,8 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('do **not** automatically `archive_session`')
     expect(prompt).toContain('`run_task`')
     expect(prompt).toContain('`control_task_run`')
-    expect(prompt).toContain('Do not ask for plan approval when the user already authorized the goal')
-    expect(prompt).toContain('Editor submit_task_definition still creates only an unsaved proposal')
+    expect(prompt).toContain("Don't reconfirm authorized goals; ask only to expand permissions or change goals or locked constraints")
+    expect(prompt).toContain('editor submit_task_definition leaves an unsaved draft')
     expect(prompt).not.toContain('mandatory when generating a new task')
     expect(prompt).toContain('`submit_task_output`')
     expect(prompt).toContain('`submit_task_verdict`')

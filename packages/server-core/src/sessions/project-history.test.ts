@@ -34,6 +34,18 @@ test('G memory authorization, cross-workspace isolation, sibling independence, e
     // A new callback invocation is the restart path; no in-memory index survives.
     expect(projectHistory(root, requester, { query: 'COST_SCOPE_TEST' })).toEqual(result);
     const historyPath = join(root, 'sessions', 'past', 'session.jsonl');
+    const originalLog = readFileSync(historyPath, 'utf8');
+    const call = { type: 'tool', id: 'call', toolUseId: 'read-5', toolName: 'document_read', toolStatus: 'completed',
+      content: 'sensitive tool output', toolInput: { token: 'private' } };
+    const notice = { type: 'info', id: 'notice', content: 'Indexing complete' };
+    writeFileSync(historyPath, originalLog + JSON.stringify(call) + '\n' + JSON.stringify(notice) + '\n');
+    expect((projectHistory(root, requester, { query: 'Indexing complete' }) as any).hits[0].role).toBe('info');
+    const activity = projectHistory(root, requester, { query: 'read-5' }) as any;
+    expect(activity.hits[0]).toMatchObject({ role: 'tool', tool: { toolUseId: 'read-5', status: 'completed' } });
+    const expanded = projectHistory(root, requester, { sessionId: 'past', messageId: 'call', expectedVersion: activity.hits[0].version });
+    expect(JSON.stringify(expanded)).not.toContain('sensitive');
+    expect(JSON.stringify(expanded)).not.toContain('private');
+    writeFileSync(historyPath, originalLog);
     const [header, original] = readFileSync(historyPath, 'utf8').trim().split('\n');
     const message = JSON.parse(original!);
     writeFileSync(historyPath, `${header}\n${JSON.stringify({ content: message.content, timestamp: message.timestamp, type: message.type, id: message.id })}\n`);

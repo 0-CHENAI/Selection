@@ -1,11 +1,12 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { readFileSync, realpathSync } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import { unzipSync, strFromU8 } from 'fflate';
 import { parse, type HTMLElement } from 'node-html-parser';
 import { insideSourceDirectory, readSourceSnapshot, saveSourceSnapshot, sourceIndexPath, sourceHash, type SourceSnapshot, type SourceUnit } from '@craft-agent/shared/source-snapshot';
-import { extractPdfPages } from './web-fetch.ts';
+import { lock } from 'proper-lockfile';
+import { extractPdfPages, readPdfPages } from './web-fetch.ts';
 
 type Part = { id: string; label: string; kind: SourceUnit['kind']; text: string };
 const elements = (node: HTMLElement, tag: string): HTMLElement[] => {
@@ -16,13 +17,57 @@ const elements = (node: HTMLElement, tag: string): HTMLElement[] => {
 const xml = (bytes: Uint8Array | undefined) => parse(bytes ? strFromU8(bytes) : '', { lowerCaseTagName: false });
 const text = (node: HTMLElement, tag: string) => elements(node, tag).map(n => n.textContent).join('');
 
+// Workers have separate processes. Share the extraction by byte content within the authorized
+// directory, then bind each original path to its own immutable source and read receipts.
+async function indexResearchPdf(directory: string, path: string, bytes: Buffer) {
+  const hash = sourceHash(bytes);
+  const store = join(directory, '.selection-sources');
+  mkdirSync(store, { recursive: true });
+  if (!insideSourceDirectory(store, directory)) throw new Error('Source store leaves the authorized directory');
+  const aliases = join(store, `pdf-v2-${hash}`);
+  mkdirSync(aliases, { recursive: true });
+  if (!insideSourceDirectory(aliases, store)) throw new Error('PDF cache leaves the source store');
+  const release = await lock(aliases, { stale: 120_000, retries: { retries: 180, minTimeout: 100, maxTimeout: 1000 } });
+  try {
+    let parts: Part[] | undefined;
+    let limitations: string[] = [];
+    for (const version of readdirSync(aliases)) {
+      const cached = readSourceSnapshot(join(store, version, 'index.json'), directory);
+      if (cached?.extractor !== 'selection-pdf-v2' || cached.version !== version || cached.originalHash !== hash) continue;
+      if (cached.originalPath === path) return cached;
+      const lines = readFileSync(cached.textPath, 'utf8').split('\n');
+      parts = cached.units.map(unit => ({ ...unit, text: lines.slice(unit.startLine - 1, unit.endLine).join('\n') }));
+      limitations = cached.limitations;
+      break;
+    }
+    if (!parts) {
+      const pages = await readPdfPages(bytes, true);
+      parts = pages.map(({ text, pageLabel, printedPage, headings }, i) => ({
+        id: `page-${i + 1}`, kind: 'page', text,
+        label: [`第 ${i + 1} 页`, pageLabel && `PDF 页标 ${pageLabel}`, printedPage !== undefined && `印刷页 ${printedPage}（页眉页脚推断）`, ...headings].filter(Boolean).join(' · '),
+      }));
+      if (!parts.some(part => part.text.trim())) throw new Error('No extractable original text; use the native PDF/OCR skill.');
+      limitations = [pages.some(page => page.headings.length) ? 'Headings come from PDF bookmarks.' : 'No locatable PDF bookmarks; indexed by file page.',
+        'PDF text layer; page labels come from the file when available. Check scans and visual layout with the PDF skill.'];
+      for (const part of parts) if (!part.text.trim()) limitations.push(`${part.label}: no extractable text.`);
+    }
+    const snapshot = saveSourceSnapshot(directory, bytes, path, '.pdf', parts, limitations, undefined, path, 'selection-pdf-v2');
+    mkdirSync(join(aliases, snapshot.version), { recursive: true });
+    return snapshot;
+  } finally {
+    await release();
+  }
+}
+
 /** Uses literal native structure; never asks a model to invent pages or headings. */
-export async function indexOriginalDocument(directory: string, file: string): Promise<SourceSnapshot> {
+export async function indexOriginalDocument(directory: string, file: string, research = false): Promise<SourceSnapshot> {
   const path = realpathSync(resolve(directory, file));
   if (!insideSourceDirectory(path, directory)) throw new Error('Document leaves the authorized directory');
-  const existing = readSourceSnapshot(sourceIndexPath(directory, path), directory);
+  const researchPdf = research && extname(path).toLowerCase() === '.pdf';
+  const existing = readSourceSnapshot(sourceIndexPath(directory, path, researchPdf ? 'selection-pdf-v2' : 'selection-original-v1'), directory);
   if (existing) return existing;
   const bytes = readFileSync(path), format = extname(path).toLowerCase();
+  if (researchPdf) return indexResearchPdf(directory, path, bytes);
   let parts: Part[] = [];
   const limitations: string[] = [];
   if (format === '.pdf') {
@@ -81,14 +126,14 @@ export async function indexOriginalDocument(directory: string, file: string): Pr
 }
 const indexSchema = Type.Object({ path: Type.String(), query: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) });
 const readSchema = Type.Object({ path: Type.String(), unit_id: Type.String({ description: 'Exact unit ID from document_index (chapter/paragraph, page or worksheet!cell).' }),
-  offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1 })), quote: Type.Optional(Type.String({ description: 'Optional exact literal quotation to check inside the returned original range.' })) });
-export function createDocumentTools(getDirectory: () => string, getSourceDirectory?: () => string | undefined): ToolDefinition<any, any>[] {
+  offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1 })), quote: Type.Optional(Type.String({ minLength: 1, pattern: '\\S', description: 'Optional exact literal quotation to check inside the returned original range.' })) });
+export function createDocumentTools(getDirectory: () => string, getSourceDirectory?: () => string | undefined, research = false): ToolDefinition<any, any>[] {
   const indexDocument = (file: string) => {
     const directory = getDirectory(), path = realpathSync(resolve(directory, file));
     const sourceDirectory = getSourceDirectory?.();
     const readDirectory = !insideSourceDirectory(path, directory) && sourceDirectory && insideSourceDirectory(path, sourceDirectory)
       ? sourceDirectory : directory;
-    return indexOriginalDocument(readDirectory, path);
+    return indexOriginalDocument(readDirectory, path, research);
   };
   return [{ name: 'document_index', label: '定位文档', description: 'Index native original structure by file version, search headings/pages/cells, then use document_read for original text. Index results are navigation, not proof of reading or semantic verification. Existing Office/PDF Skills remain available for full editing, OCR and visual QA.', parameters: indexSchema,
     async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof indexSchema>; signal?.throwIfAborted(); const snapshot = await indexDocument(params.path);
@@ -99,17 +144,28 @@ export function createDocumentTools(getDirectory: () => string, getSourceDirecto
       return { content: [{ type: 'text', text: JSON.stringify({ path: snapshot.originalPath, sourceVersion: snapshot.version, snapshotPath: snapshot.textPath,
         total: matches.length, units: matches.slice(offset, offset + 100), next_offset: offset + 100 < matches.length ? offset + 100 : null, limitations: snapshot.limitations, readEvidence: false }) }], details: {} };
     } }, { name: 'document_read', label: '读取文档原文', description: 'Read a located unit from the current original version. Returns original lines, physical page/cell/paragraph location, limits and an exact read receipt. Quote check is literal only; semantic support and visual layout need independent review.', parameters: readSchema,
-    async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof readSchema>; signal?.throwIfAborted(); const snapshot = await indexDocument(params.path);
+    async execute(_id, rawParams, signal) {
+      const params = rawParams as Static<typeof readSchema>;
+      signal?.throwIfAborted();
+      if (params.quote !== undefined && !params.quote.trim()) throw new Error('Provide a nonempty literal quotation or omit quote.');
+      const snapshot = await indexDocument(params.path);
       const unit = snapshot.units.find(unit => unit.id === params.unit_id); if (!unit) throw new Error('Unit not found in the current file version; refresh document_index.');
       const startLine = unit.startLine + (params.offset ?? 0); if (startLine > unit.endLine) throw new Error('Offset leaves the original unit.');
-      const lines = readFileSync(snapshot.textPath, 'utf8').split('\n').slice(startLine - 1, Math.min(unit.endLine, startLine + (params.limit ?? unit.endLine) - 1));
+      const allLines = readFileSync(snapshot.textPath, 'utf8').split('\n');
+      const lines = allLines.slice(startLine - 1, Math.min(unit.endLine, startLine + (params.limit ?? unit.endLine) - 1));
       // Same bounded native text delivery policy as Read. Never claim a partial line as a full returned range.
       let returned = ''; let count = 0;
       for (const line of lines) { const next = count ? `${returned}\n${line}` : line; if (next.length > 50_000) break; returned = next; count++; }
-      if (!count || !returned.trim()) throw new Error('No complete readable line returned; use the native document Skill.');
+      if ((!count || !returned.trim()) && !(research && snapshot.format === '.pdf' && params.quote?.trim())) throw new Error('No complete readable line returned; use the native document Skill.');
       const endLine = startLine + count - 1;
-      const note = { location: unit.label, sourceVersion: snapshot.version, startLine, endLine, snapshotPath: snapshot.textPath, limitations: snapshot.limitations,
+      // Hits elsewhere are navigation only. The receipt still covers exactly the returned text.
+      const quote = params.quote;
+      const quoteLocations = research && snapshot.format === '.pdf' && quote?.trim() && !returned.includes(quote)
+        ? snapshot.units.filter(page => allLines.slice(page.startLine - 1, page.endLine).join('\n').includes(quote))
+          .map(({ id, label }) => ({ id, label })) : undefined;
+      const note = { ...(quoteLocations && { quoteLocations }), location: unit.label, sourceVersion: snapshot.version, startLine, endLine, snapshotPath: snapshot.textPath, limitations: snapshot.limitations,
         ...(params.quote !== undefined ? { quoteMatched: returned.includes(params.quote) } : {}), more: endLine < unit.endLine };
+      if (!returned.trim()) return { content: [{ type: 'text', text: JSON.stringify({ location: unit.label, quoteMatched: false, quoteLocations, readEvidence: false }) }], details: {} };
       return { content: [{ type: 'text', text: `${returned}\n\n${JSON.stringify(note)}` }], details: { sourceRead: { path: snapshot.textPath,
         contentHash: snapshot.textHash, startLine, endLine, returnedTextHash: sourceHash(returned) } } };
     } }];
