@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { captureSlides } from './screenshot.ts'
@@ -82,4 +82,26 @@ test('bundled CLI persists independent evidence for each successful screenshot b
     expect(readdirSync(receipts).some(name => readFileSync(join(receipts, name), 'utf8') === JSON.stringify(body.pptVisualRender))).toBe(true)
   }
   expect(readdirSync(receipts)).toHaveLength(2)
+})
+
+test('bundled CLI renders each saved revision at a path isolated from OfficeCLI residents', async () => {
+  const { dir, cli } = renderer()
+  const file = join(dir, 'deck.pptx')
+  writeFileSync(cli, `#!${process.execPath}\nimport {readFileSync,writeFileSync} from 'node:fs'; const source=process.argv[3]; writeFileSync(process.argv.at(-1), JSON.stringify({source, bytes:readFileSync(source,'utf8'), noAuto:process.env.OFFICECLI_NO_AUTO_RESIDENT}));\n`)
+  const sources = []
+  for (const bytes of ['original revision', 'edited revision']) {
+    writeFileSync(file, bytes)
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'deck-cli.mjs'), 'screenshot', file,
+      '--out', dir, '--pages', '1', '--officecli', cli], { stdout: 'pipe', stderr: 'pipe' })
+    const body = JSON.parse(await new Response(child.stdout).text())
+    expect(await child.exited).toBe(0)
+    const png = JSON.parse(readFileSync(body.screenshots.files[0], 'utf8'))
+    expect(png.bytes).toBe(bytes)
+    expect(png.noAuto).toBe('1')
+    expect(png.source).not.toBe(file)
+    expect(existsSync(png.source)).toBe(false)
+    expect(body.pptVisualRender.path).toBe(realpathSync(file))
+    sources.push(png.source)
+  }
+  expect(new Set(sources).size).toBe(2)
 })

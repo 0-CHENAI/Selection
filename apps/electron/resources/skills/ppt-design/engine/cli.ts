@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join, resolve } from 'node:path'
 import { argumentLayoutCatalog } from './argument-layouts.ts'
 import { checkDeck, formatNeedsRevision, revisionStatus } from './check.ts'
 import { exportDeck, platformFromProcess } from './export-pptx.ts'
@@ -99,12 +100,24 @@ const file = resolve(flags.file)
 
 if (flags.command === 'screenshot') {
   if (!flags.out) usage()
-  const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
-  const before = sha256(file)
-  const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers })
+  const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+  const bytes = readFileSync(file)
+  const before = hash(bytes)
+  const scratch = mkdtempSync(join(tmpdir(), 'selection-ppt-screenshot-'))
+  const snapshot = join(scratch, basename(file))
+  const result = await (async () => {
+    try {
+      // OfficeCLI can serve the original path from a resident's memory instead of from disk.
+      writeFileSync(snapshot, bytes, { mode: 0o600 })
+      process.env.OFFICECLI_NO_AUTO_RESIDENT = '1'
+      return await captureSlides(snapshot, resolve(flags.out!), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers })
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  })()
   const pages = flags.pageNumbers ? [...new Set(flags.pageNumbers)].sort((a, b) => a - b) : result.files.map((_, index) => index + 1)
-  const pptVisualRender = result.available && result.files.length && sha256(file) === before
-    ? { path: realpathSync(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: sha256(path) })) }
+  const pptVisualRender = result.available && result.files.length && hash(readFileSync(file)) === before
+    ? { path: realpathSync(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: hash(readFileSync(path)) })) }
     : undefined
   if (pptVisualRender && process.env.CRAFT_SESSION_DIR) {
     const dir = join(process.env.CRAFT_SESSION_DIR, 'data', 'ppt-visual-renders')

@@ -9168,8 +9168,9 @@ var require_lib3 = __commonJS((exports, module) => {
 
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
 import { createHash as createHash3, randomUUID } from "crypto";
-import { mkdirSync as mkdirSync5, readFileSync as readFileSync6, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync5 } from "fs";
-import { join as join6, resolve as resolve2 } from "path";
+import { mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync2, readFileSync as readFileSync6, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync5 } from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { basename, join as join6, resolve as resolve2 } from "path";
 
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
 var NO_LINE_START = new Set(Array.from("\uFF0C\u3002\u3001\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u3009\u300D,.!?;:)]}%"));
@@ -24399,11 +24400,22 @@ var file = resolve2(flags.file);
 if (flags.command === "screenshot") {
   if (!flags.out)
     usage();
-  const sha256 = (path) => createHash3("sha256").update(readFileSync6(path)).digest("hex");
-  const before = sha256(file);
-  const result = await captureSlides(file, resolve2(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
+  const hash = (bytes2) => createHash3("sha256").update(bytes2).digest("hex");
+  const bytes = readFileSync6(file);
+  const before = hash(bytes);
+  const scratch = mkdtempSync2(join6(tmpdir2(), "selection-ppt-screenshot-"));
+  const snapshot = join6(scratch, basename(file));
+  const result = await (async () => {
+    try {
+      writeFileSync5(snapshot, bytes, { mode: 384 });
+      process.env.OFFICECLI_NO_AUTO_RESIDENT = "1";
+      return await captureSlides(snapshot, resolve2(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
+    } finally {
+      rmSync2(scratch, { recursive: true, force: true });
+    }
+  })();
   const pages = flags.pageNumbers ? [...new Set(flags.pageNumbers)].sort((a, b) => a - b) : result.files.map((_, index) => index + 1);
-  const pptVisualRender = result.available && result.files.length && sha256(file) === before ? { path: realpathSync2(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: sha256(path) })) } : undefined;
+  const pptVisualRender = result.available && result.files.length && hash(readFileSync6(file)) === before ? { path: realpathSync2(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: hash(readFileSync6(path)) })) } : undefined;
   if (pptVisualRender && process.env.CRAFT_SESSION_DIR) {
     const dir = join6(process.env.CRAFT_SESSION_DIR, "data", "ppt-visual-renders");
     const receipt = join6(dir, `${Date.now()}-${randomUUID()}.json`);
