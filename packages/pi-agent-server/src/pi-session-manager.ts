@@ -232,14 +232,15 @@ function protectSessionJsonl(manager: PiSessionManager): PiSessionManager {
   manager.appendMessage = ((message: Message) =>
     appendMessage(sanitizePiMessageForPersistence(message, sessionDir))) as PiSessionManager['appendMessage']
 
-  const buildSessionContext = manager.buildSessionContext.bind(manager)
-  manager.buildSessionContext = (() => {
-    const context = buildSessionContext()
-    return {
-      ...context,
-      messages: context.messages.map(entry => rehydratePiToolImages(entry, lookupDirs)),
-    }
-  }) as PiSessionManager['buildSessionContext']
+  const buildSessionProjection = manager.buildSessionProjection.bind(manager)
+  manager.buildSessionProjection = () => {
+    const projection = buildSessionProjection()
+    const entries = projection.entries.map(entry => ({
+      ...entry,
+      messages: entry.messages.map(message => rehydratePiToolImages(message, lookupDirs)),
+    }))
+    return { ...projection, entries, messages: entries.flatMap(entry => entry.messages) }
+  }
 
   return manager
 }

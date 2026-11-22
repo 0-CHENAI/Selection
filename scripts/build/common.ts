@@ -2,6 +2,7 @@
  * Common build utilities shared across all platforms
  */
 
+import { IMAGE_RESIZE_WORKERS, verifyImageResizeWorkers } from '../../packages/pi-agent-server/scripts/copy-runtime-assets';
 import { $ } from 'bun';
 import { execSync } from 'child_process';
 import {
@@ -812,9 +813,9 @@ function koffiPlatformDir(platform: Platform, arch: Arch): string {
 /**
  * Copy Pi Agent Server to packaged app resources.
  *
- * The bundle requires a dedicated image resize Worker and Photon WASM, and uses --external
+ * The bundle requires the SDK and Read image workers and Photon WASM, and uses --external
  * koffi so the bare import resolves through node_modules at runtime. We copy
- * the Worker, WASM, and Koffi runtime next to index.js, limiting Koffi to the
+ * the workers, WASM, and Koffi runtime next to index.js, limiting Koffi to the
  * target platform's native binary (~4MB instead of ~80MB).
  */
 export function copyPiAgentServer(config: BuildConfig): void {
@@ -823,9 +824,7 @@ export function copyPiAgentServer(config: BuildConfig): void {
   const piSourceDir = join(rootDir, 'packages', 'pi-agent-server', 'dist');
   const piDestDir = join(electronDir, 'resources', 'pi-agent-server');
   const photonWasmName = 'photon_rs_bg.wasm';
-  const imageResizeWorkerName = 'image-resize-worker.js';
   const photonWasmSource = join(piSourceDir, photonWasmName);
-  const imageResizeWorkerSource = join(piSourceDir, imageResizeWorkerName);
 
   if (!existsSync(join(piSourceDir, 'index.js'))) {
     console.warn(`Warning: Pi agent server not found at ${piSourceDir}/index.js. Pi SDK sessions will not work.`);
@@ -836,18 +835,14 @@ export function copyPiAgentServer(config: BuildConfig): void {
       `Pi Agent Server Photon WASM not found at ${photonWasmSource}. Run bun run build in packages/pi-agent-server.`,
     );
   }
-  if (!existsSync(imageResizeWorkerSource)) {
-    throw new Error(
-      `Pi Agent Server image resize Worker not found at ${imageResizeWorkerSource}. Run bun run build in packages/pi-agent-server.`,
-    );
-  }
+  verifyImageResizeWorkers(piSourceDir);
 
   console.log('Copying Pi Agent Server...');
   mkdirSync(piDestDir, { recursive: true });
 
   // 1. Copy the bundle and its image-processing runtime.
   copyFileSync(join(piSourceDir, 'index.js'), join(piDestDir, 'index.js'));
-  copyFileSync(imageResizeWorkerSource, join(piDestDir, imageResizeWorkerName));
+  for (const worker of IMAGE_RESIZE_WORKERS) copyFileSync(join(piSourceDir, worker), join(piDestDir, worker));
   copyFileSync(photonWasmSource, join(piDestDir, photonWasmName));
 
   // 2. Copy koffi npm package (external import, resolved via node_modules at runtime)
@@ -939,7 +934,6 @@ export function verifyMcpServersExist(config: BuildConfig): void {
 
   const sessionPath = join(electronDir, 'resources', 'session-mcp-server', 'index.js');
   const piPath = join(electronDir, 'resources', 'pi-agent-server', 'index.js');
-  const imageResizeWorkerPath = join(electronDir, 'resources', 'pi-agent-server', 'image-resize-worker.js');
   const photonWasmPath = join(electronDir, 'resources', 'pi-agent-server', 'photon_rs_bg.wasm');
 
   if (!existsSync(sessionPath)) {
@@ -952,9 +946,7 @@ export function verifyMcpServersExist(config: BuildConfig): void {
   if (!existsSync(photonWasmPath)) {
     throw new Error(`Pi Agent Server Photon WASM not found at ${photonWasmPath}`);
   }
-  if (!existsSync(imageResizeWorkerPath)) {
-    throw new Error(`Pi Agent Server image resize Worker not found at ${imageResizeWorkerPath}`);
-  }
+  verifyImageResizeWorkers(join(electronDir, 'resources', 'pi-agent-server'));
 }
 
 /**

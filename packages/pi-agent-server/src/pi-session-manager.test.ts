@@ -197,6 +197,11 @@ describe('Pi tool image persistence', () => {
     expect(persisted).toContain('sha256=')
     expect(persisted).not.toContain(imageData)
 
+    const projection = manager.buildSessionProjection()
+    const projectedImage = projection.entries.flatMap(entry => entry.messages).find(message => message.role === 'toolResult')
+    expect(projectedImage?.content).toEqual(toolResult.content)
+    expect(projection.messages).toContain(projectedImage)
+
     const context = manager.buildSessionContext()
     const restored = context.messages.find(message => message.role === 'toolResult')
     expect(restored && 'content' in restored ? restored.content : []).toEqual(expect.arrayContaining([

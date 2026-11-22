@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -26,9 +26,9 @@ afterAll(() => {
   if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
 });
 
-function driveBundle(messages: object[], done: (output: string, send: (message: object) => void) => boolean, preload = false): Promise<string> {
+function driveBundle(messages: object[], done: (output: string, send: (message: object) => void) => boolean, preload = false, bundle = bundlePath): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = preload ? ['--preload', join(packageDir, '../shared/src/unified-network-interceptor.ts'), bundlePath] : [bundlePath];
+    const args = preload ? ['--preload', join(packageDir, '../shared/src/unified-network-interceptor.ts'), bundle] : [bundle];
     const child = spawn(process.execPath, args, {
       cwd: scratchDir,
       env: { ...process.env, CRAFT_SESSION_DIR: scratchDir, CRAFT_INTERCEPTOR_DISABLE_AUTO_INSTALL: '0', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
@@ -135,11 +135,24 @@ describe('pi-agent-server bundle', () => {
     } finally { child.kill(); server.stop(true); }
   }, 10_000);
 
-  it('runs an isolated utility query with its exact prompt through the bundled SDK', async () => {
+  it('sends the exact utility prompt and image through a relocated SDK bundle', async () => {
+    // Run from the release layout without access to the Photon path on the build machine.
+    const relocated = join(scratchDir, 'relocated-pi');
+    mkdirSync(relocated);
+    const photonPath = JSON.stringify(dirname(Bun.resolveSync('@silvia-odwyer/photon-node', packageDir))).slice(1, -1);
+    for (const file of ['index.js', 'image-resize-worker.js']) {
+      const source = readFileSync(join(dirname(bundlePath), file), 'utf8');
+      expect(source).toContain(photonPath);
+      writeFileSync(join(relocated, file), source.replaceAll(photonPath, '/missing-build-machine/photon-node'));
+    }
+    copyFileSync(join(dirname(bundlePath), 'photon_rs_bg.wasm'), join(relocated, 'photon_rs_bg.wasm'));
+    const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/ANcyFP8FHgIdBOVbKQAAAABJRU5ErkJggg==';
     let sentPrompt = '';
+    let sentUserContent: unknown;
     const server = Bun.serve({ port: 0, async fetch(request) {
-      const body = await request.json() as { messages?: Array<{ role: string; content: string }> };
-      sentPrompt = body.messages?.find(message => message.role === 'system')?.content ?? '';
+      const body = await request.json() as { messages?: Array<{ role: string; content: string | Array<unknown> }> };
+      sentUserContent = body.messages?.find(message => message.role === 'user')?.content;
+      sentPrompt = String(body.messages?.find(message => message.role === 'system')?.content ?? '');
       const chunks = [
         { id: 'utility', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'Utility OK' }, finish_reason: null }] },
         { id: 'utility', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
@@ -154,8 +167,11 @@ describe('pi-agent-server bundle', () => {
           providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
           customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'Laufry', contextWindow: 8192, maxTokens: 2048 }] },
         { type: 'llm_query', id: 'utility-1', request: { purpose: 'progress-evaluation', model: 'Laufry',
-          systemPrompt: 'Exact utility prompt', prompt: 'Evaluate.', maxTokens: 128, timeoutMs: 5000 } },
-      ], output => output.includes('"type":"llm_query_result"'));
+          systemPrompt: 'Exact utility prompt', prompt: 'Evaluate.', images: [{ type: 'image', mimeType: 'image/png', data: pixel }], maxTokens: 128, timeoutMs: 5000 } },
+      ], output => output.includes('"type":"llm_query_result"'), false, join(relocated, 'index.js'));
+      expect(sentUserContent).toContainEqual(expect.objectContaining({
+        type: 'image_url', image_url: expect.objectContaining({ url: 'data:image/png;base64,' + pixel }),
+      }));
       expect(output).toContain('Utility OK');
       expect(sentPrompt).toBe('Exact utility prompt');
     } finally { server.stop(true); }

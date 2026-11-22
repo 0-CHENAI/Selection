@@ -86,8 +86,8 @@ async function runInWorker(
 ): Promise<ImageOptimizationResult> {
   if (signal?.aborted) throw abortError()
   const workerFilename = import.meta.url.endsWith('.ts')
-    ? 'image-resize-worker.ts'
-    : 'image-resize-worker.js'
+    ? 'read-image-resize-worker.ts'
+    : 'read-image-resize-worker.js'
   const worker = createWorker(new URL(workerFilename, import.meta.url))
   try {
     const transferredBytes = new Uint8Array(inputBytes)
