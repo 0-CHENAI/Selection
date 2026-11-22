@@ -67,10 +67,13 @@ export {
   inferModelSupportsImages,
   isUnsupportedImageInputError,
   learnModelRejectsImages,
+  lookupCatalogImageSupport,
   lookupKnownModelImageSupport,
   normalizeConnectionModelId,
+  planPromptImagesForModel,
   planUnsupportedImageRetry,
   readStoredImageSupport,
+  registerCatalogImageSupportLookup,
   resolveModelImageSupportFromCatalog,
   setModelImageSupport,
   resolveCustomModelContextWindow,
@@ -80,10 +83,13 @@ export {
   toCustomEndpointModelPayload,
 } from './model-image-support';
 export type {
+  CatalogImageSupportLookup,
   ImageSupportMode,
   ImageSupportResolution,
   ImageSupportSource,
   ModelImageRecord,
+  PromptImageBlock,
+  PromptImagePlan,
 } from './model-image-support';
 
 // ============================================================
@@ -669,8 +675,9 @@ export function setModelSupportsImages(
  *
  * Renderer banners and runtime send paths both call this. Precedence lives in
  * `resolveModelImageSupportFromCatalog`: explicit on/off, then a learned
- * rejection, then a connection endpoint default, then the known table, then
- * an optimistic attempt.
+ * rejection, then a connection endpoint default, then a stored catalog flag,
+ * then the live Pi SDK catalog, then the known-name table, then an optimistic
+ * attempt.
  */
 export function modelSupportsImages(
   connection: Pick<LlmConnection, 'models' | 'customEndpoint'>,

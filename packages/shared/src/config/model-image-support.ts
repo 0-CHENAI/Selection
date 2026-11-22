@@ -44,7 +44,26 @@ const KNOWN_VISION_IDS = new Set(['laufry', 'deepseek-flash', 'deepseek-v4-flash
 const DEEPSEEK_TEXT_ONLY = /^(?:deepseek-chat|deepseek-reasoner|deepseek-v4(?:[.-].+)?)$/
 
 export type ImageSupportMode = 'auto' | 'on' | 'off'
-export type ImageSupportSource = 'explicit' | 'learned' | 'endpoint' | 'known' | 'optimistic'
+export type ImageSupportSource = 'explicit' | 'learned' | 'endpoint' | 'catalog' | 'known' | 'optimistic'
+
+/**
+ * Live Pi SDK / built-in catalog lookup. Injected from `models-pi.ts` so the
+ * renderer never imports `@earendil-works/pi-ai`. Unregistered lookups are
+ * treated as "no catalog opinion".
+ */
+export type CatalogImageSupportLookup = (modelId: string, modelName?: string) => boolean | undefined
+
+let catalogImageSupportLookup: CatalogImageSupportLookup | undefined
+
+export function registerCatalogImageSupportLookup(lookup: CatalogImageSupportLookup | undefined): void {
+  catalogImageSupportLookup = lookup
+}
+
+export function lookupCatalogImageSupport(modelId: string, modelName?: string): boolean | undefined {
+  if (!catalogImageSupportLookup || !modelId.trim()) return undefined
+  const result = catalogImageSupportLookup(modelId, modelName)
+  return typeof result === 'boolean' ? result : undefined
+}
 
 export interface ModelImageRecord {
   id: string
@@ -122,6 +141,12 @@ export function resolveModelImageSupportFromCatalog(input: {
   modelName?: string
   models?: ReadonlyArray<string | ModelImageRecord>
   endpointSupportsImages?: boolean
+  /**
+   * Live SDK `model.input.includes('image')` for the resolved session model.
+   * Beats the name heuristic and the injected catalog map; loses to explicit
+   * on/off, a learned rejection, and a connection endpoint default.
+   */
+  catalogSupportsImages?: boolean
 }): ImageSupportResolution {
   const entry = input.models?.find(model => {
     const id = typeof model === 'string' ? model : model.id
@@ -155,9 +180,26 @@ export function resolveModelImageSupportFromCatalog(input: {
       learnable: input.endpointSupportsImages,
     }
   }
-  // In auto mode the live catalog may declare a modality for a brand new ID.
-  const known = entry && typeof entry !== 'string' && typeof entry.supportsImages === 'boolean'
-    ? entry.supportsImages : lookupKnownModelImageSupport(input.modelId, modelName)
+  if (entry && typeof entry !== 'string' && typeof entry.supportsImages === 'boolean') {
+    return {
+      supportsImages: entry.supportsImages,
+      mode: 'auto',
+      source: 'known',
+      learnable: entry.supportsImages,
+    }
+  }
+  const catalog = typeof input.catalogSupportsImages === 'boolean'
+    ? input.catalogSupportsImages
+    : lookupCatalogImageSupport(input.modelId, modelName)
+  if (typeof catalog === 'boolean') {
+    return {
+      supportsImages: catalog,
+      mode: 'auto',
+      source: 'catalog',
+      learnable: catalog,
+    }
+  }
+  const known = lookupKnownModelImageSupport(input.modelId, modelName)
   if (typeof known === 'boolean') {
     return {
       supportsImages: known,
@@ -171,6 +213,42 @@ export function resolveModelImageSupportFromCatalog(input: {
     mode: 'auto',
     source: 'optimistic',
     learnable: true,
+  }
+}
+
+export interface PromptImageBlock {
+  type: 'image'
+  data: string
+  mimeType: string
+}
+
+export interface PromptImagePlan<T extends PromptImageBlock = PromptImageBlock> {
+  images: T[] | undefined
+  message: string
+  skipped: boolean
+  skippedCount: number
+}
+
+/**
+ * Last-mile gate before `session.prompt`. Catalog text-only and explicit off
+ * must not hand pixels to the SDK (which would drop them with a hidden
+ * placeholder) and then let the model invent a description.
+ */
+export function planPromptImagesForModel<T extends PromptImageBlock>(input: {
+  images?: T[]
+  resolution: ImageSupportResolution
+  message: string
+}): PromptImagePlan<T> {
+  const images = input.images && input.images.length > 0 ? input.images : undefined
+  if (!images || input.resolution.supportsImages) {
+    return { images, message: input.message, skipped: false, skippedCount: 0 }
+  }
+  const note = buildSkippedImagesNote(images.length)
+  return {
+    images: undefined,
+    message: input.message.includes(note) ? input.message : `${input.message}\n\n${note}`,
+    skipped: true,
+    skippedCount: images.length,
   }
 }
 

@@ -94,6 +94,30 @@ describe('unified-network-interceptor validators (#613)', () => {
       expect(body.messages.map(message => message.role)).toEqual(['system', 'user']);
       expect(body.input.map(message => message.role)).toEqual(['system', 'user']);
     });
+
+    it('keeps Kimi/OpenAI vision content as a JSON array across rewrite and stringify', () => {
+      const marker = 'SELECTION_VISION_MARKER_ARRAY'
+      const body = {
+        messages: [
+          { role: 'developer', content: 'You are Kimi.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(marker).toString('base64')}` } },
+              { type: 'text', text: '这张图是什么？' },
+            ],
+          },
+        ],
+      }
+      rewriteDeveloperRolesToSystem(body)
+      sanitizeOpenAiHistoryInPlace(body)
+      expect(Array.isArray(body.messages[1]?.content)).toBe(true)
+      const roundTrip = JSON.parse(JSON.stringify(body)) as typeof body
+      expect(Array.isArray(roundTrip.messages[1]?.content)).toBe(true)
+      expect(typeof roundTrip.messages[1]?.content).not.toBe('string')
+      expect(JSON.stringify(roundTrip)).toContain(Buffer.from(marker).toString('base64'))
+      expect(() => validateOpenAiChatBody(roundTrip)).not.toThrow()
+    })
   });
 
   describe('OpenAI Chat Completions', () => {

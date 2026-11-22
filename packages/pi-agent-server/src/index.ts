@@ -29,9 +29,11 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
 import {
   alignModelImageInput,
+  planPromptImagesForModel,
   planUnsupportedImageRetry,
   resolveModelImageSupportFromCatalog,
 } from '../../shared/src/config/model-image-support.ts';
+import '../../shared/src/config/models-pi.ts';
 import { streamTrace } from '../../shared/src/stream-trace.ts';
 import { createSessionHistoryTool } from './context-retention.ts';
 import { setModelRequestGate } from '../../shared/src/model-request-gate';
@@ -2022,13 +2024,14 @@ async function retryPromptForUnsupportedEffort(
   return true;
 }
 
-function activeModelImageResolution(model: { id?: string; name?: string } | undefined) {
+function activeModelImageResolution(model: { id?: string; name?: string; input?: readonly string[] } | undefined) {
   const modelId = model?.id || initConfig?.model || '';
   return resolveModelImageSupportFromCatalog({
     modelId,
     modelName: model?.name,
     models: initConfig?.customModels,
     endpointSupportsImages: initConfig?.customEndpoint?.supportsImages,
+    catalogSupportsImages: Array.isArray(model?.input) ? model.input.includes('image') : undefined,
   });
 }
 
@@ -2073,6 +2076,11 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
   answerBatchGate.reset();
   const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined;
   let imageResolution = activeModelImageResolution(undefined);
+  let promptImagePlan = planPromptImagesForModel({
+    images: promptImages,
+    resolution: imageResolution,
+    message: msg.message,
+  });
 
   try {
     await modelConfigurationQueue.ready();
@@ -2119,26 +2127,36 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     applyCompactionPolicy(session.model, session.autoCompactionEnabled);
 
     imageResolution = alignActiveModelImageInput(session);
+    promptImagePlan = planPromptImagesForModel({
+      images: promptImages,
+      resolution: imageResolution,
+      message: msg.message,
+    });
+    if (promptImagePlan.skipped) {
+      const modelId = (session.model as { id?: string } | undefined)?.id || initConfig?.model || '';
+      send({ type: 'image_input_skipped', modelId, imageCount: promptImagePlan.skippedCount });
+    }
     if (promptImages) {
       debugLog(`image-input ${JSON.stringify({
         requestId: msg.id,
-        payloadImageCount: promptImages.length,
+        payloadImageCount: promptImagePlan.images?.length ?? 0,
+        skippedImageCount: promptImagePlan.skippedCount,
         learnable: imageResolution.learnable,
         source: imageResolution.source,
-        images: describePromptImages(promptImages),
+        images: describePromptImages(promptImagePlan.images ?? promptImages),
       })}`);
     }
 
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
     const previewRunId = msg.answerRunId;
-    const sourceMetadata = userSourceMetadata(msg.message, msg.userTextOffset);
+    const sourceMetadata = userSourceMetadata(promptImagePlan.message, msg.userTextOffset);
     if (sourceMetadata) session.sessionManager.appendCustomEntry('selection-user-source-v1', sourceMetadata);
     await answerPreviewContext.run(({ toolCallId, text }) => {
       if (!previewRunId || previewRunId !== answerRunId || answerAccepted) return;
       send({ type: 'event', event: { type: 'answer_preview', answerRunId: previewRunId, toolCallId, text } });
-    }, () => session!.prompt(msg.message, {
-      images: promptImages,
+    }, () => session!.prompt(promptImagePlan.message, {
+      images: promptImagePlan.images,
       streamingBehavior: 'followUp',
     }));
   } catch (error) {
@@ -2146,7 +2164,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     const errorMsg = error instanceof Error ? error.message : String(error);
     if (piSession && !thinkingEffortRetried) {
       try {
-        const retried = await retryPromptForUnsupportedEffort(piSession, errorMsg, msg.message, promptImages);
+        const retried = await retryPromptForUnsupportedEffort(piSession, errorMsg, promptImagePlan.message, promptImagePlan.images);
         if (retried) return;
       } catch (retryError) {
         reported = retryError;
@@ -2156,8 +2174,8 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     const imageRetry = piSession
       ? planUnsupportedImageRetry({
         error: reportedBeforeImageRetry,
-        message: msg.message,
-        imageCount: promptImages?.length ?? 0,
+        message: promptImagePlan.message,
+        imageCount: promptImagePlan.images?.length ?? 0,
         toolsStarted: promptToolsStarted,
         alreadyRetried: false,
         learnable: imageResolution.learnable,
