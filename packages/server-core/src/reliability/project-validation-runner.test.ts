@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { planProjectValidation } from './project-validation-plan'
 import { runProjectValidation } from './project-validation-runner'
 
@@ -21,6 +22,36 @@ test('project checks execute in candidate, retain logs, and stop after a failed 
     writeFileSync(join(candidate, 'package.json'), JSON.stringify({ scripts: { test: 'echo bypass' } }))
     await expect(runProjectValidation({ plan: planProjectValidation(baseline, ['a.ts']), baselineRoot: baseline, projectRoot: baseline, lockDirectory: join(root, 'locks'), candidateRoot: candidate, logDirectory: join(root, 'changed-logs'), ensureAuthorized: () => {}, executable: { bun: process.execPath } })).rejects.toThrow('scripts changed')
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test.skipIf(process.platform !== 'linux')('successful validation waits for sandbox descendants to be dead, not just signalled', async () => {
+  const { existsSync } = await import('node:fs')
+  const root = mkdtempSync(join(tmpdir(), 'project-reaped-')), baseline = join(root, 'base'), candidate = join(root, 'candidate')
+  mkdirSync(baseline); mkdirSync(candidate)
+  const manifest = JSON.stringify({ packageManager: 'bun@1', scripts: { test: 'bun run launcher.ts' } })
+  writeFileSync(join(baseline, 'package.json'), manifest); writeFileSync(join(candidate, 'package.json'), manifest)
+  const worker = join(candidate, 'worker.ts')
+  writeFileSync(worker, `import { appendFileSync } from 'node:fs'; appendFileSync('heartbeat', 'x'); setInterval(() => appendFileSync('heartbeat', 'x'), 1);`)
+  writeFileSync(join(candidate, 'launcher.ts'), `import { spawn } from 'node:child_process'; import { existsSync } from 'node:fs'; const child = spawn(process.execPath, [${JSON.stringify(worker)}], { stdio: 'ignore' }); child.unref(); while (!existsSync('finish')) await new Promise(r => setTimeout(r, 5)); process.exit(0);`)
+  const controller = new AbortController()
+  const pending = runProjectValidation({ plan: planProjectValidation(baseline, ['a.ts']), baselineRoot: baseline, projectRoot: baseline, lockDirectory: join(root, 'locks'), candidateRoot: candidate, logDirectory: join(root, 'logs'), ensureAuthorized: () => {}, executable: { bun: process.execPath }, signal: controller.signal })
+  void pending.catch(() => {})
+  try {
+    for (let i = 0; i < 200 && !existsSync(join(candidate, 'heartbeat')); i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(existsSync(join(candidate, 'heartbeat'))).toBe(true)
+    const processes = execFileSync('/bin/ps', ['-axo', 'pid=,args='], { encoding: 'utf8' })
+    const line = processes.split('\n').find(line => line.trim().split(/\s+/).at(-1) === worker)
+    expect(line).toBeDefined()
+    const pid = Number(line!.trim().split(/\s+/)[0])
+    writeFileSync(join(candidate, 'finish'), '')
+    expect((await pending).passed).toBe(true)
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      expect(['Z', 'X']).toContain(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0])
+    } catch (error) {
+      if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+    }
+  } finally { controller.abort(); await pending.catch(() => {}); rmSync(root, { recursive: true, force: true }) }
 })
 
 test('cancellation terminates the validation process group before returning', async () => {

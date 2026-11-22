@@ -1,10 +1,35 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, isAbsolute, sep } from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
 import { withIsolatedPythonHome } from './isolated-python-env'
 import { createWindowsIsolatedShell } from './windows-isolated-shell'
+
+async function waitForTermination(pid: number, namespace: boolean): Promise<void> {
+  const deadline = Date.now() + 5_000
+  for (;;) {
+    let alive: boolean
+    if (namespace) {
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+        alive = !['Z', 'X'].includes(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0]!)
+      } catch (error) {
+        if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+        alive = false
+      }
+    } else {
+      const processes = execFileSync('/bin/ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8' })
+      alive = processes.split('\n').some(line => {
+        const [group, state] = line.trim().split(/\s+/)
+        return Number(group) === pid && state && !state.startsWith('Z') && !state.startsWith('X')
+      })
+    }
+    if (!alive) return
+    if (Date.now() >= deadline) throw new Error('Isolated Shell processes did not terminate')
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+}
 
 /** Only native confinement may authorize Shell in a candidate workspace. */
 export function createIsolatedShell(directory: string, options: { denyExternalBrowsers?: boolean; officeDocument?: { path: string; binary: string } } = {}): { directory: string; operations: BashOperations; dispose: () => void } | undefined {
@@ -22,6 +47,7 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
   const home = join(temporary, 'home')
   mkdirSync(home)
   const children = new Set<number>()
+  let nextCommand = 0
   let disposed = false
   const dispose = () => {
     disposed = true
@@ -85,7 +111,16 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
       ].join('\n') : command
       const args = [...prefix, transaction]
       if (process.platform === 'linux') args[args.indexOf('--chdir') + 1] = target
-      const child = spawn(executable, args, { cwd: target, env: environment(env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const namespace = process.platform === 'linux'
+      if (namespace) args.unshift('--info-fd', '3')
+      const infoPath = join(temporary, `process-${nextCommand++}.json`)
+      const infoFd = namespace ? openSync(infoPath, 'wx+', 0o600) : undefined
+      if (namespace) rmSync(infoPath)
+      const child = (() => {
+        try {
+          return spawn(executable, args, { cwd: target, env: environment(env), detached: true, stdio: infoFd === undefined ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe', infoFd] })
+        } catch (error) { if (infoFd !== undefined) closeSync(infoFd); throw error }
+      })()
       if (child.pid) children.add(child.pid)
       let timedOut = false
       let terminationError: unknown
@@ -97,6 +132,7 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
       const timer = timeout === undefined ? undefined : setTimeout(() => { timedOut = true; stop() }, timeout * 1000)
       const cleanup = () => {
         if (timer) clearTimeout(timer); signal?.removeEventListener('abort', stop)
+        if (infoFd !== undefined) closeSync(infoFd)
         if (child.pid) children.delete(child.pid)
         if (disposed && !children.size) rmSync(temporary, { recursive: true, force: true })
       }
@@ -104,19 +140,32 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
         if (outputError !== undefined) return
         try { onData(bytes) } catch (error) { outputError = error ?? new Error('Shell output handling failed'); stop() }
       }
-      child.stdout.on('data', consume); child.stderr.on('data', consume)
+      child.stdout!.on('data', consume); child.stderr!.on('data', consume)
       signal?.addEventListener('abort', stop, { once: true })
       if (signal?.aborted) stop()
-      child.once('error', error => { cleanup(); reject(error) })
+      let spawnError: unknown
+      child.once('error', error => { spawnError = error })
       // Kill children on parent exit, before inherited pipes can hold `close` open.
       child.once('exit', stop)
-      child.once('close', exitCode => {
-        cleanup()
-        if (outputError !== undefined) reject(outputError)
-        else if (terminationError) reject(terminationError)
-        else if (signal?.aborted) reject(new Error('aborted'))
-        else if (timedOut) reject(new Error(`timeout:${timeout}`))
-        else resolve({ exitCode })
+      child.once('close', async exitCode => {
+        try {
+          if (spawnError) throw spawnError
+          const sandboxInfo = infoFd === undefined ? '' : readFileSync(`/proc/self/fd/${infoFd}`, 'utf8')
+          if (namespace && exitCode === 0 && !sandboxInfo) throw new Error('Missing sandbox process ID')
+          if (namespace && sandboxInfo) {
+            // bwrap's monitor can exit before its PID namespace has finished dying.
+            const pid: unknown = JSON.parse(sandboxInfo)['child-pid']
+            if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid sandbox process ID')
+            try { process.kill(pid, 'SIGKILL') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+            await waitForTermination(pid, true)
+          }
+          if (child.pid) await waitForTermination(child.pid, namespace)
+          if (outputError !== undefined) throw outputError
+          if (terminationError) throw terminationError
+          if (signal?.aborted) throw new Error('aborted')
+          if (timedOut) throw new Error(`timeout:${timeout}`)
+          resolve({ exitCode })
+        } catch (error) { reject(error) } finally { cleanup() }
       })
     })
   } } }
