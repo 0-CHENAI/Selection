@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
@@ -510,6 +510,48 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const ready = verdict === 'pass' && !stale
     expect(final.content.includes(body)).toBe(ready)
     expect(final.artifactVersions ?? []).toHaveLength(ready ? 1 : 0)
+    expect(prompts).toHaveLength(1)
+  })
+
+  it.each(['pass', 'tampered', 'stale'] as const)('uses the headless render receipt despite truncated stdout (%s)', async (scenario) => {
+    const path = join(root, 'receipt.pptx')
+    const receipts = join(getSessionPath(root, managed.id), 'data', 'ppt-visual-renders')
+    const body = 'The deck is built and delivered.'
+    const coveredPages = [1, 2, 3, 4, 5]
+    install(async function* () {
+      const pptx = readFileSync(fixturePptx)
+      writeFileSync(path, pptx)
+      yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'render',
+        input: { command: 'bun engine/deck-cli.mjs screenshot receipt.pptx --pages 5 --out slides | head -c 300' } }
+      const pages = coveredPages.map(page => {
+        const image = join(root, `receipt-slide-${page}.png`)
+        const bytes = Buffer.from(`rendered page ${page}`)
+        writeFileSync(image, bytes)
+        return { page, path: image, sha256: visualSha256(bytes) }
+      })
+      mkdirSync(receipts, { recursive: true })
+      writeFileSync(join(receipts, '1234-00000000-0000-4000-8000-000000000000.json'),
+        JSON.stringify({ path, sha256: visualSha256(pptx), pages }))
+      yield { type: 'tool_result', toolName: 'Bash', toolUseId: 'render', isError: false,
+        result: '{"status":"ok","screenshots":{"available":true' }
+      if (scenario === 'tampered') writeFileSync(pages[0]!.path, 'tampered screenshot')
+      yield { type: 'tool_start', toolName: 'mcp__session__call_llm', toolUseId: 'review',
+        input: { pptReview: { path, pages: coveredPages }, attachments: pages.map(page => page.path) } }
+      yield { type: 'tool_result', toolName: 'mcp__session__call_llm', toolUseId: 'review', isError: false,
+        result: JSON.stringify({ coveredPages, verdict: 'pass', findings: [] }) }
+      if (scenario === 'stale') writeFileSync(path, 'edited after review')
+      yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: 'ppt-draft', sdkMessageId: 'ppt-sdk' }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, 'Create a PowerPoint.')
+    const final = managed.messages.find(message => message.answerCommitted)!
+    expect(final.content).toContain({
+      pass: body,
+      tampered: 'The saved deck has no verified visual-review result.',
+      stale: 'The saved deck changed after visual review.',
+    }[scenario])
+    expect(final.artifactVersions ?? []).toHaveLength(scenario === 'pass' ? 1 : 0)
+    expect(readdirSync(receipts)).toEqual([])
     expect(prompts).toHaveLength(1)
   })
 

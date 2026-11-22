@@ -191,7 +191,7 @@ import { generatePresentationImage } from '../services/ppt-image-generate'
 import { pptRouteMismatch } from '../services/ppt-route'
 import { createTemplateTaskProject } from '../services/ppt-template-project'
 import { recordVisualInspection } from '../services/ppt-visual-record'
-import { PptVisualTurn, markVisualDeliveryBlocked, pptVisualBlock, readVisualRender, visualSha256, type PptVisualBlock } from '../services/ppt-visual-verdict'
+import { PptVisualTurn, markVisualDeliveryBlocked, pptVisualBlock, readVisualRender, takeHeadlessVisualRenders, visualSha256, type PptVisualBlock } from '../services/ppt-visual-verdict'
 import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, routedOfficeSkillNote, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
@@ -8376,6 +8376,7 @@ export class SessionManager implements ISessionManager {
         managed.workingDirectory ?? chatSessionDir,
       )
       this.officeTurnTimings.set(managed, { generation: myGeneration, timing: officeTiming })
+      takeHeadlessVisualRenders(chatSessionDir)
       this.pptVisualTurns.set(managed, new PptVisualTurn())
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
@@ -14900,13 +14901,17 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const priorTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
         const previewToolName = event.toolName ?? priorTool?.toolName ?? ''
         const visual = this.pptVisualTurns.get(managed)
-        if (visual && !event.isError && !event.parentToolUseId) {
+        if (visual && !event.parentToolUseId) {
           if (/^(?:Bash|bash|shell)$/.test(previewToolName) && /(?:^|[\\/\s"'])deck-cli\.mjs["']?\s+screenshot\b/i.test(String(priorTool?.toolInput?.command ?? ''))) {
-            const render = readVisualRender(event.result)
-            if (render) visual.addRender(render)
-          } else if (/^(?:mcp__session__)?call_llm$/.test(previewToolName)) {
+            const renders = takeHeadlessVisualRenders(getSessionStoragePath(managed.workspace.rootPath, managed.id))
+            for (const render of renders) visual.addRender(render)
+            if (renders.length === 0 && !event.isError) {
+              const render = readVisualRender(event.result)
+              if (render) visual.addRender(render)
+            }
+          } else if (!event.isError && /^(?:mcp__session__)?call_llm$/.test(previewToolName)) {
             this.savePptVisualVerdict(managed, visual.finishReview(event.toolUseId, event.result))
-          } else if (/^Read$/i.test(previewToolName) && event.content?.some(item => item.type === 'image')) {
+          } else if (!event.isError && /^Read$/i.test(previewToolName) && event.content?.some(item => item.type === 'image')) {
             const path = priorTool?.toolInput?.path ?? priorTool?.toolInput?.file_path
             if (typeof path === 'string') visual.noteRead(resolve(managed.workingDirectory ?? managed.workspace.rootPath, path))
           }

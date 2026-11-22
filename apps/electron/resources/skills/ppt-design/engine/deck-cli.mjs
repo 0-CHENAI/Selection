@@ -9167,9 +9167,9 @@ var require_lib3 = __commonJS((exports, module) => {
 });
 
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
-import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync6, realpathSync as realpathSync2 } from "fs";
-import { resolve as resolve2 } from "path";
+import { createHash as createHash3, randomUUID } from "crypto";
+import { mkdirSync as mkdirSync5, readFileSync as readFileSync6, realpathSync as realpathSync2, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync5 } from "fs";
+import { join as join6, resolve as resolve2 } from "path";
 
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
 var NO_LINE_START = new Set(Array.from("\uFF0C\u3002\u3001\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u3009\u300D,.!?;:)]}%"));
@@ -24404,6 +24404,20 @@ if (flags.command === "screenshot") {
   const result = await captureSlides(file, resolve2(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
   const pages = flags.pageNumbers ? [...new Set(flags.pageNumbers)].sort((a, b) => a - b) : result.files.map((_, index) => index + 1);
   const pptVisualRender = result.available && result.files.length && sha256(file) === before ? { path: realpathSync2(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: sha256(path) })) } : undefined;
+  if (pptVisualRender && process.env.CRAFT_SESSION_DIR) {
+    const dir = join6(process.env.CRAFT_SESSION_DIR, "data", "ppt-visual-renders");
+    const receipt = join6(dir, `${Date.now()}-${randomUUID()}.json`);
+    const partial = receipt + ".tmp";
+    try {
+      mkdirSync5(dir, { recursive: true });
+      writeFileSync5(partial, JSON.stringify(pptVisualRender), { mode: 384 });
+      renameSync2(partial, receipt);
+    } catch {
+      try {
+        rmSync2(partial, { force: true });
+      } catch {}
+    }
+  }
   emit(result.available ? "ok" : "error", { screenshots: result, pptVisualRender }, result.available ? 0 : 1);
 }
 var stamp;

@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto'
-import { readFileSync, realpathSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { argumentLayoutCatalog } from './argument-layouts.ts'
 import { checkDeck, formatNeedsRevision, revisionStatus } from './check.ts'
 import { exportDeck, platformFromProcess } from './export-pptx.ts'
@@ -106,6 +106,18 @@ if (flags.command === 'screenshot') {
   const pptVisualRender = result.available && result.files.length && sha256(file) === before
     ? { path: realpathSync(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: sha256(path) })) }
     : undefined
+  if (pptVisualRender && process.env.CRAFT_SESSION_DIR) {
+    const dir = join(process.env.CRAFT_SESSION_DIR, 'data', 'ppt-visual-renders')
+    const receipt = join(dir, `${Date.now()}-${randomUUID()}.json`)
+    const partial = receipt + '.tmp'
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(partial, JSON.stringify(pptVisualRender), { mode: 0o600 })
+      renameSync(partial, receipt)
+    } catch {
+      try { rmSync(partial, { force: true }) } catch { /* The render is still available on stdout. */ }
+    }
+  }
   emit(result.available ? 'ok' : 'error', { screenshots: result, pptVisualRender }, result.available ? 0 : 1)
 }
 

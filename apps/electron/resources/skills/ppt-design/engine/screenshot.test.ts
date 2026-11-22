@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { captureSlides } from './screenshot.ts'
@@ -65,4 +65,21 @@ test('bundled CLI passes the affected-page list through to screenshot capture', 
   expect(body.screenshots.files).toEqual([join(dir, 'slide-02.png'), join(dir, 'slide-04.png')])
   expect(body.pptVisualRender.pages.map((page: {page: number}) => page.page)).toEqual([2, 4])
   expect(readFileSync(join(dir, 'calls'), 'utf8')).toBe('2\n4\n')
+})
+
+test('bundled CLI persists independent evidence for each successful screenshot batch', async () => {
+  const { dir, cli } = renderer()
+  const file = join(dir, 'deck.pptx')
+  const session = join(dir, 'session')
+  const receipts = join(session, 'data', 'ppt-visual-renders')
+  writeFileSync(file, 'saved deck bytes')
+  for (const page of [2, 4]) {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'deck-cli.mjs'), 'screenshot', file,
+      '--out', dir, '--pages', '5', '--only-pages', String(page), '--officecli', cli],
+    { env: { ...process.env, CRAFT_SESSION_DIR: session }, stdout: 'pipe', stderr: 'pipe' })
+    const body = JSON.parse(await new Response(child.stdout).text())
+    expect(await child.exited).toBe(0)
+    expect(readdirSync(receipts).some(name => readFileSync(join(receipts, name), 'utf8') === JSON.stringify(body.pptVisualRender))).toBe(true)
+  }
+  expect(readdirSync(receipts)).toHaveLength(2)
 })
