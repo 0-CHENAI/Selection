@@ -75,6 +75,15 @@ describe('models-pi filtering', () => {
     expect(getPiApiKeyProviders().some(provider => provider.key === 'xai' && provider.label === 'xAI (Grok)')).toBe(true);
   });
 
+  it('copies Pi catalog image support onto Kimi K3.1 Pro definitions', () => {
+    const kimi = getPiModelsForAuthProvider('kimi-coding').find(model => model.id === 'pi/k3.1-pro')
+    const moonshot = getPiModelsForAuthProvider('moonshotai').find(model => model.id === 'pi/kimi-k3.1-pro')
+    const deepseekPro = getPiModelsForAuthProvider('deepseek').find(model => model.id === 'pi/deepseek-v4-pro')
+    expect(kimi?.supportsImages).toBe(true)
+    expect(moonshot?.supportsImages).toBe(true)
+    expect(deepseekPro?.supportsImages).toBe(false)
+  })
+
   it('exposes Kimi K3 and K3.1 Pro for Moonshot and Kimi Coding providers', () => {
     expect(getPiModelsForAuthProvider('moonshotai').map(model => model.id)).toEqual(expect.arrayContaining([
       'pi/kimi-k3',

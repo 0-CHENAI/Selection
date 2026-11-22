@@ -19,6 +19,7 @@ import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
 import { thinkingFieldsFromUpstream } from '../agent/thinking-capabilities.ts';
 import { fromPiProviderId, toPiProviderId } from './pi-provider-ids.ts';
+import { registerCatalogImageSupportLookup } from './model-image-support.ts';
 
 // ============================================
 // PI MODEL DISCOVERY
@@ -41,6 +42,7 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
     thinkingFormat: compat?.thinkingFormat,
   });
 
+  const supportsImages = Array.isArray(m.input) && m.input.includes('image');
   return {
     id: `pi/${m.id}`,
     name: m.name,
@@ -48,6 +50,8 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
     description: `${m.provider} model via Selection Backend`,
     provider: 'pi',
     contextWindow: m.contextWindow,
+    supportsImages,
+    imageSupport: 'auto',
     ...thinking,
   };
 }
@@ -232,3 +236,60 @@ export function getPiProviderBaseUrl(provider: string): string | undefined {
     return undefined;
   }
 }
+
+type CatalogImageIndex = { flags: Map<string, boolean>; conflicts: Set<string> }
+
+let catalogImageIndex: CatalogImageIndex | undefined
+
+function addCatalogKey(index: CatalogImageIndex, key: string, hasImage: boolean): void {
+  if (!key) return
+  const previous = index.flags.get(key)
+  if (previous === undefined) {
+    index.flags.set(key, hasImage)
+    return
+  }
+  if (previous !== hasImage) {
+    index.conflicts.add(key)
+    index.flags.delete(key)
+  }
+}
+
+function buildCatalogImageIndex(): CatalogImageIndex {
+  const index: CatalogImageIndex = { flags: new Map(), conflicts: new Set() }
+  for (const provider of getProviders()) {
+    let models: Model<Api>[] = []
+    try {
+      models = getCatalogModels(provider)
+    } catch {
+      continue
+    }
+    for (const model of models) {
+      const hasImage = Array.isArray(model.input) && model.input.includes('image')
+      addCatalogKey(index, model.id, hasImage)
+      addCatalogKey(index, model.id.toLowerCase(), hasImage)
+      addCatalogKey(index, `pi/${model.id}`, hasImage)
+      addCatalogKey(index, `pi/${model.id}`.toLowerCase(), hasImage)
+    }
+  }
+  return index
+}
+
+function catalogImageIndexSnapshot(): CatalogImageIndex {
+  catalogImageIndex ??= buildCatalogImageIndex()
+  return catalogImageIndex
+}
+
+/**
+ * Built-in Pi SDK modality for a model id. `undefined` means the catalog has
+ * no unique opinion (unknown id, or the same id disagrees across providers).
+ * Renderer-safe callers must go through `registerCatalogImageSupportLookup`.
+ */
+export function lookupPiCatalogImageSupport(modelId: string): boolean | undefined {
+  const bare = modelId.trim()
+  if (!bare) return undefined
+  const index = catalogImageIndexSnapshot()
+  if (index.conflicts.has(bare) || index.conflicts.has(bare.toLowerCase())) return undefined
+  return index.flags.get(bare) ?? index.flags.get(bare.toLowerCase())
+}
+
+registerCatalogImageSupportLookup(id => lookupPiCatalogImageSupport(id))

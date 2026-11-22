@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import '../../shared/src/config/models-pi.ts'
 import {
   buildCustomEndpointModelDef,
   findCustomEndpointModelEntry,
@@ -56,6 +57,11 @@ describe('buildCustomEndpointModelDef', () => {
     expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(131_072)
     expect(model.maxTokens).toBe(8_192)
+  })
+
+  it('keeps image input when a custom alias collides with a built-in catalog text-only id', () => {
+    const model = buildCustomEndpointModelDef('o3-mini')
+    expect(model.input).toEqual(['text', 'image'])
   })
 
   it('enables image input when the connection explicitly opts in', () => {

@@ -1,13 +1,17 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
+  alignModelImageInput,
   buildSkippedImagesNote,
   inferModelSupportsImages,
   isUnsupportedImageInputError,
   learnModelRejectsImages,
+  planPromptImagesForModel,
+  registerCatalogImageSupportLookup,
   planUnsupportedImageRetry,
   resolveModelImageSupportFromCatalog,
   setModelImageSupport,
   toCustomEndpointModelPayload,
+  usesBuiltInPiCatalogLookup,
   type ModelImageRecord,
 } from '../model-image-support.ts'
 import { modelSupportsImages, type LlmConnection } from '../llm-connections.ts'
@@ -21,6 +25,7 @@ const PI = {
 }
 
 type ImageConnection = {
+  providerType?: LlmConnection['providerType']
   models?: Array<string | ModelImageRecord>
   customEndpoint?: { api?: string; supportsImages?: boolean }
 }
@@ -30,10 +35,18 @@ function resolution(connection: ImageConnection, modelId: string) {
     modelId,
     models: connection.models,
     endpointSupportsImages: connection.customEndpoint?.supportsImages,
+    allowCatalogLookup: usesBuiltInPiCatalogLookup(connection),
   })
 }
 
 describe('resolveModelImageSupportFromCatalog precedence', () => {
+  beforeEach(() => {
+    registerCatalogImageSupportLookup(undefined)
+  })
+  afterEach(() => {
+    registerCatalogImageSupportLookup(undefined)
+  })
+
   it('treats DeepSeek flash as known vision and the other official ids as text-only', () => {
     const conn = {
       ...PI,
@@ -115,6 +128,30 @@ describe('resolveModelImageSupportFromCatalog precedence', () => {
     expect(resolution(conn, 'custom').source).toBe('explicit')
     expect(resolution(conn, 'custom').supportsImages).toBe(false)
   })
+
+  it('does not treat a custom-gateway alias as a built-in catalog text-only id', () => {
+    registerCatalogImageSupportLookup((id) => {
+      const bare = id.replace(/^pi\//i, '').toLowerCase()
+      return bare === 'catalog-text-only' ? false : undefined
+    })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'catalog-text-only',
+    })).toMatchObject({ supportsImages: false, source: 'catalog' })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'catalog-text-only',
+      allowCatalogLookup: false,
+    })).toMatchObject({ supportsImages: true, source: 'optimistic' })
+    expect(modelSupportsImages({
+      ...PI,
+      providerType: 'pi_compat',
+      customEndpoint: { api: 'openai-completions' },
+      models: ['catalog-text-only'],
+    }, 'catalog-text-only')).toBe(true)
+    expect(modelSupportsImages({
+      ...PI,
+      models: ['catalog-text-only'],
+    }, 'catalog-text-only')).toBe(false)
+  })
 })
 
 describe('unsupported image retry', () => {
@@ -184,6 +221,13 @@ describe('unsupported image retry', () => {
 })
 
 describe('renderer and runtime agree', () => {
+  beforeEach(() => {
+    registerCatalogImageSupportLookup(undefined)
+  })
+  afterEach(() => {
+    registerCatalogImageSupportLookup(undefined)
+  })
+
   function agree(connection: ImageConnection, modelId: string) {
     const renderer = modelSupportsImages(connection as LlmConnection, modelId)
     const payload = connection.models?.map((model) => toCustomEndpointModelPayload(model))
@@ -191,10 +235,31 @@ describe('renderer and runtime agree', () => {
       modelId,
       models: payload,
       endpointSupportsImages: connection.customEndpoint?.supportsImages,
+      allowCatalogLookup: usesBuiltInPiCatalogLookup(connection),
     })
     expect(runtime.supportsImages).toBe(renderer)
     return runtime
   }
+
+  it('lets a live SDK catalog flag beat the name heuristic and stay below explicit off', () => {
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'k3.1-pro',
+      catalogSupportsImages: true,
+    })).toMatchObject({ supportsImages: true, source: 'catalog', learnable: true })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'kimi-k2',
+      catalogSupportsImages: false,
+    })).toMatchObject({ supportsImages: false, source: 'catalog', learnable: false })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'gpt-5-lookalike',
+      catalogSupportsImages: false,
+    })).toMatchObject({ supportsImages: false, source: 'catalog' })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'k3.1-pro',
+      models: [{ id: 'k3.1-pro', imageSupport: 'off' }],
+      catalogSupportsImages: true,
+    })).toMatchObject({ supportsImages: false, source: 'explicit' })
+  })
 
   it('matches for DeepSeek, unknown models, explicit off, and learned off', () => {
     expect(agree({ ...PI, models: [{ id: 'pi/deepseek-flash' }] }, 'pi/deepseek-flash').source).toBe('known')
@@ -213,5 +278,47 @@ describe('renderer and runtime agree', () => {
       customEndpoint: { api: 'openai-completions', supportsImages: false },
       models: ['Opus'],
     }, 'pi/Opus').supportsImages).toBe(false)
+  })
+})
+
+describe('planPromptImagesForModel', () => {
+  const image = { type: 'image' as const, data: 'abc', mimeType: 'image/png' }
+
+  it('keeps pixels for catalog/known/optimistic vision', () => {
+    const planned = planPromptImagesForModel({
+      images: [image],
+      resolution: { supportsImages: true, mode: 'auto', source: 'catalog', learnable: true },
+      message: '这张图是什么？',
+    })
+    expect(planned.skipped).toBe(false)
+    expect(planned.images).toEqual([image])
+    expect(planned.message).toBe('这张图是什么？')
+  })
+
+  it('does not silently drop images for a text-only model', () => {
+    const planned = planPromptImagesForModel({
+      images: [image, { ...image, data: 'def' }],
+      resolution: { supportsImages: false, mode: 'auto', source: 'catalog', learnable: false },
+      message: '这张图是什么？',
+    })
+    expect(planned.skipped).toBe(true)
+    expect(planned.skippedCount).toBe(2)
+    expect(planned.images).toBeUndefined()
+    expect(planned.message).toContain(buildSkippedImagesNote(2))
+    expect(planned.message.startsWith('这张图是什么？')).toBe(true)
+  })
+})
+
+describe('alignModelImageInput', () => {
+  it('does not add image onto a catalog text-only model', () => {
+    const aligned = alignModelImageInput({ id: 'deepseek-chat', input: ['text'] as const }, false)
+    expect(aligned.input).toEqual(['text'])
+  })
+
+  it('keeps catalog vision and strips image when the resolution is text-only', () => {
+    const kept = alignModelImageInput({ id: 'k3.1-pro', input: ['text', 'image'] }, true)
+    expect(kept.input).toEqual(['text', 'image'])
+    const stripped = alignModelImageInput({ id: 'k3.1-pro', input: ['text', 'image'] }, false)
+    expect(stripped.input).toEqual(['text'])
   })
 })

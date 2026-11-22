@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LlmConnection } from '@craft-agent/shared/config'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
+import '../../../shared/src/config/models-pi.ts'
+import { uniquePng } from '../../../shared/src/config/__tests__/vision-image-fixtures.ts'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput, prepareModelImageAttachments, usesStreamingAnswerDelivery } from './runtime-config'
 
 const baseCompat: LlmConnection = {
@@ -182,9 +185,34 @@ describe('filterAttachmentsForModelInput', () => {
       connection,
       'pi/deepseek-v4-pro',
     )
-    expect(result.resolution?.source).toBe('known')
+    expect(result.resolution?.source === 'known' || result.resolution?.source === 'catalog').toBe(true)
     expect(result.omittedImages).toEqual([imageAttachment])
     expect(result.attachments).toEqual([textAttachment])
+  })
+
+  it('keeps images for a custom gateway alias that collides with a catalog text-only id', () => {
+    const connection: LlmConnection = {
+      ...baseCompat,
+      customEndpoint: { api: 'openai-completions' },
+      models: ['o3-mini'],
+    }
+    const result = filterAttachmentsForModelInput([imageAttachment], connection, 'o3-mini')
+    expect(result.omittedImages).toHaveLength(0)
+    expect(result.attachments).toEqual([imageAttachment])
+  })
+
+  it('soft-skips the same catalog id on a built-in Pi connection', () => {
+    const connection: LlmConnection = {
+      slug: 'openai',
+      name: 'OpenAI',
+      providerType: 'pi',
+      authType: 'api_key',
+      createdAt: 1,
+      models: ['o3-mini'],
+    }
+    const result = filterAttachmentsForModelInput([imageAttachment], connection, 'pi/o3-mini')
+    expect(result.resolution?.source).toBe('catalog')
+    expect(result.omittedImages).toEqual([imageAttachment])
   })
 })
 
@@ -322,5 +350,125 @@ describe('prepareModelImageAttachments', () => {
       code: 'image_resource_expired',
       payloadImageCount: 0,
     })
+  })
+
+  it('sends Kimi K3.1 Pro images and restores the same sha256 after persistence', () => {
+    const bytes = uniquePng('kimi-k3.1-pro-restore')
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const dir = mkdtempSync(join(tmpdir(), 'image-kimi-'))
+    roots.push(dir)
+    const path = join(dir, 'shot.png')
+    writeFileSync(path, bytes)
+
+    const kimi: LlmConnection = {
+      slug: 'kimi-coding',
+      name: 'Kimi Code',
+      providerType: 'pi',
+      authType: 'api_key',
+      createdAt: 1,
+      piAuthProvider: 'kimi-coding',
+      models: ['pi/k3.1-pro'],
+    }
+    const restored = prepareModelImageAttachments({
+      storedAttachments: [{
+        type: 'image',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: bytes.byteLength,
+        storedPath: path,
+      }],
+      connection: kimi,
+      modelId: 'pi/k3.1-pro',
+    })
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) return
+    expect(restored.payloadImageCount).toBe(1)
+    expect(restored.attachments?.[0]?.base64).toBe(bytes.toString('base64'))
+    expect(createHash('sha256').update(Buffer.from(restored.attachments?.[0]?.base64 ?? '', 'base64')).digest('hex')).toBe(sha256)
+  })
+
+  it('keeps multi-image order for vision models and skips both for catalog text-only', () => {
+    const first = uniquePng('multi-a')
+    const second = uniquePng('multi-b')
+    const dir = mkdtempSync(join(tmpdir(), 'image-multi-'))
+    roots.push(dir)
+    const pathA = join(dir, 'a.png')
+    const pathB = join(dir, 'b.png')
+    writeFileSync(pathA, first)
+    writeFileSync(pathB, second)
+    const attachments: FileAttachment[] = [
+      { type: 'image', path: pathA, name: 'a.png', mimeType: 'image/png', size: first.byteLength },
+      { type: 'image', path: pathB, name: 'b.png', mimeType: 'image/png', size: second.byteLength },
+    ]
+    const storedAttachments = [
+      { type: 'image' as const, name: 'a.png', mimeType: 'image/png', size: first.byteLength, storedPath: pathA },
+      { type: 'image' as const, name: 'b.png', mimeType: 'image/png', size: second.byteLength, storedPath: pathB },
+    ]
+
+    const vision = prepareModelImageAttachments({
+      attachments,
+      storedAttachments,
+      connection: {
+        slug: 'kimi-coding',
+        name: 'Kimi Code',
+        providerType: 'pi',
+        authType: 'api_key',
+        createdAt: 1,
+        models: ['pi/k3.1-pro'],
+      },
+      modelId: 'k3.1-pro',
+    })
+    expect(vision.ok).toBe(true)
+    if (!vision.ok) return
+    expect(vision.payloadImageCount).toBe(2)
+    expect(vision.attachments?.map(item => item.name)).toEqual(['a.png', 'b.png'])
+    expect(vision.attachments?.[0]?.base64).toBe(first.toString('base64'))
+    expect(vision.attachments?.[1]?.base64).toBe(second.toString('base64'))
+
+    const skipped = prepareModelImageAttachments({
+      attachments,
+      storedAttachments,
+      connection: {
+        slug: 'deepseek',
+        name: 'DeepSeek',
+        providerType: 'pi',
+        authType: 'api_key',
+        createdAt: 1,
+        models: ['pi/deepseek-chat'],
+      },
+      modelId: 'deepseek-chat',
+    })
+    expect(skipped.ok).toBe(true)
+    if (!skipped.ok) return
+    expect(skipped.payloadImageCount).toBe(0)
+    expect(skipped.skippedImages?.map(item => item.name)).toEqual(['a.png', 'b.png'])
+  })
+
+  it('tries unknown custom models and refuses explicit off', () => {
+    const unknown = prepareModelImageAttachments({
+      attachments: [imageAttachment],
+      connection: {
+        slug: 'custom',
+        name: 'Custom',
+        providerType: 'pi_compat',
+        authType: 'api_key_with_endpoint',
+        createdAt: 1,
+        baseUrl: 'http://127.0.0.1:9/v1',
+        customEndpoint: { api: 'openai-completions' },
+        models: ['Maylo'],
+      },
+      modelId: 'Maylo',
+    })
+    expect(unknown.ok).toBe(true)
+    if (!unknown.ok) return
+    expect(unknown.payloadImageCount).toBe(1)
+
+    const filtered = filterAttachmentsForModelInput(
+      [imageAttachment],
+      { ...baseCompat, models: [{ id: 'Maylo', imageSupport: 'off' } as never] },
+      'Maylo',
+    )
+    expect(filtered.resolution?.source).toBe('explicit')
+    expect(filtered.omittedImages).toEqual([imageAttachment])
   })
 })

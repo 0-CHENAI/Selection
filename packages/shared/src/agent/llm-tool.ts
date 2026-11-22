@@ -184,6 +184,8 @@ export interface CallLlmImageSupport {
   models?: Parameters<typeof resolveModelImageSupportFromCatalog>[0]['models'];
   /** Connection-level image default. Explicit per-model on/off still wins. */
   endpointSupportsImages?: boolean;
+  /** Built-in Pi catalog only. Custom gateways skip it so colliding aliases still try images. */
+  allowCatalogLookup?: boolean;
 }
 
 export interface BuildCallLlmOptions {
@@ -217,6 +219,7 @@ export function callLlmModelSupportsImages(
     modelId: id,
     models: catalog?.models,
     endpointSupportsImages: catalog?.endpointSupportsImages,
+    allowCatalogLookup: catalog?.allowCatalogLookup,
   }).supportsImages;
 }
 
