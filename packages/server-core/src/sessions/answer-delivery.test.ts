@@ -541,7 +541,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
 
   it('does not snapshot a blocked edit of a previously delivered PowerPoint', async () => {
     const dir = getSessionPath(root, managed.id)
-    const path = join(root, 'revised.pptx')
+    const path = join(dir, 'revised.pptx')
     const pptx = readFileSync(fixturePptx)
     const coveredPages = [1, 2, 3, 4, 5]
     const pages = coveredPages.map(page => ({ page, path: `slide-${page}.png`, sha256: '' }))
@@ -552,17 +552,20 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       } else {
         writeFileSync(path, 'edited without review')
       }
-      await control!.submit({ ...submission, markdown: `Updated [PowerPoint](<${path}>)` })
+      await control!.submit({ ...submission, markdown: 'Updated [PowerPoint](revised.pptx)' })
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, 'Create a PowerPoint.')
     const store = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
-    expect(store.findByPath(path)?.versions).toHaveLength(1)
+    const first = managed.messages.findLast(message => message.answerCommitted)!
+    expect(first.artifactVersions).toHaveLength(1)
+    const artifactId = first.artifactVersions![0]!.artifactId!
+    expect(store.read(artifactId).versions).toHaveLength(1)
     await manager.sendMessage(managed.id, 'Revise the PowerPoint.')
     const final = managed.messages.findLast(message => message.answerCommitted)!
     expect(final.content).toContain('G4')
     expect(final.artifactVersions ?? []).toHaveLength(0)
-    expect(store.findByPath(path)?.versions).toHaveLength(1)
+    expect(store.read(artifactId).versions).toHaveLength(1)
   })
 
   it('reveals a refused candidate as process text when a later tool runs', async () => {
