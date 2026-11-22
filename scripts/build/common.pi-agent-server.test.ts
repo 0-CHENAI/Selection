@@ -36,6 +36,7 @@ function createFixture(): { rootDir: string; electronDir: string; config: BuildC
   }
 
   writeFileSync(join(piDistDir, 'index.js'), 'console.log("pi")')
+  writeFileSync(join(piDistDir, 'read-image-resize-worker.js'), 'console.log("read worker")')
   writeFileSync(join(piDistDir, 'image-resize-worker.js'), 'console.log("worker")')
   writeFileSync(join(photonPackageDir, 'photon_rs_bg.wasm'), 'wasm-fixture')
   writeFileSync(join(koffiDir, 'package.json'), '{}')

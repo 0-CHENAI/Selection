@@ -2,7 +2,14 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const PHOTON_WASM_FILENAME = 'photon_rs_bg.wasm'
-export const IMAGE_RESIZE_WORKER_FILENAME = 'image-resize-worker.js'
+export const IMAGE_RESIZE_WORKERS = ['image-resize-worker.js', 'read-image-resize-worker.js'] as const
+
+export function verifyImageResizeWorkers(directory: string): void {
+  for (const worker of IMAGE_RESIZE_WORKERS) {
+    const path = join(directory, worker)
+    if (!existsSync(path)) throw new Error(`Pi image resize Worker not found at ${path}`)
+  }
+}
 
 export function copyPiAgentServerRuntimeAssets(rootDir: string, outputDir: string): void {
   const photonWasmSource = join(
@@ -18,11 +25,7 @@ export function copyPiAgentServerRuntimeAssets(rootDir: string, outputDir: strin
       `Photon WASM not found at ${photonWasmSource}. Run bun install before building pi-agent-server.`,
     )
   }
-  if (!existsSync(join(outputDir, IMAGE_RESIZE_WORKER_FILENAME))) {
-    throw new Error(
-      `Pi image resize Worker not found at ${join(outputDir, IMAGE_RESIZE_WORKER_FILENAME)}. Run the complete pi-agent-server build.`,
-    )
-  }
+  verifyImageResizeWorkers(outputDir)
 
   mkdirSync(outputDir, { recursive: true })
   copyFileSync(photonWasmSource, join(outputDir, PHOTON_WASM_FILENAME))

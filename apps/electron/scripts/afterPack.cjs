@@ -132,7 +132,7 @@ function copyAgentRuntimes(context, resourcesRoot) {
     fs.cpSync(source, destination, { recursive: true, dereference: true });
   }
   for (const relative of ['resources/session-mcp-server/index.js', 'resources/pi-agent-server/index.js',
-    'resources/pi-agent-server/photon_rs_bg.wasm', 'resources/pi-agent-server/image-resize-worker.js',
+    'resources/pi-agent-server/photon_rs_bg.wasm', 'resources/pi-agent-server/image-resize-worker.js', 'resources/pi-agent-server/read-image-resize-worker.js',
     `vendor/bun/${context.electronPlatformName === 'win32' ? 'bun.exe' : 'bun'}`]) {
     if (!fs.existsSync(path.join(resourcesRoot, 'app', relative))) throw new Error(`Packaged agent runtime is missing: ${relative}`);
   }

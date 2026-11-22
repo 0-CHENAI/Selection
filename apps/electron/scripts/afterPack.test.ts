@@ -32,7 +32,7 @@ describe('afterPack OfficeCLI runtime pruning', () => {
       const context = { electronPlatformName: 'darwin', packager: { projectDir } }
       expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Required agent runtime')
       const files = ['resources/session-mcp-server/index.js', 'resources/pi-agent-server/index.js',
-        'resources/pi-agent-server/image-resize-worker.js', 'resources/pi-agent-server/photon_rs_bg.wasm',
+        'resources/pi-agent-server/image-resize-worker.js', 'resources/pi-agent-server/read-image-resize-worker.js', 'resources/pi-agent-server/photon_rs_bg.wasm',
         'resources/pi-agent-server/node_modules/koffi/native.node', 'vendor/bun/bun', 'vendor/git/bin/git',
         'vendor/python/bin/python3', 'node_modules/@vscode/ripgrep/bin/rg']
       for (const file of files) {

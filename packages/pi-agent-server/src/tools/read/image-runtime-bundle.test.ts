@@ -26,7 +26,7 @@ beforeAll(async () => {
   }
 
   const processorBundlePath = join(tempDir, 'image-processing.js')
-  const workerBundlePath = join(tempDir, 'image-resize-worker.js')
+  const workerBundlePath = join(tempDir, 'read-image-resize-worker.js')
   const processorBuild = Bun.spawnSync({
     cmd: [
       process.execPath,
@@ -46,7 +46,7 @@ beforeAll(async () => {
     cmd: [
       process.execPath,
       'build',
-      join(rootDir, 'packages', 'pi-agent-server', 'src', 'tools', 'read', 'image-resize-worker.ts'),
+      join(rootDir, 'packages', 'pi-agent-server', 'src', 'tools', 'read', 'read-image-resize-worker.ts'),
       '--outfile',
       workerBundlePath,
       '--target=bun',
@@ -78,7 +78,7 @@ beforeAll(async () => {
     writeFileSync(join(dir, 'image-processing.js'), isolatedProcessor)
   }
   for (const dir of [completeRuntimeDir, withoutWasmDir]) {
-    writeFileSync(join(dir, 'image-resize-worker.js'), isolatedWorker)
+    writeFileSync(join(dir, 'read-image-resize-worker.js'), isolatedWorker)
   }
   for (const dir of [completeRuntimeDir, withoutWorkerDir]) {
     copyFileSync(
