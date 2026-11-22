@@ -189,6 +189,31 @@ describe('filterAttachmentsForModelInput', () => {
     expect(result.omittedImages).toEqual([imageAttachment])
     expect(result.attachments).toEqual([textAttachment])
   })
+
+  it('keeps images for a custom gateway alias that collides with a catalog text-only id', () => {
+    const connection: LlmConnection = {
+      ...baseCompat,
+      customEndpoint: { api: 'openai-completions' },
+      models: ['o3-mini'],
+    }
+    const result = filterAttachmentsForModelInput([imageAttachment], connection, 'o3-mini')
+    expect(result.omittedImages).toHaveLength(0)
+    expect(result.attachments).toEqual([imageAttachment])
+  })
+
+  it('soft-skips the same catalog id on a built-in Pi connection', () => {
+    const connection: LlmConnection = {
+      slug: 'openai',
+      name: 'OpenAI',
+      providerType: 'pi',
+      authType: 'api_key',
+      createdAt: 1,
+      models: ['o3-mini'],
+    }
+    const result = filterAttachmentsForModelInput([imageAttachment], connection, 'pi/o3-mini')
+    expect(result.resolution?.source).toBe('catalog')
+    expect(result.omittedImages).toEqual([imageAttachment])
+  })
 })
 
 describe('prepareModelImageAttachments', () => {

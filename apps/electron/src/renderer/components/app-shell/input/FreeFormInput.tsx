@@ -74,6 +74,7 @@ import { getModelShortName, getModelDisplayName } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   resolveModelImageSupportFromCatalog,
+  usesBuiltInPiCatalogLookup,
 } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
@@ -643,6 +644,7 @@ export function FreeFormInput({
       modelId: currentModel,
       models: effectiveConnectionDetails.models,
       endpointSupportsImages: effectiveConnectionDetails.customEndpoint?.supportsImages,
+      allowCatalogLookup: usesBuiltInPiCatalogLookup(effectiveConnectionDetails),
     }).supportsImages
 
   // Ref to track current attachments for use in event handlers (avoids stale closure issues)

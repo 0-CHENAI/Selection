@@ -29,6 +29,7 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
 import {
   alignModelImageInput,
+  connectionModelIdsMatch,
   planPromptImagesForModel,
   planUnsupportedImageRetry,
   resolveModelImageSupportFromCatalog,
@@ -1649,6 +1650,7 @@ async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQue
     imageSupport: {
       models: initConfig?.customModels,
       endpointSupportsImages: initConfig?.customEndpoint?.supportsImages,
+      allowCatalogLookup: !initConfig?.customEndpoint,
     },
   });
   return queryLlm(request);
@@ -2032,6 +2034,7 @@ function activeModelImageResolution(model: { id?: string; name?: string; input?:
     models: initConfig?.customModels,
     endpointSupportsImages: initConfig?.customEndpoint?.supportsImages,
     catalogSupportsImages: Array.isArray(model?.input) ? model.input.includes('image') : undefined,
+    allowCatalogLookup: !initConfig?.customEndpoint,
   });
 }
 
@@ -2048,7 +2051,7 @@ function rememberRejectedImageInput(modelId: string): void {
   const models = [...(initConfig.customModels ?? [])];
   const index = models.findIndex(model => {
     const id = typeof model === 'string' ? model : model.id;
-    return id === modelId || id.endsWith(`/${modelId}`) || modelId.endsWith(`/${id}`);
+    return connectionModelIdsMatch(id, modelId);
   });
   const learned = { id: modelId, imageSupport: 'auto' as const, learnedSupportsImages: false as const };
   if (index === -1) models.push(learned);

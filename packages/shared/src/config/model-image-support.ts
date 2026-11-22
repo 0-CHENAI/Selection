@@ -28,6 +28,22 @@ export function connectionModelIdsMatch(a: string, b: string): boolean {
   return left === right || left.toLowerCase() === right.toLowerCase()
 }
 
+/**
+ * Live Pi SDK catalog flags belong to built-in providers only. A custom
+ * gateway (`pi_compat` / `customEndpoint`) may reuse a catalog id such as
+ * `o3-mini` for a different backend; Auto then stays optimistic unless the
+ * endpoint default, stored flag, or known-name table says otherwise.
+ */
+export function usesBuiltInPiCatalogLookup(connection?: {
+  providerType?: string
+  customEndpoint?: unknown
+} | null): boolean {
+  if (!connection) return true
+  if (connection.customEndpoint) return false
+  if (connection.providerType === 'pi_compat') return false
+  return true
+}
+
 // Bounded tokens so `octopus`, `omnibox`, and `foo-vllm` are not treated as vision names.
 const VISION_TOKEN = /(?:^|[^a-z0-9])(?:opus|sonnet|haiku|claude|gemini|pixtral|internvl|omni|multimodal|vision|llama-4|gemma-3|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|qwen-vl|qwen2\.5-vl|qwen2-vl)(?:[^a-z0-9]|$)/
 const VL_AFFIX = /(?:^|[.-])vl(?:[^a-z]|$)/
@@ -147,6 +163,13 @@ export function resolveModelImageSupportFromCatalog(input: {
    * on/off, a learned rejection, and a connection endpoint default.
    */
   catalogSupportsImages?: boolean
+  /**
+   * When false, skip the injected built-in Pi catalog map. Live
+   * `catalogSupportsImages` from the resolved SDK model still applies.
+   * Custom/synthetic endpoints pass false so a colliding catalog id cannot
+   * drop images before the gateway is contacted.
+   */
+  allowCatalogLookup?: boolean
 }): ImageSupportResolution {
   const entry = input.models?.find(model => {
     const id = typeof model === 'string' ? model : model.id
@@ -190,7 +213,9 @@ export function resolveModelImageSupportFromCatalog(input: {
   }
   const catalog = typeof input.catalogSupportsImages === 'boolean'
     ? input.catalogSupportsImages
-    : lookupCatalogImageSupport(input.modelId, modelName)
+    : input.allowCatalogLookup === false
+      ? undefined
+      : lookupCatalogImageSupport(input.modelId, modelName)
   if (typeof catalog === 'boolean') {
     return {
       supportsImages: catalog,

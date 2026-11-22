@@ -11,6 +11,7 @@ import {
   resolveModelImageSupportFromCatalog,
   setModelImageSupport,
   toCustomEndpointModelPayload,
+  usesBuiltInPiCatalogLookup,
   type ModelImageRecord,
 } from '../model-image-support.ts'
 import { modelSupportsImages, type LlmConnection } from '../llm-connections.ts'
@@ -24,6 +25,7 @@ const PI = {
 }
 
 type ImageConnection = {
+  providerType?: LlmConnection['providerType']
   models?: Array<string | ModelImageRecord>
   customEndpoint?: { api?: string; supportsImages?: boolean }
 }
@@ -33,6 +35,7 @@ function resolution(connection: ImageConnection, modelId: string) {
     modelId,
     models: connection.models,
     endpointSupportsImages: connection.customEndpoint?.supportsImages,
+    allowCatalogLookup: usesBuiltInPiCatalogLookup(connection),
   })
 }
 
@@ -125,6 +128,30 @@ describe('resolveModelImageSupportFromCatalog precedence', () => {
     expect(resolution(conn, 'custom').source).toBe('explicit')
     expect(resolution(conn, 'custom').supportsImages).toBe(false)
   })
+
+  it('does not treat a custom-gateway alias as a built-in catalog text-only id', () => {
+    registerCatalogImageSupportLookup((id) => {
+      const bare = id.replace(/^pi\//i, '').toLowerCase()
+      return bare === 'catalog-text-only' ? false : undefined
+    })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'catalog-text-only',
+    })).toMatchObject({ supportsImages: false, source: 'catalog' })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'catalog-text-only',
+      allowCatalogLookup: false,
+    })).toMatchObject({ supportsImages: true, source: 'optimistic' })
+    expect(modelSupportsImages({
+      ...PI,
+      providerType: 'pi_compat',
+      customEndpoint: { api: 'openai-completions' },
+      models: ['catalog-text-only'],
+    }, 'catalog-text-only')).toBe(true)
+    expect(modelSupportsImages({
+      ...PI,
+      models: ['catalog-text-only'],
+    }, 'catalog-text-only')).toBe(false)
+  })
 })
 
 describe('unsupported image retry', () => {
@@ -208,6 +235,7 @@ describe('renderer and runtime agree', () => {
       modelId,
       models: payload,
       endpointSupportsImages: connection.customEndpoint?.supportsImages,
+      allowCatalogLookup: usesBuiltInPiCatalogLookup(connection),
     })
     expect(runtime.supportsImages).toBe(renderer)
     return runtime

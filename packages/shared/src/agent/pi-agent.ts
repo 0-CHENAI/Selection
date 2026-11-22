@@ -45,6 +45,7 @@ import {
   connectionModelIdsMatch,
   resolveCustomModelContextWindow,
   resolveModelImageSupportFromCatalog,
+  usesBuiltInPiCatalogLookup,
 } from '../config/model-image-support.ts';
 import {
   lookupKnownModelContextWindow,
@@ -2208,6 +2209,9 @@ export class PiAgent extends BaseAgent {
       modelName: registeredModel?.name,
       models: runtime.customModels,
       endpointSupportsImages: runtime.customEndpoint?.supportsImages,
+      allowCatalogLookup: usesBuiltInPiCatalogLookup({
+        customEndpoint: runtime.customEndpoint,
+      }),
     }).supportsImages;
   }
 

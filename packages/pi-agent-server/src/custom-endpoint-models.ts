@@ -118,6 +118,8 @@ function resolveCustomEndpointThinking(
  * Context window comes from the stored catalog when present, otherwise 128k.
  * Image support uses the shared auto resolver: explicit on/off, learned
  * rejection, endpoint default, known table, then an optimistic attempt.
+ * Built-in Pi catalog flags are ignored so a custom alias that collides
+ * with an official text-only id still tries images.
  */
 export function buildCustomEndpointModelDef(
   id: string,
@@ -134,6 +136,7 @@ export function buildCustomEndpointModelDef(
       ...(overrides?.learnedSupportsImages !== undefined ? { learnedSupportsImages: overrides.learnedSupportsImages } : {}),
     }],
     endpointSupportsImages: defaults?.supportsImages,
+    allowCatalogLookup: false,
   }).supportsImages
   const input: CustomEndpointInput[] = supportsImages ? ['text', 'image'] : ['text']
   const contextWindow = sanitizeCustomContextWindow(overrides?.contextWindow) ?? DEFAULT_CUSTOM_CONTEXT_WINDOW

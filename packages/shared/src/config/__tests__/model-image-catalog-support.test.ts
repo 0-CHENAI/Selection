@@ -43,4 +43,19 @@ describe('Pi SDK catalog image support', () => {
       source: 'known',
     })
   })
+
+  it('lets a custom gateway skip a colliding built-in catalog text-only id', () => {
+    expect(lookupPiCatalogImageSupport('o3-mini')).toBe(false)
+    expect(resolveModelImageSupportFromCatalog({ modelId: 'pi/o3-mini' })).toMatchObject({
+      supportsImages: false,
+      source: 'catalog',
+    })
+    expect(resolveModelImageSupportFromCatalog({
+      modelId: 'pi/o3-mini',
+      allowCatalogLookup: false,
+    })).toMatchObject({
+      supportsImages: true,
+      source: 'optimistic',
+    })
+  })
 })

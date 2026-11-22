@@ -1,6 +1,6 @@
 import { existsSync, statSync } from 'node:fs'
 import type { AgentProvider, LlmAuthType } from '@craft-agent/shared/agent/backend'
-import { isCompatProvider, resolveModelImageSupportFromCatalog, type ImageSupportResolution, type LlmConnection } from '@craft-agent/shared/config'
+import { isCompatProvider, resolveModelImageSupportFromCatalog, usesBuiltInPiCatalogLookup, type ImageSupportResolution, type LlmConnection } from '@craft-agent/shared/config'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
 import {
   describeImageAttachment,
@@ -147,6 +147,7 @@ export function filterAttachmentsForModelInput(
     modelId,
     models: connection.models,
     endpointSupportsImages: connection.customEndpoint?.supportsImages,
+    allowCatalogLookup: usesBuiltInPiCatalogLookup(connection),
   })
   if (resolution.supportsImages) return { attachments, omittedImages: [], resolution }
 

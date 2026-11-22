@@ -22,6 +22,7 @@ import {
   resolveCustomModelMaxTokens,
   resolveModelImageSupportFromCatalog,
   setModelImageSupport,
+  usesBuiltInPiCatalogLookup,
 } from './model-image-support';
 import {
   lookupKnownModelContextWindow,
@@ -81,6 +82,7 @@ export {
   sanitizeCustomContextWindow,
   sanitizeCustomMaxTokens,
   toCustomEndpointModelPayload,
+  usesBuiltInPiCatalogLookup,
 } from './model-image-support';
 export type {
   CatalogImageSupportLookup,
@@ -676,17 +678,19 @@ export function setModelSupportsImages(
  * Renderer banners and runtime send paths both call this. Precedence lives in
  * `resolveModelImageSupportFromCatalog`: explicit on/off, then a learned
  * rejection, then a connection endpoint default, then a stored catalog flag,
- * then the live Pi SDK catalog, then the known-name table, then an optimistic
- * attempt.
+ * then the live Pi SDK catalog (built-in providers only), then the known-name
+ * table, then an optimistic attempt. Custom gateways skip the built-in catalog
+ * so an alias that collides with a text-only official id still tries images.
  */
 export function modelSupportsImages(
-  connection: Pick<LlmConnection, 'models' | 'customEndpoint'>,
+  connection: Pick<LlmConnection, 'models' | 'customEndpoint' | 'providerType'>,
   modelId: string,
 ): boolean {
   return resolveModelImageSupportFromCatalog({
     modelId,
     models: connection.models,
     endpointSupportsImages: connection.customEndpoint?.supportsImages,
+    allowCatalogLookup: usesBuiltInPiCatalogLookup(connection),
   }).supportsImages
 }
 
