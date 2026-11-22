@@ -162,6 +162,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **PPT 截图输出截断不再误拦截交付** — 无界面截图将验收绑定信息另存到会话，工具输出即使被截短也不会丢失；最终保存版本和截图仍须通过指纹校验。
+
 - **内置技能按需调用** — 应用随包技能不再显示在技能管理页、slash 命令和其他用户选择列表中；模型目录、自然语言路由与 Office 案例的按需注入保持可用。
 
 - **PPT 导出结构校验** — 修正备注母版列表的 OOXML 顺序，保留备注、母版和页面关系，避免生成的演示稿在 OfficeCLI 校验时报告结构错误。Issue #689。

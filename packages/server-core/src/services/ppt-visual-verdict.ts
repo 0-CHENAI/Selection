@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, posix } from 'node:path'
 import { strFromU8 } from 'fflate'
 import { z } from 'zod'
@@ -47,6 +47,24 @@ export function readVisualRender(result: string): PptVisualRender | undefined {
     const parsed = renderSchema.safeParse((json(line) as { pptVisualRender?: unknown } | undefined)?.pptVisualRender)
     if (parsed.success) return parsed.data
   }
+}
+
+export function takeHeadlessVisualRenders(sessionDir: string): PptVisualRender[] {
+  const dir = join(sessionDir, 'data', 'ppt-visual-renders')
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isFile() && /^\d+-[a-f0-9-]{36}\.json$/.test(entry.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap(({ name }) => {
+        const path = join(dir, name)
+        try {
+          const value = json(readFileSync(path, 'utf8'))
+          unlinkSync(path)
+          const parsed = renderSchema.safeParse(value)
+          return parsed.success ? [parsed.data] : []
+        } catch { return [] }
+      })
+  } catch { return [] }
 }
 
 function renderRevisions(renders: PptVisualRender[]): PptVisualRender[] {
