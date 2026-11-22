@@ -29,6 +29,7 @@ import type { LoadedSource } from '../sources/types.ts';
 import type { LoadedSkill } from '../skills/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { getBackendRuntime } from './backend/internal/driver-types.ts';
+import { usesBuiltInPiCatalogLookup } from '../config/model-image-support.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
 import { resolveSourceTitle } from '../display-titles.ts';
@@ -1345,6 +1346,9 @@ ${formattedMessages}
       imageSupport: {
         models: runtime.customModels,
         endpointSupportsImages: runtime.customEndpoint?.supportsImages,
+        allowCatalogLookup: usesBuiltInPiCatalogLookup({
+          customEndpoint: runtime.customEndpoint,
+        }),
       },
     });
     return this.queryLlm(request);

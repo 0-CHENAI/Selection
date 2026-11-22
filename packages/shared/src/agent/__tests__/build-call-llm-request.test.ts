@@ -6,6 +6,7 @@
  * and the validateModel callback hook.
  */
 import { describe, it, expect } from 'bun:test';
+import '../../config/models-pi.ts';
 import { buildCallLlmRequest, callLlmPromptImages, createLLMTool, resolveCallLlmModel } from '../llm-tool.ts';
 import type { LLMQueryRequest } from '../llm-tool.ts';
 import { createMockBackendConfig, TestAgent } from './test-utils.ts';
@@ -448,6 +449,65 @@ describe('preExecuteCallLlm vision gate', () => {
       prompt: 'Read the cover slide',
       attachments: [join(TMP_DIR, 'image.png')],
     })).rejects.toThrow('not supported by "Laufry"');
+  });
+
+  it('sends images for a custom-gateway alias that collides with a catalog text-only id', async () => {
+    const agent = new TestAgent(createMockBackendConfig({
+      model: 'o3-mini',
+      runtime: {
+        customEndpoint: { api: 'openai-completions' },
+        customModels: ['o3-mini'],
+      },
+    }));
+    const seen: LLMQueryRequest[] = [];
+    agent.queryLlm = async (request) => {
+      seen.push(request);
+      return { text: 'saw the slide' };
+    };
+
+    const result = await (agent as unknown as {
+      preExecuteCallLlm: (input: Record<string, unknown>) => Promise<{ text: string }>;
+    }).preExecuteCallLlm({
+      prompt: 'Read the cover slide',
+      attachments: [join(TMP_DIR, 'image.png')],
+    });
+
+    expect(result.text).toBe('saw the slide');
+    expect(seen[0]?.model).toBe('o3-mini');
+    expect(seen[0]?.images?.[0]?.mimeType).toBe('image/png');
+  });
+
+  it('still refuses an explicit off override on a colliding custom-gateway alias', async () => {
+    const agent = new TestAgent(createMockBackendConfig({
+      model: 'o3-mini',
+      runtime: {
+        customEndpoint: { api: 'openai-completions' },
+        customModels: [{ id: 'o3-mini', imageSupport: 'off', supportsImages: false }],
+      },
+    }));
+    agent.queryLlm = async () => ({ text: 'should not run' });
+
+    await expect((agent as unknown as {
+      preExecuteCallLlm: (input: Record<string, unknown>) => Promise<unknown>;
+    }).preExecuteCallLlm({
+      prompt: 'Read the cover slide',
+      attachments: [join(TMP_DIR, 'image.png')],
+    })).rejects.toThrow('not supported by "o3-mini"');
+  });
+
+  it('still skips the same catalog id on a built-in connection', async () => {
+    const agent = new TestAgent(createMockBackendConfig({
+      model: 'o3-mini',
+      runtime: { customModels: ['o3-mini'] },
+    }));
+    agent.queryLlm = async () => ({ text: 'should not run' });
+
+    await expect((agent as unknown as {
+      preExecuteCallLlm: (input: Record<string, unknown>) => Promise<unknown>;
+    }).preExecuteCallLlm({
+      prompt: 'Read the cover slide',
+      attachments: [join(TMP_DIR, 'image.png')],
+    })).rejects.toThrow('not supported by "o3-mini"');
   });
 });
 
