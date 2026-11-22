@@ -49,17 +49,37 @@ export function readVisualRender(result: string): PptVisualRender | undefined {
   }
 }
 
-export function reviewRender(
+function renderRevisions(renders: PptVisualRender[]): PptVisualRender[] {
+  const revisions = new Map<string, PptVisualRender>()
+  for (const render of [...renders].reverse()) {
+    try {
+      const path = normalizedPath(render.path)
+      const key = `${path}\0${render.sha256}`
+      const revision = revisions.get(key)
+      if (revision) revision.pages.push(...render.pages)
+      else revisions.set(key, { ...render, path, pages: [...render.pages] })
+    } catch { /* The source is no longer available. */ }
+  }
+  return [...revisions.values()]
+}
+
+function matchesScreenshot(image: PptVisualRender['pages'][number], attachment: string): boolean {
+  try {
+    return normalizedPath(image.path) === normalizedPath(attachment) && visualSha256(readFileSync(image.path)) === image.sha256
+  } catch { return false }
+}
+
+function reviewRender(
   renders: PptVisualRender[], path: string, pages: number[], attachments?: string[],
 ): PptVisualRender | undefined {
   try {
     const canonical = normalizedPath(path)
-    for (const render of [...renders].reverse()) {
-      if (normalizedPath(render.path) !== canonical) continue
-      const selected = pages.map(page => render.pages.find(image => image.page === page))
-      if (!selected.every(image => image !== undefined) || new Set(pages).size !== pages.length) continue
-      if (attachments && (attachments.length !== selected.length || !selected.every((image, index) =>
-        normalizedPath(image.path) === normalizedPath(attachments[index]!) && visualSha256(readFileSync(image.path)) === image.sha256))) continue
+    if (new Set(pages).size !== pages.length || (attachments && attachments.length !== pages.length)) return
+    for (const render of renderRevisions(renders)) {
+      if (render.path !== canonical) continue
+      const selected = pages.map((page, index) => render.pages.find(image => image.page === page
+        && (!attachments || matchesScreenshot(image, attachments[index]!))))
+      if (!selected.every(image => image !== undefined)) continue
       return { ...render, pages: selected }
     }
   } catch { /* Missing render evidence cannot pass. */ }
@@ -214,8 +234,8 @@ export class PptVisualTurn {
     if (!attachments.success) return
     try {
       const paths = attachments.data.map(item => normalizedPath(typeof item === 'string' ? item : item.path))
-      for (const candidate of [...this.renders].reverse()) {
-        const pages = paths.map(path => candidate.pages.find(image => normalizedPath(image.path) === path)?.page)
+      for (const candidate of renderRevisions(this.renders)) {
+        const pages = paths.map(path => candidate.pages.find(image => matchesScreenshot(image, path))?.page)
         if (!pages.every(page => page !== undefined)) continue
         const render = reviewRender([candidate], candidate.path, pages, paths)
         if (!render || visualSha256(readFileSync(render.path)) !== render.sha256) continue
@@ -246,10 +266,9 @@ export class PptVisualTurn {
     if (!verdict || typeof packet?.path !== 'string') return
     try {
       const canonical = normalizedPath(packet.path)
-      const latest = this.renders.findLast(render => normalizedPath(render.path) === canonical)
+      const latest = renderRevisions(this.renders).find(render => render.path === canonical)
       if (!latest || this.delegated.has(latest.sha256)) return
-      const shown = this.renders.filter(render => render.sha256 === latest.sha256 && normalizedPath(render.path) === canonical)
-        .flatMap(render => render.pages).filter(image => this.inspected.get(image.path) === image.sha256)
+      const shown = latest.pages.filter(image => this.inspected.get(image.path) === image.sha256)
       const pages = verdict.coveredPages.map(page => shown.find(image => image.page === page))
       if (pages.every(image => image !== undefined)) return { render: { ...latest, pages }, verdict }
     } catch { /* Missing render evidence cannot pass. */ }

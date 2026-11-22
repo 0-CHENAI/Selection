@@ -64,6 +64,29 @@ describe('G4 outcome bound to the final PowerPoint', () => {
     expect(visual.inferReview({ attachments: [render.pages[1]!.path] })).toBeUndefined()
   })
 
+  it.each([true, false])('binds attached pages from separate render batches (explicit: %s)', explicit => {
+    const visual = new PptVisualTurn()
+    for (const image of render.pages) visual.addRender({ ...render, pages: [image] })
+    const attachments = render.pages.map(image => image.path)
+    if (explicit) visual.beginReview('review', { pptReview: { path, pages: [1, 2] }, attachments })
+    const text = JSON.stringify(pass)
+    const result = explicit ? visual.finishReview('review', text) : visual.inferReview({ attachments })?.finish(text)
+    expect(result).toBeDefined()
+    recordVisualVerdict(root, result!.render, result!.verdict)
+    expect(pptVisualBlock(root, path)).toBeUndefined()
+  })
+
+  it('never assembles review attachments across different saved deck fingerprints', () => {
+    const visual = new PptVisualTurn()
+    visual.addRender({ ...render, pages: [render.pages[0]!] })
+    writeFileSync(path, visualTestPptx('<slide>changed</slide>'))
+    visual.addRender({ ...render, sha256: visualSha256(readFileSync(path)), pages: [render.pages[1]!] })
+    const attachments = render.pages.map(image => image.path)
+    visual.beginReview('review', { pptReview: { path, pages: [1, 2] }, attachments })
+    expect(visual.finishReview('review', JSON.stringify(pass))).toBeUndefined()
+    expect(visual.inferReview({ attachments })).toBeUndefined()
+  })
+
   it('reports failed pages and cannot be overridden by a pass on the same bytes', () => {
     const finding = { page: 2, issue: 'The header does not align with the table.' }
     const review = readVisualVerdict(JSON.stringify({ ...pass, findings: [finding] }))!
