@@ -154,7 +154,7 @@ export function readVisualVerdict(text: string): Verdict | undefined {
   return { ...verdict, verdict: verdict.findings.length ? 'fail' : verdict.verdict }
 }
 
-export function recordVisualVerdict(sessionDir: string, render: PptVisualRender, verdict: Verdict, allowLocalScope = false): void {
+export function recordVisualVerdict(sessionDir: string, render: PptVisualRender, verdict: Verdict, allowLocalScope = false): boolean | undefined {
   const pages = render.pages.map(image => image.page)
   if (!samePages(verdict.coveredPages, pages)) return
   const bytes = readFileSync(render.path)
@@ -166,13 +166,15 @@ export function recordVisualVerdict(sessionDir: string, render: PptVisualRender,
   const sameRevision = prior?.sha256 === render.sha256
   const findings = sameRevision ? [...prior.findings, ...verdict.findings].slice(0, 200) : verdict.findings
   const inherited = sameRevision ? prior.coveredPages
-    : allowLocalScope && prior?.verdict === 'pass' && prior.coveredPages.length === pageCount && prior.pageCount === pageCount
+    : allowLocalScope && prior?.coveredPages.length === pageCount && prior.pageCount === pageCount
       && pageDigests.length === pageCount
-      ? prior.coveredPages.filter(page => prior.pageDigests[page - 1] === pageDigests[page - 1]) : []
+      ? prior.coveredPages.filter(page => prior.pageDigests[page - 1] === pageDigests[page - 1]
+        && !prior.findings.some(finding => finding.page === page)) : []
   const coveredPages = [...new Set([...inherited, ...pages])].sort((a, b) => a - b)
   const record: Report = { sha256: render.sha256, pageCount, pageDigests, coveredPages, verdict: findings.length ? 'fail' : verdict.verdict, findings }
   mkdirSync(join(sessionDir, 'data', 'ppt-visual-verdicts'), { recursive: true })
   writeFileSync(file, JSON.stringify(record))
+  return coveredPages.length === pageCount
 }
 
 export type PptVisualBlock = {
@@ -199,6 +201,14 @@ export class PptVisualTurn {
   private inspected = new Map<string, string>()
   private pending = new Map<string, { render: PptVisualRender; attachments: string[] }>()
   private delegated = new Set<string>()
+  private fullyReviewed = new Set<string>()
+
+  recordVerdict(sessionDir: string, render: PptVisualRender, verdict: Verdict, allowLocalScope: boolean): void {
+    const path = normalizedPath(render.path)
+    if (recordVisualVerdict(sessionDir, render, verdict, allowLocalScope || this.fullyReviewed.has(path))) {
+      this.fullyReviewed.add(path)
+    }
+  }
 
   addRender(render: PptVisualRender, shown = false): void {
     this.renders.push(render)

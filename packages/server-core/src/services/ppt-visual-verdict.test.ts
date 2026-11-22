@@ -114,6 +114,25 @@ describe('G4 outcome bound to the final PowerPoint', () => {
     expect(pptVisualBlock(root, path)).toBeUndefined()
   })
 
+  it('keeps only clean unchanged coverage from a failed full review', () => {
+    const visual = new PptVisualTurn()
+    const finding = { page: 2, issue: 'The header does not align with the table.' }
+    visual.recordVerdict(root, render, { ...readVisualVerdict(JSON.stringify(pass))!, verdict: 'fail', findings: [finding] }, false)
+    writeFileSync(path, visualTestPptx('<slide>repaired</slide>'))
+    visual.recordVerdict(root, { ...render, sha256: visualSha256(readFileSync(path)), pages: [render.pages[1]!] },
+      { coveredPages: [2], verdict: 'pass', findings: [] }, false)
+    expect(pptVisualBlock(root, path)).toBeUndefined()
+  })
+
+  it('requires rechecking a finding even when its page bytes did not change', () => {
+    const finding = { page: 1, issue: 'An unresolved overlap.' }
+    recordVisualVerdict(root, render, { ...readVisualVerdict(JSON.stringify(pass))!, verdict: 'fail', findings: [finding] })
+    writeFileSync(path, visualTestPptx('<slide>different</slide>'))
+    recordVisualVerdict(root, { ...render, sha256: visualSha256(readFileSync(path)), pages: [render.pages[1]!] },
+      { coveredPages: [2], verdict: 'pass', findings: [] }, true)
+    expect(pptVisualBlock(root, path)).toEqual({ reason: 'coverage', pages: [1] })
+  })
+
   it('supports the desktop model recording images already returned by office_render', () => {
     const visual = new PptVisualTurn()
     for (const image of render.pages) visual.addRender({ ...render, pages: [image] }, true)

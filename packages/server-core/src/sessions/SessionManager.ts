@@ -191,7 +191,7 @@ import { generatePresentationImage } from '../services/ppt-image-generate'
 import { pptRouteMismatch } from '../services/ppt-route'
 import { createTemplateTaskProject } from '../services/ppt-template-project'
 import { recordVisualInspection } from '../services/ppt-visual-record'
-import { PptVisualTurn, markVisualDeliveryBlocked, pptVisualBlock, readVisualRender, recordVisualVerdict, visualSha256, type PptVisualBlock } from '../services/ppt-visual-verdict'
+import { PptVisualTurn, markVisualDeliveryBlocked, pptVisualBlock, readVisualRender, visualSha256, type PptVisualBlock } from '../services/ppt-visual-verdict'
 import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, routedOfficeSkillNote, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
@@ -10167,7 +10167,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const action = readPptRun(dir)?.action
       const local = !!managed.artifactCandidateInventory?.existedAtStart(path)
         && action !== 'generate' && action !== 'restyle' && action !== 'recolor'
-      recordVisualVerdict(dir, review.render, review.verdict, local)
+      this.pptVisualTurns.get(managed)?.recordVerdict(dir, review.render, review.verdict, local)
     } catch (error) {
       sessionLog.warn('PPT visual verdict could not be recorded', { sessionId: managed.id, error })
     }
