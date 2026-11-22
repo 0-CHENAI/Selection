@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import type { PptChartFallback, PptPageProgress, PptPageIssue, PptPageStatus, PptPalette, PptProgress, PptRevision, PptRevisionTarget, PptRun, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { buildPptPrompt, getPptCatalog, getPptSkillRoot, hasPptContext } from './ppt-catalog'
 import { customTemplateReference } from './ppt-library'
+import { hasVisualDeliveryBlock } from './ppt-visual-verdict'
 
 const MARKER = '.ppt-generating'
 const PROGRESS_FILE = 'ppt-progress.json'
@@ -677,6 +678,7 @@ export function readChartFallbacks(sessionDir: string): PptChartFallback[] {
 export function readPptProgress(sessionDir: string, generating: boolean, options: PptProgressOptions = {}): PptProgress | null {
   const loaded = loadDeck(sessionDir)
   const file = choosePptx(sessionDir, options.workingDirectory)
+  const g4Blocked = !generating && file && hasVisualDeliveryBlock(sessionDir, file.path)
   if (!loaded || loaded.pages.length === 0) {
     if (!file) return null
     const chartFallbacks = readChartFallbacks(sessionDir)
@@ -687,11 +689,13 @@ export function readPptProgress(sessionDir: string, generating: boolean, options
       completed: 0,
       generating,
       pages: [],
+      ...(g4Blocked ? { g4Blocked: true } : {}),
       ...(chartFallbacks.length ? { chartFallbacks } : {}),
     })
   }
   const redraw = generating ? readRedrawBaseline(sessionDir, loaded.imageByIndex) : undefined
-  return withChoice(sessionDir, generating, progressFrom(loaded, generating, file, options.check, readChartFallbacks(sessionDir), redraw))
+  const progress = progressFrom(loaded, generating, file, options.check, readChartFallbacks(sessionDir), redraw)
+  return withChoice(sessionDir, generating, { ...progress, ...(g4Blocked ? { g4Blocked: true } : {}) })
 }
 
 /**
@@ -833,7 +837,7 @@ export function buildPptRevisionPrompt(revision: PptRevision, sessionPath: strin
   lines.push(
     `For deck_revision or restyle, read and update ${deck}. For office_edit, edit only the delivered PPTX with OfficeCLI; do not write or export the deck.`,
     'Element ids are exported as PPTX shape names. OfficeCLI addresses one as /slide[n]/shape[@name=<element id>]. Elements with a retained field are non-editable source fragments: do not change their bounds or style, and do not submit them as revision targets.',
-    `For deck_revision or restyle, render screenshots to ${slides}/slide-01.png and onward (1-based, two digits) as each changed page is saved. Those PNGs are the page images for the visual check. Use deck-cli screenshot on the delivered pptx with --pages set to the page count${selectedPages}. For office_edit, screenshot the edited PPTX with OfficeCLI without rendering or exporting deck.json. For a local revision, inspect only affected pages if unchanged pages have valid prior visual evidence; otherwise inspect every page.`,
+    `For deck_revision or restyle, render screenshots to ${slides}/slide-01.png and onward (1-based, two digits) as each changed page is saved. Those PNGs are the page images for the visual check. Use deck-cli screenshot on the delivered pptx with --pages set to the page count${selectedPages}. For office_edit, use the same screenshot command on the edited PPTX without rendering or exporting deck.json. For a local revision, inspect only affected pages if unchanged pages have valid prior visual evidence; otherwise inspect every page. Follow the linked visual-review guide to record the G4 result on the saved PPTX.`,
     'For deck_revision or restyle, run deck_check before export. Do not write or copy a second pptx. The app rewrites the same user-visible file only when the saved deck changes. For office_edit, validate and read back the edited PPTX without deck export.',
     output ? `The only user-visible pptx is ${output.path}.` : `Read ${join(sessionPath, 'data', OUTPUT_FILE)} for the absolute path of that file.`,
     '</ppt_revision>',

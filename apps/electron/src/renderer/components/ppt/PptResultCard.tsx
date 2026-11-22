@@ -44,6 +44,7 @@ function progressSignature(progress: Session['pptProgress']): string {
     current: progress.current,
     currentTitle: progress.currentTitle,
     generating: progress.generating,
+    g4Blocked: progress.g4Blocked,
     templateId: progress.templateId,
     themeId: progress.themeId,
     run: progress.run,
@@ -70,6 +71,7 @@ export function PptArtifactMeta({
   currentTitle,
   pages,
   run,
+  g4Blocked,
 }: {
   generating: boolean
   total: number
@@ -77,6 +79,7 @@ export function PptArtifactMeta({
   currentTitle?: string
   pages: PptPageProgress[]
   run?: PptRun
+  g4Blocked?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const action = run?.action === 'recolor'
@@ -96,6 +99,7 @@ export function PptArtifactMeta({
     return <span data-testid="ppt-artifact-meta">{line}</span>
   }
   const head = [t('ppt.result.format'), total > 0 ? t('ppt.pages', { count: total }) : ''].filter(Boolean).join(' · ')
+  if (g4Blocked) return <span data-testid="ppt-artifact-meta">{head}{' · '}<span className="text-[var(--info-text)]">{t('ppt.delivery.blocked')}</span></span>
   const flagged = pages.filter(page => page.failed || page.status === 'needs_revision')
   if (flagged.length > 0) {
     const label = flagged.length > 3
@@ -281,7 +285,7 @@ function usePptArtifactSupplements(session: Session | null): readonly ArtifactSu
       progress: pptRowFraction({ generating, total, completed: progress?.completed ?? 0, current: progress?.current }),
       testId: 'ppt-artifact-row',
       onActivate: () => reveal(openAt),
-      meta: <PptArtifactMeta generating={generating} total={total} current={frame.current} currentTitle={progress?.currentTitle} pages={pages} run={run} />,
+      meta: <PptArtifactMeta generating={generating} total={total} current={frame.current} currentTitle={progress?.currentTitle} pages={pages} run={run} g4Blocked={progress?.g4Blocked} />,
       trailing: (standardItems: ReactNode) => <PptArtifactTrailing
         standardItems={standardItems}
         generating={generating}

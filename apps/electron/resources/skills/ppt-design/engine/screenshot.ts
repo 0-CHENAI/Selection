@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -67,17 +67,25 @@ export async function captureSlides(pptx: string, outDir: string, pageCount: num
     }
     return { available: true, renderer: 'libreoffice', files }
   }
-  const prefix = join(outDir, 'slide')
-  const png = await run(pdftoppm, ['-png', '-r', '108', join(outDir, pptxBasename(pptx) + '.pdf'), prefix])
-  if (png.code !== 0) return { available: false, files: [], renderer: 'libreoffice', reason: png.stderr || 'pdftoppm 失败' }
-  const files = readdirSync(outDir)
-    .filter(name => /^slide-?\d+\.png$/.test(name))
-    .sort((a, b) => Number(a.match(/(\d+)/)?.[1] ?? 0) - Number(b.match(/(\d+)/)?.[1] ?? 0))
-    .map(name => join(outDir, name))
-  if (pageCount > 0 && files.length < pageCount) {
-    return { available: false, files, renderer: 'libreoffice', reason: `只得到 ${files.length} 张 PNG，deck 有 ${pageCount} 页` }
+  const captureDir = mkdtempSync(join(outDir, '.capture-'))
+  try {
+    const png = await run(pdftoppm, ['-png', '-r', '108', join(outDir, pptxBasename(pptx) + '.pdf'), join(captureDir, 'slide')])
+    if (png.code !== 0) return { available: false, files: [], renderer: 'libreoffice', reason: png.stderr || 'pdftoppm 失败' }
+    const files = readdirSync(captureDir)
+      .filter(name => /^slide-?\d+\.png$/.test(name))
+      .sort((a, b) => Number(a.match(/(\d+)/)?.[1] ?? 0) - Number(b.match(/(\d+)/)?.[1] ?? 0))
+      .map(name => {
+        const target = join(outDir, name)
+        renameSync(join(captureDir, name), target)
+        return target
+      })
+    if (pageCount > 0 && files.length < pageCount) {
+      return { available: false, files, renderer: 'libreoffice', reason: `只得到 ${files.length} 张 PNG，deck 有 ${pageCount} 页` }
+    }
+    return { available: true, renderer: 'libreoffice', files: pageCount > 0 ? files.slice(0, pageCount) : files }
+  } finally {
+    rmSync(captureDir, { recursive: true, force: true })
   }
-  return { available: true, renderer: 'libreoffice', files: pageCount > 0 ? files.slice(0, pageCount) : files }
 }
 
 function pptxBasename(file: string): string {

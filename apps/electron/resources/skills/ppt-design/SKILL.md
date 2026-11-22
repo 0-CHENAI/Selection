@@ -131,6 +131,8 @@ G4 **整项任务最多 3 次：首次 + 至多 2 次修复复查**。更换渲�
 
 G4 跟随当前模型的读图能力，而不是固定改走 OCR。`imageInput: enabled` 时用 Read 或 `call_llm` 的 `attachments` 看受影响范围内每一页；`imageInput: unavailable` 或返回 `image_capability_mismatch` 时停下来说明 G4 未通过。两种结果都不要用 Swift/Vision（`VNRecognizeTextRequest`）、tesseract，或名为 `Swift: OCR` / `OCR New Pages` 的步骤代替看图。
 
+G4 结果按 [视觉验收记录](references/visual-review.md) 提交给交付检查：在同一次 `call_llm` 加 `pptReview`，或在看过渲染图片后随最终答复提交结构化结果。截图成功不等于通过。
+
 Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 
 ## 交付

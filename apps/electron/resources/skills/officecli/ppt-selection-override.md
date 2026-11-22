@@ -59,6 +59,8 @@ Use the installed CLI's screenshot capability, for example `officecli view "<abs
 
 Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 
+Use the [structured G4 result](../ppt-design/references/visual-review.md) in the same review or final response. On desktop use `office_render`; for CLI evidence use `deck-cli.mjs screenshot` on the saved PPTX (it wraps OfficeCLI screenshots without editing the file). The delivery check reads the outcome for the final saved revision, not the screenshot count.
+
 ## Readback without jq, Python, or shell-specific helpers
 
 Selection does not require or install `jq`, Python, Bash/zsh/PowerShell helper scripts, or style build scripts for this workflow. Do **not** copy executable QA blocks that depend on `jq`, `grep`, `seq`, process substitution, heredocs, or shell-specific loops. Use individual OfficeCLI calls and read their actual output, or Selection's bundled Bun for JSON processing with explicit argument arrays and checked exit codes. Never depend on a user-installed runtime/package or use another library as the Office document engine. All scratch inputs, dumps, renders, and helper output belong under the absolute `dataFolderPath` from session state.

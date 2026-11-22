@@ -41,11 +41,28 @@ test('new-deck capture still covers every page', async () => {
   expect(readFileSync(join(dir, 'calls'), 'utf8')).toBe('1\n2\n3\n')
 })
 
+test('full fallback capture does not count stale images from the output directory', async () => {
+  const { dir } = renderer()
+  const pdftoppm = join(dir, 'pdftoppm')
+  writeFileSync(pdftoppm, `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(process.argv.at(-1)+'-1.png', 'new');\n`)
+  const libreoffice = join(dir, 'soffice')
+  writeFileSync(libreoffice, `#!${process.execPath}\nprocess.exit(0);\n`)
+  chmodSync(pdftoppm, 0o755)
+  chmodSync(libreoffice, 0o755)
+  writeFileSync(join(dir, 'slide-02.png'), 'stale')
+  const result = await captureSlides(join(dir, 'deck.pptx'), dir, 2, { officecli: '', libreoffice, pdftoppm })
+  expect(result.available).toBe(false)
+  expect(result.files).toEqual([join(dir, 'slide-1.png')])
+  expect(readFileSync(join(dir, 'slide-02.png'), 'utf8')).toBe('stale')
+})
+
 test('bundled CLI passes the affected-page list through to screenshot capture', async () => {
   const { dir, cli } = renderer()
+  writeFileSync(join(dir, 'deck.pptx'), 'saved deck bytes')
   const child = Bun.spawn([process.execPath, join(import.meta.dir, 'deck-cli.mjs'), 'screenshot', join(dir, 'deck.pptx'), '--out', dir, '--pages', '5', '--only-pages', '2,4', '--officecli', cli], { stdout: 'pipe', stderr: 'pipe' })
   const body = JSON.parse(await new Response(child.stdout).text())
   expect(await child.exited).toBe(0)
   expect(body.screenshots.files).toEqual([join(dir, 'slide-02.png'), join(dir, 'slide-04.png')])
+  expect(body.pptVisualRender.pages.map((page: {page: number}) => page.page)).toEqual([2, 4])
   expect(readFileSync(join(dir, 'calls'), 'utf8')).toBe('2\n4\n')
 })

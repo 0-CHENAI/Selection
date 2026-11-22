@@ -25,6 +25,7 @@ export type OfficeRenderKind = 'docx' | 'xlsx' | 'pptx'
 /** Structurally the session-tools-core OfficeRenderOutcome consumed by office_render. */
 export interface OfficeRenderOutcome {
   file: string
+  sourceSha256?: string
   kind: OfficeRenderKind
   renderer: string
   pageCount: number
@@ -290,6 +291,7 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
     }
     return {
       file,
+      sourceSha256: sha256,
       kind,
       renderer: host.renderer,
       pageCount: captured.pageCount,

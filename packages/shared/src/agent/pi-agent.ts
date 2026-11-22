@@ -2274,7 +2274,11 @@ export class PiAgent extends BaseAgent {
       // call_llm uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'call_llm') {
         try {
-          const result = await this.preExecuteCallLlm(args);
+          const ppt = args.pptReview === undefined
+            ? getSessionScopedToolCallbacks(this._sessionId)?.preparePptReviewFn?.(args)
+            : undefined;
+          const result = await this.preExecuteCallLlm(ppt ? { ...args, pptReview: ppt.pptReview } : args);
+          ppt?.recordResult(result.text);
           return { content: result.text || '(Model returned empty response)', isError: false };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);

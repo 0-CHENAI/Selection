@@ -9167,7 +9167,8 @@ var require_lib3 = __commonJS((exports, module) => {
 });
 
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
-import { realpathSync as realpathSync2 } from "fs";
+import { createHash as createHash3 } from "crypto";
+import { readFileSync as readFileSync6, realpathSync as realpathSync2 } from "fs";
 import { resolve as resolve2 } from "path";
 
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
@@ -20325,7 +20326,7 @@ function inches(points) {
 }
 
 // apps/electron/resources/skills/ppt-design/engine/screenshot.ts
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";
 import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -20338,7 +20339,7 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
   mkdirSync(outDir, { recursive: true });
   const officecli = options.officecli === "" ? null : options.officecli ?? await commandOnPath("officecli");
   if (officecli && pageCount > 0) {
-    const files2 = [];
+    const files = [];
     let failed = false;
     for (const page of pages) {
       const target = join(outDir, `slide-${String(page).padStart(2, "0")}.png`);
@@ -20348,10 +20349,10 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
         failed = true;
         break;
       }
-      files2.push(target);
+      files.push(target);
     }
-    if (!failed && files2.length === pages.length)
-      return { available: true, renderer: "officecli", files: files2 };
+    if (!failed && files.length === pages.length)
+      return { available: true, renderer: "officecli", files };
   }
   const soffice = options.libreoffice ?? await commandOnPath("soffice") ?? await commandOnPath("libreoffice");
   const pdftoppm = options.pdftoppm ?? await commandOnPath("pdftoppm");
@@ -20378,26 +20379,34 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
   if (pdf.code !== 0)
     return { available: false, files: [], renderer: "libreoffice", reason: pdf.stderr || pdf.stdout || "LibreOffice \u8F6C\u6362\u5931\u8D25" };
   if (selected) {
-    const files2 = [];
+    const files = [];
     for (const page of selected) {
-      const prefix2 = join(outDir, `slide-${String(page).padStart(2, "0")}`);
-      rmSync(`${prefix2}.png`, { force: true });
-      const png2 = await run(pdftoppm, ["-png", "-r", "108", "-f", String(page), "-l", String(page), "-singlefile", join(outDir, pptxBasename(pptx) + ".pdf"), prefix2]);
-      if (png2.code !== 0 || !existsSync(`${prefix2}.png`))
-        return { available: false, files: files2, renderer: "libreoffice", reason: png2.stderr || "pdftoppm \u5931\u8D25" };
-      files2.push(`${prefix2}.png`);
+      const prefix = join(outDir, `slide-${String(page).padStart(2, "0")}`);
+      rmSync(`${prefix}.png`, { force: true });
+      const png = await run(pdftoppm, ["-png", "-r", "108", "-f", String(page), "-l", String(page), "-singlefile", join(outDir, pptxBasename(pptx) + ".pdf"), prefix]);
+      if (png.code !== 0 || !existsSync(`${prefix}.png`))
+        return { available: false, files, renderer: "libreoffice", reason: png.stderr || "pdftoppm \u5931\u8D25" };
+      files.push(`${prefix}.png`);
     }
-    return { available: true, renderer: "libreoffice", files: files2 };
+    return { available: true, renderer: "libreoffice", files };
   }
-  const prefix = join(outDir, "slide");
-  const png = await run(pdftoppm, ["-png", "-r", "108", join(outDir, pptxBasename(pptx) + ".pdf"), prefix]);
-  if (png.code !== 0)
-    return { available: false, files: [], renderer: "libreoffice", reason: png.stderr || "pdftoppm \u5931\u8D25" };
-  const files = readdirSync(outDir).filter((name) => /^slide-?\d+\.png$/.test(name)).sort((a, b) => Number(a.match(/(\d+)/)?.[1] ?? 0) - Number(b.match(/(\d+)/)?.[1] ?? 0)).map((name) => join(outDir, name));
-  if (pageCount > 0 && files.length < pageCount) {
-    return { available: false, files, renderer: "libreoffice", reason: `\u53EA\u5F97\u5230 ${files.length} \u5F20 PNG\uFF0Cdeck \u6709 ${pageCount} \u9875` };
+  const captureDir = mkdtempSync(join(outDir, ".capture-"));
+  try {
+    const png = await run(pdftoppm, ["-png", "-r", "108", join(outDir, pptxBasename(pptx) + ".pdf"), join(captureDir, "slide")]);
+    if (png.code !== 0)
+      return { available: false, files: [], renderer: "libreoffice", reason: png.stderr || "pdftoppm \u5931\u8D25" };
+    const files = readdirSync(captureDir).filter((name) => /^slide-?\d+\.png$/.test(name)).sort((a, b) => Number(a.match(/(\d+)/)?.[1] ?? 0) - Number(b.match(/(\d+)/)?.[1] ?? 0)).map((name) => {
+      const target = join(outDir, name);
+      renameSync(join(captureDir, name), target);
+      return target;
+    });
+    if (pageCount > 0 && files.length < pageCount) {
+      return { available: false, files, renderer: "libreoffice", reason: `\u53EA\u5F97\u5230 ${files.length} \u5F20 PNG\uFF0Cdeck \u6709 ${pageCount} \u9875` };
+    }
+    return { available: true, renderer: "libreoffice", files: pageCount > 0 ? files.slice(0, pageCount) : files };
+  } finally {
+    rmSync(captureDir, { recursive: true, force: true });
   }
-  return { available: true, renderer: "libreoffice", files: pageCount > 0 ? files.slice(0, pageCount) : files };
 }
 function pptxBasename(file) {
   const name = file.split(/[\\/]/).pop() ?? "deck.pptx";
@@ -24390,8 +24399,12 @@ var file = resolve2(flags.file);
 if (flags.command === "screenshot") {
   if (!flags.out)
     usage();
+  const sha256 = (path) => createHash3("sha256").update(readFileSync6(path)).digest("hex");
+  const before = sha256(file);
   const result = await captureSlides(file, resolve2(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
-  emit(result.available ? "ok" : "error", { screenshots: result }, result.available ? 0 : 1);
+  const pages = flags.pageNumbers ? [...new Set(flags.pageNumbers)].sort((a, b) => a - b) : result.files.map((_, index) => index + 1);
+  const pptVisualRender = result.available && result.files.length && sha256(file) === before ? { path: realpathSync2(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: sha256(path) })) } : undefined;
+  emit(result.available ? "ok" : "error", { screenshots: result, pptVisualRender }, result.available ? 0 : 1);
 }
 var stamp;
 if (flags.waitForExport) {

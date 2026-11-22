@@ -38,6 +38,10 @@ export interface SessionScopedToolCallbacks {
     request: import('@craft-agent/session-tools-core').OfficeRenderArgs,
     signal?: AbortSignal,
   ) => Promise<import('@craft-agent/session-tools-core').OfficeRenderOutcome>;
+  preparePptReviewFn?: (input: Record<string, unknown>) => {
+    pptReview: { path: string; pages: number[] };
+    recordResult: (text: string) => void;
+  } | undefined;
   /**
    * Called when a plan is submitted via SubmitPlan tool.
    * Receives the path to the plan markdown file.

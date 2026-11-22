@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 交付核对视觉验收结果** — 仅最终保存版本的视觉验收通过后才标记就绪；结果缺失、文件又被修改或还有版式问题时，直接说明卡在哪一步及受影响页，不自动加开一轮检查。
+
 - **PPT 预检直接返回成品路径** — 保存后可在同一次预检中拿到本次导出的文件，不用反复查找；生成文件不再声明不存在的幻灯片母版。Office 校验与验收要求不变。
 
 - **PPT 制作指南明确版式和导出位置** — 直接说明文字和表格的预检规则及成品路径，修正 OfficeCLI 读回命令的参数顺序；计时包含由 deck-cli 启动的截图。校验与验收要求不变。
