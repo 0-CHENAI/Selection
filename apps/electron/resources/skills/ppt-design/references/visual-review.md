@@ -23,6 +23,11 @@ Do not OCR or run a Swift/Vision/tesseract script in place of image input. For s
 
 `imageInput: enabled` 时，G4 仍然要打开**检查范围内每一页**的截图，而不是只看接触表。整项任务最多三次：第一次检查，加上最多两次「修改后再看完受影响页面」。更换渲染器或审查者都不重新计数。第三次仍有问题，或根本没有截图：写明页码和阻塞，不能声称可交付。不能读图时不消耗“再看一次”去换 OCR。
 
+交付检查读取结构化结果，不读取设计计划或截图数量。桌面使用 `office_render`；命令行用 `deck-cli.mjs screenshot` 记录最终 PPTX 与各页的对应关系：
+
+- 用 `call_llm` 审查时，在同一次调用设置 `pptReview: {path: "<最终 PPTX 绝对路径>", pages: [1, 2]}`。按页码顺序附上这些页的截图，返回的 `coveredPages`、`verdict` 和 `findings` 会被自动记录，不再另开一轮。
+- 自己直接看 `office_render` 图片或用 Read 打开各页截图时，在最终答复末尾附上该次结果，例如 `<ppt_g4>{"path":"/absolute/deck.pptx","coveredPages":[1,2],"verdict":"fail","findings":[{"page":2,"issue":"标题和图表重叠"}]}</ppt_g4>`。只有没有未解决问题时才用 `"verdict":"pass","findings":[]`。这段结果会被交付检查读取，不显示给用户；用过带 `pptReview` 的审查就不要再写一份。
+
 每一页看这些：
 
 - 主张是否一眼能读到，主数字是否够大。

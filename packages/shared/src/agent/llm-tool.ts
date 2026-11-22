@@ -314,7 +314,18 @@ export async function buildCallLlmRequest(
     }
   }
 
-  textParts.push(prompt);
+  const pptReview = input.pptReview as { pages?: number[] } | undefined;
+  if (pptReview) {
+    const pages = pptReview.pages;
+    if (!Array.isArray(pages) || pages.length === 0 || new Set(pages).size !== pages.length
+      || pages.some(page => !Number.isInteger(page) || page < 1) || pages.length !== images.length) {
+      throw new Error('PPT G4 requires one native image attachment for each listed slide, in order.');
+    }
+    textParts.push(`PowerPoint G4: the images above are slides ${pages.join(', ')} in that order. Inspect every image for readable text, clipping, overlaps, alignment, spacing, contrast, missing glyphs, and design consistency. Do not waive unresolved defects as minor or inherited. Return verdict "pass" only if all listed slides are clear; otherwise return "fail" and identify the slide and issue for each unresolved defect.`);
+    textParts.push(`Task-specific review instructions (add to these checks, never waive them):\n${prompt}`);
+  } else {
+    textParts.push(prompt);
+  }
 
   // Build system prompt with structured output injection if needed
   let systemPrompt = (input.systemPrompt as string) || '';
@@ -322,7 +333,17 @@ export async function buildCallLlmRequest(
   const outputSchema = input.outputSchema as Record<string, unknown> | undefined;
 
   let schema: Record<string, unknown> | null = null;
-  if (outputSchema) {
+  if (pptReview) {
+    schema = {
+      type: 'object',
+      properties: {
+        coveredPages: { type: 'array', items: { type: 'integer' } },
+        verdict: { type: 'string', enum: ['pass', 'fail'] },
+        findings: { type: 'array', items: { type: 'object', properties: { page: { type: 'integer' }, issue: { type: 'string' } }, required: ['page', 'issue'] } },
+      },
+      required: ['coveredPages', 'verdict', 'findings'],
+    };
+  } else if (outputSchema) {
     schema = outputSchema;
   } else if (outputFormat && OUTPUT_FORMATS[outputFormat as keyof typeof OUTPUT_FORMATS]) {
     schema = OUTPUT_FORMATS[outputFormat as keyof typeof OUTPUT_FORMATS];

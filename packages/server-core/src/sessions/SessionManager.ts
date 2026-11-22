@@ -191,8 +191,9 @@ import { generatePresentationImage } from '../services/ppt-image-generate'
 import { pptRouteMismatch } from '../services/ppt-route'
 import { createTemplateTaskProject } from '../services/ppt-template-project'
 import { recordVisualInspection } from '../services/ppt-visual-record'
+import { PptVisualTurn, markVisualDeliveryBlocked, pptVisualBlock, readVisualRender, recordVisualVerdict, visualSha256, type PptVisualBlock } from '../services/ppt-visual-verdict'
 import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, routedOfficeSkillNote, selectOfficeRequest } from '../services/office-catalog'
-import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
+import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
@@ -1651,6 +1652,7 @@ setBackendModelRequestLimiter((quota, owner, signal) => hostModelRequestPool.acq
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   private officeTurnTimings = new WeakMap<ManagedSession, { generation: number; timing: OfficeTurnTiming }>()
+  private pptVisualTurns = new WeakMap<ManagedSession, PptVisualTurn>()
   private pendingUserSubmissions = new Map<string, Promise<void>>()
   private executionOwners = new Map<string, { release: () => void; calls: number; completion?: SessionCompletionEvent }>()
   private startupRecoveryClaims = new Set<string>()
@@ -5458,6 +5460,7 @@ export class SessionManager implements ISessionManager {
         // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
         ...(getOfficePageCaptureHost() ? {
           officeRenderFn: async (request, signal) => {
+            const visual = this.pptVisualTurns.get(managed)
             const outcome = await renderOfficePages({
               ...request,
               cwd: managed.isolatedWorkspace?.directory ?? managed.workingDirectory ?? managed.workspace.rootPath,
@@ -5469,6 +5472,14 @@ export class SessionManager implements ISessionManager {
               const recorded = recordVisualInspection(getSessionStoragePath(managed.workspace.rootPath, managed.id), outcome.file, outcome.renderer, outcome.images.map(image => ({ label: image.label, path: image.path })))
               if (recorded.atLimit) outcome.notes = [...(outcome.notes ?? []), `这份文件的原生读图已有 ${recorded.rounds} 轮，上限是 3 轮。不要再开新的一轮，也不要改用 OCR。`]
             } catch { /* A missing record must not hide the page images. */ }
+            if (outcome.kind === 'pptx' && outcome.sourceSha256) {
+              const pages = outcome.images.filter(image => !image.truncated && /^\d+$/.test(image.label))
+                .map(image => ({ page: Number(image.label), path: image.path, sha256: visualSha256(Buffer.from(image.data, 'base64')) }))
+              visual?.addRender(
+                { path: outcome.file, sha256: outcome.sourceSha256, pages },
+                managed.agent?.currentModelSupportsImages?.() === true,
+              )
+            }
             return outcome
           },
         } : {}),
@@ -8357,6 +8368,7 @@ export class SessionManager implements ISessionManager {
         managed.workingDirectory ?? chatSessionDir,
       )
       this.officeTurnTimings.set(managed, { generation: myGeneration, timing: officeTiming })
+      this.pptVisualTurns.set(managed, new PptVisualTurn())
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -9992,7 +10004,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, submission.artifactVersionTitle, answer.content)
+      const ppt = await this.pptDeliveryAnswer(managed, answer.content)
+      answer.content = ppt.content
+      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, submission.artifactVersionTitle, answer.content, ppt.blocked)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -10137,8 +10151,71 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (block) throw new Error(block)
   }
 
+  private savePptVisualVerdict(managed: ManagedSession, review: ReturnType<PptVisualTurn['finishReview']>): void {
+    if (!review) return
+    const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    try {
+      const path = realpathSync(review.render.path)
+      const action = readPptRun(dir)?.action
+      const local = !!managed.artifactCandidateInventory?.existedAtStart(path)
+        && action !== 'generate' && action !== 'restyle' && action !== 'recolor'
+      recordVisualVerdict(dir, review.render, review.verdict, local)
+    } catch (error) {
+      sessionLog.warn('PPT visual verdict could not be recorded', { sessionId: managed.id, error })
+    }
+  }
+
+  private async pptDeliveryAnswer(managed: ManagedSession, markdown: string): Promise<{ content: string; blocked: string[] }> {
+    const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const content = markdown.replace(/<ppt_g4>([\s\S]*?)<\/ppt_g4>/g, (_, packet: string) => {
+      this.savePptVisualVerdict(managed, this.pptVisualTurns.get(managed)?.directReview(packet.trim()))
+      return ''
+    })
+    const candidates = new Set((managed.artifactCandidateInventory?.changed() ?? []).filter(path => /\.pptx$/i.test(path)))
+    for (const link of localArtifactLinks(content)) {
+      if (!/\.pptx$/i.test(link) || !isArtifactCardPath(link)) continue
+      try {
+        const path = await validateArtifactFilePath(link, managed.workspace.id)
+        const inventory = managed.artifactCandidateInventory
+        if (inventory && !inventory.covers(path)) {
+          const file = statSync(path)
+          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) candidates.add(path)
+        }
+      } catch { /* Inaccessible links are not deliverables. */ }
+    }
+    const blocks: Array<{ path: string; result: PptVisualBlock }> = []
+    for (const path of candidates) {
+      const result = pptVisualBlock(dir, path)
+      if (result) {
+        blocks.push({ path, result })
+        try { markVisualDeliveryBlocked(dir, path) } catch { /* The final answer still reports the blocker. */ }
+      }
+    }
+    if (!blocks.length) return { content, blocked: [] }
+    const escape = (text: string) => text.replace(/[\\`*_{}\[\]()<>#!|]/g, '\\$&').replace(/\s+/g, ' ').trim()
+    const translate = (key: string, fallback: string, values: Record<string, string | number | undefined> = {}) =>
+      i18n.isInitialized ? String(i18n.t(key, { ...values, defaultValue: fallback }))
+        : fallback.replace(/{{(\w+)}}/g, (_, name) => String(values[name] ?? ''))
+    const heading = translate('ppt.delivery.blocked', 'PowerPoint is not ready: G4 visual review is blocked.')
+    const message = blocks.map(({ path, result }) => {
+      const name = escape(basename(path))
+      if (result.findings?.length) {
+        return [`**${name}**`, ...result.findings.map(finding =>
+          `- ${translate('ppt.delivery.finding', 'Slide {{page}}: {{issue}}', { page: finding.page, issue: escape(finding.issue) })}`)].join('\n')
+      }
+      const reason = result.reason === 'stale'
+        ? translate('ppt.delivery.stale', 'The saved deck changed after visual review.')
+        : result.reason === 'coverage'
+          ? translate('ppt.delivery.coverage', 'Visual review is missing for slides {{pages}}.', { pages: result.pages?.join(', ') })
+          : translate('ppt.delivery.missing', 'The saved deck has no verified visual-review result.')
+      const mismatch = result.reason === 'missing' && (managed.agent?.currentModelSupportsImages?.() === false || markdown.includes('image_capability_mismatch'))
+      return `**${name}** — ${reason}${mismatch ? ' (`image_capability_mismatch`)' : ''}`
+    })
+    return { content: [heading, ...message].join('\n\n'), blocked: blocks.map(block => block.path) }
+  }
+
   /** Finish file discovery before the answer is persisted and published. */
-  private async captureChangedArtifacts(managed: ManagedSession, userMessageId: string, title?: string, answerMarkdown = ''): Promise<Message['artifactVersions']> {
+  private async captureChangedArtifacts(managed: ManagedSession, userMessageId: string, title?: string, answerMarkdown = '', blocked: string[] = []): Promise<Message['artifactVersions']> {
     const inventory = managed.artifactCandidateInventory
     const tracker = managed.conversationArtifactVersions
     if (!tracker) return undefined
@@ -10146,6 +10223,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const candidates: string[] = []
       const editedExistingFiles: string[] = []
       for (const path of inventory?.changed() ?? []) {
+        if (blocked.some(file => sameArtifactLocation(file, path))) continue
         if (!isArtifactCardPath(path)) continue
         try {
           const safe = await validateArtifactFilePath(path, managed.workspace.id)
@@ -10225,16 +10303,17 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const previousLastRole = managed.lastMessageRole
     const previousFinalId = managed.lastFinalMessageId
     const previousIndex = managed.messages.indexOf(draft)
-    const previous = { isIntermediate: draft.isIntermediate, hidden: draft.hidden, phase: draft.phase,
+    const previous = { content: draft.content, isIntermediate: draft.isIntermediate, hidden: draft.hidden, phase: draft.phase,
       answerCommitted: draft.answerCommitted, answerSalvaged: draft.answerSalvaged,
       artifactVersions: draft.artifactVersions, timestamp: draft.timestamp }
     let rollbackFeedback: (() => void) | undefined
     try {
-      const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, draft.content)
+      const ppt = await this.pptDeliveryAnswer(managed, draft.content)
+      const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, ppt.content, ppt.blocked)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       this.assertAnswerReady(managed, state, draft.content)
       this.assertOfficeDeliveryReady(managed)
-      Object.assign(draft, { isIntermediate: false, hidden: undefined, phase: 'final' as const,
+      Object.assign(draft, { content: ppt.content, isIntermediate: false, hidden: undefined, phase: 'final' as const,
         answerCommitted: true, answerSalvaged: mode === 'salvage' ? true : undefined, artifactVersions })
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, draft,
         (content, hash) => saveBodyFeedbackVersion(sessionPath, content, hash))
@@ -14658,6 +14737,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
       case 'tool_start': {
         if (managed.answerDelivery?.committedMessageId) break
+        if (/^(?:mcp__session__)?call_llm$/.test(event.toolName) && event.input) {
+          this.pptVisualTurns.get(managed)?.beginReview(event.toolUseId, event.input)
+        }
         if (toolCallBypassesWorkspaceCache(event.toolName)) {
           managed.usedExternalToolsThisTurn = true
         }
@@ -14807,6 +14889,18 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       case 'tool_result': {
         const priorTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
         const previewToolName = event.toolName ?? priorTool?.toolName ?? ''
+        const visual = this.pptVisualTurns.get(managed)
+        if (visual && !event.isError && !event.parentToolUseId) {
+          if (/^(?:Bash|bash|shell)$/.test(previewToolName) && /(?:^|[\\/\s"'])deck-cli\.mjs["']?\s+screenshot\b/i.test(String(priorTool?.toolInput?.command ?? ''))) {
+            const render = readVisualRender(event.result)
+            if (render) visual.addRender(render)
+          } else if (/^(?:mcp__session__)?call_llm$/.test(previewToolName)) {
+            this.savePptVisualVerdict(managed, visual.finishReview(event.toolUseId, event.result))
+          } else if (/^Read$/i.test(previewToolName) && event.content?.some(item => item.type === 'image')) {
+            const path = priorTool?.toolInput?.path ?? priorTool?.toolInput?.file_path
+            if (typeof path === 'string') visual.noteRead(resolve(managed.workingDirectory ?? managed.workspace.rootPath, path))
+          }
+        }
         const toolPurpose = priorTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(previewToolName) ? 'answer-delivery' : 'work')
         if (managed.answerDelivery && !managed.answerDelivery.committedMessageId
           && toolPurpose === 'answer-delivery') {

@@ -148,6 +148,10 @@ export const CallLlmSchema = z.object({
     }),
   ])).optional().describe('File paths on disk to attach (max 20). Text is inlined. png/jpg/gif/webp are sent as images only when the model running this call has vision enabled; otherwise the call fails. NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.'),
   model: z.string().optional().describe('Model ID or short name. Omit to inherit the current session model.'),
+  pptReview: z.object({
+    path: z.string().describe('Absolute path of the saved PPTX being visually reviewed'),
+    pages: z.array(z.number().int().positive()).min(1).max(20).describe('Slide numbers in the same order as the attached screenshots'),
+  }).optional().describe('Record this existing visual review as the PowerPoint G4 verdict. Attach the corresponding Office-rendered screenshots.'),
   systemPrompt: z.string().optional().describe('Optional system prompt'),
   maxTokens: z.number().optional().describe('Max output tokens (1-64000). Defaults to 4096'),
   temperature: z.number().optional().describe('Sampling temperature 0-1'),

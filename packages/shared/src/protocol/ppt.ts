@@ -121,6 +121,7 @@ export interface PptRun {
 
 /** Counts and per-page check status. fileName is set only when a real pptx exists. */
 export interface PptProgress {
+  g4Blocked?: boolean
   fileName?: string
   /** Absolute path of that pptx. Absent until the file is on disk. */
   pptxPath?: string

@@ -13,10 +13,12 @@ import { OfficeTurnTiming } from './office-stage-timing'
 import { ArtifactVersions, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
 import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
+import { recordVisualVerdict, visualSha256 } from '../services/ppt-visual-verdict'
 
 const explanation = '蒙提霍尔问题\n\n1. 三扇门，主持人知道奖品位置。\n2. 主持人打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换 | 1/3 |'
 const markdown = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
 const submission = { markdown, toolCallId: 'submit-330', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-assistant-entry' }
+const fixturePptx = join(import.meta.dir, '../../../../apps/electron/resources/officecli/1.0.162/skills/morph-ppt/reference/styles/bw--swiss-bauhaus/bw__swiss_bauhaus.pptx')
 
 describe('explicit answer delivery lifecycle (#330)', () => {
   let root: string
@@ -265,6 +267,12 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     let modelCalls = 0
     const agent = install(async function* () {
       for (const name of [...names, '笔记.txt', '日志.TXT', 'build.js', 'chart.png', 'data.csv', 'raw.json']) writeFileSync(join(dir, name), name.endsWith('.docx') ? readFileSync(join(import.meta.dir, '../../../../apps/electron/resources/skills/office-business/cases/style-system-design/example.docx')) : 'output')
+      const path = join(dir, '讲稿.PPTX')
+      const pptx = readFileSync(fixturePptx)
+      writeFileSync(path, pptx)
+      const coveredPages = [1, 2, 3, 4, 5]
+      const pages = coveredPages.map(page => ({ page, path: `slide-${page}.png`, sha256: '' }))
+      recordVisualVerdict(dir, { path, sha256: visualSha256(pptx), pages }, { coveredPages, verdict: 'pass', findings: [] })
       await control!.submit({ ...submission, markdown: '文件已更新。' })
       yield { type: 'complete' }
     })
@@ -448,6 +456,61 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       expect.objectContaining({ text: body, answerCommitted: true, turnId: 'draft' }),
     ])
     expect(managed.messages.filter(message => message.content === body)).toHaveLength(1)
+  })
+
+  it('settles a changed PowerPoint without a readiness claim or retry when its G4 verdict is missing', async () => {
+    const path = join(root, 'unchecked.pptx')
+    const body = `The deck is built and delivered. [PowerPoint](<${path}>)`
+    install(async function* () {
+      writeFileSync(path, 'unreviewed presentation')
+      yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: 'ppt-draft', sdkMessageId: 'ppt-sdk' }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, 'Create a five-slide PowerPoint.')
+    const final = managed.messages.find(message => message.answerCommitted)!
+    expect(final?.content).toContain('G4')
+    expect(final?.content).toContain('unchecked.pptx')
+    expect(final?.content).not.toContain('built and delivered')
+    expect(final?.artifactVersions ?? []).toHaveLength(0)
+    expect(prompts).toHaveLength(1)
+    expect(events.filter(event => event.type === 'text_complete' && event.answerCommitted).map(event => event.text)).toEqual([final.content])
+  })
+
+  it.each([
+    ['pass', false, 'The deck is built and delivered.'],
+    ['fail', false, 'Slide 4: The table header is misaligned.'],
+    ['pass', true, 'The saved deck changed after visual review.'],
+  ] as const)('uses the existing headless G4 result (%s, stale: %s)', async (verdict, stale, expected) => {
+    const path = join(root, 'pilot.pptx')
+    const body = 'The deck is built and delivered.'
+    const coveredPages = [1, 2, 3, 4, 5]
+    install(async function* () {
+      const pptx = readFileSync(fixturePptx)
+      writeFileSync(path, pptx)
+      const pages = coveredPages.map(page => {
+        const file = join(root, `slide-${page}.png`)
+        const bytes = Buffer.from(`rendered page ${page}`)
+        writeFileSync(file, bytes)
+        return { page, path: file, sha256: visualSha256(bytes) }
+      })
+      yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'render', input: { command: 'bun engine/deck-cli.mjs screenshot pilot.pptx --pages 5 --out slides' } }
+      yield { type: 'tool_result', toolName: 'Bash', toolUseId: 'render', isError: false,
+        result: JSON.stringify({ pptVisualRender: { path, sha256: visualSha256(pptx), pages } }) }
+      yield { type: 'tool_start', toolName: 'mcp__session__call_llm', toolUseId: 'review',
+        input: { pptReview: { path, pages: coveredPages }, attachments: pages.map(page => page.path) } }
+      yield { type: 'tool_result', toolName: 'mcp__session__call_llm', toolUseId: 'review', isError: false,
+        result: JSON.stringify({ coveredPages, verdict, findings: verdict === 'fail' ? [{ page: 4, issue: 'The table header is misaligned.' }] : [] }) }
+      if (stale) writeFileSync(path, 'edited after review')
+      yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: 'ppt-draft', sdkMessageId: 'ppt-sdk' }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, 'Create a PowerPoint.')
+    const final = managed.messages.find(message => message.answerCommitted)!
+    expect(final.content).toContain(expected)
+    const ready = verdict === 'pass' && !stale
+    expect(final.content.includes(body)).toBe(ready)
+    expect(final.artifactVersions ?? []).toHaveLength(ready ? 1 : 0)
+    expect(prompts).toHaveLength(1)
   })
 
   it('reveals a refused candidate as process text when a later tool runs', async () => {

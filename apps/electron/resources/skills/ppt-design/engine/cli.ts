@@ -1,4 +1,5 @@
-import { realpathSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { readFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { argumentLayoutCatalog } from './argument-layouts.ts'
 import { checkDeck, formatNeedsRevision, revisionStatus } from './check.ts'
@@ -98,8 +99,14 @@ const file = resolve(flags.file)
 
 if (flags.command === 'screenshot') {
   if (!flags.out) usage()
+  const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
+  const before = sha256(file)
   const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers })
-  emit(result.available ? 'ok' : 'error', { screenshots: result }, result.available ? 0 : 1)
+  const pages = flags.pageNumbers ? [...new Set(flags.pageNumbers)].sort((a, b) => a - b) : result.files.map((_, index) => index + 1)
+  const pptVisualRender = result.available && result.files.length && sha256(file) === before
+    ? { path: realpathSync(file), sha256: before, pages: result.files.map((path, index) => ({ page: pages[index], path, sha256: sha256(path) })) }
+    : undefined
+  emit(result.available ? 'ok' : 'error', { screenshots: result, pptVisualRender }, result.available ? 0 : 1)
 }
 
 let stamp: string | undefined
