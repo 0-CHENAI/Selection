@@ -14659,7 +14659,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           const owner = managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
           if (owner) {
             try {
-              assistantMessage.artifactVersions = await this.captureChangedArtifacts(managed, owner.id, undefined, content)
+              const ppt = await this.pptDeliveryAnswer(managed, content)
+              assistantMessage.content = ppt.content
+              assistantMessage.artifactVersions = await this.captureChangedArtifacts(managed, owner.id, undefined, ppt.content, ppt.blocked)
             } catch (error) {
               sessionLog.warn('Artifact version recording failed for streamed answer', { sessionId, messageId: assistantMessage.id, error })
             }
@@ -14711,7 +14713,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           }
         }
 
-        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: thinking ? 'intermediate' : event.phase, streamKind: thinking ? 'thinking' : undefined, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, artifactVersions: assistantMessage.artifactVersions, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: assistantMessage.content, isIntermediate, phase: thinking ? 'intermediate' : event.phase, streamKind: thinking ? 'thinking' : undefined, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, artifactVersions: assistantMessage.artifactVersions, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)

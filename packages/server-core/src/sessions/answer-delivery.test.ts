@@ -513,6 +513,32 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(prompts).toHaveLength(1)
   })
 
+  it('blocks unchecked PowerPoint at streaming answer completion', async () => {
+    const path = join(root, 'streamed.pptx')
+    const body = `The deck is delivered. [PowerPoint](<${path}>)`
+    managed.llmConnection = 'streaming'
+    const connection = spyOn(config, 'getLlmConnection').mockReturnValue({
+      slug: 'streaming', providerType: 'pi', authType: 'api_key', answerDelivery: 'streaming', presentationProtocol: 'native',
+    } as NonNullable<ReturnType<typeof config.getLlmConnection>>)
+    try {
+      install(async function* () {
+        expect(control).toBeUndefined()
+        writeFileSync(path, 'unreviewed presentation')
+        yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: 'streamed' }
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, 'Create a PowerPoint.')
+      const final = events.find(event => event.type === 'text_complete' && !event.isIntermediate)
+      expect(final?.text).toContain('G4')
+      expect(final?.text).not.toContain(body)
+      expect(final?.artifactVersions ?? []).toHaveLength(0)
+      expect(managed.messages.findLast(message => message.role === 'assistant')?.content).toBe(final.text)
+      expect(prompts).toHaveLength(1)
+    } finally {
+      connection.mockRestore()
+    }
+  })
+
   it('reveals a refused candidate as process text when a later tool runs', async () => {
     install(async function* () {
       yield { type: 'text_complete', text: '初稿答案', isIntermediate: false, phase: 'final', turnId: 'early' }
