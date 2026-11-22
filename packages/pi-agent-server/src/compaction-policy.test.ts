@@ -92,21 +92,25 @@ describe('80% compaction policy', () => {
     const { session, state, calls, compactions } = harness();
     state.compacting = false;
     state.agentRunActive = true;
+    const requestModel = { ...model, contextWindow: 20_000, maxTokens: 1024 };
+    applyCompactionSettings(session.settingsManager, requestModel.contextWindow, true);
     const context: Context = { messages: [
-      { role: 'user', content: 'Earlier discussion: '.repeat(3000), timestamp: 1 },
-      { role: 'assistant', content: [{ type: 'text', text: 'Earlier answer: '.repeat(3000) }],
+      { role: 'user', content: 'Earlier discussion: '.repeat(100), timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: 'Earlier answer: '.repeat(100) }],
         api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: 2 },
-      { role: 'user', content: 'New prompt: '.repeat(300_000), timestamp: 3 },
+      { role: 'user', content: 'New prompt: '.repeat(5400), timestamp: 3 },
     ] };
     state.branch = branchMessages(context.messages);
-    expect(shouldCompactBeforeRequest(context, model.contextWindow, state.reserveTokens)).toBe(true);
-    await session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    const history = { messages: context.messages.slice(0, -1) };
+    expect(shouldCompactBeforeRequest(history, requestModel.contextWindow, state.reserveTokens)).toBe(false);
+    expect(shouldCompactBeforeRequest(context, requestModel.contextWindow, state.reserveTokens)).toBe(true);
+    await session.agent.prepareRequest?.({ context, model: requestModel, thinkingLevel: 'off' });
     expect(compactions).toEqual([{ kind: 'auto', reason: 'threshold', willRetry: false }]);
     expect(calls).toHaveLength(0);
-    await session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    await session.agent.prepareRequest?.({ context, model: requestModel, thinkingLevel: 'off' });
     expect(compactions).toHaveLength(1);
-    const streamed = await (await session.agent.streamFunction(model, context)).result();
-    expect(isContextOverflow(streamed, model.contextWindow)).toBe(false);
+    const streamed = await (await session.agent.streamFunction(requestModel, context)).result();
+    expect(isContextOverflow(streamed, requestModel.contextWindow)).toBe(false);
     expect(streamed.errorMessage ?? '').not.toContain('context_length_exceeded');
     expect(streamed.stopReason).toBe('stop');
     expect(calls).toHaveLength(1);

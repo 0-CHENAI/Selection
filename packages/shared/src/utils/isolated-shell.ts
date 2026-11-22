@@ -44,9 +44,12 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
     executable = bwrap
     // Read-only root keeps vendor/git and vendor/python executable; writes stay on
     // the candidate and private home (PYTHONUSERBASE is redirected there).
-    prefix = ['--die-with-parent', '--new-session', '--unshare-all', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', root, root, '--bind', temporary, temporary, '--chdir', root]
+    prefix = ['--die-with-parent', '--new-session', '--unshare-all', '--as-pid-1', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', root, root, '--bind', temporary, temporary, '--chdir', root]
     if (existsSync(join(root, '.git'))) prefix.push('--ro-bind', join(root, '.git'), join(root, '.git'))
-    prefix.push('/bin/bash', '--noprofile', '--norc', '-c')
+    // Keep a supervising shell as namespace PID 1. On its exit Linux reaps
+    // remaining descendants before bubblewrap reports the command's status.
+    prefix.push('/bin/bash', '--noprofile', '--norc', '-c', '"$@"; exit $?', 'selection-init',
+      '/bin/bash', '--noprofile', '--norc', '-c')
   } else { dispose(); return undefined }
   if (process.platform === 'darwin' && options.denyExternalBrowsers) {
     // Applies to descendants too, including browsers spawned inside OfficeCLI
