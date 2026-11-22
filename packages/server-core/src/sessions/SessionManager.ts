@@ -5457,6 +5457,14 @@ export class SessionManager implements ISessionManager {
         },
         officeBusinessFn: async args => this.runOfficeBusiness(managed, args),
         pptToolsFn: (name, args) => this.runPptTool(managed, name, args),
+        preparePptReviewFn: input => {
+          const review = this.pptVisualTurns.get(managed)?.inferReview(input)
+          if (!review) return
+          return {
+            pptReview: { path: review.render.path, pages: review.render.pages.map(image => image.page) },
+            recordResult: text => this.savePptVisualVerdict(managed, review.finish(text)),
+          }
+        },
         // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
         ...(getOfficePageCaptureHost() ? {
           officeRenderFn: async (request, signal) => {

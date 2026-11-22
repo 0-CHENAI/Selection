@@ -22,6 +22,7 @@ const reportSchema = verdictSchema.extend({ sha256: digest, pageCount: page, pag
 export type PptVisualRender = z.infer<typeof renderSchema>
 type Verdict = z.infer<typeof verdictSchema>
 type Report = z.infer<typeof reportSchema>
+const attachmentSchema = z.array(z.union([z.string(), z.object({ path: z.string() })])).nonempty()
 
 export function visualSha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -195,7 +196,7 @@ export class PptVisualTurn {
 
   beginReview(id: string, input: Record<string, unknown>): void {
     const request = z.object({ path: z.string(), pages: z.array(page).nonempty() }).safeParse(input.pptReview)
-    const attachments = z.array(z.union([z.string(), z.object({ path: z.string() })])).safeParse(input.attachments)
+    const attachments = attachmentSchema.safeParse(input.attachments)
     if (!request.success || !attachments.success) return
     const paths = attachments.data.map(item => typeof item === 'string' ? item : item.path)
     const render = reviewRender(this.renders, request.data.path, request.data.pages, paths)
@@ -203,6 +204,31 @@ export class PptVisualTurn {
       this.delegated.add(render.sha256)
       this.pending.set(id, { render, attachments: paths })
     }
+  }
+
+  inferReview(input: Record<string, unknown>): {
+    render: PptVisualRender
+    finish: (text: string) => { render: PptVisualRender; verdict: Verdict } | undefined
+  } | undefined {
+    const attachments = attachmentSchema.safeParse(input.attachments)
+    if (!attachments.success) return
+    try {
+      const paths = attachments.data.map(item => normalizedPath(typeof item === 'string' ? item : item.path))
+      for (const candidate of [...this.renders].reverse()) {
+        const pages = paths.map(path => candidate.pages.find(image => normalizedPath(image.path) === path)?.page)
+        if (!pages.every(page => page !== undefined)) continue
+        const render = reviewRender([candidate], candidate.path, pages, paths)
+        if (!render || visualSha256(readFileSync(render.path)) !== render.sha256) continue
+        this.delegated.add(render.sha256)
+        return {
+          render,
+          finish: text => {
+            const verdict = readVisualVerdict(text)
+            if (verdict && reviewRender([render], render.path, pages, paths)) return { render, verdict }
+          },
+        }
+      }
+    } catch { /* Attachments not bound to a current render remain generic queries. */ }
   }
 
   finishReview(id: string, text: string): { render: PptVisualRender; verdict: Verdict } | undefined {

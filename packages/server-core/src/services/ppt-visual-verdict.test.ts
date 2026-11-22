@@ -50,6 +50,20 @@ describe('G4 outcome bound to the final PowerPoint', () => {
     expect(pptVisualBlock(root, path)).toBeUndefined()
   })
 
+  it('recognizes later reviews of the rendered slides without an explicit PPT marker', () => {
+    const visual = new PptVisualTurn()
+    visual.addRender(render)
+    recordVisualVerdict(root, render, readVisualVerdict(JSON.stringify(pass))!)
+    const review = visual.inferReview({ attachments: [{ path: render.pages[1]!.path }] })!
+    expect(review.render.pages.map(image => image.page)).toEqual([2])
+    const findings = [{ page: 2, issue: 'The table header is misaligned.' }]
+    const result = review.finish(JSON.stringify({ verdict: 'fail', coveredPages: [2], findings }))!
+    recordVisualVerdict(root, result.render, result.verdict)
+    expect(pptVisualBlock(root, path)).toEqual({ reason: 'failed', pages: [2], findings })
+    writeFileSync(render.pages[1]!.path, 'unrelated image')
+    expect(visual.inferReview({ attachments: [render.pages[1]!.path] })).toBeUndefined()
+  })
+
   it('reports failed pages and cannot be overridden by a pass on the same bytes', () => {
     const finding = { page: 2, issue: 'The header does not align with the table.' }
     const review = readVisualVerdict(JSON.stringify({ ...pass, findings: [finding] }))!
