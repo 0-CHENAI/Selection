@@ -22,6 +22,6 @@
 
 先读现有工程、计划、实际 PPTX 的后续定点改动及本轮附件，按 pageId/elementId 一次处理完整诊断清单。`needs_revision` 是正常反馈，修改后再检查，不重复检查没有变化的工程。
 
-局部内容/版式修改只重新截图并原生读图受影响页；未改页必须有有效的既往视觉证据。换主题、换字体、整套换皮、页序重排影响范围扩大时覆盖所有受影响页，无法证明未改页有效时做全量检查。检查后再修改会使对应页证据失效。
+局部内容/版式修改后重新截图全部页，只原生读图受影响页及不能沿用既往证据的页；只有最终稿截图与此前无问题的截图字节一致时，才沿用该页证据。换主题、换字体、整套换皮、页序重排影响范围扩大时覆盖所有受影响页，无法证明未改页有效时做全量检查。检查后再修改会使对应页证据失效。
 
 参考并适配自 DSH 的通用 composition 指引：`0-CHENAI/dsh-desktop@8dec631777c34fbbcc7d45af787bdd2c468d2cfb`，`packages/ppt-runtime/core/skills/dsh-ppt/references/composition.md`。保留 Selection 的 deck/OfficeCLI 与原生视觉约定，不引入 DSH runtime；来源与许可见本技能 ATTRIBUTION.md。

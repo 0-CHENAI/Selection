@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join, posix } from 'node:path'
+import { join } from 'node:path'
 import { strFromU8 } from 'fflate'
 import { z } from 'zod'
 import { readOoxmlPackage } from './office-template/ooxml-package'
-import { childrenNamed, firstChild, getAttr, parseXml } from './office-template/xml-tree'
+import { childrenNamed, firstChild, parseXml } from './office-template/xml-tree'
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const page = z.number().int().positive()
@@ -18,7 +18,11 @@ const verdictSchema = z.object({
   verdict: z.enum(['pass', 'fail']),
   findings: z.array(z.object({ page, issue: z.string().trim().min(1).max(500) })).max(200),
 })
-const reportSchema = verdictSchema.extend({ sha256: digest, pageCount: page, pageDigests: z.array(digest) })
+const reportSchema = verdictSchema.extend({
+  sha256: digest,
+  pageCount: page,
+  screenshotDigests: z.record(z.string(), digest).optional(),
+})
 export type PptVisualRender = z.infer<typeof renderSchema>
 type Verdict = z.infer<typeof verdictSchema>
 type Report = z.infer<typeof reportSchema>
@@ -103,40 +107,14 @@ function reviewRender(
   } catch { /* Missing render evidence cannot pass. */ }
 }
 
-function presentationPages(bytes: Uint8Array): { count: number; digests: string[] } {
+function presentationPageCount(bytes: Uint8Array): number {
   const parts = readOoxmlPackage(bytes)
   const root = parseXml(strFromU8(parts['ppt/presentation.xml']!)).root
   for (const ns of ['http://schemas.openxmlformats.org/presentationml/2006/main', 'http://purl.oclc.org/ooxml/presentationml/main']) {
     const list = firstChild(root, ns, 'sldIdLst')
-    if (!list) continue
-    const slides = childrenNamed(list, ns, 'sldId')
-    const rels = parseXml(strFromU8(parts['ppt/_rels/presentation.xml.rels']!)).root
-    const targets = new Map(childrenNamed(rels, 'http://schemas.openxmlformats.org/package/2006/relationships', 'Relationship')
-      .map(rel => [getAttr(rel, null, 'Id'), getAttr(rel, null, 'Target')]))
-    const paths = slides.map(slide => {
-      const id = getAttr(slide, 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id')
-        ?? getAttr(slide, 'http://purl.oclc.org/ooxml/officeDocument/relationships', 'id')
-      const target = targets.get(id)
-      return target ? (target.startsWith('/') ? target.slice(1) : posix.join('ppt', target)) : ''
-    })
-    if (new Set(paths).size !== paths.length || !paths.every(path => /^ppt\/slides\/[^/]+\.xml$/.test(path) && parts[path])) {
-      return { count: slides.length, digests: [] }
-    }
-    const local = paths.map(path => [path, posix.join(posix.dirname(path), '_rels', posix.basename(path) + '.rels')])
-    const localParts = new Set(local.flat())
-    // A change to shared resources, layout, theme or presentation order invalidates prior page evidence.
-    const common = createHash('sha256')
-    for (const name of Object.keys(parts).sort()) {
-      if (!localParts.has(name) && !name.startsWith('docProps/')) common.update(name + '\0' + visualSha256(parts[name]!))
-    }
-    const commonDigest = common.digest('hex')
-    return { count: slides.length, digests: local.map(names => {
-      const hash = createHash('sha256').update(commonDigest)
-      for (const name of names) hash.update(name + '\0' + (parts[name] ? visualSha256(parts[name]!) : ''))
-      return hash.digest('hex')
-    }) }
+    if (list) return childrenNamed(list, ns, 'sldId').length
   }
-  return { count: 0, digests: [] }
+  return 0
 }
 
 function reportFile(sessionDir: string, path: string): string {
@@ -172,24 +150,38 @@ export function readVisualVerdict(text: string): Verdict | undefined {
   return { ...verdict, verdict: verdict.findings.length ? 'fail' : verdict.verdict }
 }
 
-export function recordVisualVerdict(sessionDir: string, render: PptVisualRender, verdict: Verdict, allowLocalScope = false): boolean | undefined {
+export function recordVisualVerdict(
+  sessionDir: string, render: PptVisualRender, verdict: Verdict, allowLocalScope = false,
+  capture: PptVisualRender = render,
+): boolean | undefined {
   const pages = render.pages.map(image => image.page)
-  if (!samePages(verdict.coveredPages, pages)) return
+  if (!samePages(verdict.coveredPages, pages) || !render.pages.every(image => matchesScreenshot(image, image.path))) return
   const bytes = readFileSync(render.path)
   if (visualSha256(bytes) !== render.sha256) return
-  const { count: pageCount, digests: pageDigests } = presentationPages(bytes)
+  const pageCount = presentationPageCount(bytes)
   if (!pageCount || pages.some(page => page > pageCount)) return
   const file = reportFile(sessionDir, render.path)
   const prior = previousReport(file)
   const sameRevision = prior?.sha256 === render.sha256
   const findings = sameRevision ? [...prior.findings, ...verdict.findings].slice(0, 200) : verdict.findings
-  const inherited = sameRevision ? prior.coveredPages
-    : allowLocalScope && prior?.coveredPages.length === pageCount && prior.pageCount === pageCount
-      && pageDigests.length === pageCount
-      ? prior.coveredPages.filter(page => prior.pageDigests[page - 1] === pageDigests[page - 1]
-        && !prior.findings.some(finding => finding.page === page)) : []
+  const inherited = sameRevision ? prior.coveredPages.slice() : []
+  if (!sameRevision && allowLocalScope && prior?.coveredPages.length === pageCount && prior.pageCount === pageCount
+    && capture.sha256 === render.sha256 && normalizedPath(capture.path) === normalizedPath(render.path)) {
+    for (const page of prior.coveredPages) {
+      if (pages.includes(page) || prior.findings.some(finding => finding.page === page)) continue
+      const image = capture.pages.find(image => image.page === page)
+      if (image && image.sha256 === prior.screenshotDigests?.[page] && matchesScreenshot(image, image.path)) inherited.push(page)
+    }
+  }
   const coveredPages = [...new Set([...inherited, ...pages])].sort((a, b) => a - b)
-  const record: Report = { sha256: render.sha256, pageCount, pageDigests, coveredPages, verdict: findings.length ? 'fail' : verdict.verdict, findings }
+  const screenshotDigests = Object.fromEntries([
+    ...inherited.flatMap(page => {
+      const sha256 = prior?.screenshotDigests?.[page]
+      return sha256 ? [[page, sha256] as const] : []
+    }),
+    ...render.pages.map(image => [image.page, image.sha256] as const),
+  ])
+  const record: Report = { sha256: render.sha256, pageCount, screenshotDigests, coveredPages, verdict: findings.length ? 'fail' : verdict.verdict, findings }
   mkdirSync(join(sessionDir, 'data', 'ppt-visual-verdicts'), { recursive: true })
   writeFileSync(file, JSON.stringify(record))
   return coveredPages.length === pageCount
@@ -223,7 +215,9 @@ export class PptVisualTurn {
 
   recordVerdict(sessionDir: string, render: PptVisualRender, verdict: Verdict, allowLocalScope: boolean): void {
     const path = normalizedPath(render.path)
-    if (recordVisualVerdict(sessionDir, render, verdict, allowLocalScope || this.fullyReviewed.has(path))) {
+    const local = allowLocalScope || this.fullyReviewed.has(path)
+    const fresh = local ? renderRevisions(this.renders).find(candidate => candidate.path === path && candidate.sha256 === render.sha256) : undefined
+    if (recordVisualVerdict(sessionDir, render, verdict, local, fresh)) {
       this.fullyReviewed.add(path)
     }
   }

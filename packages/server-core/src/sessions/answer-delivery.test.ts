@@ -271,7 +271,12 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       const pptx = readFileSync(fixturePptx)
       writeFileSync(path, pptx)
       const coveredPages = [1, 2, 3, 4, 5]
-      const pages = coveredPages.map(page => ({ page, path: `slide-${page}.png`, sha256: '' }))
+      const pages = coveredPages.map(page => {
+        const screenshot = join(dir, `slide-${page}.png`)
+        const bytes = Buffer.from(`rendered page ${page}`)
+        writeFileSync(screenshot, bytes)
+        return { page, path: screenshot, sha256: visualSha256(bytes) }
+      })
       recordVisualVerdict(dir, { path, sha256: visualSha256(pptx), pages }, { coveredPages, verdict: 'pass', findings: [] })
       await control!.submit({ ...submission, markdown: '文件已更新。' })
       yield { type: 'complete' }
@@ -586,10 +591,15 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const path = join(dir, 'revised.pptx')
     const pptx = readFileSync(fixturePptx)
     const coveredPages = [1, 2, 3, 4, 5]
-    const pages = coveredPages.map(page => ({ page, path: `slide-${page}.png`, sha256: '' }))
     install(async function* (index) {
       if (index === 1) {
         writeFileSync(path, pptx)
+        const pages = coveredPages.map(page => {
+          const screenshot = join(dir, `slide-${page}.png`)
+          const bytes = Buffer.from(`rendered page ${page}`)
+          writeFileSync(screenshot, bytes)
+          return { page, path: screenshot, sha256: visualSha256(bytes) }
+        })
         recordVisualVerdict(dir, { path, sha256: visualSha256(pptx), pages }, { coveredPages, verdict: 'pass', findings: [] })
       } else {
         writeFileSync(path, 'edited without review')

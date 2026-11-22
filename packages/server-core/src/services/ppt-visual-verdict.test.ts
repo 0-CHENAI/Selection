@@ -6,12 +6,13 @@ import { strToU8, zipSync } from 'fflate'
 import { PptVisualTurn, pptVisualBlock, readVisualVerdict, recordVisualVerdict, visualSha256, type PptVisualRender } from './ppt-visual-verdict'
 
 const ns = 'http://schemas.openxmlformats.org'
-function visualTestPptx(second = '<slide/>'): Uint8Array {
+function visualTestPptx(second = '<slide/>', master = '<master/>'): Uint8Array {
   return zipSync({
     'ppt/presentation.xml': strToU8(`<p:presentation xmlns:p="${ns}/presentationml/2006/main" xmlns:r="${ns}/officeDocument/2006/relationships"><p:sldIdLst><p:sldId r:id="r1"/><p:sldId r:id="r2"/></p:sldIdLst></p:presentation>`),
     'ppt/_rels/presentation.xml.rels': strToU8(`<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="r1" Target="slides/slide1.xml"/><Relationship Id="r2" Target="slides/slide2.xml"/></Relationships>`),
     'ppt/slides/slide1.xml': strToU8('<slide/>'),
     'ppt/slides/slide2.xml': strToU8(second),
+    'ppt/slideMasters/slideMaster1.xml': strToU8(master),
   })
 }
 
@@ -106,12 +107,39 @@ describe('G4 outcome bound to the final PowerPoint', () => {
     expect(pptVisualBlock(root, path)).toEqual({ reason: 'coverage', pages: [2] })
   })
 
-  it('keeps existing affected-page coverage for a proven local edit', () => {
+  it('keeps clean unchanged coverage when a local edit rewrites shared XML', () => {
     recordVisualVerdict(root, render, readVisualVerdict(JSON.stringify(pass))!)
-    writeFileSync(path, visualTestPptx('<slide>changed</slide>'))
-    recordVisualVerdict(root, { ...render, sha256: visualSha256(readFileSync(path)), pages: [render.pages[1]!] },
+    writeFileSync(path, visualTestPptx('<slide>changed</slide>', '<master />'))
+    const pages = render.pages.map(image => {
+      const path = join(root, `revised-${image.page}.png`)
+      const bytes = image.page === 1 ? readFileSync(image.path) : strToU8('updated screenshot')
+      writeFileSync(path, bytes)
+      return { ...image, path, sha256: visualSha256(bytes) }
+    })
+    const revised = { ...render, sha256: visualSha256(readFileSync(path)), pages }
+    const visual = new PptVisualTurn()
+    visual.addRender(render)
+    for (const image of revised.pages) visual.addRender({ ...revised, pages: [image] })
+    visual.recordVerdict(root, { ...revised, pages: [revised.pages[1]!] },
       { coveredPages: [2], verdict: 'pass', findings: [] }, true)
     expect(pptVisualBlock(root, path)).toBeUndefined()
+  })
+
+  it.each(['changed', 'tampered', 'missing'] as const)('requires fresh identical screenshots before carrying coverage (%s)', scenario => {
+    const visual = new PptVisualTurn()
+    visual.addRender(render)
+    visual.recordVerdict(root, render, readVisualVerdict(JSON.stringify(pass))!, false)
+    writeFileSync(path, visualTestPptx('<slide>changed</slide>'))
+    const reviewed = render.pages[1]!
+    const current = { ...render.pages[0]! }
+    if (scenario !== 'missing') {
+      writeFileSync(current.path, 'different rendering')
+      if (scenario === 'changed') current.sha256 = visualSha256(readFileSync(current.path))
+    }
+    const revised = { ...render, sha256: visualSha256(readFileSync(path)), pages: [reviewed] }
+    visual.addRender({ ...revised, pages: scenario === 'missing' ? [reviewed] : [current, reviewed] })
+    visual.recordVerdict(root, revised, { coveredPages: [2], verdict: 'pass', findings: [] }, true)
+    expect(pptVisualBlock(root, path)).toEqual({ reason: 'coverage', pages: [1] })
   })
 
   it('keeps only clean unchanged coverage from a failed full review', () => {
@@ -119,7 +147,9 @@ describe('G4 outcome bound to the final PowerPoint', () => {
     const finding = { page: 2, issue: 'The header does not align with the table.' }
     visual.recordVerdict(root, render, { ...readVisualVerdict(JSON.stringify(pass))!, verdict: 'fail', findings: [finding] }, false)
     writeFileSync(path, visualTestPptx('<slide>repaired</slide>'))
-    visual.recordVerdict(root, { ...render, sha256: visualSha256(readFileSync(path)), pages: [render.pages[1]!] },
+    const revised = { ...render, sha256: visualSha256(readFileSync(path)) }
+    visual.addRender(revised)
+    visual.recordVerdict(root, { ...revised, pages: [render.pages[1]!] },
       { coveredPages: [2], verdict: 'pass', findings: [] }, false)
     expect(pptVisualBlock(root, path)).toBeUndefined()
   })
@@ -128,8 +158,9 @@ describe('G4 outcome bound to the final PowerPoint', () => {
     const finding = { page: 1, issue: 'An unresolved overlap.' }
     recordVisualVerdict(root, render, { ...readVisualVerdict(JSON.stringify(pass))!, verdict: 'fail', findings: [finding] })
     writeFileSync(path, visualTestPptx('<slide>different</slide>'))
-    recordVisualVerdict(root, { ...render, sha256: visualSha256(readFileSync(path)), pages: [render.pages[1]!] },
-      { coveredPages: [2], verdict: 'pass', findings: [] }, true)
+    const revised = { ...render, sha256: visualSha256(readFileSync(path)) }
+    recordVisualVerdict(root, { ...revised, pages: [render.pages[1]!] },
+      { coveredPages: [2], verdict: 'pass', findings: [] }, true, revised)
     expect(pptVisualBlock(root, path)).toEqual({ reason: 'coverage', pages: [1] })
   })
 

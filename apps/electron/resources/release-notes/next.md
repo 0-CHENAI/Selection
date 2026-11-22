@@ -162,6 +162,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **PPT 局部编辑保留未改页的验收结果** — 最终保存稿重新截图后，只有截图与先前一致且没有遗留问题的页才可沿用视觉验收；OfficeCLI 重写文件结构不再让这些页误报缺失。
+
 - **PPT 截图输出截断不再误拦截交付** — 无界面截图将验收绑定信息另存到会话，工具输出即使被截短也不会丢失；最终保存版本和截图仍须通过指纹校验。
 
 - **内置技能按需调用** — 应用随包技能不再显示在技能管理页、slash 命令和其他用户选择列表中；模型目录、自然语言路由与 Office 案例的按需注入保持可用。
