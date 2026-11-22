@@ -147,10 +147,11 @@ export class ConversationArtifactVersions {
       } catch { this.onFailure() }
     }
   }
-  async capture(markdown: string, sourceRunId: string, aiTitle?: string, changedPaths: readonly string[] = [], includeAnswerLinks = true): Promise<ArtifactDeliveryRef[]> {
+  async capture(markdown: string, sourceRunId: string, aiTitle?: string, changedPaths: readonly string[] = [], includeAnswerLinks = true, excludedPaths: readonly string[] = []): Promise<ArtifactDeliveryRef[]> {
     const title = suppliedVersionTitle(aiTitle) ?? artifactVersionTitle(markdown)
     const deliveries = new Map<string, string>()
     const writtenPaths = [...changedPaths, ...this.pendingWrites]
+    const excluded = (path: string) => excludedPaths.some(file => sameArtifactLocation(file, path))
     // A link can cite an unchanged source file. Only add untracked files that
     // appeared during this turn; known files are compared against their baseline.
     for (const path of [...(includeAnswerLinks ? localArtifactLinks(markdown) : []), ...writtenPaths]) {
@@ -158,7 +159,7 @@ export class ConversationArtifactVersions {
       for (const candidate of candidates) {
         try {
           const safe = await this.authorize(candidate)
-          if (isSessionScratchPath(safe)) continue
+          if (isSessionScratchPath(safe) || excluded(safe)) continue
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
           const changedPath = writtenPaths.find(path => sameArtifactLocation(path, safe))
@@ -183,7 +184,7 @@ export class ConversationArtifactVersions {
         if (!record) continue
         const baseline = this.baselines.get(record.path)
         const published = deliveries.get(record.path) ?? record.path
-        if (isSessionScratchPath(record.path) || isSessionScratchPath(published)) continue
+        if (isSessionScratchPath(record.path) || isSessionScratchPath(published) || excluded(record.path) || excluded(published)) continue
         // The path was authorized when it was tracked. A deleted file can no
         // longer be canonicalized by a fresh authorization.
         if (!existsSync(path) || !lstatSync(path).isFile()) {

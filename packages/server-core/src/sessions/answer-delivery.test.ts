@@ -539,6 +539,32 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     }
   })
 
+  it('does not snapshot a blocked edit of a previously delivered PowerPoint', async () => {
+    const dir = getSessionPath(root, managed.id)
+    const path = join(root, 'revised.pptx')
+    const pptx = readFileSync(fixturePptx)
+    const coveredPages = [1, 2, 3, 4, 5]
+    const pages = coveredPages.map(page => ({ page, path: `slide-${page}.png`, sha256: '' }))
+    install(async function* (index) {
+      if (index === 1) {
+        writeFileSync(path, pptx)
+        recordVisualVerdict(dir, { path, sha256: visualSha256(pptx), pages }, { coveredPages, verdict: 'pass', findings: [] })
+      } else {
+        writeFileSync(path, 'edited without review')
+      }
+      await control!.submit({ ...submission, markdown: `Updated [PowerPoint](<${path}>)` })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, 'Create a PowerPoint.')
+    const store = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
+    expect(store.findByPath(path)?.versions).toHaveLength(1)
+    await manager.sendMessage(managed.id, 'Revise the PowerPoint.')
+    const final = managed.messages.findLast(message => message.answerCommitted)!
+    expect(final.content).toContain('G4')
+    expect(final.artifactVersions ?? []).toHaveLength(0)
+    expect(store.findByPath(path)?.versions).toHaveLength(1)
+  })
+
   it('reveals a refused candidate as process text when a later tool runs', async () => {
     install(async function* () {
       yield { type: 'text_complete', text: '初稿答案', isIntermediate: false, phase: 'final', turnId: 'early' }

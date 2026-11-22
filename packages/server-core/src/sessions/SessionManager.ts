@@ -10255,7 +10255,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           }
         } catch { /* A missing or inaccessible link is a citation, not a card. */ }
       }
-      const versions = await tracker.capture(answerMarkdown, `${managed.id}/${userMessageId}`, title, candidates, !inventory)
+      const versions = await tracker.capture(answerMarkdown, `${managed.id}/${userMessageId}`, title, candidates, !inventory, blocked)
       const missing = managed.messages.flatMap(message => message.artifactVersions?.filter(ref => !ref.artifactId).map(ref => ref.versionId) ?? [])
       const prior = missing.length ? withArtifactIdentities(managed.messages,
         new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id).versionArtifactIds(missing)) : managed.messages
