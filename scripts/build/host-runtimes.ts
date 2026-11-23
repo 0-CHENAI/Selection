@@ -18,13 +18,12 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
-  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'fs'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
+import { createRequire } from 'node:module'
+import { join } from 'path'
 import {
   curlDownload,
   extractArchive,
@@ -34,6 +33,19 @@ import {
   type BuildConfig,
   type Platform,
 } from './common'
+
+const require = createRequire(import.meta.url)
+const copyRuntime = require('./copy-runtime-tree.cjs') as {
+  HOST_RUNTIME_TREE_FORMAT: number
+  copyRuntimeTree: (source: string, destination: string, options?: { preserveSymlinks?: boolean }) => void
+  replaceTree: (source: string, destination: string, options?: { preserveSymlinks?: boolean }) => void
+  shouldPreserveRuntimeSymlinks: (platform: string) => boolean
+}
+
+export const HOST_RUNTIME_TREE_FORMAT = copyRuntime.HOST_RUNTIME_TREE_FORMAT
+export const copyRuntimeTree = copyRuntime.copyRuntimeTree
+export const replaceTree = copyRuntime.replaceTree
+export const shouldPreserveRuntimeSymlinks = copyRuntime.shouldPreserveRuntimeSymlinks
 
 export const DUGITE_NATIVE_VERSION = 'v2.56.1'
 export const DUGITE_NATIVE_ASSET = 'v2.56.1-238326e'
@@ -48,6 +60,7 @@ interface RuntimeStamp {
   version: string
   platform: Platform
   arch: Arch
+  treeFormat: number
 }
 
 interface GitArtifact {
@@ -140,14 +153,15 @@ function writeStamp(targetDir: string, stamp: RuntimeStamp): void {
   writeFileSync(stampPath(targetDir), JSON.stringify(stamp, null, 2))
 }
 
-function stampMatches(targetDir: string, expected: RuntimeStamp): boolean {
+export function stampMatches(targetDir: string, expected: RuntimeStamp): boolean {
   const stamp = readStamp(targetDir)
   return Boolean(
     stamp
     && stamp.kind === expected.kind
     && stamp.version === expected.version
     && stamp.platform === expected.platform
-    && stamp.arch === expected.arch,
+    && stamp.arch === expected.arch
+    && stamp.treeFormat === expected.treeFormat,
   )
 }
 
@@ -219,94 +233,6 @@ async function cachedDownload(electronDir: string, fileName: string, urls: strin
   return cached
 }
 
-function isVirtualUnixTarget(target: string): boolean {
-  const posix = target.replace(/\\/g, '/')
-  return posix === '/dev' || posix.startsWith('/dev/')
-    || posix === '/proc' || posix.startsWith('/proc/')
-    || posix === '/sys' || posix.startsWith('/sys/')
-}
-
-function isInsideTree(root: string, candidate: string): boolean {
-  const rel = relative(resolve(root), resolve(candidate))
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-}
-
-/**
- * Copy a relocatable Git/Python tree without `cpSync({ dereference: true })`.
- *
- * Git for Windows' portable tarball (Git-2.56.1-64-bit.tar.bz2) ships MSYS2
- * Unix symlinks — `dev/fd -> /proc/self/fd`, `dev/std{in,out,err}`,
- * `etc/mtab -> /proc/mounts`. After extract those links dangle on Windows;
- * Bun then `stat`s them and throws ENOENT (Package Desktop Installers
- * 43403568887 / 43863028271). Skip non-relocatable and dangling links;
- * dereference in-tree links so later electron-builder/afterPack copies stay
- * symlink-free.
- */
-export function copyRuntimeTree(source: string, destination: string): void {
-  copyRuntimeNode(source, destination, resolve(source), new Set())
-}
-
-function copyRuntimeNode(
-  source: string,
-  destination: string,
-  treeRoot: string,
-  walkStack: Set<string>,
-): void {
-  let sourceStat
-  try {
-    sourceStat = lstatSync(source)
-  } catch {
-    return
-  }
-
-  if (sourceStat.isSymbolicLink()) {
-    let target: string
-    try {
-      target = readlinkSync(source)
-    } catch {
-      return
-    }
-    if (isVirtualUnixTarget(target)) return
-    const resolvedTarget = isAbsolute(target)
-      ? resolve(target)
-      : resolve(dirname(source), target)
-    if (!isInsideTree(treeRoot, resolvedTarget)) return
-    try {
-      sourceStat = statSync(source)
-    } catch {
-      return
-    }
-  }
-
-  if (sourceStat.isDirectory()) {
-    let real = source
-    try {
-      real = realpathSync(source)
-    } catch {
-      /* keep source */
-    }
-    if (walkStack.has(real)) return
-    walkStack.add(real)
-    mkdirSync(destination, { recursive: true })
-    for (const name of readdirSync(source)) {
-      copyRuntimeNode(join(source, name), join(destination, name), treeRoot, walkStack)
-    }
-    walkStack.delete(real)
-    return
-  }
-
-  if (sourceStat.isFile()) {
-    mkdirSync(dirname(destination), { recursive: true })
-    copyFileSync(source, destination)
-  }
-}
-
-export function replaceTree(source: string, destination: string): void {
-  rmSync(destination, { recursive: true, force: true })
-  mkdirSync(dirname(destination), { recursive: true })
-  copyRuntimeTree(source, destination)
-}
-
 function ensureWindowsPython3Alias(pythonRoot: string, platform: Platform): void {
   if (platform !== 'win32') return
   const python = join(pythonRoot, 'python.exe')
@@ -325,6 +251,7 @@ export async function downloadGit(config: BuildConfig): Promise<void> {
     version: artifact.version,
     platform,
     arch,
+    treeFormat: HOST_RUNTIME_TREE_FORMAT,
   }
   if (stampMatches(targetDir, expected) && looksLikeGitRoot(targetDir)) {
     console.log(`Git ${artifact.version} already present at ${targetDir}`)
@@ -344,7 +271,9 @@ export async function downloadGit(config: BuildConfig): Promise<void> {
     mkdirSync(extractDir, { recursive: true })
     await extractArchive(archive, extractDir)
     const root = locateRuntimeRoot(extractDir, looksLikeGitRoot)
-    replaceTree(root, targetDir)
+    replaceTree(root, targetDir, {
+      preserveSymlinks: shouldPreserveRuntimeSymlinks(platform),
+    })
     chmodUnixTree(targetDir)
     writeStamp(targetDir, expected)
     if (!looksLikeGitRoot(targetDir)) {
@@ -365,6 +294,7 @@ export async function downloadPython(config: BuildConfig): Promise<void> {
     version: `${PYTHON_STANDALONE_VERSION}+${PYTHON_STANDALONE_TAG}`,
     platform,
     arch,
+    treeFormat: HOST_RUNTIME_TREE_FORMAT,
   }
   if (stampMatches(targetDir, expected) && looksLikePythonRoot(targetDir)) {
     console.log(`Python ${expected.version} already present at ${targetDir}`)
@@ -384,7 +314,9 @@ export async function downloadPython(config: BuildConfig): Promise<void> {
     mkdirSync(extractDir, { recursive: true })
     await extractArchive(archive, extractDir)
     const root = locateRuntimeRoot(extractDir, looksLikePythonRoot)
-    replaceTree(root, targetDir)
+    replaceTree(root, targetDir, {
+      preserveSymlinks: shouldPreserveRuntimeSymlinks(platform),
+    })
     ensureWindowsPython3Alias(targetDir, platform)
     chmodUnixTree(targetDir)
     writeStamp(targetDir, expected)

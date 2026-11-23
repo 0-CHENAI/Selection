@@ -20,6 +20,10 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const {
+  copyRuntimeTree,
+  shouldPreserveRuntimeSymlinks,
+} = require('../../../scripts/build/copy-runtime-tree.cjs');
 
 function copySharpRuntime(context, resourcesRoot) {
   const archName = ({ 1: 'x64', 3: 'arm64' })[context.arch] || String(context.arch);
@@ -107,13 +111,17 @@ function hasAny(root, relatives) {
   return relatives.some(relative => fs.existsSync(path.join(root, relative)));
 }
 
-function copyHostRuntime(projectDir, resourcesRoot, relative, markers) {
+function copyHostRuntime(projectDir, resourcesRoot, relative, markers, platform) {
   const source = path.join(projectDir, relative);
   if (!fs.existsSync(source)) throw new Error(`Required host runtime is missing: ${relative}`);
   const destination = path.join(resourcesRoot, 'app', relative);
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.cpSync(source, destination, { recursive: true, dereference: true });
+  // Must match staging: POSIX keeps in-tree file symlinks, Windows flattens.
+  // Do not recopy host runtimes with dereference enabled; that inflates macOS Git.
+  copyRuntimeTree(source, destination, {
+    preserveSymlinks: shouldPreserveRuntimeSymlinks(platform),
+  });
   if (!hasAny(destination, markers)) {
     throw new Error(`Packaged host runtime is missing: ${relative}`);
   }
@@ -138,10 +146,10 @@ function copyAgentRuntimes(context, resourcesRoot) {
   }
   copyHostRuntime(projectDir, resourcesRoot, 'vendor/git', [
     'bin/git', 'cmd/git.exe', 'mingw64/bin/git.exe', 'ucrt64/bin/git.exe',
-  ]);
+  ], context.electronPlatformName);
   copyHostRuntime(projectDir, resourcesRoot, 'vendor/python', [
     'bin/python3', 'python.exe', 'python3.exe',
-  ]);
+  ], context.electronPlatformName);
   const ripgrep = 'node_modules/@vscode/ripgrep';
   const sources = [path.join(projectDir, ripgrep), path.join(projectDir, '..', '..', ripgrep)];
   const source = sources.find(candidate => fs.existsSync(candidate));

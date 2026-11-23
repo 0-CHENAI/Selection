@@ -126,6 +126,8 @@ mac:
       to: app/node_modules/@vscode/ripgrep
     # Relocatable Git (dugite-native) and CPython (python-build-standalone).
     # Copied before signing so every Mach-O in these trees is notarized.
+    # afterPack re-copies these trees with copyRuntimeTree so macOS in-tree
+    # git-*/python symlinks are not flattened into duplicate files.
     - from: vendor/git
       to: app/vendor/git
     - from: vendor/python
