@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import {
   DUGITE_NATIVE_VERSION,
   GIT_FOR_WINDOWS_VERSION,
+  HOST_RUNTIME_TREE_FORMAT,
   PYTHON_STANDALONE_TAG,
   PYTHON_STANDALONE_VERSION,
   copyRuntimeTree,
@@ -23,6 +24,8 @@ import {
   hasHostRuntimeArtifacts,
   replaceTree,
   resolveBundleConfig,
+  shouldPreserveRuntimeSymlinks,
+  stampMatches,
 } from './host-runtimes.ts'
 
 const repoRoot = join(import.meta.dir, '../..')
@@ -103,6 +106,9 @@ describe('bundled host runtime artifacts', () => {
     const afterPack = readFileSync(join(repoRoot, 'apps/electron/scripts/afterPack.cjs'), 'utf8')
     expect(afterPack).toContain('vendor/git')
     expect(afterPack).toContain('vendor/python')
+    expect(afterPack).toContain('copyRuntimeTree')
+    expect(afterPack).toContain('shouldPreserveRuntimeSymlinks')
+    expect(afterPack).not.toMatch(/copyHostRuntime[\s\S]{0,400}dereference:\s*true/)
   })
 
   it('wires Git/Python downloads into package, copy-assets, electron-dev, and main PATH', () => {
@@ -165,6 +171,91 @@ describe('bundled host runtime artifacts', () => {
 })
 
 describe('copyRuntimeTree', () => {
+  it('preserves POSIX in-tree file symlinks and skips unsafe or dangling links', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'git-runtime-preserve-'))
+    try {
+      const source = join(tmp, 'extract')
+      const dest = join(tmp, 'vendor-git')
+      mkdirSync(join(source, 'bin'), { recursive: true })
+      mkdirSync(join(source, 'libexec', 'git-core'), { recursive: true })
+      mkdirSync(join(source, 'dev'), { recursive: true })
+      writeFileSync(join(source, 'libexec', 'git-core', 'git'), 'git-binary', { mode: 0o755 })
+      writeFileSync(join(source, 'bin', 'scalar'), 'scalar-binary', { mode: 0o755 })
+      symlinkSync('git', join(source, 'libexec', 'git-core', 'git-fetch'))
+      symlinkSync('git', join(source, 'libexec', 'git-core', 'git-clone'))
+      symlinkSync('../libexec/git-core/git', join(source, 'bin', 'git'))
+      symlinkSync('/proc/self/fd', join(source, 'dev', 'fd'))
+      symlinkSync('/etc/passwd', join(source, 'bin', 'escape'))
+      symlinkSync('missing-target', join(source, 'bin', 'dangling'))
+
+      copyRuntimeTree(source, dest, { preserveSymlinks: true })
+
+      expect(lstatSync(join(dest, 'libexec', 'git-core', 'git-fetch')).isSymbolicLink()).toBe(true)
+      expect(readFileSync(join(dest, 'libexec', 'git-core', 'git-fetch'), 'utf8')).toBe('git-binary')
+      expect(lstatSync(join(dest, 'libexec', 'git-core', 'git-clone')).isSymbolicLink()).toBe(true)
+      expect(lstatSync(join(dest, 'bin', 'git')).isSymbolicLink()).toBe(true)
+      expect(readFileSync(join(dest, 'bin', 'git'), 'utf8')).toBe('git-binary')
+      expect(lstatSync(join(dest, 'libexec', 'git-core', 'git')).isSymbolicLink()).toBe(false)
+      expect((lstatSync(join(dest, 'libexec', 'git-core', 'git')).mode & 0o111) !== 0).toBe(true)
+      expect(existsSync(join(dest, 'dev', 'fd'))).toBe(false)
+      expect(existsSync(join(dest, 'bin', 'escape'))).toBe(false)
+      expect(existsSync(join(dest, 'bin', 'dangling'))).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps Windows flattening of in-tree file links while still skipping Unix vfs links', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'git-runtime-flatten-'))
+    try {
+      const source = join(tmp, 'extract')
+      const dest = join(tmp, 'vendor-git')
+      mkdirSync(join(source, 'libexec', 'git-core'), { recursive: true })
+      mkdirSync(join(source, 'dev'), { recursive: true })
+      writeFileSync(join(source, 'libexec', 'git-core', 'git'), 'git-binary', { mode: 0o755 })
+      symlinkSync('git', join(source, 'libexec', 'git-core', 'git-fetch'))
+      symlinkSync('/proc/self/fd', join(source, 'dev', 'fd'))
+
+      copyRuntimeTree(source, dest, { preserveSymlinks: false })
+
+      expect(lstatSync(join(dest, 'libexec', 'git-core', 'git-fetch')).isSymbolicLink()).toBe(false)
+      expect(readFileSync(join(dest, 'libexec', 'git-core', 'git-fetch'), 'utf8')).toBe('git-binary')
+      expect(existsSync(join(dest, 'dev', 'fd'))).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('invalidates vendor stamps that predate symlink-preserving treeFormat', () => {
+    expect(shouldPreserveRuntimeSymlinks('darwin')).toBe(true)
+    expect(shouldPreserveRuntimeSymlinks('linux')).toBe(true)
+    expect(shouldPreserveRuntimeSymlinks('win32')).toBe(false)
+    expect(HOST_RUNTIME_TREE_FORMAT).toBe(2)
+
+    const tmp = mkdtempSync(join(tmpdir(), 'runtime-stamp-'))
+    try {
+      const expected = {
+        kind: 'git' as const,
+        version: 'v2.56.1+git-2.56.1',
+        platform: 'darwin' as const,
+        arch: 'arm64' as const,
+        treeFormat: HOST_RUNTIME_TREE_FORMAT,
+      }
+      const stampPath = join(tmp, '.selection-runtime.json')
+      writeFileSync(stampPath, JSON.stringify({
+        kind: expected.kind,
+        version: expected.version,
+        platform: expected.platform,
+        arch: expected.arch,
+      }))
+      expect(stampMatches(tmp, expected)).toBe(false)
+      writeFileSync(stampPath, JSON.stringify(expected))
+      expect(stampMatches(tmp, expected)).toBe(true)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
   it('skips Git-for-Windows MSYS Unix symlinks that break cpSync dereference on Windows', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'git-runtime-copy-'))
     try {

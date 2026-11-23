@@ -13,6 +13,8 @@ on:
     paths:
       - 'scripts/build/host-runtimes.ts'
       - 'scripts/build/host-runtimes.test.ts'
+      - 'scripts/build/copy-runtime-tree.cjs'
+      - 'apps/electron/scripts/afterPack.cjs'
       - '.github/workflows/package-desktop.yml'
   workflow_dispatch:
 
