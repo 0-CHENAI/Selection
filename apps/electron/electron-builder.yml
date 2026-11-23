@@ -57,10 +57,12 @@ files:
   - resources/bin/linux-x64/**/*
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
-  # Relocatable Git + CPython. Windows excludes these from `files` (EBUSY) and
-  # copies them via extraResources; afterPack copies all platforms before signing.
-  - vendor/git/**/*
-  - vendor/python/**/*
+  # Git/Python must not be in `files`. macOS #834 kept in-tree git-* / python3
+  # symlinks; electron-builder then copies the same tree again via extraResources
+  # with fs.symlink and throws EEXIST (Package Desktop 45133668791, git-add).
+  # extraResources copies once; afterPack recopies with copyRuntimeTree.
+  - "!vendor/git/**/*"
+  - "!vendor/python/**/*"
   # Exclude everything from node_modules (will use extraResources for SDK)
   - "!node_modules/**/*"
   # Build outputs live inside the Electron project. Never recursively package a
@@ -125,9 +127,9 @@ mac:
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
     # Relocatable Git (dugite-native) and CPython (python-build-standalone).
-    # Copied before signing so every Mach-O in these trees is notarized.
-    # afterPack re-copies these trees with copyRuntimeTree so macOS in-tree
-    # git-*/python symlinks are not flattened into duplicate files.
+    # Sole electron-builder copy of these trees (not `files`) so in-tree
+    # git-* symlinks are not created twice. afterPack recopies with
+    # copyRuntimeTree before signing so Mach-O is notarized and links stay.
     - from: vendor/git
       to: app/vendor/git
     - from: vendor/python
@@ -141,6 +143,8 @@ mac:
     - "!**/__pycache__/**"
     - "!**/resources/bin/win32-*/**"
     - "!**/resources/bin/linux-*/**"
+    - "!vendor/git/**/*"
+    - "!vendor/python/**/*"
     - "!release/**"
     - "!release-swarm-preview/**"
     - "!**/ppt-design/styles/_archive/**"
@@ -244,6 +248,8 @@ linux:
     - "!**/__pycache__/**"
     - "!**/resources/bin/darwin-*/**"
     - "!**/resources/bin/win32-*/**"
+    - "!vendor/git/**/*"
+    - "!vendor/python/**/*"
     - "!release/**"
     - "!release-swarm-preview/**"
     - "!**/ppt-design/styles/_archive/**"

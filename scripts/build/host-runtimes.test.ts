@@ -91,8 +91,10 @@ describe('bundled host runtime artifacts', () => {
 
   it('packages vendor git/python via extraResources and afterPack', () => {
     const builder = readFileSync(join(repoRoot, 'apps/electron/electron-builder.yml'), 'utf8')
-    expect(builder).toContain('- vendor/git/**/*')
-    expect(builder).toContain('- vendor/python/**/*')
+    const filesIncludes = builder.split('\n').filter((line) =>
+      /^\s+- vendor\/(?:git|python)/.test(line) && !line.includes('!'),
+    )
+    expect(filesIncludes).toEqual([])
     expect(builder).toContain('from: vendor/git')
     expect(builder).toContain('to: app/vendor/git')
     expect(builder).toContain('from: vendor/python')
