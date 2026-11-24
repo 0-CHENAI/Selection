@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   PROGRAMMATIC_SMOOTH_SCROLL_MS,
   SHOW_SCROLL_BUTTON_THRESHOLD_PX,
-  STICK_TO_BOTTOM_THRESHOLD_PX,
+  HIDE_SCROLL_BUTTON_THRESHOLD_PX,
   FOLLOW_PAINT_SHIFT_MAX_STEP_PX,
   applyFollowPaintTransform,
   compensateFollowPaintShift,
@@ -25,29 +25,42 @@ import {
 describe('virtual history preserves reader intent and streaming', () => {
   const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
   const body = source.match(/const handleScroll = React.useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[applyStickState\]\)/)?.[1]
-  function scroll(sticky: boolean, atBottom: boolean) {
+  function scroll(sticky: boolean, distanceFromBottom: number, previousScrollTop: number) {
     expect(body).toBeDefined()
-    const viewport = { scrollTop: atBottom ? 4600 : 1000, scrollHeight: 5000, clientHeight: 400 }
+    const viewport = { scrollTop: 4600 - distanceFromBottom, scrollHeight: 5000, clientHeight: 400 }
     const stickyRef = { current: sticky }
     let updates = 0
     let resumes = 0
     const scope = {
       scrollViewportRef: { current: viewport }, readScrollMetrics, isAtBottom,
+      previousScrollTopRef: { current: previousScrollTop },
       ignoreScrollUnstickUntilRef: { current: 0 }, isStickToBottomRef: stickyRef, shouldApplyUserScroll,
-      applyStickState: () => { updates++; stickyRef.current = isAtBottom(viewport) },
+      applyStickState: (metrics: ScrollMetrics, options: { allowStick: boolean }) => {
+        updates++
+        stickyRef.current = resolveStickToBottomState(metrics, false, options.allowStick).isStickToBottom
+      },
       stickyFollowRef: { current: { resize() { resumes++ } } },
     }
     new Function(...Object.keys(scope), body!)(...Object.values(scope))
     return { sticky: stickyRef.current, updates, resumes }
   }
   test('layout growth alone cannot release the sticky bottom', () => {
-    expect(scroll(true, false)).toEqual({ sticky: true, updates: 0, resumes: 0 })
+    expect(scroll(true, 3600, 1000)).toEqual({ sticky: true, updates: 0, resumes: 0 })
   })
   test('reader scrolling away keeps control of the full history', () => {
-    expect(scroll(false, false)).toEqual({ sticky: false, updates: 1, resumes: 0 })
+    expect(scroll(false, 3600, 4600)).toEqual({ sticky: false, updates: 1, resumes: 0 })
+  })
+  test('a small upward scroll does not reattach, even within rounding distance', () => {
+    for (const distance of [0.5, 1, 10, 19]) {
+      expect(scroll(false, distance, 4600)).toEqual({ sticky: false, updates: 1, resumes: 0 })
+    }
+    expect(scroll(false, 0.5, 4599.5)).toEqual({ sticky: false, updates: 1, resumes: 0 })
+  })
+  test('approaching the bottom keeps the reader in control until the end is reached', () => {
+    expect(scroll(false, 10, 4550)).toEqual({ sticky: false, updates: 1, resumes: 0 })
   })
   test('returning to the actual bottom resumes following', () => {
-    expect(scroll(false, true)).toEqual({ sticky: true, updates: 1, resumes: 1 })
+    expect(scroll(false, 0.5, 4590)).toEqual({ sticky: true, updates: 1, resumes: 1 })
   })
 })
 
@@ -67,11 +80,12 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     let unlocks = 0
     let cancelled = 0
     const stickyFollowRef = { current: { cancel() { cancelled++ } } }
-    const wheel = new Function('event', 'isStickToBottomRef', 'cancelProgrammaticLock', 'stickyFollowRef', wheelBody!)
-    wheel({ deltaY: 20 }, sticky, () => unlocks++, stickyFollowRef)
+    const pauseFollowing = () => { sticky.current = false }
+    const wheel = new Function('event', 'pauseFollowing', 'cancelProgrammaticLock', 'stickyFollowRef', wheelBody!)
+    wheel({ deltaY: 20 }, pauseFollowing, () => unlocks++, stickyFollowRef)
     expect(sticky.current).toBe(true)
     expect(cancelled).toBe(1)
-    wheel({ deltaY: -1 }, sticky, () => unlocks++, stickyFollowRef)
+    wheel({ deltaY: -1 }, pauseFollowing, () => unlocks++, stickyFollowRef)
     expect(sticky.current).toBe(false)
     expect(unlocks).toBe(2)
     expect(cancelled).toBe(2)
@@ -398,13 +412,24 @@ describe('resolveStickToBottomState — leave / return / send / click (#73)', ()
   })
 
   test('hides the button after scrolling back to the bottom', () => {
-    const next = resolveStickToBottomState(away(10), true)
+    const next = resolveStickToBottomState(away(0.5), true)
     expect(next.isStickToBottom).toBe(true)
     expect(next.showButton).toBe(false)
   })
 
+  test('hides the button within 20 pixels while following stays paused', () => {
+    expect(resolveStickToBottomState(away(10), true)).toEqual({
+      isStickToBottom: false,
+      showButton: false,
+    })
+    expect(resolveStickToBottomState(away(0.5), false, false)).toEqual({
+      isStickToBottom: false,
+      showButton: false,
+    })
+  })
+
   test('does not flash the button in the 20–40px hysteresis band', () => {
-    const mid = away((STICK_TO_BOTTOM_THRESHOLD_PX + SHOW_SCROLL_BUTTON_THRESHOLD_PX) / 2)
+    const mid = away((HIDE_SCROLL_BUTTON_THRESHOLD_PX + SHOW_SCROLL_BUTTON_THRESHOLD_PX) / 2)
     const first = resolveStickToBottomState(mid, false)
     expect(first.isStickToBottom).toBe(false)
     expect(first.showButton).toBe(false)

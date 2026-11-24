@@ -5,8 +5,9 @@
  * rules can be unit-tested without mounting the renderer.
  */
 
-export const STICK_TO_BOTTOM_THRESHOLD_PX = 20
-/** Show the button farther than the stick threshold so it does not flicker at the edge. */
+/** scrollHeight/clientHeight are rounded, while scrollTop can be fractional. */
+const BOTTOM_ROUNDING_TOLERANCE_PX = 1
+export const HIDE_SCROLL_BUTTON_THRESHOLD_PX = 20
 export const SHOW_SCROLL_BUTTON_THRESHOLD_PX = 40
 export const LOAD_MORE_TOP_PX = 100
 export const PROGRAMMATIC_SMOOTH_SCROLL_MS = 1200
@@ -302,11 +303,8 @@ export function contentOverflows(metrics: ScrollMetrics): boolean {
   return metrics.scrollHeight > metrics.clientHeight + 1
 }
 
-export function isAtBottom(
-  metrics: ScrollMetrics,
-  threshold = STICK_TO_BOTTOM_THRESHOLD_PX,
-): boolean {
-  return getDistanceFromBottom(metrics) < threshold
+export function isAtBottom(metrics: ScrollMetrics): boolean {
+  return getDistanceFromBottom(metrics) <= BOTTOM_ROUNDING_TOLERANCE_PX
 }
 
 export function forceStickToBottomState(): StickToBottomState {
@@ -314,22 +312,21 @@ export function forceStickToBottomState(): StickToBottomState {
 }
 
 /**
- * Stick uses the existing 20px edge. The button uses hysteresis: appear only
- * after 40px away, then stay until the 20px stick edge so near-bottom
- * streaming / input-height jitter does not flash it.
+ * Keep the button's 20–40px hysteresis separate from following the transcript.
+ * A reader can pause following without scrolling far enough to show the button.
  */
 export function resolveStickToBottomState(
   metrics: ScrollMetrics,
   wasShowing = false,
+  allowStick = true,
 ): StickToBottomState {
-  const stuck = isAtBottom(metrics)
-  if (stuck || !contentOverflows(metrics)) {
-    return { isStickToBottom: stuck, showButton: false }
+  if (!contentOverflows(metrics) || (allowStick && isAtBottom(metrics))) {
+    return forceStickToBottomState()
   }
 
   const distance = getDistanceFromBottom(metrics)
   const showButton = wasShowing
-    ? distance >= STICK_TO_BOTTOM_THRESHOLD_PX
+    ? distance >= HIDE_SCROLL_BUTTON_THRESHOLD_PX
     : distance >= SHOW_SCROLL_BUTTON_THRESHOLD_PX
 
   return { isStickToBottom: false, showButton }

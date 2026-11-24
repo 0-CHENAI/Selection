@@ -677,6 +677,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [historyBounds, setHistoryBounds] = React.useState({ sessionId: session?.id ?? null, start: 0, end: 0 })
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  const previousScrollTopRef = React.useRef<number | null>(null)
   const activeSessionId = session?.id ?? null
   const sessionIdRef = React.useRef(activeSessionId)
   sessionIdRef.current = activeSessionId
@@ -688,14 +689,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const ignoreScrollUnstickUntilRef = React.useRef(0)
   const applyStickState = React.useCallback((
     metrics: ScrollMetrics | null,
-    options?: { forceStick?: boolean; ignoreUnstickMs?: number },
+    options?: { forceStick?: boolean; ignoreUnstickMs?: number; allowStick?: boolean },
   ) => {
     if (options?.ignoreUnstickMs != null) {
       ignoreScrollUnstickUntilRef.current = Date.now() + options.ignoreUnstickMs
     }
     const next = options?.forceStick || !metrics
       ? forceStickToBottomState()
-      : resolveStickToBottomState(metrics, showScrollToBottomRef.current)
+      : resolveStickToBottomState(metrics, showScrollToBottomRef.current, options?.allowStick)
     isStickToBottomRef.current = next.isStickToBottom
     showScrollToBottomRef.current = next.showButton
     setScrollToBottomUi(prev => (
@@ -1376,15 +1377,20 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
     const metrics = readScrollMetrics(viewport)
-    const atBottom = isAtBottom(metrics)
+    const previousScrollTop = previousScrollTopRef.current
+    previousScrollTopRef.current = metrics.scrollTop
+    const wasStuck = isStickToBottomRef.current
+    // Fractional upward movement can still be within rounding distance of the
+    // end. Only movement toward it can resume following a detached viewport.
+    const reachedBottom = isAtBottom(metrics)
+      && (wasStuck || (previousScrollTop !== null && metrics.scrollTop > previousScrollTop))
     const now = Date.now()
-    if (atBottom) ignoreScrollUnstickUntilRef.current = 0
+    if (reachedBottom) ignoreScrollUnstickUntilRef.current = 0
     // Layout/stream growth can also emit scroll events. Only reader intent
     // may release the sticky bottom; geometry alone must not switch it off.
-    if ((!isStickToBottomRef.current || atBottom) && shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, atBottom)) {
-      const wasStuck = isStickToBottomRef.current
-      applyStickState(metrics)
-      if (atBottom && !wasStuck) stickyFollowRef.current?.resize()
+    if ((!wasStuck || reachedBottom) && shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, reachedBottom)) {
+      applyStickState(metrics, { allowStick: reachedBottom })
+      if (reachedBottom && !wasStuck) stickyFollowRef.current?.resize()
     }
 
   }, [applyStickState])
@@ -1397,31 +1403,35 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       ignoreScrollUnstickUntilRef.current = 0
       virtualHistoryRef.current?.cancelScroll()
     }
+    const pauseFollowing = () => {
+      previousScrollTopRef.current = viewport.scrollTop
+      isStickToBottomRef.current = false
+    }
     const handleWheel = (event: WheelEvent) => {
       cancelProgrammaticLock()
       stickyFollowRef.current?.cancel()
       // Hand control back before the next animation frame, even if the native
       // scroll event has not yet updated the distance-to-bottom state.
-      if (event.deltaY < 0) isStickToBottomRef.current = false
+      if (event.deltaY < 0) pauseFollowing()
     }
     const handleTouchMove = () => {
       cancelProgrammaticLock()
       stickyFollowRef.current?.cancel()
-      isStickToBottomRef.current = false
+      pauseFollowing()
     }
     const handleScrollKey = (event: KeyboardEvent) => {
       if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return
       if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]')) return
       cancelProgrammaticLock()
       stickyFollowRef.current?.cancel()
-      isStickToBottomRef.current = false
+      pauseFollowing()
     }
     // Pointer interaction (including dragging the scrollbar) hands scrolling
     // back to the user even while a follow frame is scheduled.
     const handlePointerDown = () => {
       cancelProgrammaticLock()
       stickyFollowRef.current?.cancel()
-      isStickToBottomRef.current = false
+      pauseFollowing()
     }
     viewport.addEventListener('pointerdown', handlePointerDown)
     viewport.addEventListener('keydown', handleScrollKey)
@@ -1441,6 +1451,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Reset stick + pagination before paint so a new session cannot flash the button
   React.useLayoutEffect(() => {
+    previousScrollTopRef.current = null
     applyStickState(null, {
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs('instant'),
@@ -1450,7 +1461,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   React.useLayoutEffect(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
-    if (!isStickToBottomRef.current) applyStickState(readScrollMetrics(viewport))
+    if (!isStickToBottomRef.current) applyStickState(readScrollMetrics(viewport), { allowStick: false })
   }, [activeSessionId, startIndex, endIndex, hasMoreBelow, applyStickState])
 
   // Auto-scroll using ResizeObserver for streaming content
