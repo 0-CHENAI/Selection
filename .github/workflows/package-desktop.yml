@@ -16,6 +16,8 @@ on:
       - 'scripts/build/host-runtime-packaging.test.ts'
       - 'scripts/build/copy-runtime-tree.cjs'
       - 'apps/electron/scripts/afterPack.cjs'
+      - 'apps/electron/scripts/package-host-runtimes.cjs'
+      - 'apps/electron/src/main/host-runtime-*'
       - 'apps/electron/electron-builder.yml'
       - '.github/workflows/package-desktop.yml'
   workflow_dispatch:
