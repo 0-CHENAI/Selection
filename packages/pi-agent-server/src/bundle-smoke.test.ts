@@ -60,6 +60,58 @@ function driveBundle(messages: object[], done: (output: string, send: (message: 
 }
 
 describe('pi-agent-server bundle', () => {
+  it('delivers legacy Word text from a relocated desktop bundle', async () => {
+    const relocated = join(scratchDir, 'relocated-legacy-word');
+    mkdirSync(relocated);
+    for (const file of ['index.js', 'legacy-word-extractor.js']) {
+      copyFileSync(join(dirname(bundlePath), file), join(relocated, file));
+    }
+    copyFileSync(join(packageDir, 'src/tools/read/fixtures/legacy-word-bilingual.doc'), join(scratchDir, '资料一.doc'));
+    let requests = 0;
+    let delivered = '';
+    const server = Bun.serve({ port: 0, async fetch(request) {
+      const body = await request.json() as { messages: Array<{ role: string; content: unknown }> };
+      if (++requests === 2) delivered = JSON.stringify(body.messages.filter(message => message.role === 'tool'));
+      const delta = requests === 1 ? { role: 'assistant', tool_calls: [{
+        index: 0, id: 'legacy-read', type: 'function',
+        function: { name: 'read', arguments: '{"path":"资料一.doc","offset":2,"limit":1}' },
+      }] } : { role: 'assistant', content: 'Read the source.' };
+      const chunks = [
+        { choices: [{ index: 0, delta, finish_reason: null }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: requests === 1 ? 'tool_calls' : 'stop' }] },
+      ];
+      return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } });
+    } });
+    let approved = false;
+    try {
+      const sessionPath = join(scratchDir, 'legacy-word-session');
+      mkdirSync(sessionPath);
+      const output = await driveBundle([
+        { type: 'init', apiKey: 'local-test-only', model: 'local-model', cwd: scratchDir, thinkingLevel: 'off',
+          workspaceRootPath: scratchDir, sessionId: 'legacy-word', sessionPath,
+          providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+          customEndpoint: { api: 'openai-completions' },
+          customModels: [{ id: 'local-model', contextWindow: 65536, maxTokens: 1024 }] },
+        { type: 'prompt', id: 'legacy-word', message: 'Read the second line of the Word source.', systemPrompt: 'Local protocol test.' },
+      ], (output, send) => {
+        const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+        const permission = events.find(event => event.type === 'pre_tool_use_request');
+        if (permission && !approved) {
+          approved = true;
+          send({ type: 'pre_tool_use_response', requestId: permission.requestId, action: 'continue' });
+        }
+        return events.some(event => event.type === 'event' && event.event?.type === 'agent_end');
+      }, false, join(relocated, 'index.js'));
+      expect(requests).toBe(2);
+      expect(delivered).toContain('第一季度巡检，设备正常。');
+      expect(delivered).not.toContain('第二季度完成技术监督');
+      const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line).event]; } catch { return []; } }).filter(Boolean);
+      expect(events.find(event => event.partialResult?.details?.selectionToolProgress)?.partialResult.details.selectionToolProgress)
+        .toMatchObject({ phase: 'running', timeoutMs: 45_000 });
+    } finally { server.stop(true); }
+  }, RUN_TIMEOUT_MS + 1000);
+
   it('delivers every Office page at the connection image size to the next model request', async () => {
     const photon = await import('@silvia-odwyer/photon-node');
     const side = 2100;
@@ -407,6 +459,8 @@ it('large native Bash completion retains exit failure and emits phases without a
     expect(JSON.stringify(end.result.content)).toContain('Command exited with code 7');
     expect(JSON.stringify(end.result.content).length).toBeLessThan(4000);
     expect(events.filter(event => event.type === 'tool_execution_update').map(event => event.partialResult?.details?.selectionToolProgress?.phase).filter(Boolean)).toEqual(['running', 'processing_result']);
+    const running = events.find(event => event.partialResult?.details?.selectionToolProgress?.phase === 'running');
+    expect(running.partialResult.details.selectionToolProgress.timeoutMs).toBe(process.platform === 'win32' ? 120_000 : undefined);
     expect(JSON.stringify(requests)).not.toContain('Tool result to summarize:');
   } finally { server.stop(true); }
 }, RUN_TIMEOUT_MS + 1000);

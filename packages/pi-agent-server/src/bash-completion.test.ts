@@ -27,3 +27,13 @@ test('native Bash completes on exit, preserves failures and permits silent work'
     await expect(execute('sleep 30', undefined, 0.05)).rejects.toThrow();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test.skipIf(process.platform !== 'win32')('direct PowerShell failures preserve their exit status through Bash', async () => {
+  const tool = createBashToolDefinition(process.cwd());
+  const result = await tool.execute('powershell-exit', {
+    command: 'powershell.exe -NoProfile -NonInteractive -Command "Write-Output progress; exit 17"',
+    timeout: 10,
+  }, undefined, undefined, undefined as never);
+  expect(result.isError).toBe(true);
+  expect(result.structuredContent).toMatchObject({ output: expect.stringContaining('progress'), exit_code: 17 });
+});

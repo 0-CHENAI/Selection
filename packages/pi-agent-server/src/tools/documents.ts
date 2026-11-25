@@ -1,7 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { dirname, extname, join, resolve } from 'node:path';
 import { unzipSync, strFromU8 } from 'fflate';
 import { parse, type HTMLElement } from 'node-html-parser';
 import { insideSourceDirectory, readSourceSnapshot, saveSourceSnapshot, sourceIndexPath, sourceHash, type SourceSnapshot, type SourceUnit } from '@craft-agent/shared/source-snapshot';
@@ -9,6 +10,17 @@ import { lock } from 'proper-lockfile';
 import { extractPdfPages, readPdfPages } from './web-fetch.ts';
 
 type Part = { id: string; label: string; kind: SourceUnit['kind']; text: string };
+const MAX_DOCX_SOURCE_BYTES = 128 * 1024 * 1024;
+const MAX_DOCX_BODY_BYTES = 64 * 1024 * 1024;
+const MAX_CACHED_DOCX_UNITS = 50_000;
+const docxIndexes = new Map<string, { version: string; snapshot: SourceSnapshot; manifest: string; snapshotVersion: string }>();
+
+const fileStamp = async (path: string) => {
+  const info = await stat(path, { bigint: true });
+  return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+};
+const snapshotStamp = (manifest: string, snapshot: SourceSnapshot) =>
+  Promise.all([manifest, snapshot.textPath, join(dirname(manifest), 'original')].map(fileStamp)).then(values => values.join('|'));
 const elements = (node: HTMLElement, tag: string): HTMLElement[] => {
   const result: HTMLElement[] = [];
   const visit = (n: HTMLElement) => { if (n.rawTagName === tag) result.push(n); for (const child of n.childNodes) if ('rawTagName' in child) visit(child as HTMLElement); };
@@ -63,10 +75,47 @@ async function indexResearchPdf(directory: string, path: string, bytes: Buffer) 
 export async function indexOriginalDocument(directory: string, file: string, research = false): Promise<SourceSnapshot> {
   const path = realpathSync(resolve(directory, file));
   if (!insideSourceDirectory(path, directory)) throw new Error('Document leaves the authorized directory');
-  const researchPdf = research && extname(path).toLowerCase() === '.pdf';
-  const existing = readSourceSnapshot(sourceIndexPath(directory, path, researchPdf ? 'selection-pdf-v2' : 'selection-original-v1'), directory);
-  if (existing) return existing;
-  const bytes = readFileSync(path), format = extname(path).toLowerCase();
+  const format = extname(path).toLowerCase();
+  const researchPdf = research && format === '.pdf';
+  const docxKey = `${directory}\0${path}`;
+  let docxBytes: Buffer | undefined;
+  let docxVersion: string | undefined;
+  if (format === '.docx') {
+    if ((await stat(path)).size > MAX_DOCX_SOURCE_BYTES) throw new Error('DOCX sources larger than 128 MiB must be split before indexing.');
+    docxVersion = await fileStamp(path);
+    const cached = docxIndexes.get(docxKey);
+    if (cached?.version === docxVersion
+      && await snapshotStamp(cached.manifest, cached.snapshot).catch(() => undefined) === cached.snapshotVersion
+      && insideSourceDirectory(cached.snapshot.textPath, directory)) {
+      if (docxIndexes.get(docxKey) === cached) {
+        docxIndexes.delete(docxKey);
+        docxIndexes.set(docxKey, cached);
+      }
+      return cached.snapshot;
+    }
+    if (docxIndexes.get(docxKey) === cached) docxIndexes.delete(docxKey);
+    docxBytes = await readFile(path);
+    if (docxBytes.length > MAX_DOCX_SOURCE_BYTES || await fileStamp(path) !== docxVersion) {
+      throw new Error('The DOCX changed during indexing. Retry after it is saved.');
+    }
+  }
+  const manifest = sourceIndexPath(directory, path, researchPdf ? 'selection-pdf-v2' : 'selection-original-v1', docxBytes);
+  const rememberDocx = async (snapshot: SourceSnapshot) => {
+    if (docxVersion !== undefined) {
+      if (await fileStamp(path) !== docxVersion) throw new Error('The DOCX changed during indexing. Retry after it is saved.');
+      docxIndexes.set(docxKey, { version: docxVersion, snapshot, manifest, snapshotVersion: await snapshotStamp(manifest, snapshot) });
+      let cachedUnits = [...docxIndexes.values()].reduce((sum, entry) => sum + entry.snapshot.units.length, 0);
+      for (const [oldest, entry] of docxIndexes) {
+        if (docxIndexes.size <= 8 && cachedUnits <= MAX_CACHED_DOCX_UNITS) break;
+        docxIndexes.delete(oldest);
+        cachedUnits -= entry.snapshot.units.length;
+      }
+    }
+    return snapshot;
+  };
+  const existing = readSourceSnapshot(manifest, directory);
+  if (existing) return rememberDocx(existing);
+  const bytes = docxBytes ?? readFileSync(path);
   if (researchPdf) return indexResearchPdf(directory, path, bytes);
   let parts: Part[] = [];
   const limitations: string[] = [];
@@ -76,9 +125,14 @@ export async function indexOriginalDocument(directory: string, file: string, res
     limitations.push('PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied.');
     pages.forEach((page, i) => { if (!page.trim()) limitations.push(`Page ${i + 1} has no extractable text; use native PDF/OCR skill.`); });
   } else if (['.docx', '.xlsx', '.pptx'].includes(format)) {
-    const archive = unzipSync(bytes);
+    const archive = format === '.docx' ? unzipSync(bytes, { filter: entry => {
+      if (entry.name !== 'word/document.xml') return false;
+      if (entry.originalSize > MAX_DOCX_BODY_BYTES) throw new Error('The DOCX body XML exceeds 64 MiB. Split the document before indexing.');
+      return true;
+    } }) : unzipSync(bytes);
     limitations.push('Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.');
     if (format === '.docx') {
+      if (!archive['word/document.xml']) throw new Error('The DOCX is missing its main document body.');
       const doc = xml(archive['word/document.xml']); let chapter = '正文';
       parts = elements(doc, 'w:p').flatMap((p, i) => {
         const value = text(p, 'w:t'); if (!value.trim()) return [];
@@ -122,7 +176,7 @@ export async function indexOriginalDocument(directory: string, file: string, res
     limitations.push('Text sections use literal Markdown headings and line ranges, not physical pages.');
   }
   if (!parts.some(part => part.text.trim())) throw new Error('No extractable original text; use native parsing/OCR. No read receipt was created.');
-  return saveSourceSnapshot(directory, bytes, path, format, parts, limitations, undefined, path);
+  return rememberDocx(saveSourceSnapshot(directory, bytes, path, format, parts, limitations, undefined, path));
 }
 const indexSchema = Type.Object({ path: Type.String(), query: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) });
 const readSchema = Type.Object({ path: Type.String(), unit_id: Type.String({ description: 'Exact unit ID from document_index (chapter/paragraph, page or worksheet!cell).' }),

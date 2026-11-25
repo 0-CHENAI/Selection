@@ -2,7 +2,7 @@
  * Common build utilities shared across all platforms
  */
 
-import { IMAGE_RESIZE_WORKERS, verifyImageResizeWorkers } from '../../packages/pi-agent-server/scripts/copy-runtime-assets';
+import { PI_AUXILIARY_ENTRIES, verifyPiAuxiliaryEntries } from '../../packages/pi-agent-server/scripts/copy-runtime-assets';
 import { $ } from 'bun';
 import { execSync } from 'child_process';
 import {
@@ -836,14 +836,14 @@ export function copyPiAgentServer(config: BuildConfig): void {
       `Pi Agent Server Photon WASM not found at ${photonWasmSource}. Run bun run build in packages/pi-agent-server.`,
     );
   }
-  verifyImageResizeWorkers(piSourceDir);
+  verifyPiAuxiliaryEntries(piSourceDir);
 
   console.log('Copying Pi Agent Server...');
   mkdirSync(piDestDir, { recursive: true });
 
-  // 1. Copy the bundle and its image-processing runtime.
+  // 1. Copy the bundle and its document-processing runtime.
   copyFileSync(join(piSourceDir, 'index.js'), join(piDestDir, 'index.js'));
-  for (const worker of IMAGE_RESIZE_WORKERS) copyFileSync(join(piSourceDir, worker), join(piDestDir, worker));
+  for (const entry of PI_AUXILIARY_ENTRIES) copyFileSync(join(piSourceDir, entry), join(piDestDir, entry));
   copyFileSync(photonWasmSource, join(piDestDir, photonWasmName));
 
   // 2. Copy koffi npm package (external import, resolved via node_modules at runtime)
@@ -878,11 +878,11 @@ export function copyPiAgentServer(config: BuildConfig): void {
       throw new Error(`Koffi native binary directory is empty: ${nativeSrc}`);
     }
     const size = lstatSync(join(nativeSrc, nativeBinary)).size;
-    console.log(`  Copied index.js + image Worker + Photon WASM + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
+    console.log(`  Copied Pi bundle, document helpers, Photon WASM and koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
   } else {
     console.warn(`  Warning: koffi native binary not found for ${targetDir}`);
     cpSync(join(koffiSource, 'build'), join(koffiDest, 'build'), { recursive: true });
-    console.log('  Copied index.js + image Worker + Photon WASM + koffi (all platforms as fallback)');
+    console.log('  Copied Pi bundle, document helpers, Photon WASM and koffi (all platforms as fallback)');
   }
 }
 
@@ -947,7 +947,7 @@ export function verifyMcpServersExist(config: BuildConfig): void {
   if (!existsSync(photonWasmPath)) {
     throw new Error(`Pi Agent Server Photon WASM not found at ${photonWasmPath}`);
   }
-  verifyImageResizeWorkers(join(electronDir, 'resources', 'pi-agent-server'));
+  verifyPiAuxiliaryEntries(join(electronDir, 'resources', 'pi-agent-server'));
 }
 
 /**

@@ -417,7 +417,7 @@ export interface Message {
   toolResultContent?: AgentToolResultContent[];
   toolStatus?: ToolStatus;
   /** Live-only execution telemetry; never model output or persisted transcript. */
-  toolProgress?: { phase: 'running' | 'processing_result'; at: number; outputBytes?: number; executionMs?: number };
+  toolProgress?: { phase: 'running' | 'processing_result'; at: number; outputBytes?: number; executionMs?: number; startedAt?: number; timeoutMs?: number };
   toolDuration?: number;
   toolIntent?: string;
   toolDisplayName?: string;

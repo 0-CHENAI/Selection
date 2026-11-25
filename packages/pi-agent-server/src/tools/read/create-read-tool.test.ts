@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, it, spyOn } from 'bun:test'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { DEFAULT_JPEG_QUALITY, DEFAULT_MAX_ENCODED_BYTES, DEFAULT_MAX_HEIGHT, DE
 import { createSelectionReadToolDefinition } from './create-read-tool.ts'
 
 const tempDirs: string[] = []
+const legacyWordFixture = join(import.meta.dir, 'fixtures', 'legacy-word-bilingual.doc')
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
@@ -16,6 +17,52 @@ const png = Buffer.from(
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+it('reads legacy Word text with UTF-8 line pagination through the normal Read entry point', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'legacy-word-read-'))
+  tempDirs.push(cwd)
+  const file = join(cwd, '资料 01.DOC')
+  copyFileSync(legacyWordFixture, file)
+  const before = readFileSync(file)
+  const result = await createSelectionReadToolDefinition(cwd).execute(
+    'legacy', { path: '资料 01.DOC', offset: 2, limit: 1 }, undefined, undefined, undefined as never,
+  )
+  expect(result.content.map(part => part.type === 'text' ? part.text : '')).toEqual([
+    'Extracted legacy Word text. Line offsets refer to the extracted text.',
+    expect.stringMatching(/^第一季度巡检，设备正常。\n\n.*offset=3/),
+  ])
+  expect(result.details?.sourceRead).toBeUndefined()
+  expect(readFileSync(file)).toEqual(before)
+})
+
+it('reports an invalid legacy Word document without returning binary text', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'legacy-word-invalid-'))
+  tempDirs.push(cwd)
+  writeFileSync(join(cwd, 'malformed.doc'), Buffer.alloc(512))
+  const read = createSelectionReadToolDefinition(cwd)
+  await expect(read.execute('legacy', { path: 'malformed.doc' }, undefined, undefined, undefined as never))
+    .rejects.toThrow('not a Word 97–2003 binary .doc file')
+})
+
+it('coalesces consecutive and concurrent Word offsets and invalidates on source change', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'legacy-word-cache-'))
+  tempDirs.push(cwd)
+  const file = join(cwd, 'source.doc')
+  copyFileSync(legacyWordFixture, file)
+  const tool = createSelectionReadToolDefinition(cwd)
+  const reads = (offset: number) => tool.execute('legacy', { path: file, offset, limit: 1 }, undefined, undefined, undefined as never)
+  const spawn = spyOn(Bun, 'spawn')
+  try {
+    const [a, b] = await Promise.all([reads(1), reads(3)])
+    expect(a.content[1]).toMatchObject({ text: expect.stringContaining('Annual report 2026') })
+    expect(b.content[1]).toMatchObject({ text: expect.stringContaining('第二季度完成技术监督') })
+    await reads(2)
+    expect(spawn).toHaveBeenCalledTimes(1)
+    utimesSync(file, new Date(), new Date(Date.now() - 5000))
+    await reads(3)
+    expect(spawn).toHaveBeenCalledTimes(2)
+  } finally { spawn.mockRestore() }
 })
 
 function imageContext() {

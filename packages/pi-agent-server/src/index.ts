@@ -47,7 +47,7 @@ import http from 'node:http';
 import { githubShellEnvironment } from '../../session-tools-core/src/runtime/github-shell.ts';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { createIsolatedPiSettings, resolveIsolatedAgentDir } from './pi-isolation.ts';
 import { applyProviderEndpointEnv } from './provider-endpoint-env.ts';
@@ -144,6 +144,7 @@ import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
+import { LEGACY_WORD_TIMEOUT_MS } from './tools/read/read-legacy-word.ts';
 import { resolveImageSendPolicy } from '../../shared/src/utils/image-send-size.ts';
 import { resolveModelImageProcessingOptions } from './tools/read/image-processing.ts';
 import { fitToolResultImages } from './tool-result-images.ts';
@@ -453,6 +454,8 @@ function currentImageProcessingOptions() {
   const model = piSession?.routedModel?.model ?? piSession?.model;
   return resolveModelImageProcessingOptions(policy, model?.inputLimits?.images?.resize);
 }
+const WINDOWS_BASH_DEFAULT_TIMEOUT_SECONDS = 120;
+
 let thinkingEffortRetried = false;
 let promptToolsStarted = false;
 const modelRequestSlots = createModelRequestSlots(message => send(message));
@@ -912,9 +915,18 @@ async function ensureSession(): Promise<AgentSession> {
     spawnHook: context => ({ ...context, env: githubShellEnvironment(context.env) }),
   }), 'unknown');
   if (isolatedShell && process.platform === 'win32') {
-    bashTool.description = 'Execute a Windows cmd.exe command in the current working directory. Use cmd.exe syntax, not Bash: use && for sequencing, double quotes for paths, and %NAME% for environment variables. Do not use export, source, POSIX quoting, printf, or heredocs. For complex scripts or OfficeCLI batch JSON, write a file first and invoke it with python, node, or officecli batch --input. Returns stdout and stderr; optionally provide a timeout in seconds.';
+    bashTool.description = 'Execute a Windows cmd.exe command in the current working directory. Use cmd.exe syntax, not Bash: use && for sequencing, double quotes for paths, and %NAME% for environment variables. Do not use export, source, POSIX quoting, printf, or heredocs. For complex scripts or OfficeCLI batch JSON, write a file first and invoke it with python, node, or officecli batch --input. Returns stdout and stderr.';
     bashTool.promptSnippet = 'Execute Windows cmd.exe commands (python, officecli, node, bun)';
     bashTool.promptGuidelines = ['Use cmd.exe syntax in this isolated worker. You can inspect PI_* environment variables for current model and session details.'];
+  }
+  if (process.platform === 'win32') {
+    const timeoutDescription = `Timeout in seconds. Defaults to ${WINDOWS_BASH_DEFAULT_TIMEOUT_SECONDS} on Windows. Set this explicitly for longer commands.`;
+    const timeoutSchema = { ...bashTool.parameters.properties.timeout, description: timeoutDescription };
+    bashTool.parameters = {
+      ...bashTool.parameters,
+      properties: { ...bashTool.parameters.properties, timeout: timeoutSchema },
+    };
+    bashTool.description += ` ${timeoutDescription} For legacy Word .doc text, call Read directly. When invoking PowerShell scripts, keep the script's exit status and stream progress before slow steps. Windows PowerShell 5.1 needs a BOM on UTF-8 scripts containing non-ASCII characters.`;
   }
   const builtinDefs = [
     registerRecoveryClass(createSelectionReadToolDefinition(cwd, undefined, {
@@ -1209,6 +1221,18 @@ function wrapSingleTool(
 
       if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
       if (answerRecovery) throw new Error('Tools are unavailable during answer recovery. Write the final answer as plain text.');
+      let timeoutMs: number | undefined;
+      if (sdkToolName === 'Bash') {
+        if (process.platform === 'win32' && inputObj.timeout === undefined) {
+          inputObj = { ...inputObj, timeout: WINDOWS_BASH_DEFAULT_TIMEOUT_SECONDS };
+        }
+        if (typeof inputObj.timeout === 'number' && Number.isFinite(inputObj.timeout) && inputObj.timeout > 0) {
+          timeoutMs = inputObj.timeout * 1000;
+        }
+      } else if (sdkToolName === 'Read') {
+        const path = inputObj.path ?? inputObj.file_path;
+        if (typeof path === 'string' && extname(path).toLowerCase() === '.doc') timeoutMs = LEGACY_WORD_TIMEOUT_MS;
+      }
       // Execute original tool with (potentially modified) input
       const fileOperation = registeredRecoveryClass(tool) === 'file-verifiable'
         && (sdkToolName === 'Write' || sdkToolName === 'Edit');
@@ -1216,7 +1240,10 @@ function wrapSingleTool(
       const execute = () => originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
       executionStarted = true;
       const executionStartedAt = Date.now();
-      onUpdate?.({ content: [], details: { selectionToolProgress: { phase: 'running', at: executionStartedAt } } });
+      onUpdate?.({ content: [], details: { selectionToolProgress: {
+        phase: 'running', at: executionStartedAt,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      } } });
       const executed = fileOperation
         ? await withToolFileOperation(getSessionPath(initConfig!.workspaceRootPath, initConfig!.sessionId), {
           sessionId: initConfig!.sessionId, sdkSessionId: piSession!.sessionId, answerRunId: executingRunId,

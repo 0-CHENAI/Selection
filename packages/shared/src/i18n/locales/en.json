@@ -2840,6 +2840,8 @@
   "turnCard.thinkingDeeply": "Thinking deeply",
   "turnCard.thoughtDeeply": "Thought deeply",
   "turnCard.toolArguments": "Generating tool arguments",
+  "turnCard.toolDeadline": "{{elapsed}}s / {{limit}}s",
+  "turnCard.toolDeadlineLabel": "Elapsed time and time limit",
   "turnCard.toolOutputReceived": "Receiving execution output",
   "turnCard.toolProcessingResult": "Execution returned · preparing result",
   "turnCard.toolRunning": "Executing",

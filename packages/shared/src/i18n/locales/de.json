@@ -2840,6 +2840,8 @@
   "turnCard.thinkingDeeply": "Denkt tief nach",
   "turnCard.thoughtDeeply": "Tief nachgedacht",
   "turnCard.toolArguments": "Werkzeugaufruf wird erstellt",
+  "turnCard.toolDeadline": "{{elapsed}} s / {{limit}} s",
+  "turnCard.toolDeadlineLabel": "Laufzeit und Zeitlimit",
   "turnCard.toolOutputReceived": "Ausgabe wird empfangen",
   "turnCard.toolProcessingResult": "Ausführung beendet · Ergebnis wird vorbereitet",
   "turnCard.toolRunning": "Wird ausgeführt",
