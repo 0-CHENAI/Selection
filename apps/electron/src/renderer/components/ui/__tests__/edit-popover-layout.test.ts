@@ -8,24 +8,20 @@ import {
   DEFAULT_POPOVER_WIDTH,
   MIN_POPOVER_HEIGHT,
   MIN_POPOVER_WIDTH,
-  POPOVER_COLLISION_PADDING,
   POPOVER_HEADER_HEIGHT,
   POPOVER_INPUT_CHROME,
   VIEWPORT_MARGIN,
   VIEWPORT_MARGIN_TOP,
-  clampPopoverOffset,
+  clampPopoverOrigin,
   clampPopoverSize,
   clampPopoverSizeFromOrigin,
-  clampVisualPopoverOffset,
   getCompactInputMaxHeight,
+  getInitialPopoverOrigin,
   hasPopoverDragMoved,
-  offsetToPinVisualOrigin,
   popoverBodyClassName,
   readEditPopoverTriggerAnchor,
   resolveEditPopoverJobStatus,
   resolveEditPopoverOpenChange,
-  resolveEditPopoverPositioningSize,
-  shouldAvoidEditPopoverCollisions,
   sizeFromResizeEdge,
 } from '../edit-popover-layout'
 
@@ -125,137 +121,58 @@ describe('popoverBodyClassName (#122)', () => {
   })
 })
 
-describe('POPOVER_COLLISION_PADDING (#123)', () => {
-  it('reserves the app title bar, not the Radix 20px default', () => {
-    expect(POPOVER_COLLISION_PADDING.top).toBe(VIEWPORT_MARGIN_TOP)
-    expect(POPOVER_COLLISION_PADDING.top).toBeGreaterThan(20)
+describe('clampPopoverOrigin', () => {
+  const expanded = { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT }
+  const collapsed = { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT }
+
+  it('keeps the same fractional origin through repeated collapse and expand', () => {
+    const origin = { x: 520.25, y: 200.75 }
+    let current = origin
+    for (let cycle = 0; cycle < 5; cycle++) {
+      current = clampPopoverOrigin(current, collapsed, desktop)
+      current = clampPopoverOrigin(current, expanded, desktop)
+    }
+    expect(current).toBe(origin)
+  })
+
+  it('only moves the title bar when an expansion would overflow', () => {
+    const edge = { x: desktop.width - VIEWPORT_MARGIN - collapsed.width, y: 100 }
+    expect(clampPopoverOrigin(edge, collapsed, desktop)).toBe(edge)
+    const fitted = clampPopoverOrigin(edge, expanded, desktop)
+    expect(fitted).toEqual({ x: desktop.width - VIEWPORT_MARGIN - expanded.width, y: edge.y })
+    expect(clampPopoverOrigin(fitted, collapsed, desktop)).toBe(fitted)
+  })
+
+  it('keeps the window clear of the app title bar during drag', () => {
+    expect(clampPopoverOrigin({ x: -400, y: -400 }, expanded, desktop))
+      .toEqual({ x: VIEWPORT_MARGIN, y: VIEWPORT_MARGIN_TOP })
+  })
+
+  it('keeps the origin inside the app even when the viewport is smaller than the card', () => {
+    expect(clampPopoverOrigin({ x: 200, y: 200 }, expanded, tiny))
+      .toEqual({ x: VIEWPORT_MARGIN, y: VIEWPORT_MARGIN_TOP })
   })
 })
 
-describe('clampPopoverOffset (#8)', () => {
-  it('keeps the window inside the viewport after a drag', () => {
-    const size = { width: 400, height: 480 }
-    const base = { x: 100, y: 80 }
-    const next = clampPopoverOffset({ x: 4000, y: 4000 }, size, desktop, base)
-    expect(base.x + next.x + size.width).toBeLessThanOrEqual(desktop.width - VIEWPORT_MARGIN)
-    expect(base.y + next.y + size.height).toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
+describe('getInitialPopoverOrigin', () => {
+  const size = { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT }
+
+  it('centers the add-source window under the trigger', () => {
+    expect(getInitialPopoverOrigin(
+      { left: 362, right: 390, top: 60, bottom: 88 }, size, desktop, 'bottom', 'center',
+    )).toEqual({ x: 176, y: 92 })
   })
 
-  it('keeps the title bar below the app chrome', () => {
-    const next = clampPopoverOffset(
-      { x: 0, y: -400 },
-      { width: 400, height: 280 },
-      desktop,
-      { x: 40, y: 40 },
-    )
-    expect(40 + next.y).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_TOP)
+  it('flips above a trigger near the bottom and clamps horizontal overflow', () => {
+    expect(getInitialPopoverOrigin(
+      { left: 1340, right: 1370, top: 820, bottom: 850 }, size, desktop, 'bottom', 'start',
+    )).toEqual({ x: 1024, y: 336 })
   })
 
-  it('does not invert the clamp when the window is larger than the viewport', () => {
-    const next = clampPopoverOffset(
-      { x: 200, y: 200 },
-      { width: 2000, height: 2000 },
-      tiny,
-      { x: 0, y: 0 },
-    )
-    expect(next.x).toBe(VIEWPORT_MARGIN)
-    expect(next.y).toBe(VIEWPORT_MARGIN_TOP)
-  })
-})
-
-describe('clampVisualPopoverOffset (#123)', () => {
-  it('keeps expand-from-top below the app chrome after the origin jumps', () => {
-    // Collapsed bar was dragged to y=52 (offset -348, base 400). Expand to 480.
-    // Radix then shifts the untranslated origin 400 → 300, painting at y=-48.
-    const offset = { x: 0, y: -348 }
-    const shiftedBaseY = 300
-    const visual = { left: 100, top: shiftedBaseY + offset.y }
-    expect(visual.top).toBeLessThan(VIEWPORT_MARGIN_TOP)
-
-    const next = clampVisualPopoverOffset(
-      offset,
-      visual,
-      { width: 400, height: 480 },
-      desktop,
-    )
-    expect(shiftedBaseY + next.y).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_TOP)
-    expect(shiftedBaseY + next.y + 480).toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
-  })
-
-  it('keeps the title bar pinned when expanding a collapsed strip at the top', () => {
-    const offset = { x: 0, y: -348 }
-    const visual = { left: 100, top: VIEWPORT_MARGIN_TOP }
-    const next = clampVisualPopoverOffset(
-      offset,
-      visual,
-      { width: 400, height: DEFAULT_POPOVER_HEIGHT },
-      desktop,
-    )
-    expect(visual.top - offset.y + next.y).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_TOP)
-    expect(visual.top - offset.y + next.y + DEFAULT_POPOVER_HEIGHT)
-      .toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
-  })
-
-  it('does not move a window that already clears the title bar', () => {
-    const offset = { x: 12, y: -40 }
-    const visual = { left: 120, top: 80 }
-    expect(clampVisualPopoverOffset(
-      offset,
-      visual,
-      { width: 400, height: 480 },
-      desktop,
-    )).toEqual(offset)
-  })
-})
-
-describe('offsetToPinVisualOrigin', () => {
-  it('does not invent an offset when the painted origin did not move', () => {
-    const visual = { left: 520, top: 200 }
-    expect(offsetToPinVisualOrigin(
-      { x: 0, y: 0 },
-      visual,
-      visual,
-      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
-      desktop,
-    )).toEqual({ x: 0, y: 0 })
-  })
-
-  it('undoes a Radix re-center after collapse so the title stays put', () => {
-    const previous = { left: 520, top: 200 }
-    const recentered = { left: 600, top: 200 }
-    expect(offsetToPinVisualOrigin(
-      { x: 0, y: 0 },
-      previous,
-      recentered,
-      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
-      desktop,
-    )).toEqual({ x: -80, y: 0 })
-  })
-
-  it('keeps the top-left pinned when a centered popover grows (#382)', () => {
-    const origin = { left: 200, top: 120 }
-    const recentered = { left: 160, top: 100 }
-    expect(offsetToPinVisualOrigin(
-      { x: 0, y: 0 },
-      origin,
-      recentered,
-      { width: 480, height: 520 },
-      desktop,
-    )).toEqual({ x: 40, y: 20 })
-  })
-
-  it('pulls an expanded window back when the pinned origin would overflow', () => {
-    const previous = { left: 1184, top: 80 }
-    const next = offsetToPinVisualOrigin(
-      { x: 0, y: 0 },
-      previous,
-      previous,
-      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
-      desktop,
-    )
-    expect(1184 + next.x).toBeGreaterThanOrEqual(VIEWPORT_MARGIN)
-    expect(1184 + next.x + DEFAULT_POPOVER_WIDTH).toBeLessThanOrEqual(desktop.width - VIEWPORT_MARGIN)
-    expect(next.x).toBeLessThan(0)
+  it('keeps the end alignment of a side-anchored window', () => {
+    expect(getInitialPopoverOrigin(
+      { left: 440, right: 468, top: 640, bottom: 668 }, size, desktop, 'right', 'end',
+    )).toEqual({ x: 472, y: 188 })
   })
 })
 
@@ -354,24 +271,6 @@ describe('resolveEditPopoverJobStatus (#394)', () => {
 })
 
 describe('collapsed popover placement (#394)', () => {
-  it('collides the painted strip instead of the frozen 480px radix box', () => {
-    expect(resolveEditPopoverPositioningSize(
-      true,
-      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
-      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
-    )).toEqual({ width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT })
-    expect(resolveEditPopoverPositioningSize(
-      false,
-      { width: 480, height: 520 },
-      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
-    )).toEqual({ width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT })
-  })
-
-  it('stops following the trigger after collapse so page reflow cannot hide the strip', () => {
-    expect(shouldAvoidEditPopoverCollisions(true)).toBe(false)
-    expect(shouldAvoidEditPopoverCollisions(false)).toBe(true)
-  })
-
   it('anchors a durable add-source trigger under the empty-state button', () => {
     expect(readEditPopoverTriggerAnchor({ left: 100, top: 80, width: 80, height: 28 }))
       .toEqual({ left: 140, top: 108 })
@@ -390,8 +289,7 @@ describe('EditPopover floating window (#384, #385)', () => {
     expect(source).toContain('data-focused={focused ? \'true\' : \'false\'}')
   })
 
-  it('resizes from invisible borders and freezes the Radix box', () => {
-    expect(source).toContain('radixBoxRef.current = next')
+  it('resizes from invisible borders', () => {
     expect(source).toContain('data-testid="edit-popover-resize-e"')
     expect(source).toContain('data-testid="edit-popover-resize-s"')
     expect(source).toContain('data-testid="edit-popover-resize-se"')
@@ -412,10 +310,7 @@ describe('EditPopover MCP/skill config (#394)', () => {
 
   it('keeps the collapsed strip after completion and shows the job status', () => {
     expect(source).toContain('resolveEditPopoverJobStatus')
-    expect(source).toContain('avoidCollisions={shouldAvoidEditPopoverCollisions(collapsed)}')
     expect(source).toContain('data-testid="edit-popover-status"')
-    expect(source).toContain('resolveEditPopoverPositioningSize')
-    expect(source).toContain('clampVisualPopoverOffset')
   })
 
   it('does not replace a loaded skill page with not-found during a config rewrite', () => {

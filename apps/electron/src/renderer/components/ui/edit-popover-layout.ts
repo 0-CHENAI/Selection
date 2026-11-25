@@ -18,20 +18,12 @@ export const VIEWPORT_MARGIN_TOP = 52
 export const POPOVER_HEADER_HEIGHT = 40
 export const POPOVER_INPUT_CHROME = 56
 export const POPOVER_MESSAGE_RESERVE = 64
-/** Clicks on the drag handle must not start a drag or flip Radix collision. */
+/** Clicks on the drag handle must not start a drag. */
 export const POPOVER_DRAG_THRESHOLD = 4
 /** Invisible hit strip for east / south / south-east border resize. */
 export const POPOVER_RESIZE_EDGE_PX = 6
 
 export type PopoverResizeEdge = 'e' | 's' | 'se'
-
-/** Keep Radix collision padding aligned with the app title-bar inset. */
-export const POPOVER_COLLISION_PADDING = {
-  top: VIEWPORT_MARGIN_TOP,
-  right: VIEWPORT_MARGIN,
-  bottom: VIEWPORT_MARGIN,
-  left: VIEWPORT_MARGIN,
-} as const
 
 /**
  * Collapsed body must not keep `flex`. Tailwind's `flex` and `hidden` both set
@@ -44,6 +36,8 @@ export function popoverBodyClassName(collapsed: boolean): string {
 export type Size = { width: number; height: number }
 export type Point = { x: number; y: number }
 export type Viewport = { width: number; height: number }
+export type PopoverSide = 'top' | 'right' | 'bottom' | 'left'
+export type PopoverAlign = 'start' | 'center' | 'end'
 
 export function hasPopoverDragMoved(
   start: Point,
@@ -80,66 +74,55 @@ export function clampPopoverSize(
   }
 }
 
-/**
- * `base` is the popover's untranslated origin (current rect minus drag offset).
- */
 function clampAxis(value: number, min: number, max: number): number {
-  if (min <= max) return Math.max(min, Math.min(max, value))
-  return min
+  return Math.max(min, Math.min(max, value))
 }
 
-export function clampPopoverOffset(
-  offset: Point,
-  size: Size,
-  viewport: Viewport,
-  base: Point,
-): Point {
-  const minX = VIEWPORT_MARGIN - base.x
-  const maxX = viewport.width - VIEWPORT_MARGIN - size.width - base.x
-  const minY = VIEWPORT_MARGIN_TOP - base.y
-  const maxY = viewport.height - VIEWPORT_MARGIN - size.height - base.y
-  return {
-    x: clampAxis(offset.x, minX, maxX),
-    y: clampAxis(offset.y, minY, maxY),
-  }
-}
-
-/**
- * Clamp using the painted box (getBoundingClientRect, includes translate).
- * After collapse/expand Radix may move the untranslated origin; re-run this
- * so the card cannot cover the app title bar (#123).
- */
-export function clampVisualPopoverOffset(
-  offset: Point,
-  visual: { left: number; top: number },
+export function clampPopoverOrigin(
+  origin: Point,
   size: Size,
   viewport: Viewport,
 ): Point {
-  return clampPopoverOffset(
-    offset,
-    size,
-    viewport,
-    { x: visual.left - offset.x, y: visual.top - offset.y },
-  )
+  const x = clampAxis(origin.x, VIEWPORT_MARGIN, viewport.width - VIEWPORT_MARGIN - size.width)
+  const y = clampAxis(origin.y, VIEWPORT_MARGIN_TOP, viewport.height - VIEWPORT_MARGIN - size.height)
+  return x === origin.x && y === origin.y ? origin : { x, y }
 }
 
 /**
- * Collapse/expand changes the box size. Radix may also re-place the
- * untranslated origin while avoidCollisions is still on. Shift the drag
- * offset so the top-left the user last saw stays put, then clamp.
+ * Choose a side of the trigger when opening. After that the window's origin
+ * is independent of the trigger, even if the underlying page reflows.
  */
-export function offsetToPinVisualOrigin(
-  offset: Point,
-  previousVisual: { left: number; top: number },
-  currentVisual: { left: number; top: number },
-  nextSize: Size,
+export function getInitialPopoverOrigin(
+  trigger: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'> | undefined,
+  size: Size,
   viewport: Viewport,
+  side: PopoverSide,
+  align: PopoverAlign,
 ): Point {
-  const pinned = {
-    x: offset.x + previousVisual.left - currentVisual.left,
-    y: offset.y + previousVisual.top - currentVisual.top,
-  }
-  return clampVisualPopoverOffset(pinned, previousVisual, nextSize, viewport)
+  if (!trigger) return { x: VIEWPORT_MARGIN, y: VIEWPORT_MARGIN_TOP }
+
+  const vertical = side === 'top' || side === 'bottom'
+  const before = side === 'top' || side === 'left'
+  const start = vertical ? trigger.top : trigger.left
+  const end = vertical ? trigger.bottom : trigger.right
+  const span = vertical ? size.height : size.width
+  const gap = 4
+  const beforeRoom = start - gap - (vertical ? VIEWPORT_MARGIN_TOP : VIEWPORT_MARGIN)
+  const afterRoom = (vertical ? viewport.height : viewport.width) - VIEWPORT_MARGIN - end - gap
+  const preferredRoom = before ? beforeRoom : afterRoom
+  const oppositeRoom = before ? afterRoom : beforeRoom
+  // Flip only when the opposite side has more room.
+  const keepSide = preferredRoom >= span || preferredRoom >= oppositeRoom
+  const placeBefore = keepSide ? before : !before
+  const main = placeBefore ? start - gap - span : end + gap
+  const crossStart = vertical ? trigger.left : trigger.top
+  const crossEnd = vertical ? trigger.right : trigger.bottom
+  const crossSpan = vertical ? size.width : size.height
+  const cross = align === 'start' ? crossStart
+    : align === 'end' ? crossEnd - crossSpan
+    : (crossStart + crossEnd - crossSpan) / 2
+
+  return clampPopoverOrigin(vertical ? { x: cross, y: main } : { x: main, y: cross }, size, viewport)
 }
 
 /**
@@ -211,20 +194,6 @@ export function resolveEditPopoverJobStatus(input: {
   }
   if (input.hasWork || input.creationStatus === 'completed') return 'completed'
   return 'idle'
-}
-
-/** A collapsed 40px strip must not collide as a 480px box or it can leave the viewport. */
-export function resolveEditPopoverPositioningSize(
-  collapsed: boolean,
-  containerSize: Size,
-  radixBox: Size,
-): Size {
-  return collapsed ? containerSize : radixBox
-}
-
-/** After collapse, keep the strip where the user left it when the page reflows. */
-export function shouldAvoidEditPopoverCollisions(collapsed: boolean): boolean {
-  return !collapsed
 }
 
 export function readEditPopoverTriggerAnchor(

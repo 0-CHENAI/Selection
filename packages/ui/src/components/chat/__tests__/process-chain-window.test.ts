@@ -50,6 +50,13 @@ describe('process chain window math', () => {
       .toBe(80 * PROCESS_CHAIN_ROW_PX)
   })
 
+  it('keeps real rows at either edge when a chain is outside the viewport', () => {
+    expect(processChainWindow({ containerTop: 4000, viewportHeight: 300, count: 39 }))
+      .toMatchObject({ start: 0, end: 24, padTop: 0 })
+    const above = processChainWindow({ containerTop: -4000, viewportHeight: 300, count: 39 })
+    expect(above).toMatchObject({ start: 26, end: 39, padBottom: 0 })
+  })
+
   it('stays pinned to the tail when a live chain grows', () => {
     const previous = processChainWindowFromRange(60, 80, 80)
     const next = reconcileProcessChainWindow(previous, 84)
