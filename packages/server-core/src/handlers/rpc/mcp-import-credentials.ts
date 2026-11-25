@@ -13,6 +13,10 @@ import {
   type LoadedSource,
 } from '@craft-agent/shared/sources'
 import type { HandlerDeps } from '../handler-deps'
+import type { Workspace } from '@craft-agent/shared/config'
+import type { McpGuideMetadata } from '@craft-agent/shared/protocol'
+import { buildBackendHostRuntimeContext } from '../utils'
+import { queueInitialMcpGuide } from '../../services/mcp-guide'
 
 interface RawMcpServer {
   name: string
@@ -25,6 +29,7 @@ export interface McpImportCredentialDependencies {
   saveSourceConfig: (workspaceRootPath: string, config: FolderSourceConfig) => void
   validateConnection: (source: LoadedSource) => Promise<McpValidationResult>
   notifySourceChanged: (workspaceRootPath: string, sourceSlug: string) => void
+  onConnected?: (source: FolderSourceConfig, metadata: McpGuideMetadata) => void
   now?: () => number
 }
 
@@ -58,7 +63,7 @@ function validateWithTimeout(validation: Promise<McpValidationResult>): Promise<
   })
 }
 
-export function createMcpValidationDependencies(deps: HandlerDeps): McpImportCredentialDependencies {
+export function createMcpValidationDependencies(deps: HandlerDeps, workspace: Workspace): McpImportCredentialDependencies {
   return {
     loadSource,
     saveCredential: async (source, value) => {
@@ -104,6 +109,12 @@ export function createMcpValidationDependencies(deps: HandlerDeps): McpImportCre
         mcpTransport: mcp.transport,
         mcpHeaders: server.headers,
       }))
+    },
+    onConnected: (source, metadata) => {
+      queueInitialMcpGuide(
+        workspace, source, metadata, buildBackendHostRuntimeContext(deps.platform),
+        deps.sessionManager.notifyConfigFileChange.bind(deps.sessionManager), deps.platform.logger,
+      )
     },
     notifySourceChanged: (workspaceRootPath, sourceSlug) => {
       deps.sessionManager.notifyConfigFileChange(workspaceRootPath, `sources/${sourceSlug}/config.json`)
@@ -235,7 +246,7 @@ export function startMcpSourceValidation(
   })
   deps.notifySourceChanged(workspaceRootPath, sourceSlug)
 
-  const finish = (result: McpValidationResult): void => {
+  const finish = (result: McpValidationResult, testedConfig: FolderSourceConfig): void => {
     if (activeValidationAttempts.get(key) !== attempt) return
 
     const latest = deps.loadSource(workspaceRootPath, sourceSlug)
@@ -251,6 +262,7 @@ export function startMcpSourceValidation(
       lastTestedAt: (deps.now ?? Date.now)(),
     })
     deps.notifySourceChanged(workspaceRootPath, sourceSlug)
+    if (result.success && result.guideMetadata) deps.onConnected?.(testedConfig, result.guideMetadata)
   }
 
   return (async () => {
@@ -261,14 +273,14 @@ export function startMcpSourceValidation(
       if (!current || current.config.id !== source.config.id) return
       if (activeValidationAttempts.get(key) !== attempt) return
 
-      finish(await deps.validateConnection(current))
+      finish(await deps.validateConnection(current), current.config)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       finish({
         success: false,
         error: message,
         errorType: authFailure(message) ? 'needs-auth' : 'failed',
-      })
+      }, source.config)
     } finally {
       if (activeValidationAttempts.get(key) === attempt) {
         activeValidationAttempts.delete(key)

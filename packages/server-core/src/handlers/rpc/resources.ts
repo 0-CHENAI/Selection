@@ -175,7 +175,7 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
         decisions,
         result.imported,
         credentials,
-        createMcpValidationDependencies(deps),
+        createMcpValidationDependencies(deps, workspace),
       )
 
       for (const validation of pendingValidations) {

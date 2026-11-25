@@ -1,4 +1,4 @@
-import { RPC_CHANNELS, type McpResourcesInfo } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type McpGuideMetadata, type McpGuideSaveInput, type McpResourcesInfo } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { getSourceCredentialManager, getSourceServerBuilder, loadWorkspaceSources } from '@craft-agent/shared/sources'
 import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
@@ -6,6 +6,8 @@ import { safeJsonParse } from '@craft-agent/shared/utils/files'
 import { resolveFsPath } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { buildBackendHostRuntimeContext, getWorkspaceOrThrow } from '../utils'
+import { draftMcpGuide, getMcpGuideSource, queueInitialMcpGuide, saveMcpGuide } from '../../services/mcp-guide'
 import {
   createMcpValidationDependencies,
   resumeInterruptedMcpValidations,
@@ -22,6 +24,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.workspace.GET_PERMISSIONS,
   RPC_CHANNELS.permissions.GET_DEFAULTS,
   RPC_CHANNELS.sources.GET_MCP_TOOLS,
+  RPC_CHANNELS.sources.DRAFT_MCP_GUIDE,
+  RPC_CHANNELS.sources.SAVE_MCP_GUIDE,
   RPC_CHANNELS.sources.RETRY_CONNECTION,
   RPC_CHANNELS.sources.SET_DISPLAY_TITLE,
 ] as const
@@ -41,7 +45,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     for (const validation of resumeInterruptedMcpValidations(
       workspaceRootPath,
       sources,
-      createMcpValidationDependencies(deps),
+      createMcpValidationDependencies(deps, workspace),
     )) {
       void validation.catch(error => {
         log.error('Failed to resume interrupted MCP connection validation:', error)
@@ -128,7 +132,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     const validation = startMcpSourceValidation(
       resolveFsPath(workspace.rootPath),
       sourceSlug,
-      createMcpValidationDependencies(deps),
+      createMcpValidationDependencies(deps, workspace),
     )
     void validation.catch(error => {
       log.error(`Background MCP connection retry failed for ${sourceSlug}:`, error)
@@ -195,6 +199,24 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     }
   })
 
+  server.handle(RPC_CHANNELS.sources.DRAFT_MCP_GUIDE, async (
+    _ctx, workspaceId: string, sourceSlug: string, metadata: McpGuideMetadata, markdown: string,
+  ) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const source = getMcpGuideSource(workspace.rootPath, sourceSlug)
+    return draftMcpGuide(workspace, source, metadata, markdown, buildBackendHostRuntimeContext(deps.platform))
+  })
+
+  server.handle(RPC_CHANNELS.sources.SAVE_MCP_GUIDE, async (
+    _ctx, workspaceId: string, sourceSlug: string, input: McpGuideSaveInput,
+  ) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const workspaceRoot = resolveFsPath(workspace.rootPath)
+    const saved = saveMcpGuide(workspaceRoot, sourceSlug, input)
+    if (saved !== null) deps.sessionManager.notifyConfigFileChange(workspaceRoot, `sources/${sourceSlug}/guide.md`)
+    return saved
+  })
+
   // Get MCP tools for a source with permission status
   server.handle(RPC_CHANNELS.sources.GET_MCP_TOOLS, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -220,7 +242,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         return { success: false, error: 'Source has not been tested yet' }
       }
 
-      const { CraftMcpClient } = await import('@craft-agent/shared/mcp')
+      const { CraftMcpClient, collectMcpGuideMetadata } = await import('@craft-agent/shared/mcp')
       let client: InstanceType<typeof CraftMcpClient>
 
       if (source.config.mcp.transport === 'stdio') {
@@ -261,8 +283,14 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
 
       let tools: Array<{ name: string; description?: string }> = []
       let resources: McpResourcesInfo | undefined
+      let guideMetadata: McpGuideMetadata
       try {
         tools = await client.listTools()
+        guideMetadata = collectMcpGuideMetadata(client.getInstructions(), tools)
+        queueInitialMcpGuide(
+          workspace, source.config, guideMetadata, buildBackendHostRuntimeContext(deps.platform),
+          deps.sessionManager.notifyConfigFileChange.bind(deps.sessionManager), log,
+        )
         const { collectResourcePreview } = await import('@craft-agent/shared/mcp')
         const preview = await collectResourcePreview(
           () => client.listResources(),
@@ -308,7 +336,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         }
       })
 
-      return { success: true, tools: toolsWithPermission, resources }
+      return { success: true, tools: toolsWithPermission, resources, guideMetadata }
     } catch (error) {
       log.error('Failed to get MCP tools:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch tools'

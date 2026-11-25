@@ -51,6 +51,7 @@
     "./projects/working-directory": "./src/projects/working-directory.ts",
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
+    "./sources/guide-content": "./src/sources/guide-content.ts",
     "./skills": "./src/skills/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",

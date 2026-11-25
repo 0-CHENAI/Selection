@@ -1029,11 +1029,23 @@ export interface McpResourcesInfo {
   truncated?: boolean
 }
 
+export interface McpGuideMetadata {
+  instructions?: string
+  tools: Array<Pick<McpToolWithPermission, 'name' | 'description'>>
+}
+
+export interface McpGuideSaveInput {
+  sourceId: string
+  previous: string | null
+  markdown: string
+}
+
 export interface McpToolsResult {
   success: boolean
   error?: string
   tools?: McpToolWithPermission[]
   resources?: McpResourcesInfo
+  guideMetadata?: McpGuideMetadata
 }
 
 // ---------------------------------------------------------------------------

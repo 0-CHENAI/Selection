@@ -270,6 +270,8 @@ export const CHANNEL_MAP = {
   getDefaultPermissionsConfig: invoke(RPC_CHANNELS.permissions.GET_DEFAULTS),
   onDefaultPermissionsChanged: listener(RPC_CHANNELS.permissions.DEFAULTS_CHANGED),
   getMcpTools: invoke(RPC_CHANNELS.sources.GET_MCP_TOOLS),
+  draftMcpGuide: invoke(RPC_CHANNELS.sources.DRAFT_MCP_GUIDE),
+  saveMcpGuide: invoke(RPC_CHANNELS.sources.SAVE_MCP_GUIDE),
   retryMcpConnection: invoke(RPC_CHANNELS.sources.RETRY_CONNECTION),
   setSourceDisplayTitle: invoke(RPC_CHANNELS.sources.SET_DISPLAY_TITLE),
 

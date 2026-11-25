@@ -26,6 +26,7 @@ rl.on('line', (line) => {
       result: {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
+        instructions: 'Use echo to return the provided text.',
         serverInfo: { name: 'mcp-server-good', version: '1.0.0' },
       },
     })

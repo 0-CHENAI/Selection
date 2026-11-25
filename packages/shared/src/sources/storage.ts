@@ -19,7 +19,7 @@ import type {
 } from './types.ts';
 import { validateSourceConfig } from '../config/validators.ts';
 import { debug } from '../utils/debug.ts';
-import { readJsonFileSync } from '../utils/files.ts';
+import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
 import { getBuiltinSources, isBuiltinSource, getDocsSource } from './builtin-sources.ts';
 import { expandPath, toPortablePath } from '../utils/paths.ts';
 import { getWorkspaceSourcesPath } from '../workspaces/storage.ts';
@@ -284,7 +284,7 @@ export function saveSourceGuide(
     mkdirSync(dir, { recursive: true });
   }
 
-  writeFileSync(join(dir, 'guide.md'), guide.raw);
+  atomicWriteFileSync(join(dir, 'guide.md'), guide.raw);
 }
 
 // ============================================================
@@ -553,6 +553,21 @@ export async function createSource(
   // Save config first to create the directory
   saveSourceConfig(workspaceRootPath, config);
 
+  // MCP guides are filled after successful discovery. Other sources still use the template.
+  const guideContent = `# ${input.name}
+
+## Guidelines
+
+(Add usage guidelines here)
+
+## Context
+
+(Add context about this source)
+`;
+  saveSourceGuide(workspaceRootPath, slug, {
+    raw: config.type === 'mcp' ? '' : guideContent,
+  });
+
   // If icon is a URL, download it immediately
   // (watcher will also handle this, but doing it here provides immediate feedback)
   const sourcePath = getSourcePath(workspaceRootPath, slug);
@@ -578,20 +593,6 @@ export async function createSource(
       }
     }
   }
-
-  // Create guide.md with skeleton template
-  // (bundled guides removed - agent should search craft-agents-docs MCP for service-specific guidance)
-  const guideContent = `# ${input.name}
-
-## Guidelines
-
-(Add usage guidelines here)
-
-## Context
-
-(Add context about this source)
-`;
-  saveSourceGuide(workspaceRootPath, slug, { raw: guideContent });
 
   return config;
 }
