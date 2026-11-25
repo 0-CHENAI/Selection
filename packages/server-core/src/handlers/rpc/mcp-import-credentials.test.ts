@@ -169,9 +169,14 @@ describe('activateImportedMcpSources', () => {
     }
   }
 
-  it('persists the connecting state immediately and marks connected only after real validation', async () => {
+  it('persists the connecting state immediately and publishes guide metadata after validation', async () => {
     const imported = candidate('anysearch')
     const fixture = sourceFixture(imported)
+    const onConnected = mock(() => {
+      expect(fixture.source?.config.connectionStatus).toBe('connected')
+    })
+    fixture.deps.onConnected = onConnected
+    const guideMetadata = { instructions: 'Search the index.', tools: [{ name: 'search', description: 'Search' }] }
     let completeValidation: ((result: McpValidationResult) => void) | undefined
     fixture.deps.validateConnection = mock(() => new Promise<McpValidationResult>(resolve => {
       completeValidation = resolve
@@ -197,8 +202,10 @@ describe('activateImportedMcpSources', () => {
 
     await Promise.resolve()
     expect(fixture.source?.config.connectionStatus).toBe('connecting')
-    completeValidation?.({ success: true })
+    expect(onConnected).not.toHaveBeenCalled()
+    completeValidation?.({ success: true, guideMetadata })
     await Promise.all(pending)
+    expect(onConnected).toHaveBeenCalledWith(expect.objectContaining({ slug: 'anysearch' }), guideMetadata)
 
     expect(fixture.source?.config).toMatchObject({
       enabled: true,

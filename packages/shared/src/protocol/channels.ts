@@ -295,6 +295,8 @@ export const RPC_CHANNELS = {
     CHANGED: 'sources:changed',
     GET_PERMISSIONS: 'sources:getPermissions',
     GET_MCP_TOOLS: 'sources:getMcpTools',
+    DRAFT_MCP_GUIDE: 'sources:draftMcpGuide',
+    SAVE_MCP_GUIDE: 'sources:saveMcpGuide',
     RETRY_CONNECTION: 'sources:retryConnection',
     SET_DISPLAY_TITLE: 'sources:setDisplayTitle',
   },

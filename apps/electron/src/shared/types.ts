@@ -214,6 +214,8 @@ import type {
   SessionFile,
   OAuthResult,
   McpToolsResult,
+  McpGuideMetadata,
+  McpGuideSaveInput,
   McpResourcesInfo,
   GitBashStatus,
   ClaudeOAuthResult,
@@ -534,6 +536,8 @@ export interface ElectronAPI {
   getWorkspacePermissionsConfig(workspaceId: string): Promise<import('@craft-agent/shared/agent').PermissionsConfigFile | null>
   getDefaultPermissionsConfig(): Promise<{ config: import('@craft-agent/shared/agent').PermissionsConfigFile | null; path: string }>
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
+  draftMcpGuide(workspaceId: string, sourceSlug: string, metadata: McpGuideMetadata, markdown: string): Promise<string>
+  saveMcpGuide(workspaceId: string, sourceSlug: string, input: McpGuideSaveInput): Promise<string | null>
   retryMcpConnection(workspaceId: string, sourceSlug: string): Promise<{ started: boolean }>
   setSourceDisplayTitle(workspaceId: string, sourceSlug: string, title: string): Promise<{ displayTitle: string | null }>
 

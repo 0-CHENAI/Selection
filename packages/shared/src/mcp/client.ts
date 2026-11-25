@@ -248,6 +248,10 @@ export class CraftMcpClient {
     return { name: info.name, version: info.version };
   }
 
+  getInstructions(): string | undefined {
+    return this.client.getInstructions();
+  }
+
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     if (!this.connected) {
       await this.connect();

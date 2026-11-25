@@ -7,6 +7,8 @@
  */
 
 import { CraftMcpClient } from './client.js';
+import { collectMcpGuideMetadata } from './guide-metadata.ts';
+import type { McpGuideMetadata } from '../protocol/dto.ts';
 import { debug } from '../utils/debug.ts';
 import { normalizeMcpUrl } from '../sources/server-builder.ts';
 import type { McpTransport } from '../sources/types.ts';
@@ -28,6 +30,7 @@ export interface McpValidationResult {
   invalidProperties?: InvalidProperty[];
   /** Tool names available on this server (populated on successful connection) */
   tools?: string[];
+  guideMetadata?: McpGuideMetadata;
 }
 
 /**
@@ -206,6 +209,7 @@ export async function validateMcpConnection(
       success: true,
       serverInfo,
       tools: toolNames,
+      guideMetadata: collectMcpGuideMetadata(mcpClient.getInstructions(), tools),
     };
   } catch (err) {
     debug('[mcp-validation] error:', err instanceof Error ? err.message : err);
@@ -428,6 +432,7 @@ export async function validateStdioMcpConnection(
       return {
         success: true,
         tools: [],
+        guideMetadata: collectMcpGuideMetadata(client.getInstructions(), []),
         serverInfo: {
           name: command,
           version: args.join(' '),
@@ -479,6 +484,7 @@ export async function validateStdioMcpConnection(
     return {
       success: true,
       tools: toolNames,
+      guideMetadata: collectMcpGuideMetadata(client.getInstructions(), tools),
       serverInfo: {
         name: command,
         version: args.join(' '),

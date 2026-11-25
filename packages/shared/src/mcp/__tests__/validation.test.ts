@@ -17,6 +17,10 @@ describe('validateStdioMcpConnection', () => {
       })
       expect(result.success).toBe(true)
       expect(result.tools).toEqual(['echo'])
+      expect(result.guideMetadata).toEqual({
+        instructions: 'Use echo to return the provided text.',
+        tools: [{ name: 'echo', description: 'Echo input back' }],
+      })
       expect(result.error).toBeUndefined()
     },
     15000,

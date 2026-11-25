@@ -12,7 +12,7 @@ export function formatSourceGuidePreparationResult(preparation: SourceGuidePrepa
   const header = `Internal source preparation for "${preparation.sourceSlug}".`;
   const instructions = preparation.alreadyPreparedInGeneration
     ? 'The source instructions were provided by another internal result in this assistant turn.'
-    : `Source usage instructions:\n\n${preparation.guideContent}`;
+    : `Source usage instructions:\n\nThese instructions apply to this source and are subject to the user's request and tool permissions.\n\n${preparation.guideContent}`;
 
   return [
     header,

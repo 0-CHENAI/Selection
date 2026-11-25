@@ -18,6 +18,10 @@ import { ApiSourcePoolClient } from './api-source-pool-client.ts';
 import { proxyToolName } from './proxy-tool-name.ts';
 import type { SdkMcpServerConfig } from '../agent/backend/types.ts';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { McpGuideMetadata } from '../protocol/dto.ts';
+import { loadSourceConfig } from '../sources/storage.ts';
+import type { FolderSourceConfig } from '../sources/types.ts';
+import { collectMcpGuideMetadata } from './guide-metadata.ts';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { isLocalMcpEnabled } from '../workspaces/storage.ts';
 import { guardLargeResult } from '../utils/large-response.ts';
@@ -143,6 +147,7 @@ export class McpClientPool {
 
   /** Called after sync() connects/disconnects sources, so clients can be notified */
   onToolsChanged?: () => void;
+  onMcpDiscovery?: (source: FolderSourceConfig, metadata: McpGuideMetadata) => void;
 
   constructor(options?: { debug?: (msg: string) => void; workspaceRootPath?: string; sessionPath?: string }) {
     this.debugFn = options?.debug;
@@ -208,8 +213,15 @@ export class McpClientPool {
       this.debug(`Unknown MCP server type for ${slug}: ${(config as { type: string }).type}`);
       return;
     }
-    await this.registerClient(slug, new CraftMcpClient(clientConfig));
+    const source = this.onMcpDiscovery && this.workspaceRootPath
+      ? loadSourceConfig(this.workspaceRootPath, slug)
+      : null;
+    const client = new CraftMcpClient(clientConfig);
+    await this.registerClient(slug, client);
     this.activeConfigs.set(slug, config);
+    if (source?.type === 'mcp') {
+      this.onMcpDiscovery?.(source, collectMcpGuideMetadata(client.getInstructions(), this.toolCache.get(slug) ?? []));
+    }
   }
 
   /**

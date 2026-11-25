@@ -13,6 +13,8 @@ import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopo
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SourceMenu } from '@/components/app-shell/SourceMenu'
 import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
+import { McpGuideSection } from '@/components/resources/McpGuideSection'
+import type { McpGuideMetadata } from '@craft-agent/shared/protocol'
 import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { cn } from '@/lib/utils'
@@ -183,6 +185,8 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
   const [mcpToolsLoading, setMcpToolsLoading] = useState(false)
   const [mcpToolsError, setMcpToolsError] = useState<string | null>(null)
   const [mcpResources, setMcpResources] = useState<McpResourcesInfo | null>(null)
+  const [guideMetadata, setGuideMetadata] = useState<McpGuideMetadata | null>(null)
+  const { type, connectionStatus, updatedAt, id: sourceId } = source?.config ?? {}
   const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
 
 
@@ -224,24 +228,25 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     }
   }, [workspaceId, sourceSlug])
 
-  // Load MCP tools when source is loaded and is MCP type
+  // Refresh discovery on connection/config changes, not on guide edits.
   useEffect(() => {
-    if (!source || source.config.type !== 'mcp') {
+    setGuideMetadata(null)
+    if (type !== 'mcp') {
       setMcpTools(null)
       setMcpToolsError(null)
       setMcpResources(null)
       return
     }
     if (
-      source.config.connectionStatus === 'connecting'
-      || source.config.connectionStatus === 'needs_auth'
-      || source.config.connectionStatus === 'failed'
-      || source.config.connectionStatus === 'untested'
+      connectionStatus === 'connecting'
+      || connectionStatus === 'needs_auth'
+      || connectionStatus === 'failed'
+      || connectionStatus === 'untested'
     ) {
       setMcpTools(null)
       setMcpToolsError(null)
       setMcpResources(null)
-      setMcpToolsLoading(source.config.connectionStatus === 'connecting')
+      setMcpToolsLoading(connectionStatus === 'connecting')
       return
     }
 
@@ -257,6 +262,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         if (result.success) {
           setMcpTools(result.tools ?? [])
           setMcpResources(result.resources ?? null)
+          setGuideMetadata(result.guideMetadata ?? null)
         } else {
           setMcpToolsError(result.error || t('sourceInfo.failedToLoadTools'))
           setMcpResources(null)
@@ -274,7 +280,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     return () => {
       isMounted = false
     }
-  }, [source, workspaceId, sourceSlug])
+  }, [type, connectionStatus, updatedAt, sourceId, workspaceId, sourceSlug])
 
   // Load workspace settings (for localMcpEnabled)
   useEffect(() => {
@@ -597,7 +603,19 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
           )}
 
           {/* Documentation */}
-          {source.guide?.raw && (
+          {source.config.type === 'mcp' ? (
+            <McpGuideSection
+              key={`${workspaceId}:${source.config.id}`}
+              workspaceId={workspaceId}
+              sourceId={source.config.id}
+              sourceSlug={sourceSlug}
+              savedGuide={source.guide?.raw ?? null}
+              guideMetadata={guideMetadata}
+              onSaved={(raw) => setSource((current) => current?.config.id === source.config.id
+                ? { ...current, guide: { raw } }
+                : current)}
+            />
+          ) : source.guide?.raw && (
             <Info_Section
               title={t('sourceInfo.documentation')}
               description={t('sourceInfo.documentationDesc')}

@@ -10,6 +10,8 @@ const MARKDOWN_HEADING_RE = /^\s{0,3}#{1,6}(?:\s+.*)?$/;
 const DEFAULT_PLACEHOLDER_RE = /^\(add (?:usage guidelines here|context about this source)\)$/i;
 const SOURCE_SLUG_RE = /^[a-z0-9-]+$/;
 
+export const CLEARED_MCP_GUIDE = '<!-- selection: mcp guide cleared by user -->\n';
+
 /** Return true only when a guide contains instructions beyond its empty template. */
 export function hasMeaningfulSourceGuide(raw: string | null | undefined): boolean {
   if (!raw) return false;
@@ -25,6 +27,13 @@ export function hasMeaningfulSourceGuide(raw: string | null | undefined): boolea
     if (DEFAULT_PLACEHOLDER_RE.test(trimmed)) return false;
     return true;
   });
+}
+
+/** Fill blank guides and the legacy template while preserving authored text and metadata. */
+export function canAutoFillMcpGuide(raw: string | null | undefined): boolean {
+  if (!raw?.trim()) return true;
+  if (hasMeaningfulSourceGuide(raw) || /<!--|^\uFEFF?---/.test(raw)) return false;
+  return raw.split(/\r?\n/).some(line => DEFAULT_PLACEHOLDER_RE.test(line.trim()));
 }
 
 const INTERNAL_SOURCE_SLUGS = new Set(['session', 'craft-agents-docs']);

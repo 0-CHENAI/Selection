@@ -76,6 +76,7 @@ import {
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
 import { LlmConnectionPool } from '../tasks/connection-pool'
+import { queueInitialMcpGuide } from '../services/mcp-guide'
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
@@ -4537,6 +4538,10 @@ export class SessionManager implements ISessionManager {
 
       // Create centralized MCP client pool (all backends use it)
       managed.mcpPool = new McpClientPool({ debug: (msg) => sessionLog.debug(msg), workspaceRootPath: managed.workspace.rootPath, sessionPath })
+      managed.mcpPool.onMcpDiscovery = (source, metadata) => queueInitialMcpGuide(
+        managed.workspace, source, metadata, buildBackendHostRuntimeContext(),
+        this.notifyConfigFileChange.bind(this), sessionLog,
+      )
 
       // Backends that run as external subprocesses need an HTTP pool server
       let poolServerUrl: string | undefined
