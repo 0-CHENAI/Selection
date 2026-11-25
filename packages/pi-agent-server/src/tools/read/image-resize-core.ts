@@ -186,7 +186,8 @@ function encodeForSendPolicy(
         composited = compositeOnWhite(photon, working)
         if (composited) jpegSource = composited
       }
-      for (const quality of IMAGE_ENCODING_QUALITIES) {
+      const qualities = [limits.jpegQuality, ...IMAGE_ENCODING_QUALITIES.filter(quality => quality < limits.jpegQuality)]
+      for (const quality of qualities) {
         encodingAttempts += 1
         const bytes = jpegSource.get_bytes_jpeg(quality)
         if (!smallest || bytes.byteLength < smallest.byteLength) {
@@ -269,10 +270,15 @@ export async function optimizeImageInProcess(
   try {
     const originalWidth = image.get_width()
     const originalHeight = image.get_height()
-    if (limits.policy) {
+    if (limits.policy && !limits.rejectOverEncodedLimit) {
       return encodeForSendPolicy(photon, image, limits, originalWidth, originalHeight)
     }
-    let current = fitDimensions(originalWidth, originalHeight, limits.maxWidth, limits.maxHeight)
+    const target = limits.policy
+      ? resolveImageSendSize(originalWidth, originalHeight, limits.policy)
+      : { width: originalWidth, height: originalHeight }
+    let current = !limits.policy || limits.applyDimensionBox
+      ? fitDimensions(target.width, target.height, limits.maxWidth, limits.maxHeight)
+      : target
     const preferJpeg = baseMimeType(mimeType) === 'image/jpeg' || baseMimeType(mimeType) === 'image/jpg'
     let encodingAttempts = 0
 

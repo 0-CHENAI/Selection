@@ -113,30 +113,37 @@ export function officeRenderKind(path: string): OfficeRenderKind | null {
  * Returns the pages to render (capped) and human-readable notes for the rest.
  */
 export function resolvePageSpec(spec: string | undefined, pageCount: number, max: number = OFFICE_PAGE_RENDER_LIMITS.maxImages): { pages: number[]; notRendered: string[] } {
-  const wanted: number[] = []
-  const notRendered: string[] = []
+  const wanted = new Set<number>()
+  const unavailable = new Set<string>()
+  const addRange = (start: number, end: number) => {
+    const first = Math.min(start, end)
+    const last = Math.max(start, end)
+    if (first === 0) unavailable.add('page 0')
+    const missing = Math.max(first, pageCount + 1)
+    if (missing <= last) unavailable.add(missing === last ? `page ${last}` : `pages ${missing}-${last}`)
+    for (let page = Math.max(1, first); page <= Math.min(last, pageCount); page++) wanted.add(page)
+  }
   const text = (spec ?? '').trim().toLowerCase()
   if (!text || text === 'all') {
-    for (let page = 1; page <= pageCount; page++) wanted.push(page)
+    if (pageCount) addRange(1, pageCount)
   } else {
-    for (const raw of text.split(/[,，\s]+/).filter(Boolean)) {
+    const compact = text.replace(/(\d)\s*([-–~])\s*(?=\d|last\b)/g, '$1$2')
+    for (const raw of compact.split(/[,，\s]+/).filter(Boolean)) {
       const token = raw.replace(/^p(?:age)?/, '')
-      if (token === 'last' || token === '-1') { if (pageCount > 0) wanted.push(pageCount); continue }
-      if (token === 'first') { if (pageCount > 0) wanted.push(1); continue }
-      const range = /^(\d+)\s*[-–~]\s*(\d+|last)$/.exec(token)
-      if (range) {
-        const start = Number(range[1])
-        const end = range[2] === 'last' ? pageCount : Number(range[2])
-        for (let page = Math.min(start, end); page <= Math.max(start, end); page++) wanted.push(page)
+      if (token === 'last' || token === '-1') { if (pageCount > 0) wanted.add(pageCount); continue }
+      if (token === 'first') { if (pageCount > 0) wanted.add(1); continue }
+      const range = /^(\d+)(?:[-–~](\d+|last))?$/.exec(token)
+      const start = Number(range?.[1])
+      const end = range?.[2] === 'last' ? pageCount : Number(range?.[2] ?? range?.[1])
+      if (Number.isSafeInteger(start) && Number.isSafeInteger(end)) {
+        addRange(start, end)
         continue
       }
-      if (/^\d+$/.test(token)) { wanted.push(Number(token)); continue }
       throw new Error(`无法识别的页码「${raw}」。用 1、1,3-5、last 或 all。`)
     }
   }
-  const unique = [...new Set(wanted)]
-  const valid = unique.filter(page => page >= 1 && page <= pageCount)
-  for (const page of unique) if (page < 1 || page > pageCount) notRendered.push(`page ${page} (document has ${pageCount})`)
+  const valid = [...wanted]
+  const notRendered = [...unavailable].map(label => `${label} (document has ${pageCount})`)
   const pages = valid.slice(0, max)
   const rest = valid.slice(max)
   if (rest.length) notRendered.push(`pages ${compactPages(rest)} (limit ${max} per call)`)
@@ -213,14 +220,31 @@ export interface RenderOfficePagesOptions {
 
 let queue: Promise<unknown> = Promise.resolve()
 
-/** One render at a time; a stuck render is cut off by the timeout and does not block the next. */
-export function renderOfficePages(options: RenderOfficePagesOptions): Promise<OfficeRenderOutcome> {
-  const run = queue.catch(() => {}).then(() => renderNow(options))
+/** Serialize renders and start the request deadline before it enters the queue. */
+export async function renderOfficePages(options: RenderOfficePagesOptions): Promise<OfficeRenderOutcome> {
+  const outer = options.signal
+  const controller = new AbortController()
+  const cancel = () => controller.abort(new Error('渲染已取消'))
+  if (outer?.aborted) {
+    cancel()
+    throw controller.signal.reason
+  }
+  outer?.addEventListener('abort', cancel, { once: true })
+  const timer = setTimeout(() => controller.abort(
+    new Error(`渲染超过 ${OFFICE_PAGE_RENDER_LIMITS.timeoutMs / 1000} 秒（含排队时间），已停止`),
+  ), OFFICE_PAGE_RENDER_LIMITS.timeoutMs)
+  const run = queue.then(() => renderNow(options, controller.signal))
   queue = run.catch(() => {})
-  return run
+  try {
+    return await abortable(run, controller.signal)
+  } finally {
+    clearTimeout(timer)
+    outer?.removeEventListener('abort', cancel)
+  }
 }
 
-async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRenderOutcome> {
+async function renderNow(options: RenderOfficePagesOptions, signal: AbortSignal): Promise<OfficeRenderOutcome> {
+  signal.throwIfAborted()
   const host = options.host === undefined ? captureHost : options.host
   if (!host) throw new Error('当前进程没有页图宿主（需要 Selection 桌面版）。')
   const plan = resolveOfficeRenderPlan()
@@ -235,15 +259,9 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
   if (kind === 'xlsx' && options.pages) throw new Error('Excel 用 sheet 和 range 指定区域，不用 pages。')
   const excel = kind === 'xlsx' ? splitSheetRange(options.range, options.sheet) : undefined
 
-  const controller = new AbortController()
-  const outer = options.signal
-  const onAbort = () => controller.abort(outer?.reason)
-  if (outer?.aborted) throw new Error('渲染已取消')
-  outer?.addEventListener('abort', onAbort, { once: true })
-  const timer = setTimeout(() => controller.abort(new Error('timeout')), OFFICE_PAGE_RENDER_LIMITS.timeoutMs)
   let scratch: string | undefined
   try {
-    const bytes = await readFile(file)
+    const bytes = await readFile(file, { signal })
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     let html = options.previewHtml?.(file, sha256)
     const shared = !!html
@@ -251,12 +269,14 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
       // Render a private copy so a half-written live file cannot change under OfficeCLI.
       scratch = await mkdtemp(join(tmpdir(), 'selection-office-render-'))
       const copy = join(scratch, `document.${kind}`)
-      await writeFile(copy, bytes, { mode: 0o600 })
-      html = await (options.loadHtml ?? officecliHtml)(copy, controller.signal)
+      await writeFile(copy, bytes, { mode: 0o600, signal })
+      signal.throwIfAborted()
+      html = await abortable((options.loadHtml ?? officecliHtml)(copy, signal), signal)
     }
     if (html.length > OFFICE_PAGE_RENDER_LIMITS.maxHtmlBytes) throw new Error('文档渲染结果过大，请缩小范围')
     if (kind === 'xlsx') html = alignXlsxFloats(html, bytes)
     let notRendered: string[] = []
+    signal.throwIfAborted()
     const captured = await abortable(host.capture({
       kind,
       html: sanitizeOfficeHtml(html),
@@ -267,8 +287,8 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
       },
       excel,
       maxCssEdge: OFFICE_PAGE_RENDER_LIMITS.maxCssEdge,
-      signal: controller.signal,
-    }), controller.signal)
+      signal,
+    }), signal)
     if (captured.notFound?.length) notRendered = [...notRendered, ...captured.notFound]
     if (!captured.images.length) {
       throw new Error(notRendered.length ? `没有可渲染的页：${notRendered.join('；')}` : '没有渲染出任何页')
@@ -277,6 +297,7 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
     const stem = basename(file, extname(file)).replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 60) || 'document'
     const images = []
     for (const image of captured.images) {
+      signal.throwIfAborted()
       const safeLabel = image.label.replace(/[^\p{L}\p{N}_-]+/gu, '-').slice(0, 40) || 'page'
       const out = join(options.outDir, `${stem}-${sha256.slice(0, 8)}-${safeLabel}.png`)
       await writeFile(out, image.png)
@@ -303,22 +324,23 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
       ...(shared ? { sharedWithPreviewPanel: true } : {}),
     }
   } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(outer?.aborted ? '渲染已取消' : `渲染超过 ${OFFICE_PAGE_RENDER_LIMITS.timeoutMs / 1000} 秒，已停止`)
+    if (signal.aborted) {
+      throw signal.reason
     }
     throw error
   } finally {
-    clearTimeout(timer)
-    outer?.removeEventListener('abort', onAbort)
     if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => {})
   }
 }
 
 function abortable<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason)
   return new Promise<T>((resolvePromise, reject) => {
-    const onAbort = () => reject(signal.reason ?? new Error('aborted'))
+    const onAbort = () => reject(signal.reason)
     signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      signal.removeEventListener('abort', onAbort)
+      onAbort()
+    }
     task.then(
       value => { signal.removeEventListener('abort', onAbort); resolvePromise(value) },
       error => { signal.removeEventListener('abort', onAbort); reject(error) },

@@ -19,7 +19,7 @@ export interface ImageResizeLimits {
   maxHeight: number
   maxEncodedBytes: number
   jpegQuality: number
-  /** When set, one projection plus the 85/75/60 ladder replaces the adaptive shrink loop. */
+  /** Project to the connection's image size before applying any explicit limits. */
   policy?: ImageSendPolicy
   /** Apply maxWidth/maxHeight on top of the policy projection. */
   applyDimensionBox?: boolean

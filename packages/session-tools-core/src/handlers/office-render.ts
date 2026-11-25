@@ -63,7 +63,7 @@ export async function handleOfficeRender(ctx: SessionToolContext, rawArgs: unkno
   const args = parsed.data;
   if (!/\.(docx|xlsx|pptx)$/i.test(args.path)) return errorResponse('office_render only accepts .docx, .xlsx or .pptx files.');
   if (!ctx.officeRender) {
-    return errorResponse('office_render needs the Selection desktop app; it is not available in this session. Check the file structurally with officecli view text / issues instead, and do not substitute OCR.');
+    return errorResponse('Visual inspection requires the Selection desktop app. Open this session there and render the requested pages. Report visual inspection as incomplete until the images have been inspected, and do not substitute OCR.');
   }
   let outcome: OfficeRenderOutcome;
   try {
@@ -89,10 +89,10 @@ export function officeRenderResult(outcome: OfficeRenderOutcome, supportsImages:
   };
   const notes: string[] = [...(outcome.notes ?? [])];
   if (outcome.missingFonts.length) notes.push(`Fonts not installed on this computer: ${outcome.missingFonts.join(', ')}. The pages fall back to other fonts here; tell the user, or switch to an installed font if the layout depends on it.`);
-  if (outcome.notRendered?.length) notes.push(`Not rendered in this call: ${outcome.notRendered.join(', ')}. Call again with those pages if you need them.`);
+  if (outcome.notRendered?.length) notes.push(`Not rendered in this call: ${outcome.notRendered.join(', ')}. Render any remaining requested pages before marking visual inspection complete.`);
   if (supportsImages === false) {
-    notes.push('The current model cannot receive images, so the rendered PNG files were saved but not attached. Do not claim a visual check and do not use OCR; report that visual inspection needs an image-capable model.');
-    return { content: [text(JSON.stringify(summary, null, 2) + (notes.length ? `\n\n${notes.join('\n')}` : ''))], structuredContent: summary, isError: false };
+    notes.push('Visual inspection is incomplete. The current model cannot receive images. The original PNGs are saved at the paths above. Switch to an image-capable model and inspect every requested page. Do not use OCR.');
+    return { content: [text(JSON.stringify(summary, null, 2) + `\n\n${notes.join('\n')}`)], structuredContent: summary, isError: true };
   }
   notes.push('Look at each attached image now. Check layout, overflow, clipped or overlapping text, empty pages, table borders and chart readability. Do not use OCR.');
   const content: [TextContent, ...(TextContent | ImageContent)[]] = [text(JSON.stringify(summary, null, 2) + `\n\n${notes.join('\n')}`)];

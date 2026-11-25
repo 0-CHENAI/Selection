@@ -1,4 +1,5 @@
 import { IMAGE_LIMITS, resolveImageSendPolicy, resolveImageSendSize, type ImageSendPolicy } from '@craft-agent/shared/utils'
+import type { ModelImageResizeOptions } from '@earendil-works/pi-ai'
 import { encodedSize } from './image-resize-core.ts'
 import { runImageOptimizer, type ImageResizeRunnerDependencies } from './image-resize-runner.ts'
 import {
@@ -35,8 +36,25 @@ export interface ReadImageProcessingOptions {
 export interface ReadImageProcessingDependencies {
   optimize?: typeof runImageOptimizer
   runner?: ImageResizeRunnerDependencies
-  /** Live connection policy. Read at execution time so runtime updates apply. */
-  getPolicy?: () => ImageSendPolicy
+  /** Read at execution time so connection and model changes apply. */
+  getOptions?: () => ReadImageProcessingOptions
+}
+
+export function resolveModelImageProcessingOptions(
+  policy: ImageSendPolicy,
+  resize?: ModelImageResizeOptions,
+): ReadImageProcessingOptions {
+  return {
+    policy,
+    ...(resize?.maxWidth !== undefined || resize?.maxHeight !== undefined ? {
+      maxWidth: resize.maxWidth ?? policy.maxDimension,
+      maxHeight: resize.maxHeight ?? policy.maxDimension,
+    } : {}),
+    ...(resize?.maxBytes !== undefined ? {
+      maxEncodedBytes: Math.min(resize.maxBytes, (Math.floor(policy.maxBytes / 3) + 1) * 4),
+    } : {}),
+    ...(resize?.jpegQuality !== undefined ? { jpegQuality: resize.jpegQuality } : {}),
+  }
 }
 
 interface ImageDimensions {

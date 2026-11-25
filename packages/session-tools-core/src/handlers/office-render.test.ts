@@ -64,11 +64,13 @@ describe('office_render', () => {
     expect((rest[2] as { text: string }).text).toBe('Page 7');
   });
 
-  it('does not attach images to a text-only model and says the visual check did not happen', async () => {
+  it('reports an incomplete visual inspection and keeps the PNG paths for a text-only model', async () => {
     const result = await handleOfficeRender(ctx({ supportsImages: false, officeRender: async () => outcome }), { path: '/work/report.docx' });
+    expect(result.isError).toBe(true);
     expect(result.content).toHaveLength(1);
     expect(result.content[0].text).toContain('cannot receive images');
-    expect(result.content[0].text).toContain('do not use OCR');
+    expect(result.content[0].text).toContain('Do not use OCR');
+    expect(result.content[0].text).toContain('/s/office-render/report-7.png');
   });
 
   it('reports host failures as tool errors', async () => {

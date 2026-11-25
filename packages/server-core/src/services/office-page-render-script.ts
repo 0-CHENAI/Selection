@@ -17,6 +17,8 @@ export type OfficePageScriptRequest =
   | { op: 'measure' | 'locate'; kind: 'docx' | 'xlsx' | 'pptx'; page?: number; sheet?: string; range?: string; maxCssEdge: number }
   | { op: 'fonts'; kind: 'docx' | 'xlsx' | 'pptx' }
 
+const DOCX_PAGE_OVERLAP_CSS_PX = 32
+
 const SOURCE = String.raw`(async function (req) {
   const css = {
     docx: 'html,body{background:#fff!important}::-webkit-scrollbar{display:none}',
@@ -34,17 +36,23 @@ const SOURCE = String.raw`(async function (req) {
   if (req.op === 'prepare') {
     if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch {} }
     if (req.kind === 'docx') {
-      // OfficeCLI only starts a new .page at explicit page / section breaks. Cut taller
-      // pages at the nominal page height so each image is one sheet of paper.
+      // OfficeCLI only adds .page nodes at explicit breaks. Overlap inferred cuts
+      // so a text line crossing a cut can still be read in the adjacent image.
       const slices = [];
       let cut = false;
       for (const page of document.querySelectorAll('.page[data-page]')) {
         const declared = /min-height\s*:\s*([0-9.]+)pt/.exec(page.getAttribute('style') || '');
-        const nominal = declared ? parseFloat(declared[1]) * 4 / 3 : 1123;
+        const declaredHeight = declared ? parseFloat(declared[1]) * 4 / 3 : 0;
+        const nominal = declaredHeight >= 1 ? declaredHeight : 1123;
         const height = page.getBoundingClientRect().height;
         const count = Math.max(1, Math.ceil((height - 2) / nominal));
+        const overlap = Math.min(${DOCX_PAGE_OVERLAP_CSS_PX}, nominal / 4);
         if (count > 1) cut = true;
-        for (let i = 0; i < count; i++) slices.push({ page: page.getAttribute('data-page'), offset: i * nominal, height: Math.min(nominal, height - i * nominal) });
+        for (let i = 0; i < count; i++) {
+          const offset = i === 0 ? 0 : i * nominal - overlap;
+          const end = i === count - 1 ? height : Math.min(height, (i + 1) * nominal + overlap);
+          slices.push({ page: page.getAttribute('data-page'), offset, height: end - offset });
+        }
       }
       window.__selectionOfficeSlices = slices;
       return { pageCount: slices.length, approximatePages: cut };
