@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { inspectImageDimensions } from './tools/read/image-processing.ts';
 
 const packageDir = dirname(import.meta.dir);
 const bundlePath = join(packageDir, 'dist', 'index.js');
@@ -59,6 +60,82 @@ function driveBundle(messages: object[], done: (output: string, send: (message: 
 }
 
 describe('pi-agent-server bundle', () => {
+  it('delivers every Office page at the connection image size to the next model request', async () => {
+    const photon = await import('@silvia-odwyer/photon-node');
+    const side = 2100;
+    const pixels = new Uint8Array(side * side * 4).fill(255);
+    const pages = [48, 120, 204].map(gray => {
+      for (let i = 0; i < pixels.length; i += 4) {
+        pixels[i] = pixels[i + 1] = pixels[i + 2] = gray;
+      }
+      const page = new photon.PhotonImage(pixels, side, side);
+      try { return { type: 'image', mimeType: 'image/png', data: Buffer.from(page.get_bytes()).toString('base64') }; }
+      finally { page.free(); }
+    });
+    const toolName = 'mcp__session__office_render';
+    let requests = 0;
+    let received: string[] = [];
+    const server = Bun.serve({ port: 0, async fetch(request) {
+      const body = await request.json() as { messages: Array<{ content: string | Array<{ image_url?: { url: string } }> }> };
+      requests += 1;
+      if (requests > 1) {
+        received = body.messages.flatMap(message => Array.isArray(message.content)
+          ? message.content.flatMap(part => part.image_url ? [part.image_url.url] : []) : []);
+      }
+      const delta = requests === 1 ? { role: 'assistant', tool_calls: [{
+        index: 0, id: 'office-call', type: 'function',
+        function: { name: toolName, arguments: '{"path":"example.docx","pages":"1-3"}' },
+      }] } : { role: 'assistant', content: 'Received the page images.' };
+      const chunks = [
+        { choices: [{ index: 0, delta, finish_reason: null }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: requests === 1 ? 'tool_calls' : 'stop' }] },
+      ];
+      return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } });
+    } });
+    let approved = false;
+    let replied = false;
+    try {
+      const sessionPath = join(scratchDir, 'office-page-images');
+      mkdirSync(sessionPath);
+      await driveBundle([
+        { type: 'init', apiKey: 'local-test-only', model: 'local-vision', cwd: scratchDir, thinkingLevel: 'off',
+          workspaceRootPath: scratchDir, sessionId: 'office-page-images', sessionPath,
+          providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+          customEndpoint: { api: 'openai-completions', supportsImages: true },
+          customModels: [{ id: 'local-vision', contextWindow: 65536, maxTokens: 1024, supportsImages: true }] },
+        { type: 'register_tools', tools: [{ name: toolName, description: 'Render Office pages.',
+          inputSchema: { type: 'object', properties: { path: { type: 'string' }, pages: { type: 'string' } } } }] },
+        { type: 'prompt', id: 'office-page-images', message: 'Inspect all three pages.', systemPrompt: 'Local protocol test.' },
+      ], (output, send) => {
+        const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+        const permission = events.find(event => event.type === 'pre_tool_use_request');
+        if (permission && !approved) {
+          approved = true;
+          send({ type: 'pre_tool_use_response', requestId: permission.requestId, action: 'continue' });
+        }
+        const execution = events.find(event => event.type === 'tool_execute_request');
+        if (execution && !replied) {
+          replied = true;
+          send({ type: 'tool_execute_response', requestId: execution.requestId,
+            result: { isError: false, content: [{ type: 'text', text: 'Three pages' }, ...pages] } });
+        }
+        return events.some(event => event.type === 'event' && event.event?.type === 'agent_end');
+      });
+      expect(requests).toBe(2);
+      expect(received).toHaveLength(3);
+      const shades = received.map(url => {
+        const [, mime, data] = /^data:([^;]+);base64,(.+)$/.exec(url)!;
+        const bytes = Buffer.from(data!, 'base64');
+        expect(inspectImageDimensions(bytes, mime!)).toEqual({ width: 2048, height: 2048 });
+        const decoded = photon.PhotonImage.new_from_byteslice(bytes);
+        try { return decoded.get_raw_pixels()[0]; }
+        finally { decoded.free(); }
+      });
+      shades.forEach((gray, index) => expect(gray).toBeCloseTo([48, 120, 204][index]!, 0));
+    } finally { server.stop(true); }
+  }, RUN_TIMEOUT_MS + 1000);
+
   it('orders rapid model/effort changes and sends only legal reasoning parameters', async () => {
     const requests: Array<{ model: string; reasoning_effort?: string }> = [];
     const server = Bun.serve({ port: 0, async fetch(request) {

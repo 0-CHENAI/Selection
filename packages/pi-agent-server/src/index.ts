@@ -144,7 +144,8 @@ import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
-import { resolveImageSendPolicy, type ImageSendPolicy } from '../../shared/src/utils/image-send-size.ts';
+import { resolveImageSendPolicy } from '../../shared/src/utils/image-send-size.ts';
+import { resolveModelImageProcessingOptions } from './tools/read/image-processing.ts';
 import { fitToolResultImages } from './tool-result-images.ts';
 import { describePromptImages } from '../../shared/src/utils/image-input.ts';
 import { isBundledOfficecliLoadSkillCommand } from '../../shared/src/utils/officecli.ts';
@@ -441,14 +442,16 @@ function applyContextMeterConnection(): void {
   });
 }
 
-function currentImageSendPolicy(): ImageSendPolicy {
-  return resolveImageSendPolicy({
+function currentImageProcessingOptions() {
+  const policy = resolveImageSendPolicy({
     baseUrl: initConfig?.baseUrl,
     piAuthProvider: initConfig?.piAuth?.provider,
     imagePixelBudget: initConfig?.imagePixelBudget,
     imageMaxBytes: initConfig?.imageMaxBytes,
     imageMaxDimension: initConfig?.imageMaxDimension,
   });
+  const model = piSession?.routedModel?.model ?? piSession?.model;
+  return resolveModelImageProcessingOptions(policy, model?.inputLimits?.images?.resize);
 }
 let thinkingEffortRetried = false;
 let promptToolsStarted = false;
@@ -915,7 +918,7 @@ async function ensureSession(): Promise<AgentSession> {
   }
   const builtinDefs = [
     registerRecoveryClass(createSelectionReadToolDefinition(cwd, undefined, {
-      getPolicy: () => currentImageSendPolicy(),
+      getOptions: currentImageProcessingOptions,
     }), 'read-only'),
     bashTool,
     registerRecoveryClass(createEditToolDefinition(cwd, { operations: nativeEditOperations }), 'file-verifiable'),
@@ -957,6 +960,9 @@ async function ensureSession(): Promise<AgentSession> {
   sessionOptions.agentDir = isolatedAgentDir;
   piSettingsManager = createIsolatedPiSettings();
   sessionOptions.settingsManager = piSettingsManager;
+  // Selection already fits its images with the connection policy. Keep SDK resizing for
+  // explicit Pi extension directories, whose tools can return images outside that path.
+  piSettingsManager.setImageAutoResize(Boolean(initConfig.agentDir));
 
   if (initConfig.sessionPath) {
     const { sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
@@ -1338,12 +1344,20 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         }));
 
         if (acceptsTurnCompletion(executionName, result)) answerAccepted = true;
+        const officeRender = executionName === 'mcp__session__office_render';
+        const { content, blockedImages } = await fitToolResultImages(
+          normalizeProxyToolContent(result.content),
+          currentImageProcessingOptions(),
+          {
+            signal,
+            // Bundled Bun on Windows can stall starting a Worker after an Office render reply.
+            preferInProcess: process.platform === 'win32' && officeRender,
+            enforceModelLimits: officeRender,
+          },
+        );
         return {
-          content: await fitToolResultImages(
-            normalizeProxyToolContent(result.content),
-            currentImageSendPolicy(),
-          ),
-          details: proxyToolDetails(result),
+          content,
+          details: proxyToolDetails({ isError: result.isError || blockedImages > 0 }),
         };
       },
     }, executionName === 'mcp__session__task_help' ? 'read-only' : 'unknown');

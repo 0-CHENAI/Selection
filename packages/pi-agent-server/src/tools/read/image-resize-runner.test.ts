@@ -11,6 +11,10 @@ const limits: ImageResizeLimits = {
   jpegQuality: 85,
 }
 
+class TestWorker extends EventEmitter {
+  unref(): void {}
+}
+
 describe('Pi read image optimizer runner', () => {
   it('falls back in-process when the Worker cannot start', async () => {
     let fallbackCalls = 0
@@ -47,7 +51,7 @@ describe('Pi read image optimizer runner', () => {
 
   it('falls back when the Worker fails before processing starts', async () => {
     let fallbackCalls = 0
-    class StartupFailureWorker extends EventEmitter {
+    class StartupFailureWorker extends TestWorker {
       postMessage(): void {
         queueMicrotask(() => this.emit('error', new Error('worker startup failed')))
       }
@@ -70,9 +74,32 @@ describe('Pi read image optimizer runner', () => {
     expect(fallbackCalls).toBe(1)
   })
 
+  it('falls back when a Worker stays silent, even when its termination never resolves', async () => {
+    let terminationRequested = false
+    const bytes = new Uint8Array([7, 8, 9])
+    class SilentWorker extends TestWorker {
+      postMessage(): void {}
+      terminate(): Promise<number> {
+        terminationRequested = true
+        return new Promise(() => {})
+      }
+    }
+    const fallback = { ok: false, code: 'image_runtime_unavailable', detail: 'fallback reached' } as const
+    const result = await runImageOptimizer(bytes, 'image/png', limits, undefined, {
+      createWorker: () => new SilentWorker() as unknown as Worker,
+      workerStartupTimeoutMs: 10,
+      optimizeInProcess: async original => {
+        expect(original).toEqual(bytes)
+        return fallback
+      },
+    })
+    expect(result).toEqual(fallback)
+    expect(terminationRequested).toBe(true)
+  })
+
   it('does not repeat processing in-process when the Worker crashes after starting', async () => {
     let fallbackCalls = 0
-    class ProcessingCrashWorker extends EventEmitter {
+    class ProcessingCrashWorker extends TestWorker {
       postMessage(): void {
         queueMicrotask(() => {
           this.emit('message', { type: 'started' })
@@ -100,7 +127,7 @@ describe('Pi read image optimizer runner', () => {
 
   it('falls back when a stale Worker returns an incomplete success payload', async () => {
     let fallbackCalls = 0
-    class StaleWorker extends EventEmitter {
+    class StaleWorker extends TestWorker {
       postMessage(): void {
         queueMicrotask(() => this.emit('message', {
           ok: true,
@@ -132,7 +159,7 @@ describe('Pi read image optimizer runner', () => {
 
   it('does not retry a valid processing failure returned by the Worker', async () => {
     let fallbackCalls = 0
-    class FailedWorker extends EventEmitter {
+    class FailedWorker extends TestWorker {
       postMessage(): void {
         queueMicrotask(() => this.emit('message', {
           ok: false,
@@ -196,7 +223,7 @@ describe('Pi read image optimizer runner', () => {
     const controller = new AbortController()
     let fallbackCalls = 0
     let terminateCalls = 0
-    class HangingWorker extends EventEmitter {
+    class HangingWorker extends TestWorker {
       postMessage(): void {}
       async terminate(): Promise<number> {
         terminateCalls += 1
@@ -216,5 +243,16 @@ describe('Pi read image optimizer runner', () => {
     await expect(processing).rejects.toMatchObject({ name: 'AbortError' })
     expect(terminateCalls).toBe(1)
     expect(fallbackCalls).toBe(0)
+  })
+
+  it('cancels an in-process optimizer that has not returned', async () => {
+    const controller = new AbortController()
+    const processing = runImageOptimizer(new Uint8Array([1]), 'image/png', limits, controller.signal, {
+      preferInProcess: true,
+      createWorker: () => { throw new Error('unexpected Worker') },
+      optimizeInProcess: () => new Promise(() => {}),
+    })
+    controller.abort()
+    await expect(processing).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

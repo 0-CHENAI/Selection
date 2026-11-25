@@ -15,12 +15,16 @@ const FAILURE_CODES = new Set<ImageProcessingFailureCode>([
   'image_resize_failed',
   'image_size_limit_exceeded',
 ])
+const WORKER_STARTUP_TIMEOUT_MS = 2_000
+const PROCESSING_TIMEOUT_MS = 15_000
 
 type WorkerFactory = (specifier: string | URL) => Worker
 
 export interface ImageResizeRunnerDependencies {
   createWorker?: WorkerFactory
   optimizeInProcess?: typeof optimizeImageInProcess
+  preferInProcess?: boolean
+  workerStartupTimeoutMs?: number
 }
 
 function abortError(): Error {
@@ -83,6 +87,7 @@ async function runInWorker(
   limits: ImageResizeLimits,
   signal: AbortSignal | undefined,
   createWorker: WorkerFactory,
+  startupTimeoutMs: number,
 ): Promise<ImageOptimizationResult> {
   if (signal?.aborted) throw abortError()
   const workerFilename = import.meta.url.endsWith('.ts')
@@ -95,16 +100,25 @@ async function runInWorker(
     return await new Promise<ImageOptimizationResult>((resolve, reject) => {
       let settled = false
       let processingStarted = false
+      let timer: ReturnType<typeof setTimeout>
       const settle = (callback: () => void): void => {
         if (settled) return
         settled = true
+        clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
         callback()
       }
       const onAbort = (): void => settle(() => reject(abortError()))
+      timer = setTimeout(() => settle(() => reject(new Error('Image resize Worker did not start in time'))), startupTimeoutMs)
       worker.on('message', (message: unknown) => {
+        if (settled) return
         if (isWorkerStarted(message)) {
+          if (processingStarted) return
           processingStarted = true
+          clearTimeout(timer)
+          timer = setTimeout(() => settle(() => resolve(
+            imageResizeFailure('Image resize Worker timed out', 'No result after processing started'),
+          )), PROCESSING_TIMEOUT_MS)
           return
         }
         settle(() => {
@@ -133,6 +147,10 @@ async function runInWorker(
         })
       })
       signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
       try {
         worker.postMessage(request, [transferredBytes.buffer])
       } catch (error) {
@@ -140,7 +158,10 @@ async function runInWorker(
       }
     })
   } finally {
-    await worker.terminate().catch(() => undefined)
+    // A stalled Bun Worker can also stall termination. Release it without holding the reply.
+    const termination = worker.terminate()
+    worker.unref()
+    void termination.catch(() => undefined)
   }
 }
 
@@ -151,24 +172,38 @@ export async function runImageOptimizer(
   signal?: AbortSignal,
   dependencies: ImageResizeRunnerDependencies = {},
 ): Promise<ImageOptimizationResult> {
+  if (!dependencies.preferInProcess) {
+    try {
+      return await runInWorker(
+        inputBytes,
+        mimeType,
+        limits,
+        signal,
+        dependencies.createWorker ?? (specifier => new Worker(specifier)),
+        dependencies.workerStartupTimeoutMs ?? WORKER_STARTUP_TIMEOUT_MS,
+      )
+    } catch (error) {
+      if (signal?.aborted) throw abortError()
+      if (error instanceof Error && error.name === 'AbortError') throw error
+    }
+  }
+  if (signal?.aborted) throw abortError()
   const optimizeInProcess = dependencies.optimizeInProcess ?? optimizeImageInProcess
+  let onAbort: (() => void) | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    return await runInWorker(
-      inputBytes,
-      mimeType,
-      limits,
-      signal,
-      dependencies.createWorker ?? (specifier => new Worker(specifier)),
-    )
+    return await new Promise<ImageOptimizationResult>((resolve, reject) => {
+      onAbort = () => reject(abortError())
+      timer = setTimeout(() => reject(new Error('In-process image resize timed out')), PROCESSING_TIMEOUT_MS)
+      signal?.addEventListener('abort', onAbort, { once: true })
+      void optimizeInProcess(inputBytes, mimeType, limits).then(resolve, reject)
+    })
   } catch (error) {
     if (signal?.aborted) throw abortError()
     if (error instanceof Error && error.name === 'AbortError') throw error
-    try {
-      return await optimizeInProcess(inputBytes, mimeType, limits)
-    } catch (fallbackError) {
-      if (signal?.aborted) throw abortError()
-      if (fallbackError instanceof Error && fallbackError.name === 'AbortError') throw fallbackError
-      return imageResizeFailure('In-process image resize failed', fallbackError)
-    }
+    return imageResizeFailure('In-process image resize failed', error)
+  } finally {
+    clearTimeout(timer)
+    if (onAbort) signal?.removeEventListener('abort', onAbort)
   }
 }

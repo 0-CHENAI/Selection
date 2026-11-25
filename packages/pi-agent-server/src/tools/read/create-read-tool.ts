@@ -104,11 +104,10 @@ export function createSelectionReadToolDefinition(
         throw error
       }
 
-      const policy = imageProcessingDependencies?.getPolicy?.()
       const processed = await processReadImage(
         image.bytes,
         image.mimeType,
-        policy ? { ...imageProcessingOptions, policy } : imageProcessingOptions,
+        { ...imageProcessingOptions, ...imageProcessingDependencies?.getOptions?.() },
         imageProcessingDependencies,
         args[2],
       )

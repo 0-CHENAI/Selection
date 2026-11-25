@@ -53,35 +53,39 @@ export function createElectronOfficeCaptureHost(): OfficePageCaptureHost {
   return {
     renderer: OFFICE_PAGE_RENDER_STEP,
     async capture(input: OfficePageCaptureInput): Promise<OfficePageCaptureResult> {
+      input.signal.throwIfAborted()
       const dir = await mkdtemp(join(tmpdir(), 'selection-office-render-'))
-      const file = join(dir, 'page.html')
-      await writeFile(file, input.html, { mode: 0o600 })
-      const zoom = ZOOM[input.kind]
-      const startWidth = input.kind === 'pptx' ? SLIDE_VIEWPORT_CSS.width : 1000
-      const win = new BrowserWindow({
-        show: false,
-        width: Math.ceil(startWidth * zoom),
-        height: Math.ceil(SLIDE_VIEWPORT_CSS.height * zoom),
-        useContentSize: true,
-        enableLargerThanScreen: true,
-        paintWhenInitiallyHidden: true,
-        webPreferences: {
-          offscreen: true,
-          session: renderSession(),
-          sandbox: true,
-          contextIsolation: true,
-          nodeIntegration: false,
-          javascript: true,
-          webSecurity: true,
-          spellcheck: false,
-          backgroundThrottling: false,
-        },
-      })
-      const abort = () => { if (!win.isDestroyed()) win.destroy() }
-      input.signal.addEventListener('abort', abort, { once: true })
-      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      win.webContents.on('will-navigate', event => event.preventDefault())
+      let window: BrowserWindow | undefined
+      const abort = () => { if (window && !window.isDestroyed()) window.destroy() }
       try {
+        const file = join(dir, 'page.html')
+        await writeFile(file, input.html, { mode: 0o600, signal: input.signal })
+        input.signal.throwIfAborted()
+        const zoom = ZOOM[input.kind]
+        const startWidth = input.kind === 'pptx' ? SLIDE_VIEWPORT_CSS.width : 1000
+        const win = new BrowserWindow({
+          show: false,
+          width: Math.ceil(startWidth * zoom),
+          height: Math.ceil(SLIDE_VIEWPORT_CSS.height * zoom),
+          useContentSize: true,
+          enableLargerThanScreen: true,
+          paintWhenInitiallyHidden: true,
+          webPreferences: {
+            offscreen: true,
+            session: renderSession(),
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+            javascript: true,
+            webSecurity: true,
+            spellcheck: false,
+            backgroundThrottling: false,
+          },
+        })
+        window = win
+        input.signal.addEventListener('abort', abort, { once: true })
+        win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+        win.webContents.on('will-navigate', event => event.preventDefault())
         await win.loadURL(pathToFileURL(file).href)
         win.webContents.setZoomFactor(zoom)
         await settle()
@@ -103,6 +107,7 @@ export function createElectronOfficeCaptureHost(): OfficePageCaptureHost {
             width: Math.ceil(located.width * zoom),
             height: Math.ceil(located.height * zoom),
           })
+          if (image.isEmpty()) throw new Error(`未截取到可读取的页图（${label}），请重试。`)
           const size = image.getSize()
           images.push({ label: input.kind === 'xlsx' && located.sheet ? `${located.sheet}${target.range ? `!${target.range}` : ''}` : label, png: image.toPNG(), width: size.width, height: size.height, ...(located.truncated ? { truncated: true } : {}) })
         }
@@ -123,12 +128,12 @@ export function createElectronOfficeCaptureHost(): OfficePageCaptureHost {
         }
         const fonts = await run<{ missingFonts: string[] }>(win, { op: 'fonts', kind: input.kind })
         const notes = prepared.approximatePages
-          ? ['Part of this document has no explicit page breaks; those parts were cut at the page height, so page numbers can differ slightly from Word.']
+          ? ['Inferred DOCX page breaks include a small overlap to keep text readable at the edges. Text can repeat across those edges and page numbers can differ from Word.']
           : []
         return { pageCount: prepared.pageCount, ...(prepared.sheets?.length ? { sheets: prepared.sheets } : {}), images, missingFonts: fonts.missingFonts, ...(notFound.length ? { notFound } : {}), ...(notes.length ? { notes } : {}) }
       } finally {
         input.signal.removeEventListener('abort', abort)
-        if (!win.isDestroyed()) win.destroy()
+        abort()
         await rm(dir, { recursive: true, force: true }).catch(() => {})
       }
     },

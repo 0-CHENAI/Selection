@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'bun:test'
 import { encodedSize } from './image-resize-core.ts'
 import type { ImageOptimizationResult, ImageResizeLimits } from './image-resize-types.ts'
 import { resolveImageSendPolicy } from '@craft-agent/shared/utils'
-import { processReadImage } from './image-processing.ts'
+import { inspectImageDimensions, processReadImage, resolveModelImageProcessingOptions } from './image-processing.ts'
 
 let png: Uint8Array
 let jpeg: Uint8Array
@@ -50,6 +50,18 @@ function optimizedImage(overrides: Partial<Extract<ImageOptimizationResult, { ok
 }
 
 describe('Pi read image processing', () => {
+  it('applies the selected model box and encoded-byte limit on top of the connection policy', async () => {
+    const options = resolveModelImageProcessingOptions(
+      resolveImageSendPolicy({ imageMaxDimension: 8000 }),
+      { maxWidth: 640, maxBytes: 1024, jpegQuality: 92 },
+    )
+    const result = await processReadImage(largePng, 'image/png', options, { runner: { preferInProcess: true } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(inspectImageDimensions(Buffer.from(result.data, 'base64'), result.mimeType)).toEqual({ width: 640, height: 1 })
+    expect(result.data.length).toBeLessThan(1024)
+  })
+
   it('passes supported small PNG, JPEG, GIF, and WebP images through without starting the optimizer', async () => {
     let optimizerCalls = 0
     const optimize = async (): Promise<ImageOptimizationResult> => {
