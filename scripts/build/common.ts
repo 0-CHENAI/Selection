@@ -340,7 +340,8 @@ async function runExecutable(executable: string, args: string[]): Promise<void> 
   }
 }
 
-export async function extractArchive(archivePath: string, destination: string): Promise<void> {
+export async function extractArchive(archivePath: string, destination: string, excludes: string[] = []): Promise<void> {
+  const tarArgs = ['-xf', archivePath, '-C', destination, ...excludes.map(pattern => `--exclude=${pattern}`)];
   if (process.platform === 'win32') {
     // Bun's shell can run with a restricted PATH even when Windows system
     // tools exist. Resolve bsdtar by absolute path so ZIP and tar.gz archives
@@ -351,7 +352,7 @@ export async function extractArchive(archivePath: string, destination: string): 
     if (!tar) {
       throw new Error('Unable to extract archive: Windows tar.exe was not found');
     }
-    await runExecutable(tar, ['-xf', archivePath, '-C', destination]);
+    await runExecutable(tar, tarArgs);
     return;
   }
 
@@ -362,8 +363,8 @@ export async function extractArchive(archivePath: string, destination: string): 
   }
 
   const args = archivePath.endsWith('.zip')
-    ? ['-o', archivePath, '-d', destination]
-    : ['-xf', archivePath, '-C', destination];
+    ? ['-o', archivePath, '-d', destination, ...(excludes.length > 0 ? ['-x', ...excludes] : [])]
+    : tarArgs;
   await runExecutable(executable, args);
 }
 

@@ -269,7 +269,9 @@ export async function downloadGit(config: BuildConfig): Promise<void> {
     ], artifact.sha256)
     const extractDir = join(tempDir, 'extract')
     mkdirSync(extractDir, { recursive: true })
-    await extractArchive(archive, extractDir)
+    // Windows bsdtar rejects these MSYS links before copyRuntimeTree can skip them.
+    const excludes = platform === 'win32' ? ['dev/*', 'etc/mtab'] : []
+    await extractArchive(archive, extractDir, excludes)
     const root = locateRuntimeRoot(extractDir, looksLikeGitRoot)
     replaceTree(root, targetDir, {
       preserveSymlinks: shouldPreserveRuntimeSymlinks(platform),

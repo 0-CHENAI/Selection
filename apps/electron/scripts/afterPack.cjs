@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const { packageHostRuntimeArchives } = require('./package-host-runtimes.cjs');
 const {
   copyRuntimeTree,
   shouldPreserveRuntimeSymlinks,
@@ -144,12 +145,10 @@ function copyAgentRuntimes(context, resourcesRoot) {
     `vendor/bun/${context.electronPlatformName === 'win32' ? 'bun.exe' : 'bun'}`]) {
     if (!fs.existsSync(path.join(resourcesRoot, 'app', relative))) throw new Error(`Packaged agent runtime is missing: ${relative}`);
   }
-  copyHostRuntime(projectDir, resourcesRoot, 'vendor/git', [
-    'bin/git', 'cmd/git.exe', 'mingw64/bin/git.exe', 'ucrt64/bin/git.exe',
-  ], context.electronPlatformName);
-  copyHostRuntime(projectDir, resourcesRoot, 'vendor/python', [
-    'bin/python3', 'python.exe', 'python3.exe',
-  ], context.electronPlatformName);
+  if (context.electronPlatformName === 'linux') {
+    copyHostRuntime(projectDir, resourcesRoot, 'vendor/git', ['bin/git'], 'linux');
+    copyHostRuntime(projectDir, resourcesRoot, 'vendor/python', ['bin/python3', 'bin/python'], 'linux');
+  }
   const ripgrep = 'node_modules/@vscode/ripgrep';
   const sources = [path.join(projectDir, ripgrep), path.join(projectDir, '..', '..', ripgrep)];
   const source = sources.find(candidate => fs.existsSync(candidate));
@@ -166,6 +165,10 @@ function copyAgentRuntimes(context, resourcesRoot) {
 module.exports = async function afterPack(context) {
   const resourcesRoot = resolvePackagedResourcesRoot(context);
   copyAgentRuntimes(context, resourcesRoot);
+  if (context.electronPlatformName !== 'linux') {
+    const arch = ({ 1: 'x64', 3: 'arm64' })[context.arch] || String(context.arch);
+    packageHostRuntimeArchives(context.packager.projectDir, path.join(resourcesRoot, 'app'), context.electronPlatformName, arch);
+  }
   pruneForeignPlatformRuntimes(context, resourcesRoot);
   copySharpRuntime(context, resourcesRoot);
 

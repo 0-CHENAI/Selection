@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -42,18 +40,14 @@ describe('afterPack OfficeCLI runtime pruning', () => {
       expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Required agent runtime')
       const files = ['resources/session-mcp-server/index.js', 'resources/pi-agent-server/index.js',
         'resources/pi-agent-server/image-resize-worker.js', 'resources/pi-agent-server/read-image-resize-worker.js', 'resources/pi-agent-server/photon_rs_bg.wasm',
-        'resources/pi-agent-server/node_modules/koffi/native.node', 'vendor/bun/bun', 'vendor/git/bin/git',
-        'vendor/python/bin/python3', 'node_modules/@vscode/ripgrep/bin/rg']
+        'resources/pi-agent-server/node_modules/koffi/native.node', 'vendor/bun/bun',
+        'node_modules/@vscode/ripgrep/bin/rg']
       for (const file of files) {
         mkdirSync(join(projectDir, file, '..'), { recursive: true })
         writeFileSync(join(projectDir, file), file)
       }
       copyAgentRuntimes(context, resourcesRoot)
       for (const file of files) expect(readFileSync(join(resourcesRoot, 'app', file), 'utf8')).toBe(file)
-      rmSync(join(projectDir, 'vendor/git'), { recursive: true, force: true })
-      expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Required host runtime is missing: vendor/git')
-      mkdirSync(join(projectDir, 'vendor/git/bin'), { recursive: true })
-      writeFileSync(join(projectDir, 'vendor/git/bin/git'), 'vendor/git/bin/git')
       rmSync(join(projectDir, 'resources/pi-agent-server/photon_rs_bg.wasm'))
       expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Packaged agent runtime is missing')
     } finally { rmSync(root, { recursive: true, force: true }) }
@@ -126,76 +120,4 @@ describe('afterPack OfficeCLI runtime pruning', () => {
     )).toThrow('Unsupported packaged OfficeCLI target')
   })
 
-  it('keeps macOS Git/Python in-tree file symlinks when afterPack recopies vendor trees', () => {
-    const root = mkdtempSync(join(tmpdir(), 'selection-afterpack-symlinks-'))
-    try {
-      const projectDir = join(root, 'project')
-      const resourcesRoot = join(root, 'packed')
-      seedHostRuntimeWithSymlinks(projectDir, { bunName: 'bun', gitUnix: true })
-      copyAgentRuntimes({ electronPlatformName: 'darwin', packager: { projectDir } }, resourcesRoot)
-
-      const gitFetch = join(resourcesRoot, 'app/vendor/git/libexec/git-core/git-fetch')
-      const python3 = join(resourcesRoot, 'app/vendor/python/bin/python3')
-      expect(lstatSync(gitFetch).isSymbolicLink()).toBe(true)
-      expect(readFileSync(gitFetch, 'utf8')).toBe('git-binary')
-      expect(lstatSync(python3).isSymbolicLink()).toBe(true)
-      expect(readFileSync(python3, 'utf8')).toBe('python-binary')
-      expect(existsSync(join(resourcesRoot, 'app/vendor/git/dev/fd'))).toBe(false)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('still flattens Windows in-tree Git links and skips dangling Unix vfs links', () => {
-    const root = mkdtempSync(join(tmpdir(), 'selection-afterpack-win-'))
-    try {
-      const projectDir = join(root, 'project')
-      const resourcesRoot = join(root, 'packed')
-      seedHostRuntimeWithSymlinks(projectDir, { bunName: 'bun.exe', gitUnix: false })
-      copyAgentRuntimes({ electronPlatformName: 'win32', packager: { projectDir } }, resourcesRoot)
-
-      const gitFetch = join(resourcesRoot, 'app/vendor/git/libexec/git-core/git-fetch')
-      expect(lstatSync(gitFetch).isSymbolicLink()).toBe(false)
-      expect(readFileSync(gitFetch, 'utf8')).toBe('git-binary')
-      expect(existsSync(join(resourcesRoot, 'app/vendor/git/cmd/git.exe'))).toBe(true)
-      expect(existsSync(join(resourcesRoot, 'app/vendor/git/dev/fd'))).toBe(false)
-      expect(existsSync(join(resourcesRoot, 'app/vendor/python/python.exe'))).toBe(true)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
 })
-
-function seedHostRuntimeWithSymlinks(
-  projectDir: string,
-  opts: { bunName: string; gitUnix: boolean },
-) {
-  const files = [
-    'resources/session-mcp-server/index.js',
-    'resources/pi-agent-server/index.js',
-    'resources/pi-agent-server/image-resize-worker.js',
-    'resources/pi-agent-server/read-image-resize-worker.js',
-    'resources/pi-agent-server/photon_rs_bg.wasm',
-    `vendor/bun/${opts.bunName}`,
-    'node_modules/@vscode/ripgrep/bin/' + (opts.gitUnix ? 'rg' : 'rg.exe'),
-  ]
-  for (const file of files) {
-    mkdirSync(join(projectDir, file, '..'), { recursive: true })
-    writeFileSync(join(projectDir, file), file)
-  }
-  mkdirSync(join(projectDir, 'vendor/git/libexec/git-core'), { recursive: true })
-  mkdirSync(join(projectDir, 'vendor/git/bin'), { recursive: true })
-  mkdirSync(join(projectDir, 'vendor/git/dev'), { recursive: true })
-  mkdirSync(join(projectDir, 'vendor/python/bin'), { recursive: true })
-  writeFileSync(join(projectDir, 'vendor/git/libexec/git-core/git'), 'git-binary', { mode: 0o755 })
-  writeFileSync(join(projectDir, 'vendor/git/bin/git'), 'git-binary', { mode: 0o755 })
-  symlinkSync('git', join(projectDir, 'vendor/git/libexec/git-core/git-fetch'))
-  symlinkSync('/proc/self/fd', join(projectDir, 'vendor/git/dev/fd'))
-  writeFileSync(join(projectDir, 'vendor/python/bin/python3.12'), 'python-binary', { mode: 0o755 })
-  symlinkSync('python3.12', join(projectDir, 'vendor/python/bin/python3'))
-  if (!opts.gitUnix) {
-    mkdirSync(join(projectDir, 'vendor/git/cmd'), { recursive: true })
-    writeFileSync(join(projectDir, 'vendor/git/cmd/git.exe'), 'git-exe')
-    writeFileSync(join(projectDir, 'vendor/python/python.exe'), 'python-exe')
-  }
-}

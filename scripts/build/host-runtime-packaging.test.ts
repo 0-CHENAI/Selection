@@ -1,153 +1,144 @@
 import { describe, expect, it } from 'bun:test'
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { copyRuntimeTree } from './host-runtimes.ts'
+import { prepareDesktopHostRuntimes } from '../../apps/electron/src/main/host-runtime-cache'
+import { hostRuntimeArchiveDirectory, sha256File } from '../../apps/electron/src/main/host-runtime-archive.cjs'
 
-const { copyAgentRuntimes } = require('../../apps/electron/scripts/afterPack.cjs') as {
-  copyAgentRuntimes: (
-    context: { electronPlatformName: string; packager: { projectDir: string } },
-    resourcesRoot: string,
-  ) => void
+const { packageHostRuntimeArchives } = require('../../apps/electron/scripts/package-host-runtimes.cjs') as {
+  packageHostRuntimeArchives: (projectDir: string, resourcesBase: string, platform: string, arch: string) => void
+}
+const platform = process.platform
+const archiveTestPlatform = platform === 'win32' ? 'win32' : 'darwin'
+const gitPaths = archiveTestPlatform === 'win32'
+  ? ['cmd/git.exe', 'ucrt64/bin/git.exe', 'bin/bash.exe', 'usr/bin/bash.exe']
+  : ['bin/git', 'libexec/git-core/git']
+const pythonPaths = archiveTestPlatform === 'win32'
+  ? ['python.exe', 'python3.exe', 'python312.dll', 'Lib/encodings/__init__.py']
+  : ['bin/python3', 'lib/python3.12/encodings/__init__.py']
+
+function writeFile(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, content, { mode: 0o755 })
 }
 
-/**
- * electron-builder FileCopier creates dest symlinks with fs.symlink and does
- * not unlink an existing path. Package Desktop 45133668791 failed that way
- * when `files` and extraResources both copied vendor/git:
- *   EEXIST: file already exists, symlink 'git' -> '.../git-core/git-add'
- */
-function electronBuilderCopyTree(source: string, destination: string): void {
-  mkdirSync(destination, { recursive: true })
-  for (const name of readdirSync(source, { withFileTypes: true })) {
-    const from = join(source, name.name)
-    const to = join(destination, name.name)
-    if (name.isDirectory()) {
-      electronBuilderCopyTree(from, to)
-      continue
-    }
-    if (name.isSymbolicLink()) {
-      symlinkSync(readlinkSync(from), to)
-      continue
-    }
-    mkdirSync(dirname(to), { recursive: true })
-    copyFileSync(from, to)
+function seedRuntime(project: string, kind: 'git' | 'python', version: string): void {
+  const root = join(project, 'vendor', kind)
+  for (const file of kind === 'git' ? gitPaths : pythonPaths) {
+    writeFile(join(root, file), `${kind}-${version}-${file}`)
   }
+  writeFile(join(root, '.selection-runtime.json'), JSON.stringify({
+    kind, version, platform: archiveTestPlatform, arch: process.arch, treeFormat: 2,
+  }))
 }
 
-function seedDugiteStyleGit(root: string): void {
-  mkdirSync(join(root, 'bin'), { recursive: true })
-  mkdirSync(join(root, 'libexec', 'git-core'), { recursive: true })
-  writeFileSync(join(root, 'libexec', 'git-core', 'git'), 'git-binary', { mode: 0o755 })
-  chmodSync(join(root, 'libexec', 'git-core', 'git'), 0o755)
-  writeFileSync(join(root, 'bin', 'git'), 'git-binary', { mode: 0o755 })
-  symlinkSync('git', join(root, 'libexec', 'git-core', 'git-add'))
-  symlinkSync('git', join(root, 'libexec', 'git-core', 'git-fetch'))
-}
-
-function seedPackagingProject(projectDir: string): void {
-  const files = [
-    'resources/session-mcp-server/index.js',
-    'resources/pi-agent-server/index.js',
-    'resources/pi-agent-server/image-resize-worker.js',
-    'resources/pi-agent-server/read-image-resize-worker.js',
-    'resources/pi-agent-server/photon_rs_bg.wasm',
-    'vendor/bun/bun',
-    'node_modules/@vscode/ripgrep/bin/rg',
-  ]
-  for (const file of files) {
-    mkdirSync(join(projectDir, file, '..'), { recursive: true })
-    writeFileSync(join(projectDir, file), file)
-  }
-  seedDugiteStyleGit(join(projectDir, 'vendor/git'))
-  mkdirSync(join(projectDir, 'vendor/python/bin'), { recursive: true })
-  writeFileSync(join(projectDir, 'vendor/python/bin/python3.12'), 'python-binary', { mode: 0o755 })
-  symlinkSync('python3.12', join(projectDir, 'vendor/python/bin/python3'))
-}
-
-function yamlFilesIncludesVendorRuntime(builder: string): string[] {
-  return builder.split('\n').filter((line) =>
-    /^\s+- vendor\/(?:git|python)/.test(line) && !line.includes('!'),
-  )
-}
-
-describe('electron-builder host runtime packaging', () => {
-  it('does not list vendor git/python in files while extraResources still copies them', () => {
-    const builder = readFileSync(
-      join(import.meta.dir, '../../apps/electron/electron-builder.yml'),
-      'utf8',
-    )
-    expect(yamlFilesIncludesVendorRuntime(builder)).toEqual([])
+describe('desktop Git/Python packaging', () => {
+  it('keeps unpacked trees out of the macOS and Windows payloads', () => {
+    const builder = readFileSync(join(import.meta.dir, '../../apps/electron/electron-builder.yml'), 'utf8')
     expect(builder).toContain('!vendor/git/**/*')
     expect(builder).toContain('!vendor/python/**/*')
     for (const block of builder.split(/\n(?=mac:|win:|linux:)/)) {
-      if (!/^(mac|win|linux):/.test(block)) continue
-      expect(block).toContain('from: vendor/git')
-      expect(block).toContain('from: vendor/python')
+      if (/^(mac|win):/.test(block)) {
+        expect(block).not.toMatch(/from: vendor\/(git|python)/)
+      } else if (block.startsWith('linux:')) {
+        expect(block).toContain('from: vendor/git')
+        expect(block).toContain('from: vendor/python')
+      }
     }
   })
 
-  it('reproduces the macOS files+extraResources EEXIST on git-add', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'pack-eexist-'))
+  it.skipIf(platform === 'linux')('installs offline, reuses healthy components, and repairs only changed or damaged components', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-host-runtime-'))
     try {
-      const source = join(tmp, 'vendor/git')
-      const dest = join(tmp, 'app/vendor/git')
-      seedDugiteStyleGit(source)
-      // #834 yml: files glob copied the tree, extraResources copied it again.
-      electronBuilderCopyTree(source, dest)
-      expect(lstatSync(join(dest, 'libexec/git-core/git-add')).isSymbolicLink()).toBe(true)
-      expect(() => electronBuilderCopyTree(source, dest)).toThrow(
-        /EEXIST: file already exists, symlink 'git'/,
-      )
+      const project = join(root, 'project')
+      const resourcesBase = join(root, 'installed app')
+      const cacheRoot = join(root, 'local runtimes')
+      seedRuntime(project, 'git', '1')
+      seedRuntime(project, 'python', '1')
+      packageHostRuntimeArchives(project, resourcesBase, platform, process.arch)
+
+      const errors: unknown[] = []
+      const prepare = () => prepareDesktopHostRuntimes(resourcesBase, cacheRoot, (_kind, error) => errors.push(error))
+      const first = await prepare()
+      expect(errors).toEqual([])
+      expect(first.git).toBeDefined()
+      expect(first.python).toBeDefined()
+      expect(existsSync(join(resourcesBase, 'vendor/git'))).toBe(false)
+      const gitMarker = join(first.git!, gitPaths[0]!)
+      const pythonMarker = join(first.python!, pythonPaths[0]!)
+      const gitSentinel = join(first.git!, 'user-sentinel')
+      const pythonSentinel = join(first.python!, 'user-sentinel')
+      writeFileSync(gitSentinel, 'keep until repair')
+      writeFileSync(pythonSentinel, 'keep through upgrade')
+
+      // A later full installer includes a fresh archive, but provisioning should ignore it
+      // while the existing files match the manifest.
+      const gitArchive = join(hostRuntimeArchiveDirectory(resourcesBase), 'git.tar.gz')
+      const originalArchiveHash = sha256File(gitArchive)
+      writeFileSync(gitArchive, 'damaged compressed file')
+      expect(await prepare()).toEqual(first)
+      expect(existsSync(gitSentinel)).toBe(true)
+      expect(existsSync(pythonSentinel)).toBe(true)
+
+      // A same-length edit is still corruption, even when the key binaries exist.
+      const original = readFileSync(gitMarker, 'utf8')
+      writeFileSync(gitMarker, 'x'.repeat(original.length))
+      expect(await prepare()).toEqual({ python: first.python })
+      expect(errors).toHaveLength(1)
+      expect(existsSync(gitSentinel)).toBe(true)
+
+      packageHostRuntimeArchives(project, resourcesBase, platform, process.arch)
+      expect(sha256File(gitArchive)).toBe(originalArchiveHash)
+      expect(await prepare()).toEqual(first)
+      expect(readFileSync(gitMarker, 'utf8')).toBe(original)
+      expect(existsSync(gitSentinel)).toBe(false)
+      expect(existsSync(pythonSentinel)).toBe(true)
+
+      seedRuntime(project, 'git', '2')
+      packageHostRuntimeArchives(project, resourcesBase, platform, process.arch)
+      const updated = await prepare()
+      expect(updated.git).not.toBe(first.git)
+      expect(updated.python).toBe(first.python)
+      expect(readFileSync(join(updated.git!, gitPaths[0]!), 'utf8')).toContain('git-2-')
+      expect(existsSync(gitMarker)).toBe(true)
+      expect(existsSync(pythonMarker)).toBe(true)
+      expect(existsSync(pythonSentinel)).toBe(true)
     } finally {
-      rmSync(tmp, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true })
     }
   })
 
-  it('packs Git/Python through extraResources once then afterPack without flattening links', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'pack-once-'))
+  it.skipIf(platform === 'win32')('preserves relative macOS links and omits virtual Unix links', () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-host-links-'))
     try {
-      const projectDir = join(tmp, 'project')
-      const resourcesRoot = join(tmp, 'Selection.app/Contents/Resources')
-      seedPackagingProject(projectDir)
+      const resources = join(root, 'resources')
+      seedRuntime(root, 'git', '1')
+      seedRuntime(root, 'python', '1')
+      const gitCore = join(root, 'vendor/git/libexec/git-core')
+      symlinkSync('git', join(gitCore, 'git-add'))
+      symlinkSync('/proc/self/fd/0', join(gitCore, 'virtual'))
+      const pythonBin = join(root, 'vendor/python/bin')
+      rmSync(join(pythonBin, 'python3'))
+      writeFile(join(pythonBin, 'python3.12'), 'python binary')
+      symlinkSync('python3.12', join(pythonBin, 'python3'))
+      packageHostRuntimeArchives(root, resources, 'darwin', process.arch)
 
-      // extraResources (single copy), matching the electron-builder.yml fix.
-      copyRuntimeTree(
-        join(projectDir, 'vendor/git'),
-        join(resourcesRoot, 'app/vendor/git'),
-        { preserveSymlinks: true },
-      )
-      copyRuntimeTree(
-        join(projectDir, 'vendor/python'),
-        join(resourcesRoot, 'app/vendor/python'),
-        { preserveSymlinks: true },
-      )
-
-      copyAgentRuntimes({ electronPlatformName: 'darwin', packager: { projectDir } }, resourcesRoot)
-
-      const gitAdd = join(resourcesRoot, 'app/vendor/git/libexec/git-core/git-add')
-      const python3 = join(resourcesRoot, 'app/vendor/python/bin/python3')
+      // Check the resulting tar on Linux too. A macOS host exercises its usual
+      // application startup path in the lifecycle test above.
+      const output = join(root, 'output')
+      for (const kind of ['git', 'python']) {
+        const dest = join(output, kind)
+        mkdirSync(dest, { recursive: true })
+        execFileSync('/usr/bin/tar', ['-xzf', join(hostRuntimeArchiveDirectory(resources), `${kind}.tar.gz`), '-C', dest])
+      }
+      const gitAdd = join(output, 'git/libexec/git-core/git-add')
       expect(lstatSync(gitAdd).isSymbolicLink()).toBe(true)
       expect(readlinkSync(gitAdd)).toBe('git')
-      expect(readFileSync(gitAdd, 'utf8')).toBe('git-binary')
-      expect(lstatSync(python3).isSymbolicLink()).toBe(true)
-      expect(existsSync(join(resourcesRoot, 'app/vendor/git/bin/git'))).toBe(true)
-      expect((lstatSync(join(resourcesRoot, 'app/vendor/git/libexec/git-core/git')).mode & 0o111) !== 0).toBe(true)
+      expect(() => lstatSync(join(output, 'git/libexec/git-core/virtual'))).toThrow()
+      expect(readlinkSync(join(output, 'python/bin/python3'))).toBe('python3.12')
     } finally {
-      rmSync(tmp, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })

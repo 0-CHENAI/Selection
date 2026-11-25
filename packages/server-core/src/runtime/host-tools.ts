@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
-import { delimiter as hostDelimiter, join } from 'node:path'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, unlinkSync } from 'node:fs'
+import { basename, delimiter as hostDelimiter, dirname, join, relative } from 'node:path'
 
 export const HOST_PYTHON_VERSION = '3.12'
 export const USER_PYTHON_VENV = 'python-venv'
@@ -10,7 +10,10 @@ export type HostToolSource = 'bundled' | 'system' | 'missing'
 
 export interface ResolveHostToolsOptions {
   resourcesBase: string
+  bundledGitRoot?: string
+  bundledPythonRoot?: string
   userDataDir?: string
+  includePythonVenvInPath?: boolean
   preferSystemGit?: boolean
   preferSystemPython?: boolean
   platform?: NodeJS.Platform
@@ -217,8 +220,8 @@ export function resolveHostTools(options: ResolveHostToolsOptions): ResolvedHost
     || process.env.CRAFT_PREFER_SYSTEM_GIT === '1'
   const preferSystemPython = options.preferSystemPython === true
     || process.env.CRAFT_PREFER_SYSTEM_PYTHON === '1'
-  const gitRoot = vendorGitRoot(options.resourcesBase)
-  const pythonRoot = vendorPythonRoot(options.resourcesBase)
+  const gitRoot = options.bundledGitRoot ?? vendorGitRoot(options.resourcesBase)
+  const pythonRoot = options.bundledPythonRoot ?? vendorPythonRoot(options.resourcesBase)
   const stubOpts = { platform, hasXcodeClt }
 
   const bundledGit = findBundledGitBinary(gitRoot, platform, exists)
@@ -278,7 +281,8 @@ export function resolveHostTools(options: ResolveHostToolsOptions): ResolvedHost
 
   const venvDir = options.userDataDir ? join(options.userDataDir, USER_PYTHON_VENV) : null
   const pythonUserBase = options.userDataDir ? join(options.userDataDir, USER_PYTHON_SITE) : null
-  const venvDirs = venvDir && pythonSource === 'bundled' ? venvPathDirs(venvDir, platform, exists) : []
+  const venvDirs = venvDir && pythonSource === 'bundled' && options.includePythonVenvInPath !== false
+    ? venvPathDirs(venvDir, platform, exists) : []
 
   const python3Binary = pythonBinary && /python3(\.exe)?$/i.test(pythonBinary)
     ? pythonBinary
@@ -357,6 +361,16 @@ export function venvPythonPath(venvDir: string, platform: NodeJS.Platform = proc
     : join(venvDir, 'bin', 'python')
 }
 
+function venvUsesPython(venvDir: string, pythonBinary: string): boolean {
+  try {
+    const config = readFileSync(join(venvDir, 'pyvenv.cfg'), 'utf8')
+    const home = config.match(/^home\s*=\s*(.+)$/m)?.[1]?.trim()
+    return Boolean(home && relative(realpathSync(home), dirname(realpathSync(pythonBinary))) === '')
+  } catch {
+    return false
+  }
+}
+
 /** Create an isolated venv under userData using the bundled interpreter. Offline-safe. */
 export function ensureUserPythonVenv(
   pythonBinary: string,
@@ -364,7 +378,8 @@ export function ensureUserPythonVenv(
   uvBinary: string | null = process.env.CRAFT_UV ?? null,
 ): boolean {
   const pythonInVenv = venvPythonPath(venvDir)
-  if (existsSync(pythonInVenv)) return true
+  if (existsSync(pythonInVenv) && venvUsesPython(venvDir, pythonBinary)) return true
+  const hasVenv = existsSync(join(venvDir, 'pyvenv.cfg'))
   mkdirSync(venvDir, { recursive: true })
   const env = {
     ...process.env,
@@ -374,19 +389,31 @@ export function ensureUserPythonVenv(
   }
   try {
     if (uvBinary && existsSync(uvBinary)) {
-      execFileSync(uvBinary, ['venv', '--python', pythonBinary, venvDir], {
+      execFileSync(uvBinary, ['venv', '--offline', '--no-project', '--allow-existing', '--python', pythonBinary, venvDir], {
         stdio: 'ignore',
         timeout: 120_000,
         env,
+        windowsHide: true,
       })
     } else {
-      execFileSync(pythonBinary, ['-m', 'venv', venvDir], {
+      if (hasVenv && process.platform !== 'win32') {
+        // CPython's venv --upgrade leaves existing links alone, including broken
+        // links to the original .app. Refresh launchers without changing site-packages.
+        const commands = new Set(['python', 'python3', basename(realpathSync(pythonBinary))])
+        for (const command of commands) {
+          const launcher = join(venvDir, 'bin', command)
+          if (lstatSync(launcher, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(launcher)
+        }
+      }
+      const upgrade = hasVenv ? ['--upgrade', '--without-pip'] : []
+      execFileSync(pythonBinary, ['-I', '-m', 'venv', ...upgrade, venvDir], {
         stdio: 'ignore',
         timeout: 120_000,
         env,
+        windowsHide: true,
       })
     }
-    return existsSync(pythonInVenv)
+    return existsSync(pythonInVenv) && venvUsesPython(venvDir, pythonBinary)
   } catch {
     return false
   }

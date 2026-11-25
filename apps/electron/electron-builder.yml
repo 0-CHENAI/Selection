@@ -57,10 +57,8 @@ files:
   - resources/bin/linux-x64/**/*
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
-  # Git/Python must not be in `files`. macOS #834 kept in-tree git-* / python3
-  # symlinks; electron-builder then copies the same tree again via extraResources
-  # with fs.symlink and throws EEXIST (Package Desktop 45133668791, git-add).
-  # extraResources copies once; afterPack recopies with copyRuntimeTree.
+  # afterPack embeds independent Git/Python archives on Windows and macOS.
+  # Keep the source trees out of the application payload.
   - "!vendor/git/**/*"
   - "!vendor/python/**/*"
   # Exclude everything from node_modules (will use extraResources for SDK)
@@ -88,10 +86,7 @@ publish:
   url: https://agents.craft.do/electron/latest
 
 # Disable ASAR to avoid decompression overhead and click delays.
-# Vendor Git/Python are native executables and must never live inside app.asar
-# (Electron cannot exec from asar). asar:false unpacks the whole app; extraResources
-# and afterPack also copy vendor/ to Resources/app/vendor (outside asar). asarUnpack
-# is belt-and-suspenders if asar is ever re-enabled.
+# Run vendor executables from disk, outside app.asar.
 asar: false
 asarUnpack:
   - vendor/**
@@ -126,14 +121,6 @@ mac:
     # ripgrep (used by packages/server-core/src/services/search.ts).
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
-    # Relocatable Git (dugite-native) and CPython (python-build-standalone).
-    # Sole electron-builder copy of these trees (not `files`) so in-tree
-    # git-* symlinks are not created twice. afterPack recopies with
-    # copyRuntimeTree before signing so Mach-O is notarized and links stay.
-    - from: vendor/git
-      to: app/vendor/git
-    - from: vendor/python
-      to: app/vendor/python
   # Exclude binaries for other platforms
   files:
     # A positive platform filter prevents electron-builder from prepending its
@@ -208,10 +195,6 @@ win:
       to: app/node_modules/@vscode/ripgrep
     - from: vendor/bun/bun.exe
       to: app/vendor/bun/bun.exe
-    - from: vendor/git
-      to: app/vendor/git
-    - from: vendor/python
-      to: app/vendor/python
     - from: resources/bin/win32-x64
       to: app/resources/bin/win32-x64
 

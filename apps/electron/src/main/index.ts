@@ -124,6 +124,7 @@ import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeU
 import type { EventSink } from '@craft-agent/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@craft-agent/server-core/services'
 import { applyHostTools, ensureUserPythonVenv, resolveHostTools } from '@craft-agent/server-core/runtime'
+import { prepareDesktopHostRuntimes } from './host-runtime-cache'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -234,12 +235,22 @@ if (isDebugMode) {
   if (isDebugMode) {
     mainLog.info('CLI tools configured:', { uvBinary: process.env.CRAFT_UV, binDir, scriptsDir, bundledUvExists })
   }
+}
 
-  const hostTools = resolveHostTools({
-    resourcesBase,
-    userDataDir: app.getPath('userData'),
-  })
-  applyHostTools(hostTools)
+async function configureHostTools(): Promise<void> {
+  const resourcesBase = app.isPackaged ? join(process.resourcesPath, 'app') : join(__dirname, '..')
+  const userDataDir = app.getPath('userData')
+  const localAppData = process.platform === 'win32' ? process.env.LOCALAPPDATA : undefined
+  const runtimeStore = join(localAppData ? join(localAppData, app.getName()) : userDataDir, 'runtimes')
+  const runtimeRoots = app.isPackaged
+    ? await prepareDesktopHostRuntimes(resourcesBase, runtimeStore, (kind, error) => {
+        mainLog.warn(`Could not prepare bundled ${kind} runtime`, error)
+      })
+    : {}
+  const options = {
+    resourcesBase, userDataDir, bundledGitRoot: runtimeRoots.git, bundledPythonRoot: runtimeRoots.python,
+  }
+  let hostTools = resolveHostTools({ ...options, includePythonVenvInPath: false })
   if (hostTools.pythonSource === 'bundled' && hostTools.pythonBinary && hostTools.venvDir) {
     if (hostTools.pythonUserBase) mkdirSync(hostTools.pythonUserBase, { recursive: true })
     if (!ensureUserPythonVenv(hostTools.pythonBinary, hostTools.venvDir)) {
@@ -248,12 +259,10 @@ if (isDebugMode) {
         venvDir: hostTools.venvDir,
       })
     } else {
-      applyHostTools(resolveHostTools({
-        resourcesBase,
-        userDataDir: app.getPath('userData'),
-      }))
+      hostTools = resolveHostTools(options)
     }
   }
+  applyHostTools(hostTools)
   if (hostTools.gitSource === 'missing') {
     mainLog.warn('Bundled Git runtime missing; agent git commands need a system git.', {
       expectedGitRoot: join(resourcesBase, 'vendor', 'git'),
@@ -465,6 +474,9 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (!gotTheLock) return
+  await configureHostTools()
+
   // Export packaged state as env var so logger.ts (and headless Bun) don't need 'electron'
   process.env.CRAFT_IS_PACKAGED = app.isPackaged ? 'true' : 'false'
 
