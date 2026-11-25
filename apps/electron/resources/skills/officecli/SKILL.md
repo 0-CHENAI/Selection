@@ -15,6 +15,8 @@ description: "Selection Office 文件入口：按文档类型读取唯一制作�
 
 用户明确指定工具或提出对照实验时遵循该要求；否则新建 Word 默认模板工具，已有文件修改使用捆绑 OfficeCLI。不要安装或自更新 OfficeCLI，不读取用户目录中同名 Office 技能。
 
+汇总已有资料时，用 Read 直接读取 Word 97–2003 二进制 `.doc` 的文本，按工具返回的行号续读。长篇 `.docx` 优先用 `document_index` 定位段落，再用 `document_read` 读取所需原文。简短 `.docx` 可用 `officecli view <文件> text`。资料提取只读源文件。读取失败时记录具体文件和错误，保留其他资料的提取结果。
+
 业务技能只补内容要求，不追加制作或 QA 流程。学术引文、表单、金融等专用指南仅在需要相应功能时按需读其语法。
 
 最终文件按用户指定位置交付，否则放用户选择的项目目录；未选择项目目录时放会话根目录的 `outputs/`（按需创建）。最终产物禁止写入 `data/`、`plans/` 或 `long_responses/`；脚本、草稿、检查输出放 `<session_state>` 的精确 dataFolderPath。保留用户原件，不清理已有工作目录。

@@ -2,12 +2,15 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const PHOTON_WASM_FILENAME = 'photon_rs_bg.wasm'
-export const IMAGE_RESIZE_WORKERS = ['image-resize-worker.js', 'read-image-resize-worker.js'] as const
+const LEGACY_WORD_LICENSE_FILENAME = 'legacy-word-extractor.LICENSE.txt'
+export const PI_AUXILIARY_ENTRIES = [
+  'image-resize-worker.js', 'read-image-resize-worker.js', 'legacy-word-extractor.js', LEGACY_WORD_LICENSE_FILENAME,
+] as const
 
-export function verifyImageResizeWorkers(directory: string): void {
-  for (const worker of IMAGE_RESIZE_WORKERS) {
-    const path = join(directory, worker)
-    if (!existsSync(path)) throw new Error(`Pi image resize Worker not found at ${path}`)
+export function verifyPiAuxiliaryEntries(directory: string): void {
+  for (const entry of PI_AUXILIARY_ENTRIES) {
+    const path = join(directory, entry)
+    if (!existsSync(path)) throw new Error(`Pi runtime entry not found at ${path}`)
   }
 }
 
@@ -25,9 +28,9 @@ export function copyPiAgentServerRuntimeAssets(rootDir: string, outputDir: strin
       `Photon WASM not found at ${photonWasmSource}. Run bun install before building pi-agent-server.`,
     )
   }
-  verifyImageResizeWorkers(outputDir)
-
   mkdirSync(outputDir, { recursive: true })
+  copyFileSync(join(rootDir, 'node_modules', 'word-extractor', 'LICENSE'), join(outputDir, LEGACY_WORD_LICENSE_FILENAME))
+  verifyPiAuxiliaryEntries(outputDir)
   copyFileSync(photonWasmSource, join(outputDir, PHOTON_WASM_FILENAME))
 }
 

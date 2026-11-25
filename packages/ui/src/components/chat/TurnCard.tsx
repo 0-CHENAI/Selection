@@ -1451,6 +1451,33 @@ function ThinkingActivityRow({
 }
 
 /** Single activity row in expanded view */
+function ToolExecutionProgress({ progress }: { progress: NonNullable<Message['toolProgress']> }) {
+  const startedAt = progress.phase === 'running' ? progress.startedAt : undefined
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (startedAt === undefined) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [startedAt])
+
+  const label = i18n.t(progress.phase === 'processing_result'
+    ? 'turnCard.toolProcessingResult'
+    : progress.outputBytes ? 'turnCard.toolOutputReceived' : 'turnCard.toolRunning')
+  const duration = startedAt !== undefined && progress.timeoutMs !== undefined
+    ? i18n.t('turnCard.toolDeadline', {
+      elapsed: Math.floor(Math.max(0, now - startedAt) / 1000),
+      limit: Math.ceil(progress.timeoutMs / 1000),
+    })
+    : undefined
+  return (
+    <span className="inline-flex min-w-0 items-center text-muted-foreground" data-tool-phase={progress.phase}>
+      <span className="truncate">{label}</span>
+      {duration && <span className="ml-1 shrink-0 tabular-nums" title={i18n.t('turnCard.toolDeadlineLabel')}>{duration}</span>}
+    </span>
+  )
+}
+
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
 
@@ -1724,11 +1751,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         {!isMcpOrApiTool && (
           <span className={cn("shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayedName}</span>
         )}
-        {activity.status === 'running' && activity.toolProgress && (
-          <span className="truncate text-muted-foreground" data-tool-phase={activity.toolProgress.phase}>
-            {i18n.t(activity.toolProgress.phase === 'processing_result' ? 'turnCard.toolProcessingResult' : activity.toolProgress.outputBytes ? 'turnCard.toolOutputReceived' : 'turnCard.toolRunning')}
-          </span>
-        )}
+        {activity.status === 'running' && activity.toolProgress && <ToolExecutionProgress progress={activity.toolProgress} />}
         {/* Diff stats and filename badges - after tool name */}
         {!isMcpOrApiTool && !isBackgrounded && diffStats && (
           <span className="flex items-center gap-1.5 text-[10px] shrink-0">

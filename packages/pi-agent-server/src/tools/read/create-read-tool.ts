@@ -1,10 +1,12 @@
 import { constants } from 'node:fs'
 import { access, readFile, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { extname } from 'node:path'
 import { createReadToolDefinition, truncateHead } from '@earendil-works/pi-coding-agent'
 import type { ReadOperations, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { PPT_VISUAL_QA_NO_OCR_NOTE } from '../../../../shared/src/agent/ppt-visual-qa-policy.ts'
 import { detectReadImageMimeType } from './image-mime.ts'
+import { readLegacyWord } from './read-legacy-word.ts'
 import {
   processReadImage,
   type ReadImageProcessingDependencies,
@@ -41,6 +43,7 @@ export function createSelectionReadToolDefinition(
 
   return {
     ...baseTool,
+    description: `${baseTool.description} Also reads body text from Word 97–2003 .doc files without Word or WPS. For legacy Word reference materials, use Read directly before considering shell automation.`,
     async execute(
       ...args: Parameters<typeof baseTool.execute>
     ): Promise<Awaited<ReturnType<typeof baseTool.execute>>> {
@@ -48,12 +51,17 @@ export function createSelectionReadToolDefinition(
       try {
         // Capture each invocation separately: parallel reads must not exchange identities.
         let captured: { path: string; bytes: Buffer } | undefined
+        let legacyWord = false
         const invocation = createReadToolDefinition(cwd, {
           operations: {
             ...operations,
             async readFile(path) {
               const canonical = await realpath(path)
               try {
+                if (extname(path).toLowerCase() === '.doc') {
+                  legacyWord = true
+                  return await readLegacyWord(canonical, args[2])
+                }
                 const bytes = await operations.readFile(path)
                 captured = { path: canonical, bytes }
                 return bytes
@@ -67,6 +75,10 @@ export function createSelectionReadToolDefinition(
           },
         })
         const result = await invocation.execute(...args)
+        if (legacyWord) {
+          result.content.unshift({ type: 'text', text: 'Extracted legacy Word text. Line offsets refer to the extracted text.' })
+          return result
+        }
         if (!captured || captured.bytes.includes(0)) return result
         let text: string
         try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(captured.bytes) } catch { return result }

@@ -869,7 +869,9 @@ export class PiEventAdapter extends BaseEventAdapter {
           if (Array.isArray(content)) {
             const text = content.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n');
             if (content.some(part => part.type === 'text')) this.commandOutput.set(event.toolCallId, text.slice(-64 * 1024));
-            const phase = (partialResult as { details?: { selectionToolProgress?: { phase?: string; executionMs?: number } } }).details?.selectionToolProgress;
+            const phase = (partialResult as { details?: { selectionToolProgress?: {
+              phase?: string; at?: number; executionMs?: number; timeoutMs?: number;
+            } } }).details?.selectionToolProgress;
             const now = Date.now();
             if (this.toolNames.has(event.toolCallId) && (phase || now - (this.toolProgressAt.get(event.toolCallId) ?? 0) >= 1000)) {
               this.toolProgressAt.set(event.toolCallId, now);
@@ -877,6 +879,9 @@ export class PiEventAdapter extends BaseEventAdapter {
                 phase: phase?.phase === 'processing_result' ? 'processing_result' : 'running', at: now,
                 ...(text ? { outputBytes: new TextEncoder().encode(text).byteLength } : {}),
                 ...(typeof phase?.executionMs === 'number' && Number.isFinite(phase.executionMs) ? { executionMs: Math.max(0, phase.executionMs) } : {}),
+                ...(typeof phase?.timeoutMs === 'number' && Number.isFinite(phase.timeoutMs) && phase.timeoutMs > 0
+                  ? { timeoutMs: phase.timeoutMs, startedAt: typeof phase.at === 'number' && Number.isFinite(phase.at) ? phase.at : now }
+                  : {}),
               } };
             }
           }

@@ -2840,6 +2840,8 @@
   "turnCard.thinkingDeeply": "Mélyen gondolkodik",
   "turnCard.thoughtDeeply": "Mélyen átgondolta",
   "turnCard.toolArguments": "Eszközhívás előkészítése",
+  "turnCard.toolDeadline": "{{elapsed}} mp / {{limit}} mp",
+  "turnCard.toolDeadlineLabel": "Eltelt idő és időkorlát",
   "turnCard.toolOutputReceived": "Kimenet fogadása",
   "turnCard.toolProcessingResult": "Végrehajtás kész · eredmény feldolgozása",
   "turnCard.toolRunning": "Végrehajtás",

@@ -2842,6 +2842,8 @@
   "turnCard.thinkingDeeply": "Myśli dogłębnie",
   "turnCard.thoughtDeeply": "Przemyślano dogłębnie",
   "turnCard.toolArguments": "Generowanie wywołania narzędzia",
+  "turnCard.toolDeadline": "{{elapsed}} s / {{limit}} s",
+  "turnCard.toolDeadlineLabel": "Czas pracy i limit czasu",
   "turnCard.toolOutputReceived": "Odbieranie wyniku",
   "turnCard.toolProcessingResult": "Wykonanie zakończone · przygotowanie wyniku",
   "turnCard.toolRunning": "Wykonywanie",

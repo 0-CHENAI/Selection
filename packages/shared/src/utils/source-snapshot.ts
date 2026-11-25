@@ -16,10 +16,10 @@ export function insideSourceDirectory(path: string, directory: string): boolean 
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 const snapshotKey = (originalHash: string, origin: string, extractor: SourceExtractor) => sourceHash(`${originalHash}\0${origin}\0${extractor}`);
-export function sourceIndexPath(directory: string, originalPath: string, extractor: SourceExtractor = 'selection-original-v1'): string {
+export function sourceIndexPath(directory: string, originalPath: string, extractor: SourceExtractor = 'selection-original-v1', bytes?: Uint8Array): string {
   const path = realpathSync(resolve(directory, originalPath));
   if (!insideSourceDirectory(path, directory)) throw new Error('Original leaves the authorized directory');
-  return join(directory, '.selection-sources', snapshotKey(sourceHash(readFileSync(path)), path, extractor), 'index.json');
+  return join(directory, '.selection-sources', snapshotKey(sourceHash(bytes ?? readFileSync(path)), path, extractor), 'index.json');
 }
 export function saveSourceSnapshot(directory: string, original: Uint8Array, origin: string, format: string,
   parts: Array<{ id: string; label: string; kind: SourceUnit['kind']; text: string }>, limitations: string[],

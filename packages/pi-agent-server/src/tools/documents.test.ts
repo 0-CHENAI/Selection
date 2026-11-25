@@ -10,6 +10,31 @@ import * as pdfReader from './web-fetch';
 import { minimalPdf } from './fixtures/minimal-pdf';
 const office = (files: Record<string, string>) => zipSync(Object.fromEntries(Object.entries(files).map(([key, value]) => [key, strToU8(value)])));
 
+test('long DOCX indexing supports deep reads and invalidates when its source or snapshot changes', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'selection-long-docx-'));
+  try {
+    const path = join(directory, '长篇资料.docx');
+    const write = (last: string) => {
+      const body = Array.from({ length: 600 }, (_, i) =>
+        `<w:p><w:r><w:t>${i + 1} ${i === 599 ? last : '连续的试验原文'}</w:t><w:br w:type="page"/></w:r></w:p>`).join('');
+      writeFileSync(path, office({ 'word/document.xml': `<w:document><w:body>${body}</w:body></w:document>`, 'word/media/unused.bin': 'embedded content' }));
+    };
+    write('旧结尾');
+    const first = await indexOriginalDocument(directory, path);
+    expect(first.units).toHaveLength(600);
+    expect(await indexOriginalDocument(directory, path)).toBe(first);
+    const [, read] = createDocumentTools(() => directory);
+    const readEnd = () => read!.execute('end', { path, unit_id: 'paragraph-600' }, undefined, undefined, {} as any);
+    expect((await readEnd()).content[0]).toMatchObject({ text: expect.stringContaining('600 旧结尾') });
+    write('新结尾');
+    const second = await indexOriginalDocument(directory, path);
+    expect(second.version).not.toBe(first.version);
+    expect((await readEnd()).content[0]).toMatchObject({ text: expect.stringContaining('600 新结尾') });
+    writeFileSync(second.textPath, 'tampered');
+    await expect(readEnd()).rejects.toThrow('Existing source index is corrupt');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; changed indexes invalidate', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'selection-documents-'));
   try {
@@ -59,8 +84,10 @@ test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; c
     const outside = mkdtempSync(join(tmpdir(), 'selection-outside-document-'));
     try {
       const path = join(outside, 'secret.md'); writeFileSync(path, 'Outside the authorized project');
-      symlinkSync(path, join(worker, 'escape.md'));
-      for (const escaped of [path, join(worker, 'escape.md')]) {
+      await expect(indexOriginalDocument(directory, path)).rejects.toThrow('authorized');
+      const link = join(worker, 'escape');
+      symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+      for (const escaped of [path, join(link, 'secret.md')]) {
         await expect(workerIndex!.execute('escape', { path: escaped }, undefined, undefined, {} as any)).rejects.toThrow('authorized');
         await expect(workerRead!.execute('escape', { path: escaped, unit_id: 'section-1' }, undefined, undefined, {} as any)).rejects.toThrow('authorized');
       }
@@ -95,7 +122,6 @@ test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; c
     writeFileSync(join(directory, 'broken.pdf'), 'broken');
     await expect(indexOriginalDocument(directory, 'broken.pdf')).rejects.toThrow();
     expect(readFileSync(fromSnapshots[3]!.snapshotPath!, 'utf8')).toBe('100万元');
-    await expect(indexOriginalDocument(directory, '/etc/passwd')).rejects.toThrow('authorized');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

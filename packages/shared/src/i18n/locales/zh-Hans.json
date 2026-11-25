@@ -2840,6 +2840,8 @@
   "turnCard.thinkingDeeply": "深度思考中",
   "turnCard.thoughtDeeply": "已深度思考",
   "turnCard.toolArguments": "正在生成工具调用",
+  "turnCard.toolDeadline": "{{elapsed}} 秒 / {{limit}} 秒",
+  "turnCard.toolDeadlineLabel": "已用时间和执行时限",
   "turnCard.toolOutputReceived": "已收到执行输出",
   "turnCard.toolProcessingResult": "执行已返回，正在整理结果",
   "turnCard.toolRunning": "正在执行",

@@ -16,6 +16,10 @@ test('Bash progress travels from SDK snapshots into one work-chain row and clear
   expect(JSON.stringify(activity)).not.toContain('SECRET')
   state = handleToolProgress(state, { ...activity, sessionId: 's' } as never)
   expect(state.session.messages[0]!.toolProgress?.outputBytes).toBe(13)
+  const startedAt = Date.now()
+  const timed = update({ content: [], details: { selectionToolProgress: { phase: 'running', at: startedAt, timeoutMs: 120_000 } } })[0]!
+  state = handleToolProgress(state, { ...timed, sessionId: 's' } as never)
+  expect(state.session.messages[0]!.toolProgress).toMatchObject({ startedAt, timeoutMs: 120_000, outputBytes: 13 })
   const processing = update({ content: [], details: { selectionToolProgress: { phase: 'processing_result', executionMs: 100 } } })[0]!
   state = handleToolProgress(state, { ...processing, sessionId: 's' } as never)
   expect(state.session.messages).toHaveLength(1)

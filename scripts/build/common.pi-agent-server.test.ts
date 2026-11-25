@@ -27,18 +27,21 @@ function createFixture(): { rootDir: string; electronDir: string; config: BuildC
 
   const piDistDir = join(rootDir, 'packages', 'pi-agent-server', 'dist')
   const photonPackageDir = join(rootDir, 'node_modules', '@silvia-odwyer', 'photon-node')
+  const wordExtractorPackageDir = join(rootDir, 'node_modules', 'word-extractor')
   const koffiDir = join(rootDir, 'node_modules', 'koffi')
   const koffiNativeDir = join(koffiDir, 'build', 'koffi', 'win32_x64')
   const sessionServerDir = join(electronDir, 'resources', 'session-mcp-server')
 
-  for (const dir of [piDistDir, photonPackageDir, koffiNativeDir, sessionServerDir]) {
+  for (const dir of [piDistDir, photonPackageDir, wordExtractorPackageDir, koffiNativeDir, sessionServerDir]) {
     mkdirSync(dir, { recursive: true })
   }
 
   writeFileSync(join(piDistDir, 'index.js'), 'console.log("pi")')
   writeFileSync(join(piDistDir, 'read-image-resize-worker.js'), 'console.log("read worker")')
   writeFileSync(join(piDistDir, 'image-resize-worker.js'), 'console.log("worker")')
+  writeFileSync(join(piDistDir, 'legacy-word-extractor.js'), 'console.log("extractor")')
   writeFileSync(join(photonPackageDir, 'photon_rs_bg.wasm'), 'wasm-fixture')
+  writeFileSync(join(wordExtractorPackageDir, 'LICENSE'), 'licensed fixture')
   writeFileSync(join(koffiDir, 'package.json'), '{}')
   writeFileSync(join(koffiDir, 'index.js'), '')
   writeFileSync(join(koffiNativeDir, 'koffi.node'), 'native-fixture')
@@ -59,7 +62,7 @@ function createFixture(): { rootDir: string; electronDir: string; config: BuildC
   }
 }
 
-describe('Pi Agent Server image runtime packaging', () => {
+describe('Pi Agent Server document runtime packaging', () => {
   it('uses the package build in the server image so Worker and WASM are included', () => {
     const dockerfile = readFileSync(resolve(import.meta.dir, '..', '..', 'Dockerfile.server'), 'utf8')
 
@@ -67,7 +70,7 @@ describe('Pi Agent Server image runtime packaging', () => {
     expect(dockerfile).not.toContain('--outfile packages/pi-agent-server/dist/index.js')
   })
 
-  it('copies the image Worker and Photon WASM through the desktop packaging chain', () => {
+  it('copies the image Workers, Photon WASM and Word extractor through desktop packaging', () => {
     const { rootDir, electronDir, config } = createFixture()
     const piDistDir = join(rootDir, 'packages', 'pi-agent-server', 'dist')
 
@@ -90,6 +93,8 @@ describe('Pi Agent Server image runtime packaging', () => {
     expect(existsSync(packagedWorker)).toBe(true)
     expect(readFileSync(packagedWorker, 'utf-8')).toContain('worker')
     expect(readFileSync(packagedWasm, 'utf-8')).toBe('wasm-fixture')
+    expect(existsSync(join(electronDir, 'resources', 'pi-agent-server', 'legacy-word-extractor.js'))).toBe(true)
+    expect(readFileSync(join(electronDir, 'resources', 'pi-agent-server', 'legacy-word-extractor.LICENSE.txt'), 'utf-8')).toBe('licensed fixture')
     expect(() => verifyMcpServersExist(config)).not.toThrow()
   })
 
@@ -111,8 +116,16 @@ describe('Pi Agent Server image runtime packaging', () => {
     rmSync(join(piDistDir, 'image-resize-worker.js'))
 
     expect(() => copyPiAgentServerRuntimeAssets(rootDir, piDistDir)).toThrow(
-      'image resize Worker not found',
+      'image-resize-worker.js',
     )
+  })
+
+  it('fails the desktop build when the legacy Word extractor is missing', () => {
+    const { rootDir, config } = createFixture()
+    const piDistDir = join(rootDir, 'packages', 'pi-agent-server', 'dist')
+    copyPiAgentServerRuntimeAssets(rootDir, piDistDir)
+    rmSync(join(piDistDir, 'legacy-word-extractor.js'))
+    expect(() => copyPiAgentServer(config)).toThrow('legacy-word-extractor.js')
   })
 
   it('keeps Pi Agent Server optional when its bundle is not present', () => {

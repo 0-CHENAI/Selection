@@ -12,6 +12,7 @@ const result = await Bun.build({
   entrypoints: [
     join(packageDir, 'src/index.ts'),
     join(packageDir, 'src/tools/read/read-image-resize-worker.ts'),
+    join(packageDir, 'src/tools/read/legacy-word-extractor.ts'),
     join(sdkUtils, 'image-resize-worker.js'),
   ],
   outdir,
