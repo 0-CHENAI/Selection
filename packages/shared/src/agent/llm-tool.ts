@@ -28,6 +28,7 @@ import { resolveModelImageSupportFromCatalog } from '../config/model-image-suppo
 import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../config/models.ts';
 import { buildAttachedImagePrompt } from '../utils/image-attachment.ts';
 import { PPT_VISUAL_QA_NO_OCR_NOTE } from './ppt-visual-qa-policy.ts';
+import { withTimeout } from '../utils/with-timeout.ts';
 
 // ============================================================================
 // QUERY INTERFACES (used by agent backends to implement queryFn)
@@ -93,13 +94,7 @@ export const LLM_QUERY_TIMEOUT_MS = 120000;
 // Races a promise against a timeout, cleaning up the timer on completion
 // ============================================================================
 
-export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer!));
-}
+export { withTimeout };
 
 // ============================================================================
 // CONSTANTS

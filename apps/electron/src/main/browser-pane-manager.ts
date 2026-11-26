@@ -22,7 +22,7 @@ import {
   type BrowserInstanceInfo,
 } from '../shared/types'
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@craft-agent/shared/config'
-import { IMAGE_ENCODING_QUALITIES, resolveImageSendPolicy, resolveImageSendSize, type ImageSendPolicy } from '@craft-agent/shared/utils'
+import { BROWSER_SCREENSHOT_BACKSTOP_MS, IMAGE_ENCODING_QUALITIES, resolveImageSendPolicy, resolveImageSendSize, type ImageSendPolicy } from '@craft-agent/shared/utils'
 import { CodedError } from '@craft-agent/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
 import type {
@@ -332,8 +332,16 @@ interface LastBrowserAction {
 
 let instanceCounter = 0
 
+interface ScreenshotWait {
+  expiresAt: number
+  step<T>(stage: string, operation: () => Promise<T>): Promise<T>
+}
+
 export class BrowserPaneManager implements IBrowserPaneManager {
   private instances: Map<string, BrowserInstance> = new Map()
+  private readonly activeScreenshots = new WeakSet<BrowserInstance>()
+  private readonly pendingNativeCaptures = new WeakMap<BrowserInstance, symbol>()
+  private readonly screenshotBackstopMs = BROWSER_SCREENSHOT_BACKSTOP_MS
   private stateChangeCallback: ((info: BrowserInstanceInfo) => void) | null = null
   private removedCallback: ((id: string) => void) | null = null
   private interactedCallback: ((id: string) => void) | null = null
@@ -1119,24 +1127,78 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   private restoreOverlayAfterCapture(instance: BrowserInstance, suspended: boolean): void {
-    if (!suspended) return
+    if (instance.window.isDestroyed() || instance.pageView.webContents.isDestroyed()) return
+    if (!suspended && !instance.agentControl?.active) return
     this.updateNativeOverlayState(instance)
+  }
+
+  private async withScreenshotOverlay(
+    instance: BrowserInstance,
+    capture: (wait: ScreenshotWait) => Promise<BrowserScreenshotResult>,
+  ): Promise<BrowserScreenshotResult> {
+    const webContents = instance.pageView.webContents
+    if (webContents.isDestroyed()) throw new Error('Browser page is closed. Reopen the browser to retry the screenshot.')
+    if (this.activeScreenshots.has(instance) || this.pendingNativeCaptures.has(instance)) {
+      throw new Error('A previous screenshot is still pending. Focus the browser and try again, or reopen it if it stays unresponsive.')
+    }
+    this.activeScreenshots.add(instance)
+    const controller = new AbortController()
+    const { signal } = controller
+    let stage = 'preparing the capture'
+    const expiresAt = Date.now() + this.screenshotBackstopMs
+    const closed = () => controller.abort(new Error('Browser window closed during screenshot capture. Reopen the browser to retry.'))
+    const rendererGone = () => controller.abort(new Error('Browser renderer stopped during screenshot capture. Reload or reopen the browser to retry.'))
+    instance.window.on('closed', closed)
+    webContents.on('destroyed', closed)
+    webContents.on('render-process-gone', rendererGone)
+    const timer = setTimeout(() => controller.abort(new Error(
+      'Browser screenshot did not return while ' + stage + '. Focus the browser and retry, or reopen it if it is unresponsive.',
+    )), this.screenshotBackstopMs)
+
+    const wait: ScreenshotWait = {
+      expiresAt,
+      async step<T>(description: string, operation: () => Promise<T>): Promise<T> {
+        signal.throwIfAborted()
+        stage = description
+        let abort!: () => void
+        const stopped = new Promise<never>((_, reject) => {
+          abort = () => reject(signal.reason)
+          signal.addEventListener('abort', abort, { once: true })
+        })
+        const pending = Promise.resolve().then(() => {
+          signal.throwIfAborted()
+          return operation()
+        })
+        try { return await Promise.race([stopped, pending]) }
+        finally { signal.removeEventListener('abort', abort) }
+      },
+    }
+
+    let suspendedOverlay = false
+    try {
+      suspendedOverlay = this.suspendOverlayForCapture(instance)
+      return await capture(wait)
+    } finally {
+      clearTimeout(timer)
+      instance.window.removeListener('closed', closed)
+      webContents.removeListener('destroyed', closed)
+      webContents.removeListener('render-process-gone', rendererGone)
+      this.activeScreenshots.delete(instance)
+      this.restoreOverlayAfterCapture(instance, suspendedOverlay)
+    }
   }
 
   async screenshot(id: string, options?: BrowserScreenshotOptions): Promise<BrowserScreenshotResult> {
     const instance = this.requireAliveInstance(id)
 
-    // Hide native agent overlay so it doesn't appear in captures
-    const suspendedOverlay = this.suspendOverlayForCapture(instance)
-
-    try {
+    return this.withScreenshotOverlay(instance, async (wait) => {
       // When annotating, force agent mode and gather refs from accessibility tree
       const annotate = !!options?.annotate
       const mode = (annotate || options?.mode === 'agent') ? 'agent' : 'raw'
 
       if (mode === 'raw') {
-        const viewport = await instance.cdp.getViewportMetrics()
-        const captured = await this.capturePageWithRecovery(instance, {
+        const viewport = await wait.step('reading viewport metrics', () => instance.cdp.getViewportMetrics())
+        const captured = await this.capturePageWithRecovery(instance, wait, {
           mode,
           errorPrefix: 'screenshot',
           dpr: viewport.dpr,
@@ -1163,34 +1225,38 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
       const warnings: string[] = []
       const geometries: ElementGeometry[] = []
+      let annotationPartial = false
 
       const MAX_ANNOTATED_REFS = 100
       let refs = options?.refs ?? []
 
       if (annotate) {
         try {
-          const snapshot = await instance.cdp.getAccessibilitySnapshot()
+          const snapshot = await wait.step('preparing annotations', () => instance.cdp.getAccessibilitySnapshot())
           refs = snapshot.nodes.map((node) => node.ref).slice(0, MAX_ANNOTATED_REFS)
           if (snapshot.nodes.length > MAX_ANNOTATED_REFS) {
             warnings.push(`Annotation capped at ${MAX_ANNOTATED_REFS} of ${snapshot.nodes.length} elements`)
           }
         } catch (error) {
+          annotationPartial = true
           warnings.push(`Accessibility snapshot for annotation failed: ${error instanceof Error ? error.message : String(error)}`)
           refs = []
         }
       }
 
-      const settled = await Promise.allSettled(
-        refs.map((ref) => instance.cdp.getElementGeometry(ref)),
-      )
+      const settled = await wait.step('reading annotation geometry', () =>
+        Promise.allSettled(refs.map(ref => instance.cdp.getElementGeometry(ref))))
 
       for (let i = 0; i < settled.length; i++) {
         const result = settled[i]!
         if (result.status === 'fulfilled') {
           geometries.push(result.value)
-        } else if (!annotate) {
-          const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
-          warnings.push(`Could not resolve ref ${refs[i]}: ${reason}`)
+        } else {
+          annotationPartial = true
+          if (!annotate) {
+            const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
+            warnings.push(`Could not resolve ref ${refs[i]}: ${reason}`)
+          }
         }
       }
 
@@ -1202,16 +1268,19 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         ? `${instance.lastAction.tool} • ${instance.lastAction.status} • ${new Date(instance.lastAction.timestamp).toISOString()}`
         : `browser_screenshot • ${new Date().toISOString()}`
 
-      let annotationPartial = false
+      const needsOverlay = geometries.length > 0 || !!options?.includeMetadata
+      const captureId = randomUUID()
 
       try {
-        if (geometries.length > 0 || options?.includeMetadata) {
-          await instance.cdp.renderTemporaryOverlay({
+        if (needsOverlay) {
+          await wait.step('drawing annotations', () => instance.cdp.renderTemporaryOverlay({
             geometries,
             includeMetadata: !!options?.includeMetadata,
             metadataText,
             includeClickPoints: true,
-          })
+            captureId,
+            expiresAt: wait.expiresAt,
+          }))
         }
       } catch (error) {
         annotationPartial = true
@@ -1219,8 +1288,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
 
       try {
-        const viewport = await instance.cdp.getViewportMetrics()
-        const captured = await this.capturePageWithRecovery(instance, {
+        const viewport = await wait.step('reading viewport metrics', () => instance.cdp.getViewportMetrics())
+        const captured = await this.capturePageWithRecovery(instance, wait, {
           mode,
           errorPrefix: 'screenshot',
           dpr: viewport.dpr,
@@ -1264,19 +1333,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         }
       } finally {
         try {
-          await instance.cdp.clearTemporaryOverlay()
+          if (needsOverlay) await wait.step('clearing annotations', () => instance.cdp.clearTemporaryOverlay(captureId))
         } catch {
           // ignore cleanup errors
         }
       }
-    } finally {
-      this.restoreOverlayAfterCapture(instance, suspendedOverlay)
-    }
+    })
   }
 
   async screenshotRegion(id: string, target: BrowserScreenshotRegionTarget): Promise<BrowserScreenshotResult> {
-    const instance = this.instances.get(id)
-    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    const instance = this.requireAliveInstance(id)
 
     const hasCoords = [target.x, target.y, target.width, target.height].every((v) => typeof v === 'number')
     const hasRef = typeof target.ref === 'string' && target.ref.length > 0
@@ -1290,16 +1356,14 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       throw new Error('Region screenshot target is ambiguous. Provide only one of coordinates, ref, or selector')
     }
 
-    const suspendedOverlay = this.suspendOverlayForCapture(instance)
-
-    try {
+    return this.withScreenshotOverlay(instance, async (wait) => {
       let box: { x: number; y: number; width: number; height: number }
 
       if (hasRef) {
-        const geometry = await instance.cdp.getElementGeometry(String(target.ref))
+        const geometry = await wait.step('locating the screenshot region', () => instance.cdp.getElementGeometry(String(target.ref)))
         box = { ...geometry.box }
       } else if (hasSelector) {
-        const geometry = await instance.cdp.getElementGeometryBySelector(String(target.selector))
+        const geometry = await wait.step('locating the screenshot region', () => instance.cdp.getElementGeometryBySelector(String(target.selector)))
         box = { ...geometry.box }
       } else {
         box = {
@@ -1318,7 +1382,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         height: box.height + padding * 2,
       }
 
-      const viewport = await instance.cdp.getViewportMetrics()
+      const viewport = await wait.step('reading viewport metrics', () => instance.cdp.getViewportMetrics())
 
       const clippedX = Math.max(0, Math.floor(box.x))
       const clippedY = Math.max(0, Math.floor(box.y))
@@ -1331,7 +1395,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         throw new Error('Resolved screenshot region is outside the current viewport')
       }
 
-      const captured = await this.capturePageWithRecovery(instance, {
+      const captured = await this.capturePageWithRecovery(instance, wait, {
         mode: 'region',
         errorPrefix: 'region screenshot',
         rect: {
@@ -1366,13 +1430,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           warnings: captured.warnings.length > 0 ? captured.warnings : undefined,
         },
       }
-    } finally {
-      this.restoreOverlayAfterCapture(instance, suspendedOverlay)
-    }
+    })
   }
 
   private async capturePageWithRecovery(
     instance: BrowserInstance,
+    wait: ScreenshotWait,
     options: {
       mode: 'raw' | 'agent' | 'region'
       errorPrefix: 'screenshot' | 'region screenshot'
@@ -1411,7 +1474,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         height?: number
       } | null = null
       try {
-        result = await this.capturePageImage(instance, {
+        result = await this.capturePageImage(instance, wait, {
           rect: options.rect,
           useHiddenCaptureOptions: true,
           ...imageOpts,
@@ -1447,7 +1510,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       )
 
       if (attempt < SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS) {
-        await this.waitForScreenshotReadiness(instance.id)
+        await wait.step('waiting for the browser to repaint', () => this.waitForScreenshotReadiness(instance.id))
       }
     }
 
@@ -1464,8 +1527,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           instance.isVisible = true
           this.emitStateChange(instance)
           rescueUsed = true
-          await this.sleep(SCREENSHOT_RESCUE_PAINT_DELAY_MS)
-          await this.waitForScreenshotReadiness(instance.id)
+          await wait.step('waiting for the revealed window to repaint', async () => {
+            await this.sleep(SCREENSHOT_RESCUE_PAINT_DELAY_MS)
+            await this.waitForScreenshotReadiness(instance.id)
+          })
         }
 
         let rescueResult: {
@@ -1477,7 +1542,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           height?: number
         } | null = null
         try {
-          rescueResult = await this.capturePageImage(instance, {
+          rescueResult = await this.capturePageImage(instance, wait, {
             rect: options.rect,
             useHiddenCaptureOptions: false,
             ...imageOpts,
@@ -1537,6 +1602,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   private async capturePageImage(
     instance: BrowserInstance,
+    wait: ScreenshotWait,
     options: {
       rect?: { x: number; y: number; width: number; height: number }
       useHiddenCaptureOptions: boolean
@@ -1557,9 +1623,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       ? { stayHidden: true, stayAwake: true }
       : undefined
 
-    let image = options.rect
-      ? await instance.pageView.webContents.capturePage(options.rect, captureOpts)
-      : await instance.pageView.webContents.capturePage(undefined, captureOpts)
+    // Electron does not cancel a capture when our wait expires. Keep this
+    // instance from starting another one until the native call actually ends.
+    let image = await wait.step('capturing the page', () => {
+      const capture = instance.pageView.webContents.capturePage(options.rect, captureOpts)
+      const token = Symbol()
+      this.pendingNativeCaptures.set(instance, token)
+      return capture.finally(() => {
+        if (this.pendingNativeCaptures.get(instance) === token) this.pendingNativeCaptures.delete(instance)
+      })
+    })
 
     if (image.isEmpty()) {
       return null
@@ -2178,7 +2251,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private updateNativeOverlayState(instance: BrowserInstance): void {
     const control = instance.agentControl
     const agentActive = !!control?.active
-    if (!agentActive || !instance.nativeOverlayReady || instance.window.isDestroyed()) {
+    if (!agentActive || !instance.nativeOverlayReady || instance.window.isDestroyed() || this.activeScreenshots.has(instance)) {
       instance.nativeOverlayView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
       if (!instance.window.isDestroyed()) {
         instance.window.setTopBrowserView(instance.toolbarView)
@@ -3663,6 +3736,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     pageWc.on('focus', () => {
       this.interactedCallback?.(instance.id)
     })
+    pageWc.on('render-process-gone', () => this.pendingNativeCaptures.delete(instance))
 
     instance.window.on('focus', () => {
       this.interactedCallback?.(instance.id)

@@ -477,27 +477,33 @@ export class BrowserCDP {
     includeMetadata?: boolean
     metadataText?: string
     includeClickPoints?: boolean
+    captureId: string
+    expiresAt: number
   }): Promise<void> {
     const payload = {
       geometries: params.geometries,
       includeMetadata: !!params.includeMetadata,
       metadataText: params.metadataText || '',
       includeClickPoints: params.includeClickPoints !== false,
+      captureId: params.captureId,
+      expiresAt: params.expiresAt,
     }
 
     await this.send('Runtime.evaluate', {
       expression: `(() => {
+        const payload = ${JSON.stringify(payload)};
+        if (Date.now() >= payload.expiresAt) return;
+
         const existing = document.getElementById('__craft_agent_screenshot_overlay__');
         if (existing) existing.remove();
 
         const root = document.createElement('div');
         root.id = '__craft_agent_screenshot_overlay__';
+        root.dataset.captureId = payload.captureId;
         root.style.position = 'fixed';
         root.style.inset = '0';
         root.style.pointerEvents = 'none';
         root.style.zIndex = '2147483647';
-
-        const payload = ${JSON.stringify(payload)};
 
         for (const g of payload.geometries || []) {
           const box = document.createElement('div');
@@ -557,15 +563,16 @@ export class BrowserCDP {
         }
 
         document.documentElement.appendChild(root);
+        setTimeout(() => root.remove(), Math.max(0, payload.expiresAt - Date.now()));
       })()`,
     })
   }
 
-  async clearTemporaryOverlay(): Promise<void> {
+  async clearTemporaryOverlay(captureId: string): Promise<void> {
     await this.send('Runtime.evaluate', {
       expression: `(() => {
         const existing = document.getElementById('__craft_agent_screenshot_overlay__');
-        if (existing) existing.remove();
+        if (existing?.dataset.captureId === ${JSON.stringify(captureId)}) existing.remove();
       })()`,
     })
   }

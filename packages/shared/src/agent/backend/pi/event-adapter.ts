@@ -214,6 +214,7 @@ export class PiEventAdapter extends BaseEventAdapter {
   private pendingRetryError: CraftAgentEvent | null = null;
   private awaitingRetry = false;
   private retryErrorDelivered = false;
+  private toolWaitTimedOut = false;
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
@@ -417,7 +418,12 @@ export class PiEventAdapter extends BaseEventAdapter {
     };
   }
 
+  noteToolWaitTimeout(): void {
+    this.toolWaitTimedOut = true;
+  }
+
   protected onTurnStart(): void {
+    this.toolWaitTimedOut = false;
     this.toolInputBytes = 0;
     this.showingToolArguments = false;
     this.pendingRetryError = null;
@@ -634,6 +640,9 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.boundary = undefined;
           this.boundaryStreamed = false;
         }
+        // The bridge already published the tool timeout and cancelled this turn.
+        if (this.toolWaitTimedOut && msg.stopReason === 'aborted') break;
+
         // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
           // Runtime admission failures are already final. Do not infer their

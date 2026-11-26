@@ -1518,6 +1518,7 @@ export class PiAgent extends BaseAgent {
         // Preserve the lifecycle reason through the host so timeout cleanup
         // drains/replaces the old runtime before another turn can reuse it.
         if (errorCode === 'tool_wait_timeout') {
+          this.adapter.noteToolWaitTimeout();
           for (const controller of this.sessionToolControllers) controller.abort();
           this.eventQueue.enqueue({ type: 'error', message: rawMessage, code: 'tool_wait_timeout' });
           break;

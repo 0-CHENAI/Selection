@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { waitForBridgeReply } from './bridge-wait.ts';
-import { proxyReplyDeadlineMs } from './proxy-reply-deadline.ts';
+import { isScreenshotProxyCall, proxyReplyDeadlineMs } from './proxy-reply-deadline.ts';
 import { replaceProxyTools, type ProxyToolDef } from './register-tools.ts';
 import { installFastServiceTier } from './gpt-oauth-fast.ts';
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
@@ -1221,7 +1221,8 @@ function wrapSingleTool(
 
       if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
       if (answerRecovery) throw new Error('Tools are unavailable during answer recovery. Write the final answer as plain text.');
-      let timeoutMs: number | undefined;
+      const screenshot = isScreenshotProxyCall(sdkToolName, inputObj);
+      let timeoutMs = screenshot ? proxyReplyDeadlineMs(sdkToolName, inputObj) : undefined;
       if (sdkToolName === 'Bash') {
         if (process.platform === 'win32' && inputObj.timeout === undefined) {
           inputObj = { ...inputObj, timeout: WINDOWS_BASH_DEFAULT_TIMEOUT_SECONDS };
@@ -1253,7 +1254,9 @@ function wrapSingleTool(
       onUpdate?.({ content: [], details: { selectionToolProgress: {
         phase: 'processing_result', at: Date.now(), executionMs: Date.now() - executionStartedAt,
       } } });
-      const result = withExecutionOutcome(executed, executed.isError === true || executed.details?.isError === true ? 'unknown' : 'completed');
+      const failed = executed.isError === true || executed.details?.isError === true;
+      // A failed standalone capture has no uncertain page mutation to reconcile.
+      const result = withExecutionOutcome(executed, failed && !screenshot ? 'unknown' : 'completed');
 
       // Preserve full source guides and explicit history access contracts.
       const command = typeof inputObj.command === 'string' ? inputObj.command : '';
@@ -1352,10 +1355,15 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         const interrupted: ProxyToolExecutionResult = {
           isError: true, content: 'Tool wait interrupted. Operation outcome unknown; verify before retrying.',
         };
+        const screenshot = isScreenshotProxyCall(executionName, params);
         const result = await waitForBridgeReply(pendingToolExecutions, requestId, {
           signal, interrupted, timeoutMs: proxyReplyDeadlineMs(executionName, params),
-          timedOut: { isError: true, content: 'Tool execution reply deadline exceeded. Operation outcome unknown; do not automatically retry.' },
+          timedOut: { isError: true, content: screenshot
+            ? 'Browser screenshot did not return. Verify that the browser is responsive, then retry the screenshot if needed.'
+            : 'Tool execution reply deadline exceeded. Operation outcome unknown; do not automatically retry.' },
           onTimeout: () => {
+            // A standalone capture does not change the page. Let the model recover.
+            if (screenshot) return;
             send({ type: 'error', code: 'tool_wait_timeout', message: '工具执行回包超时，已停止本轮。操作结果尚未确认，请核对实际结果后再继续。' });
             void handleAbort();
           },

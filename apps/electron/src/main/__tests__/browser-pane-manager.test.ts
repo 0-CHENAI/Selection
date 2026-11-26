@@ -29,6 +29,9 @@ function createMockWebContents() {
       if (!listeners[event]) listeners[event] = []
       listeners[event].push(cb)
     },
+    removeListener: (event: string, cb: Function) => {
+      listeners[event] = (listeners[event] || []).filter(fn => fn !== cb)
+    },
     once: (event: string, cb: Function) => {
       const wrapped = (...args: any[]) => { listeners[event] = (listeners[event] || []).filter(fn => fn !== wrapped); cb(...args) }
       if (!listeners[event]) listeners[event] = []
@@ -110,6 +113,9 @@ function createMockWindow(opts?: { width?: number; height?: number; minWidth?: n
     on: (event: string, cb: Function) => {
       if (!listeners[event]) listeners[event] = []
       listeners[event].push(cb)
+    },
+    removeListener: (event: string, cb: Function) => {
+      listeners[event] = (listeners[event] || []).filter(fn => fn !== cb)
     },
     once: (event: string, cb: Function) => {
       const wrapped = (...args: any[]) => {
@@ -999,6 +1005,77 @@ describe('BrowserPaneManager', () => {
     }))
 
     await expect(manager.screenshot('screenshot-empty-image')).rejects.toThrow('Failed to capture screenshot: empty image buffer')
+  })
+
+  it('bounds a stalled native capture, restores the overlay and discards a late image', async () => {
+    const id = 'screenshot-stalled-native'
+    manager.createInstance(id)
+    const internal = manager as any
+    internal.screenshotBackstopMs = 20
+    const instance = internal.instances.get(id)
+    const webContents = instance.pageView.webContents
+    const capture = webContents.capturePage
+    const lateCapture = Promise.withResolvers<Awaited<ReturnType<typeof capture>>>()
+    webContents.capturePage = mock(() => lateCapture.promise)
+    const restore = mock(internal.restoreOverlayAfterCapture.bind(internal))
+    internal.restoreOverlayAfterCapture = restore
+    instance.agentControl = { active: true }
+    instance.nativeOverlayReady = true
+
+    await expect(manager.screenshot(id)).rejects.toThrow('did not return while capturing the page')
+    expect(restore).toHaveBeenCalledTimes(1)
+    expect(restore).toHaveBeenCalledWith(instance, true)
+    expect(webContents._listeners['destroyed']).toHaveLength(0)
+    await expect(manager.screenshotRegion(id, { x: 10, y: 20, width: 120, height: 80 }))
+      .rejects.toThrow('previous screenshot is still pending')
+    expect(webContents.capturePage).toHaveBeenCalledTimes(1)
+    const lateImage = await capture()
+    lateImage.toPNG = mock(() => Buffer.from('late'))
+    lateCapture.resolve(lateImage)
+    await lateCapture.promise
+    webContents.capturePage = capture
+    expect((await manager.screenshot(id, { format: 'png' })).imageBuffer.toString()).toBe('fake-png')
+    expect(lateImage.toPNG).not.toHaveBeenCalled()
+  })
+
+  it('bounds viewport and annotation cleanup and still returns a successful image', async () => {
+    const id = 'screenshot-stalled-cdp'
+    manager.createInstance(id)
+    const internal = manager as any
+    internal.screenshotBackstopMs = 20
+    const instance = internal.instances.get(id)
+    const getViewport = instance.cdp.getViewportMetrics
+    instance.cdp.getViewportMetrics = () => new Promise(() => {})
+    await expect(manager.screenshotRegion(id, { x: 10, y: 20, width: 120, height: 80 }))
+      .rejects.toThrow('did not return while reading viewport metrics')
+    expect(instance.pageView.webContents.capturePage).not.toHaveBeenCalled()
+    instance.cdp.getViewportMetrics = getViewport
+    instance.cdp.clearTemporaryOverlay = mock(() => new Promise(() => {}))
+    expect((await manager.screenshot(id, { annotate: true, includeMetadata: true })).imageBuffer.toString()).toBe('fake-png')
+    expect(instance.cdp.clearTemporaryOverlay).toHaveBeenCalledTimes(1)
+  })
+
+  it('ends a stalled capture as soon as its renderer exits and permits a new capture', async () => {
+    const id = 'screenshot-renderer-exit'
+    manager.createInstance(id)
+    const instance = (manager as any).instances.get(id)
+    const webContents = instance.pageView.webContents
+    const originalCapture = webContents.capturePage
+    const started = Promise.withResolvers<void>()
+    const lateCapture = Promise.withResolvers<Awaited<ReturnType<typeof originalCapture>>>()
+    webContents.capturePage = mock(() => {
+      started.resolve()
+      return lateCapture.promise
+    })
+
+    const interrupted = manager.screenshot(id)
+    await started.promise
+    webContents._emit('render-process-gone', { reason: 'crashed' })
+    await expect(interrupted).rejects.toThrow('Browser renderer stopped during screenshot capture')
+    expect(webContents._listeners['render-process-gone']).toHaveLength(1)
+    webContents.capturePage = originalCapture
+    expect((await manager.screenshot(id, { format: 'png' })).imageBuffer.toString()).toBe('fake-png')
+    lateCapture.reject(new Error('Old renderer exited'))
   })
 
   it('throws when screenshot capture returns empty PNG buffer', async () => {

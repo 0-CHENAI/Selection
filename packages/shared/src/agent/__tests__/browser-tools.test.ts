@@ -5,8 +5,9 @@
  * and that it delegates correctly to BrowserPaneFns callbacks via CLI commands.
  */
 
-import { describe, it, expect, beforeEach } from 'bun:test'
+import { describe, it, expect, beforeEach, spyOn } from 'bun:test'
 import { createBrowserTools, type BrowserPaneFns } from '../browser-tools'
+import { BROWSER_SCREENSHOT_REPLY_TIMEOUT_MS } from '../browser-tool-runtime'
 
 // ============================================================================
 // Mock BrowserPaneFns
@@ -714,6 +715,24 @@ describe('createBrowserTools', () => {
       expect(result.content[0].text).toContain('Region screenshot captured')
       expect(result.content[1].type).toBe('image')
       expect((result.content[1] as any).mimeType).toBe('image/png')
+    })
+
+    it('returns a stalled screenshot as a tool error and lets a subsequent screenshot return an image', async () => {
+      const originalSetTimeout = globalThis.setTimeout
+      const clock = spyOn(globalThis, 'setTimeout').mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+        if (args[1] === BROWSER_SCREENSHOT_REPLY_TIMEOUT_MS) args[1] = 1
+        return originalSetTimeout(...args)
+      }) as typeof setTimeout)
+      try {
+        mockFns.screenshot = () => new Promise(() => {})
+        const result = await executeTool(tools, 'browser_tool', { command: 'screenshot' })
+        expect(result).toMatchObject({ isError: true, content: [{ type: 'text', text: expect.stringContaining('Browser screenshot did not return') }] })
+        mockFns.screenshot = createMockFns().screenshot
+        const retry = await executeTool(tools, 'browser_tool', { command: 'screenshot' })
+        expect(retry.content[1]).toMatchObject({ type: 'image', data: Buffer.from('fake-png-data').toString('base64') })
+      } finally {
+        clock.mockRestore()
+      }
     })
 
     it('returns error for screenshot when PNG is empty', async () => {
