@@ -1780,6 +1780,7 @@
   "settings.messaging.bindings.openSession": "Open",
   "settings.messaging.bindings.title": "Active Bindings",
   "settings.messaging.bindings.unbind": "Disconnect",
+  "settings.messaging.description": "Lark, WeChat, session bindings",
   "settings.messaging.lark.apiType": "Open Platform API",
   "settings.messaging.lark.appIdLabel": "App ID",
   "settings.messaging.lark.appIdPlaceholder": "cli_xxxxxxxxxxxx",

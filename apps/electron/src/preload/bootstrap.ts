@@ -462,3 +462,25 @@ client.onConnectionStateChanged((state) => {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
+
+// ---------------------------------------------------------------------------
+// Native macOS switch bridge — direct ipcRenderer channels, intentionally
+// outside the WS RPC transport: the native control must be embedded by the
+// local window's main process even in thin-client mode.
+// ---------------------------------------------------------------------------
+const nativeSwitchAvailable: boolean = process.platform === 'darwin'
+  ? ipcRenderer.sendSync('native-switch:available-sync') === true
+  : false
+
+contextBridge.exposeInMainWorld('nativeSwitch', {
+  available: nativeSwitchAvailable,
+  create: (id: number, props: Record<string, unknown>) => ipcRenderer.invoke('native-switch:create', id, props),
+  update: (id: number, props: Record<string, unknown>) => ipcRenderer.invoke('native-switch:update', id, props),
+  destroy: (id: number) => ipcRenderer.invoke('native-switch:destroy', id),
+  onChange: (id: number, callback: (on: boolean) => void) => {
+    const channel = `native-switch:change:${id}`
+    const listener = (_event: unknown, on: boolean) => callback(on)
+    ipcRenderer.on(channel, listener)
+    return () => ipcRenderer.removeListener(channel, listener)
+  },
+})
