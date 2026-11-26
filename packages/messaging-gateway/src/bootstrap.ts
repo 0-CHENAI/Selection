@@ -35,6 +35,10 @@ export function createMessagingBootstrap(opts: MessagingBootstrapOptions): Messa
     publishEvent: (channel, target, ...args) => publisher?.(channel, target, ...args),
   })
 
+  const unsubscribe = opts.sessionManager.onSessionComplete(event => {
+    void registry.onSessionComplete(event).catch(error => log?.warn('WeChat completion delivery failed', { sessionId: event.sessionId, error: String(error) }))
+  })
+
   log?.info('messaging bootstrap created', {
     event: 'messaging_bootstrap_created',
   })
@@ -61,6 +65,7 @@ export function createMessagingBootstrap(opts: MessagingBootstrapOptions): Messa
       }
     },
     async dispose() {
+      unsubscribe()
       await registry.stopAll().catch(() => {})
     },
   }

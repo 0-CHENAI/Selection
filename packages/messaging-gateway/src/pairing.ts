@@ -64,9 +64,9 @@ export class PairingCodeManager {
     return entry
   }
 
-  clearWorkspace(workspaceId: string): void {
+  clearWorkspace(workspaceId: string, platform?: PlatformType): void {
     for (const [key, entry] of this.entries) {
-      if (entry.workspaceId === workspaceId) this.entries.delete(key)
+      if (entry.workspaceId === workspaceId && (!platform || entry.platform === platform)) this.entries.delete(key)
     }
   }
 

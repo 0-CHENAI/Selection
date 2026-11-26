@@ -60,12 +60,45 @@ export type MessagingDialogState =
   | { kind: 'closed' }
   | {
       kind: 'pairing'
-      platform: 'lark'
+      platform: 'lark' | 'weixin'
+      workspaceId: string
       sessionId: string
       code: string | null
       expiresAt: number | null
-      botUsername?: string
+      existingBindings: MessagingBinding[]
+      needsConnection?: boolean
       error?: string
     }
 
 export const messagingDialogAtom = atom<MessagingDialogState>({ kind: 'closed' })
+
+export function sessionPlatformBindings(bindings: MessagingBinding[], workspaceId: string, sessionId: string, platform: 'lark' | 'weixin') {
+  return bindings.filter(binding => binding.enabled && binding.platform === platform
+    && binding.workspaceId === workspaceId && binding.sessionId === sessionId)
+}
+
+export const openMessagingPairingAtom = atom(null, async (get, set, workspaceId: string, sessionId: string, platform: 'lark' | 'weixin' = 'lark') => {
+  const pending = {
+    kind: 'pairing' as const, platform, workspaceId, sessionId, code: null, expiresAt: null, existingBindings: [],
+  }
+  set(messagingDialogAtom, pending)
+  try {
+    const config = await window.electronAPI.getMessagingConfig()
+    if (get(messagingDialogAtom) !== pending) return
+    if (!config?.runtime[platform]?.connected) {
+      set(messagingDialogAtom, { ...pending, needsConnection: true })
+      return
+    }
+    const bindings = await window.electronAPI.getMessagingBindings()
+    if (get(messagingDialogAtom) !== pending) return
+    const existingBindings = sessionPlatformBindings(bindings, workspaceId, sessionId, platform)
+    const { code, expiresAt } = await window.electronAPI.generateMessagingPairingCode(sessionId, platform)
+    if (get(messagingDialogAtom) === pending) {
+      set(messagingDialogAtom, { ...pending, code, expiresAt, existingBindings })
+    }
+  } catch (error) {
+    if (get(messagingDialogAtom) === pending) {
+      set(messagingDialogAtom, { ...pending, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+})

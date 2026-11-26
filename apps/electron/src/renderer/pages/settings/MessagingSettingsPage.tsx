@@ -1,13 +1,11 @@
 /**
  * MessagingSettingsPage
  *
- * The settings entry is currently hidden, but the Lark / Feishu configuration
- * remains available for future re-exposure and backwards-compatible routes.
- * Lark / Feishu is the only supported messaging integration.
+ * Workspace messaging connections and session bindings.
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -30,14 +28,15 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from '@/components/ui/styled-dropdown'
-import { SettingsSection, SettingsCard } from '@/components/settings'
-import { MessagingPlatformIcon } from '@/components/messaging/MessagingPlatformIcon'
+import { useMessagingPlatformRuntime, useWeixinNotificationAction } from '@/hooks/useMessagingPlatformRuntime'
+import { SettingsCard, SettingsToggle } from '@/components/settings'
+import { LarkIcon, WeixinIcon } from '@/components/messaging/MessagingPlatformIcon'
+import { WeixinConnectDialog } from '@/components/messaging/WeixinConnectDialog'
 import { LarkConnectDialog } from '@/components/messaging/LarkConnectDialog'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { useNavigation } from '@/contexts/NavigationContext'
 import {
   messagingBindingsAtom,
-  setMessagingBindingsAtom,
   type MessagingBinding,
 } from '@/atoms/messaging'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
@@ -53,42 +52,20 @@ export const meta: DetailsPageMeta = {
 export default function MessagingSettingsPage() {
   const { t } = useTranslation()
   const activeWorkspace = useActiveWorkspace()
-  const setBindings = useSetAtom(setMessagingBindingsAtom)
-  const workspaceId = activeWorkspace?.id
+  const workspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId ?? activeWorkspace?.id
 
-  React.useEffect(() => {
-    if (!workspaceId) return
-    let cancelled = false
-    const load = async () => {
-      try {
-        const rows = await window.electronAPI.getMessagingBindings()
-        if (!cancelled) setBindings(rows as MessagingBinding[])
-      } catch {
-        // Keep the page quiet when the gateway is unavailable during startup.
-      }
-    }
-    void load()
-    const off = window.electronAPI.onMessagingBindingChanged((wsId) => {
-      if (wsId === workspaceId) void load()
-    })
-    return () => {
-      cancelled = true
-      off()
-    }
-  }, [workspaceId, setBindings])
-
-  if (!activeWorkspace) return null
+  if (!workspaceId) return null
 
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t('settings.messaging.title')} />
       <ScrollArea className="flex-1">
-        <div className="space-y-6 p-6">
-          <SettingsSection title={t('settings.messaging.title')}>
-            <SettingsCard>
-              <LarkPlatformRow workspaceId={activeWorkspace.id} />
-            </SettingsCard>
-          </SettingsSection>
+        <div className="p-6">
+          <SettingsCard>
+            <PlatformRow key={workspaceId + '-lark'} workspaceId={workspaceId} platform="lark" />
+            <CardSeparator />
+            <PlatformRow key={workspaceId + '-weixin'} workspaceId={workspaceId} platform="weixin" />
+          </SettingsCard>
         </div>
       </ScrollArea>
     </div>
@@ -99,37 +76,23 @@ function CardSeparator() {
   return <div className="mx-4 h-px bg-border/50" />
 }
 
-function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
+function PlatformRow({ workspaceId, platform }: { workspaceId: string; platform: 'lark' | 'weixin' }) {
   const { t } = useTranslation()
   const allBindings = useAtomValue(messagingBindingsAtom)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const { navigateToSession } = useNavigation()
-  const [runtime, setRuntime] = React.useState<MessagingPlatformRuntimeInfo>(defaultRuntime)
+  const runtime = useMessagingPlatformRuntime(workspaceId, platform)
   const [connectOpen, setConnectOpen] = React.useState(false)
+  const notifications = useWeixinNotificationAction()
   const [reconfigure, setReconfigure] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
 
   const platformBindings = React.useMemo(
     () => allBindings
-      .filter((binding) => binding.platform === 'lark')
+      .filter((binding) => binding.platform === platform && binding.workspaceId === workspaceId)
       .sort((a, b) => b.createdAt - a.createdAt),
-    [allBindings],
+    [allBindings, workspaceId, platform],
   )
-
-  React.useEffect(() => {
-    let cancelled = false
-    window.electronAPI.getMessagingConfig().then((config) => {
-      if (cancelled) return
-      setRuntime((config?.runtime?.lark ?? defaultRuntime()) as MessagingPlatformRuntimeInfo)
-    })
-    const off = window.electronAPI.onMessagingPlatformStatus((wsId, platform, status) => {
-      if (wsId === workspaceId && platform === 'lark') setRuntime(status)
-    })
-    return () => {
-      cancelled = true
-      off()
-    }
-  }, [workspaceId])
 
   const runAfterMenuClose = React.useCallback((action: () => void) => {
     setMenuOpen(false)
@@ -148,8 +111,8 @@ function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
 
   const handleDisconnect = async () => {
     try {
-      await window.electronAPI.disconnectMessagingPlatform('lark')
-      toast.success(t('settings.messaging.lark.disconnected'))
+      await window.electronAPI.disconnectMessagingPlatform(platform)
+      toast.success(t('settings.messaging.lark.notConnected'))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.error'))
     }
@@ -157,8 +120,8 @@ function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
 
   const handleForget = async () => {
     try {
-      await window.electronAPI.forgetMessagingPlatform('lark')
-      toast.success(t('settings.messaging.lark.disconnected'))
+      await window.electronAPI.forgetMessagingPlatform(platform)
+      toast.success(t('settings.messaging.lark.notConnected'))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.error'))
     }
@@ -166,7 +129,8 @@ function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
 
   const handleUnbind = async (binding: MessagingBinding) => {
     try {
-      await window.electronAPI.unbindMessagingBinding(binding.id)
+      const result = await window.electronAPI.unbindMessagingBinding(binding.id)
+      if (!result.success) toast.error(t('common.error'))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.error'))
     }
@@ -176,15 +140,15 @@ function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
     <>
       <div>
         <div className="flex items-center gap-3 px-4 py-3.5">
-          <MessagingPlatformIcon platform="lark" size={22} />
+          {platform === 'lark' ? <LarkIcon size={22} /> : <WeixinIcon size={22} />}
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">{t('settings.messaging.lark.title')}</div>
+            <div className="text-sm font-medium">{t(`settings.messaging.${platform}.title`)}</div>
             <div className="mt-0.5 truncate text-xs text-muted-foreground">
-              {t('settings.messaging.lark.apiType')} · {buildDescription(runtime, t)}
+              {platform === 'lark' && <>{t('settings.messaging.lark.apiType')} · </>}{buildDescription(runtime, t)}
             </div>
           </div>
 
-          {runtime.connected ? (
+          {runtime.configured ? (
             <DropdownMenu modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <button
@@ -219,6 +183,19 @@ function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
           )}
         </div>
 
+        {platform === 'weixin' && runtime.configured && (
+          <>
+            <CardSeparator />
+            <SettingsToggle
+              label={t('settings.messaging.weixin.unattended')}
+              description={t('settings.messaging.weixin.unattendedDescription')}
+              checked={runtime.notifyOnCompletion === true}
+              disabled={notifications.saving || !runtime.connected}
+              onCheckedChange={notifications.setEnabled}
+            />
+          </>
+        )}
+
         {platformBindings.length > 0 && (
           <>
             <CardSeparator />
@@ -237,11 +214,10 @@ function LarkPlatformRow({ workspaceId }: { workspaceId: string }) {
         )}
       </div>
 
-      <LarkConnectDialog
-        open={connectOpen}
-        onOpenChange={setConnectOpen}
-        reconfigure={reconfigure}
-      />
+      {connectOpen && platform === 'weixin' && <WeixinConnectDialog onOpenChange={setConnectOpen} />}
+      {connectOpen && platform === 'lark' && (
+        <LarkConnectDialog open onOpenChange={setConnectOpen} reconfigure={reconfigure} />
+      )}
     </>
   )
 }
@@ -258,10 +234,13 @@ function FlatBindingRow({
   onUnbind: () => void
 }) {
   const meta = sessionMetaMap.get(binding.sessionId)
-  const sessionLabel = meta ? getSessionTitle(meta) : binding.channelName || binding.channelId
+  const sessionLabel = meta ? getSessionTitle(meta) : binding.sessionId
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-2.5 pl-[52px]">
-      <div className="min-w-0 truncate text-sm">{sessionLabel}</div>
+      <div className="min-w-0">
+        <div className="truncate text-sm">{sessionLabel}</div>
+        <div className="truncate text-xs text-muted-foreground">{binding.platform === 'weixin' ? binding.channelName ?? binding.channelId : binding.channelId}</div>
+      </div>
       <RowActions onOpen={onOpen} onUnbind={onUnbind} />
     </div>
   )
@@ -295,14 +274,4 @@ function buildDescription(
   if (runtime.state === 'connecting') return t('common.connecting')
   if (runtime.state === 'error' && runtime.lastError) return runtime.lastError
   return t('settings.messaging.lark.notConnected', { defaultValue: 'Not connected' })
-}
-
-function defaultRuntime(): MessagingPlatformRuntimeInfo {
-  return {
-    platform: 'lark',
-    configured: false,
-    connected: false,
-    state: 'disconnected',
-    updatedAt: Date.now(),
-  }
 }

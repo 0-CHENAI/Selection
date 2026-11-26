@@ -356,7 +356,7 @@ export interface SettingsMenuItem {
   id: SettingsSubpage
   labelKey: string    // i18n key - resolve with t() at render time
   icon: string        // Lucide icon name for AppMenu
-  descriptionKey: string // i18n key - resolve with t() at render time
+  descriptionKey?: string // i18n key - resolve with t() at render time
 }
 
 /**
@@ -372,7 +372,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   advanced: 'SlidersHorizontal',
   permissions: 'ShieldCheck',
   labels: 'Tag',
-  messaging: 'MessageSquare',
+  messaging: 'Messaging',
   shortcuts: 'Keyboard',
   preferences: 'UserCircle',
 }

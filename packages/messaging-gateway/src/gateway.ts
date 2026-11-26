@@ -13,6 +13,12 @@ import {
   evaluatePreBindingAccess,
   executeRejection,
 } from './access-control'
+import type { Message } from '@craft-agent/core/types'
+import { WeixinAdapter } from './adapters/weixin'
+import type { SessionCompletionEvent } from '@craft-agent/server-core/sessions'
+import { weixinSessionTitle } from './adapters/weixin/session-picker'
+import { WeixinConversations } from './adapters/weixin/conversations'
+import { WeixinClarifications } from './adapters/weixin/clarifications'
 import { BindingStore } from './binding-store'
 import { Router } from './router'
 import { Commands, type AccessControlDeps, type PairingCodeConsumer } from './commands'
@@ -132,6 +138,8 @@ export class MessagingGateway {
   private readonly bindingStore: BindingStore
   private readonly pendingStore: PendingSendersStore
   private readonly router: Router
+  private readonly weixinConversations: WeixinConversations
+  private readonly weixinClarifications: WeixinClarifications
   private readonly commands: Commands
   private readonly renderer: Renderer
   private readonly planTokens: PlanTokenRegistry
@@ -185,6 +193,10 @@ export class MessagingGateway {
       pendingStore: this.pendingStore,
     }
 
+    this.weixinConversations = new WeixinConversations(this.workspaceId, this.sessionManager, this.bindingStore,
+      this.accessDeps.getWorkspaceConfig, this.log)
+    this.weixinClarifications = new WeixinClarifications(this.workspaceId, this.sessionManager, this.bindingStore,
+      this.accessDeps.getWorkspaceConfig, this.log)
     this.commands = new Commands(
       opts.sessionManager,
       this.bindingStore,
@@ -205,6 +217,13 @@ export class MessagingGateway {
     )
     this.planTokens = new PlanTokenRegistry()
     this.renderer = new Renderer({
+      canDeliverWeixin: (binding, adapter) => adapter instanceof WeixinAdapter &&
+        this.adapters.get('weixin') === adapter &&
+        this.weixinConversations.canDeliver(adapter, binding.channelId, binding.sessionId, binding.id),
+      weixinSessionTitle: id => {
+        const session = this.sessionManager.getSessions(this.workspaceId).find(s => s.id === id && s.workspaceId === this.workspaceId)
+        return session ? weixinSessionTitle(session) : id
+      },
       planTokens: this.planTokens,
       // The renderer hands us the exact binding that sent the message.
       // We must not resolve it ourselves — `findBySession` returns every
@@ -256,6 +275,7 @@ export class MessagingGateway {
     const adapter = this.adapters.get(platform)
     if (!adapter) return
     this.adapters.delete(platform)
+    if (platform === 'weixin') this.weixinConversations.reset()
     try {
       await adapter.destroy()
       this.log.info('adapter unregistered', {
@@ -316,11 +336,13 @@ export class MessagingGateway {
 
   private wireAdapter(adapter: PlatformAdapter): void {
     adapter.onMessage(async (msg: IncomingMessage) => {
-      const isCommand = msg.text.trim().startsWith('/')
-      if (isCommand) {
-        const handled = await this.commands.handleCommand(adapter, msg)
-        if (handled) return
+      if (adapter instanceof WeixinAdapter) {
+        if (await this.weixinConversations.handleQuote(adapter, msg, async id => {
+          await this.commands.handleCommand(adapter, { ...msg, text: '/bind ' + id })
+        })) return
+        if (await this.weixinClarifications.handle(adapter, msg)) return
       }
+      if (await this.commands.handleCommand(adapter, msg)) return
       await this.router.route(adapter, msg)
     })
 
@@ -338,6 +360,11 @@ export class MessagingGateway {
   // -------------------------------------------------------------------------
   // Event handling (called by fan-out EventSink)
   // -------------------------------------------------------------------------
+
+  async onSessionComplete(event: SessionCompletionEvent) {
+    const adapter = this.adapters.get('weixin')
+    if (adapter instanceof WeixinAdapter) await this.weixinConversations.completed(adapter, event)
+  }
 
   onSessionEvent(channel: string, _target: PushTarget, ...args: any[]): void {
     if (channel !== RPC_CHANNELS.sessions.EVENT) return
@@ -363,10 +390,21 @@ export class MessagingGateway {
     // which is the visible side of #726.
     this.sweepStalePermissions(event)
 
+    if (event.type === 'clarification_request' || event.type === 'clarification_resolved') {
+      // A failed continuation can restore a pending card with a resolved event.
+      const adapter = this.adapters.get('weixin')
+      if (adapter instanceof WeixinAdapter) {
+        void this.weixinClarifications.publish(adapter, event.sessionId, event.message as Message).catch(error =>
+          this.log.warn('WeChat clarification delivery failed', { sessionId: event.sessionId, error: String(error) }))
+      }
+    }
+    const weixin = this.adapters.get('weixin')
+    const quotedReply = weixin instanceof WeixinAdapter && this.weixinConversations.onEvent(weixin, event)
     const bindings = this.bindingStore.findBySession(event.sessionId)
     if (bindings.length === 0) return
 
     for (const binding of bindings) {
+      if (quotedReply && binding.platform === 'weixin') continue
       const adapter = this.adapters.get(binding.platform)
       if (!adapter || !adapter.isConnected()) {
         this.log.warn('dropping session event — adapter not connected', {

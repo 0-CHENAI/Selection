@@ -12,6 +12,7 @@ import { InputErrorBoundary } from './InputErrorBoundary'
 import { QueuedMessagePanel } from './QueuedMessagePanel'
 
 interface ChatInputZoneProps {
+  messagingWorkspaceId?: string
   compactMode?: boolean
   showOptionBadges?: boolean
   permissionMode?: PermissionMode
@@ -42,6 +43,7 @@ interface ChatInputZoneProps {
 }
 
 export function ChatInputZone({
+  messagingWorkspaceId,
   compactMode = false,
   showOptionBadges,
   permissionMode = 'ask',
@@ -98,6 +100,7 @@ export function ChatInputZone({
     )}>
       {shouldShowOptionBadges && (
         <ActiveOptionBadges
+          messagingWorkspaceId={messagingWorkspaceId}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           tasks={tasks}

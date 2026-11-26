@@ -4,7 +4,9 @@ import { TOOLBAR_CONTROL_HEIGHT, TOOLBAR_SHELL_MAX, toolbarCapsuleFit } from '@c
 import { cn } from '@/lib/utils'
 import { applyOptimisticPermissionModeChange } from '@/lib/permission-mode-selection'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Check, ChevronDown, FolderOpen } from 'lucide-react'
+import { useMessagingPlatformRuntime, useWeixinNotificationAction } from '@/hooks/useMessagingPlatformRuntime'
+import { navigate, routes } from '@/lib/navigate'
+import { Bell, BellRing, Check, ChevronDown, FolderOpen } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 import type { TerminalOverlayData } from './TaskActionMenu'
@@ -44,6 +46,7 @@ function PermissionModeIcon({ mode, className }: { mode: PermissionMode; classNa
 }
 
 export interface ActiveOptionBadgesProps {
+  messagingWorkspaceId?: string
   /** Current permission mode */
   permissionMode?: PermissionMode
   /** Callback when permission mode changes */
@@ -119,6 +122,12 @@ function occupiedWidth(element: HTMLElement): number {
   return Math.max(0, right - base)
 }
 
+const toolbarAccentSurface = 'bg-accent/5 text-accent'
+const toolbarNeutralSurface = 'bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)] text-foreground/80 shadow-minimal'
+
+const toolbarSurfaceMotion = 'motion-safe:transition-[background-color,color,box-shadow,scale] motion-safe:duration-200 motion-safe:ease-out motion-safe:enabled:active:scale-[0.97]'
+const toolbarIconMotion = 'col-start-1 row-start-1 size-full motion-safe:transition-[opacity,rotate,scale] motion-safe:duration-200 motion-safe:ease-out'
+
 function toolbarControlLayout(iconsOnly: boolean, side: 'permission' | 'files') {
   return cn(
     'flex shrink-0 items-center rounded-[8px] text-xs font-medium',
@@ -171,6 +180,10 @@ function useToolbarCapsuleFit(enabled: boolean) {
       const permDelta = left.querySelector('[data-tutorial="permission-mode-dropdown"]')
         ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="perm-text"]')) - widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="perm-icon"]')))
         : 0
+      const unattendedDelta = left.querySelector('[data-toolbar-unattended]')
+        ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="unattended-text"]')) - TOOLBAR_CONTROL_HEIGHT)
+        : 0
+      const leftDelta = permDelta + unattendedDelta
       const filesDelta = right.querySelector('[data-toolbar-files]')
         ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="files-text"]')) - widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="files-icon"]')))
         : 0
@@ -179,9 +192,9 @@ function useToolbarCapsuleFit(enabled: boolean) {
       const currentIcons = iconsOnlyRef.current
       const fit = toolbarCapsuleFit({
         rowWidth: row.clientWidth,
-        leftTextWidth: currentIcons ? leftNow + permDelta : leftNow,
+        leftTextWidth: currentIcons ? leftNow + leftDelta : leftNow,
         rightTextWidth: currentIcons ? rightNow + filesDelta : rightNow,
-        leftIconWidth: currentIcons ? leftNow : Math.max(0, leftNow - permDelta),
+        leftIconWidth: currentIcons ? leftNow : Math.max(0, leftNow - leftDelta),
         rightIconWidth: currentIcons ? rightNow : Math.max(0, rightNow - filesDelta),
         shellNaturalWidth: natural.offsetWidth,
         shellMinWidth: minimum.offsetWidth,
@@ -232,6 +245,7 @@ interface ResolvedLabelEntry {
 }
 
 export function ActiveOptionBadges({
+  messagingWorkspaceId,
   permissionMode = 'ask',
   onPermissionModeChange,
   tasks = [],
@@ -336,6 +350,10 @@ export function ActiveOptionBadges({
               iconsOnly={iconsOnly}
             />
           </div>
+        )}
+
+        {messagingWorkspaceId && (
+          <UnattendedButton key={messagingWorkspaceId} workspaceId={messagingWorkspaceId} iconsOnly={iconsOnly} />
         )}
 
         {/* Swarm replaces the workflow-state badge in the composer toolbar. */}
@@ -506,9 +524,8 @@ function FilesPopoverButton({
   const label = t("chat.sessionInfo")
   const className = cn(
     toolbarControlLayout(iconsOnly, 'files'),
-    "outline-none select-none shadow-minimal",
-    "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
-    "text-foreground/80",
+    toolbarNeutralSurface,
+    "outline-none select-none",
     sessionId && "transition-colors hover:bg-foreground/5 data-[state=open]:bg-foreground/5",
     !sessionId && "disabled:cursor-default disabled:opacity-100",
   )
@@ -540,19 +557,71 @@ function FilesPopoverButton({
   )
 }
 
+function UnattendedButton({ workspaceId, iconsOnly }: { workspaceId: string; iconsOnly: boolean }) {
+  const { t } = useTranslation()
+  const runtime = useMessagingPlatformRuntime(workspaceId, 'weixin')
+  const { saving, setEnabled } = useWeixinNotificationAction()
+  const enabled = runtime.notifyOnCompletion === true
+  const label = t('settings.messaging.weixin.unattended')
+  return (
+    <button
+      type="button"
+      data-toolbar-unattended=""
+      aria-label={label}
+      aria-pressed={enabled}
+      title={t(runtime.connected ? 'settings.messaging.weixin.unattendedDescription' : 'settings.messaging.weixin.connectFirst')}
+      disabled={saving}
+      className={cn(
+        toolbarControlLayout(iconsOnly, 'permission'),
+        'select-none focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait',
+        toolbarSurfaceMotion,
+        enabled ? [toolbarAccentSurface, 'shadow-tinted'] : [toolbarNeutralSurface, 'hover:bg-foreground/5'],
+      )}
+      style={{ ...toolbarControlStyle(iconsOnly), '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties}
+      onClick={() => runtime.connected ? void setEnabled(!enabled) : navigate(routes.view.settings('messaging'))}
+    >
+      <span aria-hidden="true" className="grid size-3.5 shrink-0">
+        <Bell className={cn(toolbarIconMotion, enabled && 'opacity-0 motion-safe:-rotate-12 motion-safe:scale-90')} />
+        <BellRing className={cn(toolbarIconMotion, !enabled && 'opacity-0 motion-safe:rotate-12 motion-safe:scale-90')} />
+      </span>
+      <span className={cn('whitespace-nowrap', iconsOnly && 'hidden')}>{label}</span>
+    </button>
+  )
+}
+
+// Stack the translated labels so a mode change never moves the adjacent controls.
+function PermissionModeLabel({ mode }: { mode: PermissionMode }) {
+  const { t } = useTranslation()
+  return (
+    <span aria-hidden="true" className="grid whitespace-nowrap">
+      {PERMISSION_MODE_ORDER.map(option => (
+        <span key={option} className={cn(
+          'col-start-1 row-start-1 motion-safe:transition-opacity motion-safe:duration-200 motion-safe:ease-out',
+          option !== mode && 'opacity-0',
+        )}>
+          {t(`mode.${option}`)}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function ToolbarWidthProbes({ permissionMode }: { permissionMode?: PermissionMode }) {
   const { t } = useTranslation()
-  const modeLabel = permissionMode ? t(`mode.${permissionMode}`) : ''
   const filesLabel = t('chat.sessionInfo')
   return (
     <div data-toolbar-measure="" className="pointer-events-none absolute left-0 top-0 -z-10 flex w-max flex-col items-start opacity-0" aria-hidden>
       <span data-toolbar-measure="perm-text" className={toolbarControlLayout(false, 'permission')} style={toolbarControlStyle(false)}>
         {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
-        <span className="whitespace-nowrap">{modeLabel}</span>
+        {permissionMode && <PermissionModeLabel mode={permissionMode} />}
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </span>
       <span data-toolbar-measure="perm-icon" className={toolbarControlLayout(true, 'permission')} style={toolbarControlStyle(true)}>
         {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
+      </span>
+      <span data-toolbar-measure="unattended-text" className={toolbarControlLayout(false, 'permission')} style={toolbarControlStyle(false)}>
+        <Bell className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">{t('settings.messaging.weixin.unattended')}</span>
       </span>
       <span data-toolbar-measure="files-text" className={toolbarControlLayout(false, 'files')} style={toolbarControlStyle(false)}>
         <FolderOpen className="h-3.5 w-3.5 shrink-0" />
@@ -613,7 +682,7 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
       shadowVar: 'var(--permission-ask-rgb)',
     },
     'allow-all': {
-      className: 'bg-accent/5 text-accent',
+      className: toolbarAccentSurface,
       shadowVar: 'var(--accent-rgb)',
     },
   }
@@ -628,14 +697,22 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
           aria-label={t(`mode.${optimisticMode}`)}
           className={cn(
             toolbarControlLayout(iconsOnly, 'permission'),
-            "shadow-tinted outline-none select-none",
+            toolbarSurfaceMotion,
+            "shadow-tinted select-none focus-visible:outline-2 focus-visible:outline-ring",
             currentStyle.className
           )}
           style={{ ...toolbarControlStyle(iconsOnly), '--shadow-color': currentStyle.shadowVar } as React.CSSProperties}
         >
-          <PermissionModeIcon mode={optimisticMode} className="h-3.5 w-3.5 shrink-0" />
+          <span aria-hidden="true" className="grid size-3.5 shrink-0">
+            {PERMISSION_MODE_ORDER.map(mode => (
+              <PermissionModeIcon key={mode} mode={mode} className={cn(
+                toolbarIconMotion,
+                mode !== optimisticMode && 'opacity-0 motion-safe:rotate-12 motion-safe:scale-90',
+              )} />
+            ))}
+          </span>
           <span data-toolbar-label="" className={cn("flex items-center gap-1.5", iconsOnly && "hidden")}>
-            <span className="whitespace-nowrap">{t(`mode.${optimisticMode}`)}</span>
+            <PermissionModeLabel mode={optimisticMode} />
             <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
           </span>
         </button>

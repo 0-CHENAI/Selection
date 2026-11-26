@@ -1,3 +1,4 @@
+import { isMessagingPlatform } from './types'
 /**
  * BindingStore — workspace-scoped persistence for channel bindings.
  *
@@ -292,5 +293,5 @@ function normalizeBinding(raw: ChannelBinding): ChannelBinding {
 function isSupportedBinding(value: unknown): value is ChannelBinding {
   return typeof value === 'object'
     && value !== null
-    && (value as { platform?: unknown }).platform === 'lark'
+    && isMessagingPlatform((value as { platform?: unknown }).platform)
 }

@@ -364,6 +364,52 @@ describe('Renderer — final_only mode', () => {
     expect(adapter.calls.length).toBe(0)
   })
 
+  it('keeps the next WeChat reply while the preceding send is in flight', async () => {
+    const adapter = makeAdapter({ messageEditing: false })
+    const binding = { ...makeBinding({ responseMode: 'final_only' }), platform: 'weixin' as const }
+    const savedSend = adapter.sendText.bind(adapter)
+    const pending = Promise.withResolvers<void>()
+    adapter.sendText = async (...args) => {
+      const sent = await savedSend(...args)
+      await pending.promise
+      return sent
+    }
+    await renderer.handle(ev.final('first'), binding, adapter)
+    const first = renderer.handle(ev.complete(), binding, adapter)
+    const duplicate = renderer.handle(ev.complete(), binding, adapter)
+    await renderer.handle(ev.final('second'), binding, adapter)
+    pending.resolve()
+    await Promise.all([first, duplicate])
+    await renderer.handle(ev.complete(), binding, adapter)
+    expect(adapter.calls.map(c => c.text)).toEqual(['「sess-1」\nfirst', '「sess-1」\nsecond'])
+  })
+
+  it('stops sending the remaining WeChat chunks when access is revoked', async () => {
+    const adapter = makeAdapter({ maxMessageLength: 20 })
+    const binding = { ...makeBinding({ responseMode: 'final_only' }), platform: 'weixin' as const }
+    let allowed = true
+    const renderer = new Renderer({ canDeliverWeixin: () => allowed })
+    const send = adapter.sendText.bind(adapter)
+    adapter.sendText = async (...args) => {
+      const receipt = await send(...args)
+      allowed = false
+      return receipt
+    }
+    await play(renderer, binding, adapter, [ev.final('first part\nsecond part\nthird part'), ev.complete()])
+    expect(adapter.calls.map(c => c.text)).toEqual(['「sess-1」\nfirst part'])
+  })
+
+  it('keeps intermediate, hidden and thinking text out of WeChat final replies', async () => {
+    const binding = { ...makeBinding({ responseMode: 'final_only' }), platform: 'weixin' as const }
+    const adapter = makeAdapter({ messageEditing: false })
+    await play(renderer, binding, adapter, [
+      ev.intermediate('commentary'), { ...ev.final('reasoning'), streamKind: 'thinking' },
+      { ...ev.final('hidden reply'), hidden: true }, { ...ev.final('draft'), phase: 'intermediate' },
+      ev.complete(),
+    ])
+    expect(adapter.calls).toEqual([])
+  })
+
   it('tool-terminated run with only intermediate text → still sends the last assistant text', async () => {
     const adapter = makeAdapter()
     const binding = makeBinding({ responseMode: 'final_only' as ResponseMode })

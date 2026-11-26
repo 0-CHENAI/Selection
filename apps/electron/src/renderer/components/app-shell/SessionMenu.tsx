@@ -19,6 +19,7 @@ import { useMenuComponents } from '@/components/ui/menu-context'
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { hasMessagesMeta, hasUnreadMeta } from '@/utils/session'
+import { LarkIcon, WeixinIcon } from '@/components/messaging/MessagingPlatformIcon'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 
 export interface SessionMenuProjectOption {
@@ -106,6 +107,14 @@ export function SessionMenu({
       <MenuItem onClick={onRename}>
         <Pencil className="h-3.5 w-3.5" />
         <span className="flex-1">{t('common.rename')}</span>
+      </MenuItem>
+      <MenuItem onClick={actions.bindToLark}>
+        <LarkIcon size={14} />
+        <span className="flex-1">{t('sessionMenu.bindToLark')}</span>
+      </MenuItem>
+      <MenuItem onClick={actions.bindToWeixin}>
+        <WeixinIcon size={14} />
+        <span className="flex-1">{t('sessionMenu.bindToWeixin')}</span>
       </MenuItem>
       <MenuItem onClick={actions.refreshTitle}>
         <RefreshCw className="h-3.5 w-3.5" />

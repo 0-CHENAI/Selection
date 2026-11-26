@@ -13,7 +13,7 @@ import {
   copyFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { DEFAULT_MESSAGING_CONFIG, type MessagingConfig, type MessagingLogger } from './types'
+import { isMessagingPlatform, DEFAULT_MESSAGING_CONFIG, type MessagingConfig, type MessagingLogger } from './types'
 
 const NOOP_LOGGER: MessagingLogger = {
   info: () => {},
@@ -39,26 +39,15 @@ export class ConfigStore {
   }
 
   get(): MessagingConfig {
-    const lark = this.config.platforms.lark
-    return {
-      ...this.config,
-      platforms: lark
-        ? {
-            lark: {
-              ...lark,
-              ...(lark.owners ? { owners: lark.owners.map((owner) => ({ ...owner })) } : {}),
-            },
-          }
-        : {},
-    }
+    return structuredClone(this.config)
   }
 
   update(partial: Partial<MessagingConfig>): MessagingConfig {
-    const next: MessagingConfig = {
-      enabled: partial.enabled ?? this.config.enabled,
-      platforms: partial.platforms?.lark
-        ? { lark: { ...(this.config.platforms.lark ?? { enabled: false }), ...partial.platforms.lark } }
-        : { ...this.config.platforms },
+    const next = this.get()
+    next.enabled = partial.enabled ?? next.enabled
+    for (const platform of ['lark', 'weixin'] as const) {
+      const patch = partial.platforms?.[platform]
+      if (patch) next.platforms[platform] = { ...next.platforms[platform], ...patch }
     }
     this.config = next
     this.save()
@@ -99,9 +88,9 @@ export class ConfigStore {
         return {
           config: {
             enabled: parsed.enabled ?? DEFAULT_MESSAGING_CONFIG.enabled,
-            platforms: parsed.platforms?.lark ? { lark: parsed.platforms.lark } : {},
+            platforms: Object.fromEntries(Object.entries(platforms).filter(([key]) => isMessagingPlatform(key))),
           },
-          shouldRewrite: Object.keys(platforms).some((platform) => platform !== 'lark'),
+          shouldRewrite: Object.keys(platforms).some((platform) => !isMessagingPlatform(platform)),
         }
       }
     } catch (err) {

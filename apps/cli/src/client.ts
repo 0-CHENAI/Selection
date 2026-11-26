@@ -137,9 +137,7 @@ export class CliRpcClient {
 
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID()
-      const timeoutMs = requestTimeoutMsForChannel(channel) === null
-        ? null
-        : this.requestTimeout
+      const timeoutMs = requestTimeoutMsForChannel(channel, this.requestTimeout)
       const timeout = timeoutMs == null
         ? undefined
         : setTimeout(() => {

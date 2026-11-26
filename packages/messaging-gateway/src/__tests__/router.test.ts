@@ -121,6 +121,27 @@ describe('Router', () => {
     expect(args[2]).toBeUndefined() // fileAttachments
   })
 
+  it('releases the WeChat inbox after admission while the model is still running', async () => {
+    const { router, store, sessionManager } = makeRouter()
+    store.bind('ws1', 'sess-A', 'weixin', 'chat-1')
+    const adapter = { ...makeFakeAdapter(), platform: 'weixin' as const }
+    const finish = Promise.withResolvers<void>()
+    let released = false
+    sessionManager.sendMessage.mockImplementation(async (...args: unknown[]) => {
+      const ack = args[7] as ((id: string) => void) | undefined
+      ack?.('accepted-message')
+      await finish.promise
+    })
+    const route = router.route(adapter, baseMsg({ platform: 'weixin' })).then(() => { released = true })
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(released).toBe(true)
+    } finally {
+      finish.resolve()
+      await route
+    }
+  })
+
   it('materializes a localPath attachment into FileAttachment[]', async () => {
     const { router, sessionManager } = makeRouter()
     const pngPath = writeTinyPng()

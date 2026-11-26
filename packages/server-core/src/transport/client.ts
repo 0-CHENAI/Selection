@@ -188,9 +188,7 @@ export class WsRpcClient implements RpcClient {
       }
 
       const id = crypto.randomUUID()
-      const timeoutMs = requestTimeoutMsForChannel(channel) === null
-        ? null
-        : this.requestTimeout
+      const timeoutMs = requestTimeoutMsForChannel(channel, this.requestTimeout)
       const timeout = timeoutMs == null
         ? undefined
         : setTimeout(() => {

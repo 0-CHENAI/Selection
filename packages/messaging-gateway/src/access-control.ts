@@ -42,7 +42,7 @@ export type AccessRejectReason =
 
 export interface PreBindingAccessInput {
   /** The inbound message about to be handled by Commands. */
-  msg: IncomingMessage
+  msg: Pick<IncomingMessage, 'senderId' | 'platform' | 'senderIsBot'>
   /** Workspace messaging config (for `accessMode` + `owners`). */
   workspaceConfig: MessagingConfig
 }
@@ -71,7 +71,7 @@ export function evaluatePreBindingAccess(
 }
 
 export interface BindingAccessInput {
-  msg: IncomingMessage
+  msg: Pick<IncomingMessage, 'senderId' | 'platform' | 'senderIsBot'>
   workspaceConfig: MessagingConfig
   binding: { config: BindingConfig }
 }

@@ -1,3 +1,4 @@
+import { waitForWeixinAdmission } from './adapters/weixin/admission'
 /**
  * Router — routes inbound messages from platform adapters to sessions.
  *
@@ -88,13 +89,14 @@ export class Router {
           bindingId: binding.id,
           attachmentCount: fileAttachments?.length ?? 0,
         })
-        await this.sessionManager.sendMessage(
-          binding.sessionId,
-          msg.text,
-          fileAttachments,
-          undefined, // storedAttachments (handled by session layer)
-          undefined, // SendMessageOptions
-        )
+        if (binding.platform === 'weixin') {
+          await waitForWeixinAdmission(
+            ack => this.sessionManager.sendMessage(binding.sessionId, msg.text, fileAttachments, undefined, undefined, undefined, undefined, ack),
+            error => this.log.warn('WeChat session failed after admission', { sessionId: binding.sessionId, error: String(error) }),
+          )
+        } else {
+          await this.sessionManager.sendMessage(binding.sessionId, msg.text, fileAttachments, undefined, undefined)
+        }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error'
         this.log.error('failed to route inbound chat message', {

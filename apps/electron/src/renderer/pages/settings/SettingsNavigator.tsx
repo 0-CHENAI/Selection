@@ -36,7 +36,7 @@ interface SettingsItem {
   id: SettingsSubpage
   label: string
   icon: React.ComponentType<{ className?: string }>
-  description: string
+  description?: string
 }
 
 interface SettingsItemRowProps {
@@ -96,9 +96,9 @@ function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRo
             >
               {item.label}
             </span>
-            <span className="text-xs text-foreground/60 line-clamp-1">
-              {item.description}
-            </span>
+            {item.description && (
+              <span className="text-xs text-foreground/60 line-clamp-1">{item.description}</span>
+            )}
           </div>
         </button>
       </div>
@@ -117,7 +117,7 @@ export default function SettingsNavigator({
       id: item.id,
       label: t(item.labelKey),
       icon: SETTINGS_ICONS[item.id],
-      description: t(item.descriptionKey),
+      description: item.descriptionKey ? t(item.descriptionKey) : undefined,
     })),
     [t]
   )

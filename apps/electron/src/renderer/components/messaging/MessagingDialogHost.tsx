@@ -1,45 +1,74 @@
 import * as React from 'react'
-import { useAtom } from 'jotai'
+import { useAtom, useSetAtom, useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { messagingDialogAtom } from '@/atoms/messaging'
+import { messagingDialogAtom, sessionPlatformBindings, setMessagingBindingsAtom } from '@/atoms/messaging'
+import { navigate, routes } from '@/lib/navigate'
 import { PairingCodeDialog } from './PairingCodeDialog'
 
-export function MessagingDialogHost() {
+export function MessagingDialogHost({ workspaceId }: { workspaceId?: string | null }) {
   const [state, setState] = useAtom(messagingDialogAtom)
+  const store = useStore()
+  const setBindings = useSetAtom(setMessagingBindingsAtom)
   const { t } = useTranslation()
-  const stateRef = React.useRef(state)
-  stateRef.current = state
 
-  const waiting = state.kind === 'pairing' && state.code !== null
   React.useEffect(() => {
-    if (!waiting) return
-    return window.electronAPI.onMessagingBindingChanged(async () => {
-      const current = stateRef.current
-      if (current.kind !== 'pairing' || current.code === null) return
+    setBindings([])
+    return () => { setBindings([]) }
+  }, [workspaceId, setBindings])
+
+  React.useEffect(() => {
+    if (state.kind === 'pairing' && state.workspaceId !== workspaceId) {
+      setState({ kind: 'closed' })
+      return
+    }
+    if (!workspaceId) return
+    let active = true
+    let latestRead = 0
+    const refresh = async () => {
+      const read = ++latestRead
       try {
         const bindings = await window.electronAPI.getMessagingBindings()
-        if (bindings.some((binding) =>
-          binding.enabled
-          && binding.sessionId === current.sessionId
-          && binding.platform === 'lark')) {
-          toast.success(t('toast.messagingPaired'))
-          setState({ kind: 'closed' })
+        if (!active || read !== latestRead) return
+        const rows = bindings.filter(binding => binding.workspaceId === workspaceId)
+        setBindings(rows)
+        if (state.kind === 'pairing' && state.code && store.get(messagingDialogAtom) === state) {
+          const existingIds = new Set(state.existingBindings.map(binding => binding.id))
+          const paired = sessionPlatformBindings(rows, workspaceId, state.sessionId, state.platform)
+            .some(binding => !existingIds.has(binding.id))
+          if (paired) {
+            setState({ kind: 'closed' })
+            toast.success(t('toast.messagingPaired'))
+          }
         }
       } catch {
-        // Keep the dialog open when the latest binding state cannot be read.
+        // A later binding event can retry the read.
       }
+    }
+    const off = window.electronAPI.onMessagingBindingChanged(id => {
+      if (id === workspaceId) void refresh()
     })
-  }, [waiting, setState, t])
+    void refresh()
+    return () => {
+      active = false
+      off()
+    }
+  }, [state, workspaceId, setState, setBindings, store, t])
 
+  if (state.kind !== 'pairing' || state.workspaceId !== workspaceId) return null
   return (
     <PairingCodeDialog
-      open={state.kind === 'pairing'}
-      onOpenChange={(open) => { if (!open) setState({ kind: 'closed' }) }}
-      platform="lark"
-      code={state.kind === 'pairing' ? state.code : null}
-      expiresAt={state.kind === 'pairing' ? state.expiresAt : null}
-      error={state.kind === 'pairing' ? state.error : undefined}
+      open
+      onOpenChange={open => { if (!open) setState({ kind: 'closed' }) }}
+      platform={state.platform}
+      code={state.code}
+      expiresAt={state.expiresAt}
+      error={state.error}
+      existingBindings={state.existingBindings}
+      onOpenSettings={state.needsConnection ? () => {
+        setState({ kind: 'closed' })
+        navigate(routes.view.settings('messaging'))
+      } : undefined}
     />
   )
 }

@@ -2935,9 +2935,7 @@ function AppShellContent({
         onSubmit={handleCreateProjectSubmit}
       />
 
-      {/* Messaging dialogs (pairing-code + WA connect) — driven by messagingDialogAtom.
-          Mounted here so they survive context-menu / dropdown close. */}
-      <MessagingDialogHost />
+      <MessagingDialogHost workspaceId={remoteWorkspaceId ?? activeWorkspaceId} />
 
     </AppShellProvider>
   )

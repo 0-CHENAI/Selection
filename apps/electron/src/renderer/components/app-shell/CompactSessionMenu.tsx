@@ -3,11 +3,7 @@
  *
  * Bottom-sheet replacement for the desktop ChatPage title dropdown
  * (`SessionMenu` wrapped by `PanelHeader`'s Radix DropdownMenu) when
- * `AppShellContext.isCompactMode === true`. Mirrors the same actions but
- * routes Connect Messaging submenus through
- * an internal view stack instead of nested Radix popovers — Radix submenus
- * get clipped by the panel container query on narrow viewports, and the
- * nested submenus can fall off the right edge.
+ * `AppShellContext.isCompactMode === true`. Leaf actions close the drawer.
  *
  * Pattern matches the other compact pickers (`CompactWorkspaceSwitcher`,
  * `CompactPermissionModeSelector`) and also
@@ -51,6 +47,7 @@ import {
 import type { SessionMeta } from '@/atoms/sessions'
 import { hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { getFileManagerName } from '@/lib/platform'
+import { LarkIcon, WeixinIcon } from '@/components/messaging/MessagingPlatformIcon'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 
 export interface CompactSessionMenuProps {
@@ -201,6 +198,8 @@ export function CompactSessionMenu({
             onSendToWorkspace={closeAfter(onSendToWorkspace)}
             onMarkUnread={closeAfter(onMarkUnread)}
             onRename={closeAfter(onRename)}
+            onBindToLark={closeAfter(actions.bindToLark)}
+            onBindToWeixin={closeAfter(actions.bindToWeixin)}
             onRefreshTitle={closeAfter(actions.refreshTitle)}
             onOpenInNewPanel={closeAfter(actions.openInNewPanel)}
             onShowInFinder={closeAfter(actions.showInFinder)}
@@ -225,6 +224,8 @@ interface RootPaneProps {
   hasTransferTargets?: boolean
   onSendToWorkspace?: () => void
   onMarkUnread?: () => void
+  onBindToLark?: () => void
+  onBindToWeixin?: () => void
   onRename?: () => void
   onRefreshTitle?: () => void
   onOpenInNewPanel?: () => void
@@ -243,6 +244,8 @@ function RootPane({
   onSendToWorkspace,
   onMarkUnread,
   onRename,
+  onBindToLark,
+  onBindToWeixin,
   onRefreshTitle,
   onOpenInNewPanel,
   onShowInFinder,
@@ -270,6 +273,8 @@ function RootPane({
       )}
 
       <Row icon={<Pencil className="h-4 w-4" />} label={t('common.rename')} onTap={onRename} />
+      <Row icon={<LarkIcon />} label={t('sessionMenu.bindToLark')} onTap={onBindToLark} />
+      <Row icon={<WeixinIcon />} label={t('sessionMenu.bindToWeixin')} onTap={onBindToWeixin} />
       <Row icon={<RefreshCw className="h-4 w-4" />} label={t('sessionMenu.regenerateTitle')} onTap={onRefreshTitle} />
 
       <Separator />

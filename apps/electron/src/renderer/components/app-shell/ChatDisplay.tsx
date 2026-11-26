@@ -2667,6 +2667,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <>
           <PptSessionArtifactShelf sessionId={session.id} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
           <ChatInputZone
+            messagingWorkspaceId={session.workspaceId}
             toolbarCenter={scrollInToolbar ? (slot) => (
               <TaskProgressCard
                 placement="toolbar"

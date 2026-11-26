@@ -1,6 +1,8 @@
 import { formatDistanceToNowStrict } from "date-fns"
 import type { Locale } from "date-fns"
 import { ShieldAlert } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { LarkIcon, WeixinIcon } from "@/components/messaging/MessagingPlatformIcon"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -20,13 +22,6 @@ import { navigate, routes } from "@/lib/navigate"
 import type { SessionMeta } from "@/atoms/sessions"
 import { messagingBindingsBySessionAtom } from "@/atoms/messaging"
 import { useAtomValue } from "jotai"
-
-const PLATFORM_PILL: Record<'lark', { label: string; colorClass: string }> = {
-  lark: {
-    label: 'Lark / Feishu',
-    colorClass: 'bg-cyan-500/10 text-cyan-600 dark:bg-cyan-400/15 dark:text-cyan-300',
-  },
-}
 
 export interface SessionItemProps {
   item: SessionMeta
@@ -50,6 +45,7 @@ export function SessionItem({
   onToggleSelect,
   onRangeSelect,
 }: SessionItemProps) {
+  const { t } = useTranslation()
   const ctx = useSessionListContext()
   const { workspaces, isCompactMode } = useAppShellContext()
   const canSendToWorkspace = hasTransferTargets(workspaces)
@@ -66,7 +62,8 @@ export function SessionItem({
   const previewText = isCompactMode ? getSessionPreviewText(item) : null
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
-  const hasMessagingBinding = sessionBindings.length > 0
+  const boundPlatforms = (['lark', 'weixin'] as const).filter(platform =>
+    sessionBindings.some(binding => binding.workspaceId === item.workspaceId && binding.platform === platform))
 
   // Resolve the bound project so the row can show a project color stripe.
   // The project name is not repeated on the row. Highlight treatment is no
@@ -184,24 +181,12 @@ export function SessionItem({
       titleClassName={cn("text-[13px]", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={previewText}
       titleSuffix={
-        hasMessagingBinding ? (
-          <div className="flex items-center gap-1">
-            {sessionBindings.map((binding) => {
-              const pill = PLATFORM_PILL[binding.platform as 'lark']
-              if (!pill) return null
-              return (
-                <EntityListBadge
-                  key={binding.id}
-                  variant="text"
-                  colorClass={pill.colorClass}
-                  tooltip={`Connected to ${pill.label}`}
-                >
-                  {pill.label}
-                </EntityListBadge>
-              )
-            })}
-          </div>
-        ) : undefined
+        boundPlatforms.map(platform => (
+          <EntityListBadge key={platform} className="gap-1">
+            {platform === 'lark' ? <LarkIcon size={12} /> : <WeixinIcon size={12} />}
+            {t(`settings.messaging.${platform}.title`)}
+          </EntityListBadge>
+        ))
       }
       titleTrailing={hasMatch ? (
         <span

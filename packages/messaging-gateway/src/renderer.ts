@@ -25,6 +25,7 @@
  * and emits the prompt/error as a distinct message regardless of mode.
  */
 
+import type { Message } from '@craft-agent/core/types'
 import type {
   PlatformAdapter,
   ChannelBinding,
@@ -48,6 +49,10 @@ export interface SessionEvent {
   type: string
   sessionId: string
   [key: string]: unknown
+}
+
+export function isVisibleAnswerText(value: SessionEvent | Message): boolean {
+  return !value.hidden && !value.isIntermediate && value.phase !== 'intermediate' && value.streamKind !== 'thinking'
 }
 
 /** PermissionRequest shape from @craft-agent/core. */
@@ -135,11 +140,18 @@ export class Renderer {
   private readonly recordPlanMessage: PlanMessageRecorder | undefined
   private readonly recordPermissionMessage: PermissionMessageRecorder | undefined
 
+  private readonly canDeliverWeixin?: (binding: ChannelBinding, adapter: PlatformAdapter) => boolean
+  private readonly weixinSessionTitle?: (id: string) => string
+
   constructor(deps?: {
+    canDeliverWeixin?: (binding: ChannelBinding, adapter: PlatformAdapter) => boolean
+    weixinSessionTitle?: (id: string) => string
     planTokens?: PlanTokenRegistry
     recordPlanMessage?: PlanMessageRecorder
     recordPermissionMessage?: PermissionMessageRecorder
   }) {
+    this.canDeliverWeixin = deps?.canDeliverWeixin
+    this.weixinSessionTitle = deps?.weixinSessionTitle
     this.planTokens = deps?.planTokens
     this.recordPlanMessage = deps?.recordPlanMessage
     this.recordPermissionMessage = deps?.recordPermissionMessage
@@ -171,6 +183,14 @@ export class Renderer {
     binding: ChannelBinding,
     adapter: PlatformAdapter,
   ): Promise<void> {
+    if (binding.platform === 'weixin') {
+      if (event.type === 'text_delta' && binding.config.responseMode === 'final_only') return
+      if ((event.type === 'text_complete' || event.type === 'text_delta') && !isVisibleAnswerText(event)) return
+      if (this.canDeliverWeixin && !this.canDeliverWeixin(binding, adapter)) {
+        this.removeBinding(binding.id)
+        return
+      }
+    }
     // Permission / error prompts are mode-agnostic — handle first so they
     // can't be swallowed by mode state.
     if (event.type === 'permission_request') {
@@ -474,10 +494,11 @@ export class Renderer {
         // assistant text so final_only still delivers something rather than
         // staying silent when the run ends on a tool call.
         const finalText = (state.finalBuffer.trim() || state.lastAssistantText.trim())
+        // Detach this turn before network I/O: completion events can overlap.
+        this.resetRun(state)
         if (finalText) {
           await this.sendText(adapter, binding, finalText)
         }
-        this.resetRun(state)
         return
       }
     }
@@ -549,7 +570,7 @@ Approve in the desktop app to continue.`,
   ): Promise<void> {
     // Token registry is optional for backwards compatibility; without it we
     // degrade to the generic pointer so the bot still sees *something*.
-    if (!this.planTokens) {
+    if (!this.planTokens || !adapter.capabilities.inlineButtons) {
       await adapter.sendText(
         binding.channelId,
         '📝 A plan is ready for review. Open the desktop app to inspect and approve it.',
@@ -676,14 +697,20 @@ Approve in the desktop app to continue.`,
   ): Promise<SentMessage | undefined> {
     const maxLen = adapter.capabilities.maxMessageLength
     const opts = bindingOpts(binding)
-    if (text.length <= maxLen) {
-      return adapter.sendText(binding.channelId, text, opts)
+    let prefix = ''
+    if (binding.platform === 'weixin') {
+      opts.weixinSource = { sessionId: binding.sessionId, kind: 'answer' }
+      prefix = `「${this.weixinSessionTitle?.(binding.sessionId) ?? binding.sessionId}」\n`
+    }
+    if (prefix.length + text.length <= maxLen) {
+      return adapter.sendText(binding.channelId, prefix + text, opts)
     }
 
-    const chunks = splitText(text, maxLen)
+    const chunks = splitText(text, maxLen - prefix.length)
     let last: SentMessage | undefined
     for (const chunk of chunks) {
-      last = await adapter.sendText(binding.channelId, chunk, opts)
+      if (binding.platform === 'weixin' && this.canDeliverWeixin && !this.canDeliverWeixin(binding, adapter)) break
+      last = await adapter.sendText(binding.channelId, prefix + chunk, opts)
     }
     return last
   }
@@ -722,7 +749,7 @@ function truncateForAdapter(text: string, adapter: PlatformAdapter): string {
   return text.slice(0, maxLen - 4) + ' ...'
 }
 
-function splitText(text: string, maxLen: number): string[] {
+export function splitText(text: string, maxLen: number): string[] {
   const chunks: string[] = []
   let remaining = text
 
@@ -730,7 +757,11 @@ function splitText(text: string, maxLen: number): string[] {
     let splitAt = remaining.lastIndexOf('\n\n', maxLen)
     if (splitAt <= 0) splitAt = remaining.lastIndexOf('\n', maxLen)
     if (splitAt <= 0) splitAt = remaining.lastIndexOf(' ', maxLen)
-    if (splitAt <= 0) splitAt = maxLen
+    if (splitAt <= 0) {
+      splitAt = maxLen
+      // A hard cut in an unspaced CJK paragraph can land inside an emoji.
+      if (splitAt > 1 && /[\uD800-\uDBFF]/.test(remaining[splitAt - 1]!) && /[\uDC00-\uDFFF]/.test(remaining[splitAt]!)) splitAt--
+    }
 
     chunks.push(remaining.slice(0, splitAt).trimEnd())
     remaining = remaining.slice(splitAt).trimStart()
