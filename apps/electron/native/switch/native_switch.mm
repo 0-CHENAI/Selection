@@ -20,6 +20,9 @@
 #import <QuartzCore/QuartzCore.h>
 #include <napi.h>
 
+@interface NativeSwitch : NSSwitch
+@end
+
 @interface NSSwitchActionTarget : NSObject
 @property(nonatomic, assign) NSInteger switchId;
 - (void)didChange:(NSSwitch*)sender;
@@ -45,6 +48,14 @@ static void EmitChange(NSInteger sid, BOOL on) {
 - (void)didChange:(NSSwitch*)sender {
   EmitChange(self.switchId, sender.state == NSControlStateValueOn);
 }
+@end
+
+@implementation NativeSwitch
+- (BOOL)acceptsFirstResponder { return NO; }
+- (BOOL)canBecomeKeyView { return NO; }
+- (BOOL)isAccessibilityElement { return NO; }
+- (NSArray*)accessibilityChildren { return @[]; }
+- (id)accessibilityHitTest:(NSPoint)point { return nil; }
 @end
 
 static NSRect FrameForRect(NSView* parent, NSSwitch* sw, const Napi::Object& rect) {
@@ -132,7 +143,7 @@ Napi::Value Create(const Napi::CallbackInfo& info) {
   NSView* parent = (__bridge NSView*)rawParent;
   if (!parent || !parent.window) throw Napi::Error::New(env, "Handle does not reference a live NSView");
 
-  NSSwitch* sw = [[NSSwitch alloc] initWithFrame:NSZeroRect];
+  NSSwitch* sw = [[NativeSwitch alloc] initWithFrame:NSZeroRect];
   sw.controlSize = NSControlSizeSmall; // natural size 44x20 in-window
   NSSwitchActionTarget* target = [NSSwitchActionTarget new];
   target.switchId = sid;

@@ -19,7 +19,8 @@ for arch in arm64 x64; do
   cp build/Release/native_switch.node "$arch.node" || exit 1
 done
 lipo -create arm64.node x64.node -output switch.node
-lipo -verify_arch arm64 x86_64 switch.node
+lipo -verify_arch arm64 switch.node
+lipo -verify_arch x86_64 switch.node
 codesign --force --sign - switch.node
 codesign --verify --all-architectures --strict switch.node
 cp switch.node "$electron_dir/resources/native/switch.node"
