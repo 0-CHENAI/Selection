@@ -424,8 +424,12 @@ it.each([
 
 it('continues the same turn when a standalone browser screenshot never replies', async () => {
   const toolName = 'mcp__session__browser_tool';
+  const toolCallId = 'call_screenshot_timeout';
   const command = { command: 'screenshot' };
-  const launcher = join(scratchDir, 'screenshot-timeout.js');
+  // Pi resumes the most recent SDK transcript in sessionPath, so a test must
+  // own its session directory instead of inheriting the preceding abort cases.
+  const sessionPath = mkdtempSync(join(scratchDir, 'screenshot-timeout-'));
+  const launcher = join(sessionPath, 'launcher.js');
   const deadline = proxyReplyDeadlineMs(toolName, command);
   // Accelerate only the screenshot bridge timer in the actual bundled worker.
   writeFileSync(launcher, [
@@ -434,12 +438,12 @@ it('continues the same turn when a standalone browser screenshot never replies',
     'await import(' + JSON.stringify(pathToFileURL(bundlePath).href) + ');',
   ].join('\n'));
 
-  const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+  const requests: Array<{ messages: Array<{ role: string; content: unknown; tool_call_id?: string }> }> = [];
   const server = Bun.serve({ port: 0, async fetch(request) {
     requests.push(await request.json() as typeof requests[number]);
     const first = requests.length === 1;
     const delta = first ? { role: 'assistant', tool_calls: [{
-      index: 0, id: 'capture', type: 'function',
+      index: 0, id: toolCallId, type: 'function',
       function: { name: toolName, arguments: JSON.stringify(command) },
     }] } : { role: 'assistant', content: 'Continuing after the failed capture.' };
     const chunks = [
@@ -453,7 +457,7 @@ it('continues the same turn when a standalone browser screenshot never replies',
   try {
     const output = await driveBundle([
       { type: 'init', apiKey: 'test-only', model: 'local-model', cwd: scratchDir, thinkingLevel: 'off',
-        workspaceRootPath: scratchDir, sessionId: 'screenshot-timeout', sessionPath: scratchDir, workingDirectory: scratchDir,
+        workspaceRootPath: scratchDir, sessionId: 'screenshot-timeout', sessionPath, workingDirectory: scratchDir,
         providerType: 'pi_compat', authType: 'api_key', baseUrl: 'http://127.0.0.1:' + server.port + '/v1',
         customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'local-model', contextWindow: 65536, maxTokens: 256 }] },
       { type: 'register_tools', tools: [{ name: toolName, description: 'Capture a browser image.',
@@ -469,12 +473,14 @@ it('continues the same turn when a standalone browser screenshot never replies',
       return events.some(event => event.type === 'event' && event.event?.type === 'agent_end');
     }, false, launcher);
     expect(requests).toHaveLength(2);
-    expect(JSON.stringify(requests[1]?.messages.find(message => message.role === 'tool')?.content))
+    expect(requests[0]?.messages.some(message => message.role === 'tool')).toBe(false);
+    expect(JSON.stringify(requests[1]?.messages.find(message => message.role === 'tool' && message.tool_call_id === toolCallId)?.content))
       .toContain('Browser screenshot did not return');
     const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
-    expect(events.some(event => event.type === 'tool_execute_request')).toBe(true);
+    expect(events.find(event => event.type === 'tool_execute_request' && event.toolCallId === toolCallId))
+      .toMatchObject({ toolName, args: command });
     expect(events.some(event => event.code === 'tool_wait_timeout')).toBe(false);
-    expect(events.find(event => event.event?.type === 'tool_execution_end')?.event).toMatchObject({
+    expect(events.find(event => event.event?.type === 'tool_execution_end' && event.event.toolCallId === toolCallId)?.event).toMatchObject({
       isError: true, result: { details: { selectionExecutionOutcome: 'completed' } },
     });
   } finally { server.stop(true); }
