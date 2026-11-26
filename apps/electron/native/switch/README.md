@@ -28,4 +28,8 @@ cp switch.node "$electron_dir/resources/native/switch.node"
 Verify both appearances in Electron after rebuilding, including OFF and
 switching states. AppKit does not expose an accent override for `NSSwitch`:
 the binary desaturates the layer and adjusts ON contrast for light/dark
-appearance. Check the signed addon in both macOS installers before shipping.
+appearance. Check the signed addon in both macOS installers before shipping —
+`bun run scripts/check-macos-native-switch.ts` (`--repo`, `--app`, `--dmg`,
+`--launch`) verifies presence, architecture, signature, and that the
+installed app actually loads it; a successful launch alone is not proof
+because the renderer falls back to the web switch.

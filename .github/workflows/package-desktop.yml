@@ -70,6 +70,15 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: bun run scripts/package-desktop.ts --mac-only
 
+      # Cheap post-package gate: the native switch addon must exist inside the
+      # built .app, cover the app architecture, and load under the packaged
+      # Electron runtime. Renderer fallback would otherwise mask a missing or
+      # broken binary. Signature/notarization gates report SKIP on unsigned
+      # builds. For the full installed-app launch probe, run the script with
+      # --app ... --launch locally (see docs/ci.md).
+      - name: Verify packaged native switch addon
+        run: bun run scripts/check-macos-native-switch.ts --app apps/electron/release/mac-arm64/Selection.app
+
       - name: Create macOS checksums
         working-directory: dist-packages
         run: shasum -a 256 Selection-arm64.dmg Selection-arm64.zip > SHA256SUMS-macos-arm64.txt
