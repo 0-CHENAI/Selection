@@ -7,6 +7,11 @@ import type {
   BrowserScreenshotRegionArgs,
   BrowserWaitArgs,
 } from './browser-tools.ts';
+import { withTimeout } from '../utils/with-timeout.ts';
+import { BROWSER_SCREENSHOT_BACKSTOP_MS } from '../utils/browser-screenshot-policy.ts';
+
+export const BROWSER_SCREENSHOT_REPLY_TIMEOUT_MS = BROWSER_SCREENSHOT_BACKSTOP_MS + 10_000;
+const SCREENSHOT_TIMEOUT_MESSAGE = 'Browser screenshot did not return. Focus the browser and retry the screenshot, or reopen it if the window is unresponsive.';
 
 export interface BrowserCommandImage {
   data: string;
@@ -642,6 +647,22 @@ async function verifySelectResult(args: {
 }
 
 
+/** Match exactly one capture using the same grammar as the runtime. */
+export function isStandaloneBrowserScreenshot(command: unknown): boolean {
+  let verb: unknown;
+  if (Array.isArray(command)) {
+    verb = command[0];
+  } else if (typeof command === 'string') {
+    try {
+      if (splitBatchCommands(command).length !== 1) return false;
+      verb = tokenizeCommand(command.trim())[0];
+    } catch {
+      return false;
+    }
+  }
+  return typeof verb === 'string' && ['screenshot', 'screenshot-region'].includes(verb.toLowerCase());
+}
+
 export async function executeBrowserToolCommand(args: {
   command: string | string[];
   fns: BrowserPaneFns;
@@ -853,7 +874,8 @@ async function executeSingleCommand(args: {
         // Auto-take screenshot for visual confirmation
         let screenshotImage: BrowserCommandImage | undefined;
         try {
-          const screenshotResult = await fns.screenshot({ format: 'jpeg' });
+          const screenshotResult = await withTimeout(fns.screenshot({ format: 'jpeg' }),
+            BROWSER_SCREENSHOT_REPLY_TIMEOUT_MS, SCREENSHOT_TIMEOUT_MESSAGE);
           const buf = screenshotResult.imageBuffer;
           if (buf && buf.length > 0) {
             screenshotImage = {
@@ -1250,11 +1272,11 @@ async function executeSingleCommand(args: {
     const format = usePng ? 'png' as const : 'jpeg' as const;
 
     const started = Date.now();
-    const result = await fns.screenshot({ annotate, format });
+    const result = await withTimeout(fns.screenshot({ annotate, format }),
+      BROWSER_SCREENSHOT_REPLY_TIMEOUT_MS, SCREENSHOT_TIMEOUT_MESSAGE);
     const elapsedMs = Date.now() - started;
     const buf = result.imageBuffer;
-    const base64 = buf.toString('base64');
-    if (!buf || buf.length === 0 || !base64) {
+    if (!buf?.length) {
       throw new Error('Screenshot capture returned empty image data. Try waiting for page load (browser_tool wait network-idle), then retry browser_tool screenshot.');
     }
 
@@ -1286,7 +1308,7 @@ async function executeSingleCommand(args: {
       output: lines.join('\n'),
       appendReleaseHint: true,
       image: {
-        data: base64,
+        data: buf.toString('base64'),
         mimeType,
         sizeBytes: buf.length,
       },
@@ -1345,11 +1367,11 @@ async function executeSingleCommand(args: {
     }
 
     const started = Date.now();
-    const result = await fns.screenshotRegion(screenshotArgs);
+    const result = await withTimeout(fns.screenshotRegion(screenshotArgs),
+      BROWSER_SCREENSHOT_REPLY_TIMEOUT_MS, SCREENSHOT_TIMEOUT_MESSAGE);
     const elapsedMs = Date.now() - started;
     const buf = result.imageBuffer;
-    const base64 = buf.toString('base64');
-    if (!buf || buf.length === 0 || !base64) {
+    if (!buf?.length) {
       throw new Error('Region screenshot capture returned empty image data. Try adjusting the region/selector or waiting for page load, then retry browser_tool screenshot-region.');
     }
 
@@ -1371,7 +1393,7 @@ async function executeSingleCommand(args: {
       output: lines.join('\n'),
       appendReleaseHint: true,
       image: {
-        data: base64,
+        data: buf.toString('base64'),
         mimeType,
         sizeBytes: buf.length,
       },

@@ -4,7 +4,7 @@
  * Tests the Pi SDK AgentEvent / AgentSessionEvent → SelectionEvent conversion.
  * Each test provides mock Pi SDK event objects and verifies the AgentEvents produced.
  */
-import { describe, it, expect, beforeEach, afterEach, jest } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -2028,30 +2028,34 @@ describe('PiEventAdapter', () => {
       expect(adapter.shouldCompleteQueue(false)).toBe(false);
     });
 
-    it('skipped recovery: fallback timer drains held error after timeout', () => {
-      jest.useFakeTimers();
+    it('skipped recovery: fallback timer drains held error after timeout', async () => {
+      const schedule = globalThis.setTimeout;
+      const clock = spyOn(globalThis, 'setTimeout').mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+        if (args[1] === 5_000) args[1] = 1;
+        return schedule(...args);
+      }) as typeof setTimeout);
       try {
         const enqueued: any[] = [];
-        let completed = false;
+        let complete!: () => void;
+        const completed = new Promise<void>(resolve => { complete = resolve; });
         adapter.setOverflowFallbackHandlers(
           (event) => enqueued.push(event),
-          () => { completed = true; },
+          complete,
         );
 
         collect(adapter.adaptEvent({ type: 'turn_start' } as any));
         collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
         collect(adapter.adaptEvent({ type: 'agent_end' } as any));
 
-        // No compaction events arrive. Advance past the 5 s fallback timeout.
-        jest.advanceTimersByTime(5_000);
+        // No compaction events arrive. Wait for the accelerated fallback timer.
+        await completed;
 
         expect(enqueued).toEqual([{
           type: 'typed_error',
           error: createTypedError('context_limit'),
         }]);
-        expect(completed).toBe(true);
       } finally {
-        jest.useRealTimers();
+        clock.mockRestore();
       }
     });
 

@@ -316,15 +316,25 @@ it('a failed startup can be followed by a successful request without late-exit c
 });
 
 
-it('preserves tool timeout classification and aborts host-owned session waits', async () => {
+it('reports the tool timeout once, aborts host waits and preserves real stream errors in the next turn', async () => {
   const f = fixture('');
   const events: any[] = [];
   const controller = new AbortController();
   f.internal.eventQueue.enqueue = (event: any) => events.push(event);
   f.internal.sessionToolControllers.add(controller);
   try {
+    f.internal.adapter.startTurn();
     f.internal.handleLine(JSON.stringify({ type: 'error', code: 'tool_wait_timeout', message: '工具回包超时' }));
+    const aborted = JSON.stringify({ type: 'event', event: { type: 'message_end',
+      message: { role: 'assistant', stopReason: 'aborted', errorMessage: 'Model request cancelled', content: [] } } });
+    f.internal.handleLine(aborted);
     expect(controller.signal.aborted).toBe(true);
     expect(events).toContainEqual({ type: 'error', code: 'tool_wait_timeout', message: '工具回包超时' });
+    expect(events.some(event => event.type === 'typed_error')).toBe(false);
+    f.internal.handleLine(JSON.stringify({ type: 'event', event: { type: 'agent_end' } }));
+    expect(events.some(event => event.type === 'complete')).toBe(true);
+    f.internal.adapter.startTurn();
+    f.internal.handleLine(aborted);
+    expect(events.some(event => event.type === 'typed_error' && event.error.code === 'stream_interrupted')).toBe(true);
   } finally { await f.cleanup(); }
 });

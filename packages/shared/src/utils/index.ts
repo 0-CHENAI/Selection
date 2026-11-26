@@ -17,3 +17,4 @@ export * from './large-response.ts';
 export * from './title-generator.ts';
 export * from './toolNames.ts';
 export * from './workspace.ts';
+export { BROWSER_SCREENSHOT_BACKSTOP_MS } from './browser-screenshot-policy.ts';

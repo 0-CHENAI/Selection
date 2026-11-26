@@ -3,7 +3,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { inspectImageDimensions } from './tools/read/image-processing.ts';
+import { proxyReplyDeadlineMs } from './proxy-reply-deadline.ts';
 
 const packageDir = dirname(import.meta.dir);
 const bundlePath = join(packageDir, 'dist', 'index.js');
@@ -417,6 +419,64 @@ it.each([
     expect(output).toContain('agent_end');
     const permission = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }).find(event => event.type === 'pre_tool_use_request');
     expect(permission.recoveryClass).toBe(recovery);
+  } finally { server.stop(true); }
+}, RUN_TIMEOUT_MS + 1000);
+
+it('continues the same turn when a standalone browser screenshot never replies', async () => {
+  const toolName = 'mcp__session__browser_tool';
+  const command = { command: 'screenshot' };
+  const launcher = join(scratchDir, 'screenshot-timeout.js');
+  const deadline = proxyReplyDeadlineMs(toolName, command);
+  // Accelerate only the screenshot bridge timer in the actual bundled worker.
+  writeFileSync(launcher, [
+    'const schedule = globalThis.setTimeout;',
+    'globalThis.setTimeout = (callback, delay, ...args) => schedule(callback, delay === ' + deadline + ' ? 10 : delay, ...args);',
+    'await import(' + JSON.stringify(pathToFileURL(bundlePath).href) + ');',
+  ].join('\n'));
+
+  const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+  const server = Bun.serve({ port: 0, async fetch(request) {
+    requests.push(await request.json() as typeof requests[number]);
+    const first = requests.length === 1;
+    const delta = first ? { role: 'assistant', tool_calls: [{
+      index: 0, id: 'capture', type: 'function',
+      function: { name: toolName, arguments: JSON.stringify(command) },
+    }] } : { role: 'assistant', content: 'Continuing after the failed capture.' };
+    const chunks = [
+      { choices: [{ index: 0, delta, finish_reason: null }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: first ? 'tool_calls' : 'stop' }] },
+    ];
+    return new Response(chunks.map(chunk => 'data: ' + JSON.stringify(chunk) + '\n\n').join('') + 'data: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  let approved = false;
+  try {
+    const output = await driveBundle([
+      { type: 'init', apiKey: 'test-only', model: 'local-model', cwd: scratchDir, thinkingLevel: 'off',
+        workspaceRootPath: scratchDir, sessionId: 'screenshot-timeout', sessionPath: scratchDir, workingDirectory: scratchDir,
+        providerType: 'pi_compat', authType: 'api_key', baseUrl: 'http://127.0.0.1:' + server.port + '/v1',
+        customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'local-model', contextWindow: 65536, maxTokens: 256 }] },
+      { type: 'register_tools', tools: [{ name: toolName, description: 'Capture a browser image.',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } }] },
+      { type: 'prompt', id: 'screenshot-timeout', message: 'Capture the page and continue.', systemPrompt: 'Local protocol test.' },
+    ], (output, send) => {
+      const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+      const permission = events.find(event => event.type === 'pre_tool_use_request');
+      if (permission && !approved) {
+        approved = true;
+        send({ type: 'pre_tool_use_response', requestId: permission.requestId, action: 'continue' });
+      }
+      return events.some(event => event.type === 'event' && event.event?.type === 'agent_end');
+    }, false, launcher);
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]?.messages.find(message => message.role === 'tool')?.content))
+      .toContain('Browser screenshot did not return');
+    const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    expect(events.some(event => event.type === 'tool_execute_request')).toBe(true);
+    expect(events.some(event => event.code === 'tool_wait_timeout')).toBe(false);
+    expect(events.find(event => event.event?.type === 'tool_execution_end')?.event).toMatchObject({
+      isError: true, result: { details: { selectionExecutionOutcome: 'completed' } },
+    });
   } finally { server.stop(true); }
 }, RUN_TIMEOUT_MS + 1000);
 
