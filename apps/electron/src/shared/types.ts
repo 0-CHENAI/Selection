@@ -1182,10 +1182,14 @@ export interface NativeSwitchProps {
 
 export interface NativeSwitchAPI {
   readonly available: boolean
-  create(id: number, props: NativeSwitchProps): Promise<boolean>
-  update(id: number, props: NativeSwitchProps): Promise<boolean>
+  getZoomFactor(): number
+  // A null reply means the window geometry is changing. The instance can retry.
+  create(id: number, props: NativeSwitchProps): Promise<boolean | null>
+  update(id: number, props: NativeSwitchProps): Promise<boolean | null>
   destroy(id: number): Promise<void>
-  onChange(id: number, callback: (on: boolean) => void): () => void
+  destroyAll(): Promise<void>
+  onGeometryChange(callback: () => void): () => void
+  onClick(id: number, callback: () => void): () => void
 }
 
 declare global {

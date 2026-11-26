@@ -1,4 +1,4 @@
-import { Menu, app, BrowserWindow } from 'electron'
+import { Menu, app, BrowserWindow, webContents } from 'electron'
 import { i18n } from '@craft-agent/shared/i18n'
 import { RPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
 import { EDIT_MENU, VIEW_MENU, WINDOW_MENU } from '../shared/menu-schema'
@@ -6,6 +6,7 @@ import type { MenuItem } from '../shared/menu-schema'
 import type { WindowManager } from './window-manager'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import { mainLog, isDebugMode } from './logger'
+import { changeZoomWithNativeSwitchesHidden } from './native-switch'
 
 type ClientResolver = (webContentsId: number) => string | undefined
 
@@ -272,6 +273,21 @@ function toElectronMenuItem(item: MenuItem): Electron.MenuItemConstructorOptions
   }
 
   if (item.type === 'role') {
+    if (item.role === 'zoomIn' || item.role === 'zoomOut' || item.role === 'resetZoom') {
+      const role = item.role
+      const key = role === 'zoomIn' ? 'Plus' : role === 'zoomOut' ? '-' : '0'
+      return {
+        label: i18n.t(item.labelKey),
+        accelerator: `CmdOrCtrl+${key}`,
+        click: (_item, window) => {
+          const wc = webContents.getFocusedWebContents() ?? (window instanceof BrowserWindow ? window.webContents : undefined)
+          if (!wc) return
+          // Preserve the half-level step used by Electron's application menu.
+          const level = role === 'resetZoom' ? 0 : wc.getZoomLevel() + (role === 'zoomIn' ? 0.5 : -0.5)
+          changeZoomWithNativeSwitchesHidden(wc, () => wc.setZoomLevel(level))
+        },
+      }
+    }
     // Use Electron's built-in role - it handles accelerators automatically
     return { role: item.role as Electron.MenuItemConstructorOptions['role'] }
   }
