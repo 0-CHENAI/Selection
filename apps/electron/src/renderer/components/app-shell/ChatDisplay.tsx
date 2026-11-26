@@ -2035,7 +2035,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               <ConversationNavigation key={session.id} items={navigationItems} viewportRef={scrollViewportRef} turnRefs={turnRefs} onNavigate={navigateToRecord} />
             )}
           <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailGrid : "flex flex-1 min-h-0 min-w-0 flex-col"}>
-          <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailContent : "flex min-h-0 min-w-0 flex-col"}>
+          <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailContent : cn(
+            "flex min-h-0 min-w-0 flex-col",
+            !officeHome && "flex-1",
+          )}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className={cn('relative min-h-0', officeHome ? 'shrink-0 overflow-hidden' : 'flex-1')} style={officeHome ? { height: 126 } : undefined}>
             {officeHome ? <div data-testid={homeSection === 'ppt' ? 'ppt-home-hero' : 'office-home-hero'} className="px-5 pt-10 text-center"><h1 className="text-[23px] font-semibold">{homeCopy.title}</h1><p className="mt-2 text-[13px] text-muted-foreground">{homeCopy.description}</p></div> : showNewSessionBrand && <NewSessionBrand />}

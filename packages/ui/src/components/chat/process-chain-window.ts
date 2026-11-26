@@ -67,7 +67,9 @@ export function processChainWindow(args: {
   const rowHeight = args.rowHeight ?? PROCESS_CHAIN_ROW_PX
   const overscan = args.overscan ?? PROCESS_CHAIN_OVERSCAN
   if (args.count <= 0) return processChainWindowFromRange(0, 0, 0, rowHeight)
-  const firstVisible = Math.floor(-args.containerTop / rowHeight)
+  // An offscreen chain can be moved into view by the outer virtual list
+  // before the next measurement. Keep real rows at the nearest edge.
+  const firstVisible = clampProcessChainIndex(Math.floor(-args.containerTop / rowHeight), args.count - 1)
   const visibleCount = Math.max(1, Math.ceil(args.viewportHeight / rowHeight))
   return processChainWindowFromRange(
     firstVisible - overscan,
@@ -133,10 +135,12 @@ export function measureProcessChainWindow(
   scrollParent: HTMLElement,
   count: number,
   rowHeight = PROCESS_CHAIN_ROW_PX,
-): ProcessChainWindow {
+): ProcessChainWindow | null {
   const containerRect = container.getBoundingClientRect?.()
   const viewport = readViewport(scrollParent)
-  if (!containerRect) return initialProcessChainWindow(count, rowHeight) ?? processChainWindowFromRange(0, count, count, rowHeight)
+  // Hidden panes and skipped content-visibility descendants have no layout.
+  // Keep the last usable slice until the scrollport can be measured again.
+  if (!containerRect || containerRect.height <= 0 || viewport.height <= 0) return null
   return processChainWindow({
     containerTop: containerRect.top - viewport.top,
     viewportHeight: viewport.height,
@@ -188,6 +192,7 @@ export function useProcessChainWindow(
     let frame = 0
     const apply = () => {
       const next = measureProcessChainWindow(container, scrollParent, count)
+      if (!next) return
       setWindowState(current => sameProcessChainWindow(current, next) ? current : next)
     }
     const onScroll = () => {
@@ -198,18 +203,30 @@ export function useProcessChainWindow(
       })
     }
 
+    const documentViewport = scrollParent === document.documentElement || scrollParent === document.body
+    const scrollTarget = documentViewport ? window : scrollParent
     apply()
-    scrollParent.addEventListener('scroll', onScroll, { passive: true })
+    scrollTarget.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('resize', onScroll)
     // Expansion and layout changes can resize the viewport without a scroll
     // event. Reconcile the slice, not scrollTop: manual reading stays put.
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onScroll)
     observer?.observe(container)
     observer?.observe(scrollParent)
+    const visibility = typeof IntersectionObserver === 'undefined' ? null
+      : new IntersectionObserver(onScroll, { root: documentViewport ? null : scrollParent })
+    visibility?.observe(container)
+    // The outer chat virtualizer translates retained turns directly via
+    // inline style. A position-only change does not notify ResizeObserver.
+    const virtualTurn = container.closest('[data-chat-virtual-visible]')
+    const position = virtualTurn && typeof MutationObserver !== 'undefined' ? new MutationObserver(onScroll) : null
+    if (virtualTurn) position?.observe(virtualTurn, { attributes: true, attributeFilter: ['style', 'data-chat-virtual-visible'] })
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
       observer?.disconnect()
-      scrollParent.removeEventListener('scroll', onScroll)
+      visibility?.disconnect()
+      position?.disconnect()
+      scrollTarget.removeEventListener('scroll', onScroll)
       window.removeEventListener('resize', onScroll)
     }
   }, [containerRef, count, enabled])
