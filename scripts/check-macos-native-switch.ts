@@ -229,8 +229,18 @@ async function launchCheck(appPath: string): Promise<void> {
     record('PASS', 'nativeSwitch.available in packaged renderer', 'true')
 
     // Full roundtrip: create a real NSSwitch in the live window, update, destroy.
+    // create() returns null while the main frame is still loading or before the
+    // first geometry revision arrives — the same transient states the renderer's
+    // own manager retries through — so probe with retry instead of single-shot.
     const props = '{x:24,y:24,width:51,height:31,visible:true,on:false,enabled:true,appearance:"light"}'
-    const created = await cdpEvaluate(ws, `window.nativeSwitch.create(424242, ${props})`, true)
+    const created = await cdpEvaluate(ws, `(async () => {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const result = await window.nativeSwitch.create(424242, ${props})
+        if (result !== null) return result
+        await new Promise(r => setTimeout(r, 200))
+      }
+      return null
+    })()`, true)
     if (created === true) {
       record('PASS', 'native create() embeds NSSwitch', 'create returned true')
       const updated = await cdpEvaluate(ws, `window.nativeSwitch.update(424242, {...${props}, on:true})`, true)
