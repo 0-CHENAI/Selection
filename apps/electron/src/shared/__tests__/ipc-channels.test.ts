@@ -158,6 +158,7 @@ const EXPECTED_CHANNELS: string[] = [
   'messaging:unbind',
   'messaging:unbindBinding',
   'messaging:updateConfig',
+  'messaging:weixinLogin',
   'notification:getEnabled',
   'notification:navigate',
   'notification:setEnabled',

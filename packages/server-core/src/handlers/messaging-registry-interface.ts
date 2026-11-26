@@ -1,3 +1,4 @@
+import type { WeixinLoginRequest, WeixinLoginResult } from '@craft-agent/shared/protocol'
 /** Abstract interface used by server-core to access the messaging gateway. */
 
 export interface MessagingBindingInfo {
@@ -15,6 +16,7 @@ export interface MessagingBindingInfo {
 }
 
 export interface MessagingPlatformRuntimeInfo {
+  notifyOnCompletion?: boolean
   platform: string
   configured: boolean
   connected: boolean
@@ -56,6 +58,7 @@ export interface MessagingConfigInfo {
     string,
     | {
         enabled: boolean
+        notifyOnCompletion?: boolean
         domain?: 'lark' | 'feishu'
         accessMode?: MessagingPlatformAccessMode
         owners?: MessagingPlatformOwnerInfo[]
@@ -76,6 +79,7 @@ export interface IMessagingGatewayRegistry {
   ): { code: string; expiresAt: number; botUsername?: string }
   unbindSession(workspaceId: string, sessionId: string, platform?: string): void
   unbindBinding(workspaceId: string, bindingId: string): boolean
+  weixinLogin(workspaceId: string, request: WeixinLoginRequest): Promise<WeixinLoginResult>
   testLarkCredentials(creds: {
     appId: string
     appSecret: string

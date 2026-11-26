@@ -1,3 +1,4 @@
+import { isMessagingPlatform } from './types'
 /**
  * PendingSendersStore — bounded record of senders the access-control layer
  * recently rejected.
@@ -242,7 +243,7 @@ function isPendingSender(value: unknown): value is PendingSender {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    v.platform === 'lark' &&
+    isMessagingPlatform(v.platform) &&
     typeof v.userId === 'string' &&
     typeof v.lastAttemptAt === 'number' &&
     typeof v.attemptCount === 'number'

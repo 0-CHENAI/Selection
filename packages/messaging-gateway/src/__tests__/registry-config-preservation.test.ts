@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -29,6 +29,19 @@ function makeRegistry() {
 }
 
 describe('MessagingGatewayRegistry config preservation', () => {
+  it('starts new Feishu connections in owner-only mode and preserves existing policies on reconnect', async () => {
+    const registry = makeRegistry()
+    spyOn(registry, 'testLarkCredentials').mockResolvedValue({ success: true })
+    const creds = { appId: 'test', appSecret: 'test', domain: 'feishu' as const }
+    await registry.saveLarkCredentials('new-workspace', creds)
+    expect(registry.getPlatformAccessMode('new-workspace', 'lark')).toBe('owner-only')
+
+    await registry.updateConfig('existing', { platforms: { lark: { enabled: true } } })
+    await registry.saveLarkCredentials('existing', creds)
+    expect(registry.getPlatformAccessMode('existing', 'lark')).toBe('open')
+    await registry.stopAll()
+  })
+
   it('preserves owners when changing access mode', () => {
     const registry = makeRegistry()
     registry.setPlatformOwners('ws-test', 'lark', [

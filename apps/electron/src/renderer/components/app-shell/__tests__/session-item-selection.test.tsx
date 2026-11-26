@@ -151,9 +151,10 @@ describe('session row project name tag', () => {
       createdAt: 1,
     } satisfies MessagingBinding])
 
-    const html = renderProjectSession({ id: 's1', projectId: 'proj-fork' }, store)
+    const html = renderProjectSession({ id: 's1', workspaceId: 'ws', projectId: 'proj-fork' }, store)
 
-    expect(html).toContain('Lark / Feishu')
+    expect(html).toContain('>Lark</span>')
+    expect(html).not.toContain('Feishu')
     expect(html).toContain('项目初步查看')
     expect(html).not.toContain('Fork Reduce')
     expect(html).toContain('font-sans truncate min-w-0')

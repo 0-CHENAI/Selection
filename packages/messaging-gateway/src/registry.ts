@@ -1,4 +1,9 @@
-import { RPC_CHANNELS, type PushTarget } from '@craft-agent/shared/protocol'
+import type { SessionCompletionEvent } from '@craft-agent/server-core/sessions'
+import { WeixinLogin } from './adapters/weixin/login'
+import { WeixinAdapter } from './adapters/weixin'
+import type { WeixinAccount } from './adapters/weixin/api'
+import { isMessagingPlatform as isKnownPlatform } from './types'
+import { RPC_CHANNELS, type WeixinLoginRequest, type PushTarget } from '@craft-agent/shared/protocol'
 import type { CredentialManager } from '@craft-agent/shared/credentials'
 import type {
   ISessionManager,
@@ -49,6 +54,9 @@ export interface MessagingGatewayRegistryOptions {
 }
 
 interface WorkspaceState {
+  login: WeixinLogin
+  weixinAccount?: string
+  weixinQueue: Promise<void>
   gateway: MessagingGateway
   configStore: ConfigStore
   botUsernames: Partial<Record<PlatformType, string>>
@@ -75,6 +83,17 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     const config = state.configStore.get()
     if (!config.enabled) return
     await state.gateway.start()
+    if (isPlatformConfigured(config, 'weixin')) {
+      await this.queueWeixin(state, async () => {
+        try {
+          const saved = await this.opts.credentialManager.get({ type: 'messaging_bearer', workspaceId, name: 'weixin' })
+          if (!saved?.value) throw new Error('WeChat credentials missing')
+          await this.connectWeixin(workspaceId, state, JSON.parse(saved.value), false)
+        } catch (error) {
+          this.setPlatformRuntime(workspaceId, state, 'weixin', { configured: true, connected: false, state: 'reconnect_required', lastError: String(error) })
+        }
+      })
+    }
     if (isPlatformConfigured(config, 'lark')) {
       this.setPlatformRuntime(workspaceId, state, 'lark', {
         configured: true,
@@ -95,13 +114,15 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
   async removeWorkspace(workspaceId: string): Promise<void> {
     const state = this.workspaces.get(workspaceId)
     if (!state) return
+    state.login.cancel()
+    await state.weixinQueue
     await state.gateway.stop()
     this.pairing.clearWorkspace(workspaceId)
     this.workspaces.delete(workspaceId)
   }
 
   async stopAll(): Promise<void> {
-    await Promise.all(Array.from(this.workspaces.values()).map((state) => state.gateway.stop().catch(() => {})))
+    await Promise.all(Array.from(this.workspaces.keys()).map(id => this.removeWorkspace(id)))
     this.workspaces.clear()
   }
 
@@ -115,30 +136,24 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     return {
       enabled: config.enabled,
       platforms: config.platforms,
-      runtime: { lark: cloneRuntime(state.runtime.lark) },
+      runtime: { lark: cloneRuntime(state.runtime.lark), weixin: { ...state.runtime.weixin, notifyOnCompletion: config.platforms.weixin?.notifyOnCompletion === true } },
     }
   }
 
   async updateConfig(workspaceId: string, partial: Partial<MessagingConfigInfo>): Promise<void> {
     const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
-    const current = state.configStore.get()
-    const incoming = partial.platforms?.lark
-    const lark = incoming
-      ? { ...(current.platforms.lark ?? { enabled: false }), ...incoming }
-      : current.platforms.lark
-    state.configStore.update({
-      enabled: partial.enabled ?? current.enabled,
-      platforms: lark ? { lark } : {},
-    })
+    state.configStore.update({ enabled: partial.enabled, platforms: partial.platforms })
     const next = state.configStore.get()
-    if (!next.enabled || !isPlatformConfigured(next, 'lark')) {
-      await state.gateway.unregisterAdapter('lark').catch(() => {})
-      this.setPlatformRuntime(workspaceId, state, 'lark', {
-        configured: false,
-        connected: false,
-        state: 'disconnected',
-        identity: undefined,
-        lastError: undefined,
+    if (partial.platforms?.weixin?.notifyOnCompletion !== undefined) {
+      this.setPlatformRuntime(workspaceId, state, 'weixin', {})
+    }
+    for (const platform of ['lark', 'weixin'] as const) {
+      if (partial.enabled === undefined && !partial.platforms?.[platform]) continue
+      if (isPlatformConfigured(next, platform)) continue
+      if (platform === 'weixin') state.login.cancel()
+      await state.gateway.unregisterAdapter(platform)
+      this.setPlatformRuntime(workspaceId, state, platform, {
+        configured: false, connected: false, state: 'disconnected', identity: undefined, lastError: undefined,
       })
     }
   }
@@ -170,7 +185,7 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
   ): { code: string; expiresAt: number; botUsername?: string } {
     if (!isKnownPlatform(platform)) throw new Error(`Unknown messaging platform: ${platform}`)
     const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
-    if (!state.gateway.hasConnectedAdapter(platform)) throw new Error('Lark is not connected')
+    if (!state.gateway.hasConnectedAdapter(platform)) throw new Error(platform === 'lark' ? 'Lark is not connected' : 'WeChat is not connected')
     const generated = this.pairing.generate(workspaceId, sessionId, platform)
     return { ...generated, botUsername: state.botUsernames[platform] }
   }
@@ -213,7 +228,7 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     const previous = state.configStore.get().platforms.lark
     state.configStore.update({
       enabled: true,
-      platforms: { lark: { ...previous, enabled: true, domain: creds.domain } },
+      platforms: { lark: { ...(previous ?? { accessMode: 'owner-only' }), enabled: true, domain: creds.domain } },
     })
     this.setPlatformRuntime(workspaceId, state, 'lark', {
       configured: true,
@@ -225,19 +240,83 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     await state.gateway.start()
   }
 
+  private queueWeixin<T>(state: WorkspaceState, action: () => Promise<T>): Promise<T> {
+    const result = state.weixinQueue.then(action)
+    state.weixinQueue = result.then(() => {}, () => {})
+    return result
+  }
+
+  async weixinLogin(workspaceId: string, request: WeixinLoginRequest) {
+    const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
+    return state.login.handle(request, account =>
+      this.queueWeixin(state, () => this.connectWeixin(workspaceId, state, account, true)), async () => {
+      const saved = await this.opts.credentialManager.get({ type: 'messaging_bearer', workspaceId, name: 'weixin' })
+      const token = saved?.value && (JSON.parse(saved.value) as WeixinAccount).token
+      return token ? [token] : []
+    })
+  }
+
+  private async connectWeixin(workspaceId: string, state: WorkspaceState, account: WeixinAccount, save: boolean) {
+    if (!account.botId || !account.token) throw new Error('Incomplete WeChat account')
+    for (const other of this.workspaces.values()) {
+      if (other !== state && other.weixinAccount === account.botId) throw new Error('WeChat is connected to another workspace')
+    }
+    const previous = state.weixinAccount
+    state.weixinAccount = account.botId
+    const adapter = new WeixinAdapter(account, this.opts.getMessagingDir(workspaceId), status => {
+      if (state.gateway.getAdapter('weixin') === adapter) this.setPlatformRuntime(workspaceId, state, 'weixin',
+        { connected: status === 'connected', state: status })
+    }, () => this.getPlatformOwners(workspaceId, 'weixin')[0]?.userId)
+    try {
+      await adapter.initialize()
+      if (save) {
+        await this.opts.credentialManager.set({ type: 'messaging_bearer', workspaceId, name: 'weixin' },
+          { value: JSON.stringify(account) })
+        state.configStore.update({ enabled: true, platforms: { weixin: {
+          enabled: true, accessMode: 'owner-only',
+          ...(previous !== account.botId || (account.userId && this.getPlatformOwners(workspaceId, 'weixin')[0]?.userId !== account.userId)
+            ? { notifyOnCompletion: false } : {}),
+          owners: account.userId ? [{ userId: account.userId, addedAt: Date.now() }]
+            : previous === account.botId ? this.getPlatformOwners(workspaceId, 'weixin') : [],
+        } } })
+      }
+      const replacingSameAccount = previous === account.botId && state.gateway.getAdapter('weixin')
+      await state.gateway.unregisterAdapter('weixin')
+      // The retiring poller may have saved its cursor or a confirmed quote
+      // while the new credentials were being saved.
+      if (replacingSameAccount) await adapter.initialize()
+      state.gateway.registerAdapter(adapter)
+      await state.gateway.start()
+      this.setPlatformRuntime(workspaceId, state, 'weixin', { configured: true, connected: true, state: 'connected',
+        identity: account.botId, lastError: undefined })
+    } catch (error) {
+      state.weixinAccount = previous
+      throw error
+    }
+  }
+
   async disconnectPlatform(workspaceId: string, platform: string): Promise<void> {
     if (!isKnownPlatform(platform)) return
     const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
-    await state.gateway.unregisterAdapter(platform).catch(() => {})
-    this.pairing.clearWorkspace(workspaceId)
-    await this.opts.credentialManager
-      .delete({ type: 'messaging_bearer', workspaceId, name: platform })
-      .catch(() => {})
+    if (platform === 'weixin') {
+      state.login.cancel()
+      return this.queueWeixin(state, async () => {
+        await this.disablePlatform(workspaceId, platform, state)
+        state.weixinAccount = undefined
+      })
+    }
+    await this.disablePlatform(workspaceId, platform, state)
+  }
+
+  private async disablePlatform(workspaceId: string, platform: PlatformType, state: WorkspaceState) {
+    await this.opts.credentialManager.delete({ type: 'messaging_bearer', workspaceId, name: platform })
+    await state.gateway.unregisterAdapter(platform)
+    this.pairing.clearWorkspace(workspaceId, platform)
     const current = state.configStore.get()
-    const lark = current.platforms.lark
+    const other = platform === 'lark' ? 'weixin' : 'lark'
     state.configStore.update({
-      enabled: false,
-      platforms: lark ? { lark: { ...lark, enabled: false } } : {},
+      enabled: Boolean(current.platforms[other]?.enabled),
+      platforms: { [platform]: { enabled: false, ...(platform === 'weixin' ? { notifyOnCompletion: false } : {}) } },
     })
     this.setPlatformRuntime(workspaceId, state, platform, {
       configured: false,
@@ -255,30 +334,30 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
   getPlatformOwners(workspaceId: string, platform: string): PlatformOwner[] {
     if (!isKnownPlatform(platform)) return []
     return (this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId))
-      .configStore.get().platforms.lark?.owners ?? []
+      .configStore.get().platforms[platform]?.owners ?? []
   }
 
   setPlatformOwners(workspaceId: string, platform: string, owners: PlatformOwner[]): PlatformOwner[] {
     if (!isKnownPlatform(platform)) throw new Error('Unsupported messaging platform')
     const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
-    this.patchLarkConfig(state, { owners: dedupeOwners(owners) })
+    this.patchPlatformConfig(state, platform, { owners: dedupeOwners(owners) })
     this.emitBindingChanged(workspaceId)
-    return state.configStore.get().platforms.lark?.owners ?? []
+    return state.configStore.get().platforms[platform]?.owners ?? []
   }
 
   getPlatformAccessMode(workspaceId: string, platform: string): PlatformAccessMode {
     if (!isKnownPlatform(platform)) return 'open'
     return (this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId))
-      .configStore.get().platforms.lark?.accessMode ?? 'open'
+      .configStore.get().platforms[platform]?.accessMode ?? 'open'
   }
 
   setPlatformAccessMode(workspaceId: string, platform: string, mode: PlatformAccessMode): void {
     if (!isKnownPlatform(platform)) throw new Error('Unsupported messaging platform')
     const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
-    this.patchLarkConfig(state, { accessMode: mode })
+    this.patchPlatformConfig(state, platform, { accessMode: mode })
     if (mode === 'owner-only') {
       for (const binding of state.gateway.getBindingStore().getAll()) {
-        if (binding.config.accessMode === 'open') {
+        if (binding.platform === platform && binding.config.accessMode === 'open') {
           state.gateway.getBindingStore().updateBindingConfig(binding.id, {
             accessMode: 'inherit',
             allowedSenderIds: [],
@@ -364,6 +443,10 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     this.emitBindingChanged(workspaceId)
   }
 
+  async onSessionComplete(event: SessionCompletionEvent) {
+    await this.workspaces.get(event.workspaceId)?.gateway.onSessionComplete(event)
+  }
+
   onSessionEvent: EventSinkFn = (channel: string, target: PushTarget, ...args: unknown[]) => {
     if (channel !== RPC_CHANNELS.sessions.EVENT) return
     const event = args[0] as SessionEvent | undefined
@@ -403,7 +486,9 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       gateway,
       configStore,
       botUsernames: {},
-      runtime: { lark: createRuntime('lark', isPlatformConfigured(config, 'lark')) },
+      login: new WeixinLogin(),
+      weixinQueue: Promise.resolve(),
+      runtime: { lark: createRuntime('lark', isPlatformConfigured(config, 'lark')), weixin: createRuntime('weixin', isPlatformConfigured(config, 'weixin')) },
     }
     this.workspaces.set(workspaceId, state)
     return state
@@ -458,13 +543,14 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     return this.setPlatformOwners(workspaceId, platform, [candidate])
   }
 
-  private patchLarkConfig(
+  private patchPlatformConfig(
     state: WorkspaceState,
+    platform: PlatformType,
     patch: Partial<NonNullable<MessagingConfig['platforms']['lark']>>,
   ): void {
     const config = state.configStore.get()
     state.configStore.update({
-      platforms: { lark: { ...(config.platforms.lark ?? { enabled: true }), ...patch } },
+      platforms: { [platform]: { ...(config.platforms[platform] ?? { enabled: true }), ...patch } },
     })
   }
 
@@ -481,7 +567,7 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       { to: 'workspace', workspaceId },
       workspaceId,
       platform,
-      cloneRuntime(next),
+      platform === 'weixin' ? { ...next, notifyOnCompletion: state.configStore.get().platforms.weixin?.notifyOnCompletion === true } : cloneRuntime(next),
     )
   }
 
@@ -516,10 +602,6 @@ function toBindingInfo(binding: ChannelBinding): MessagingBindingInfo {
     accessMode: binding.config.accessMode,
     allowedSenderIds: [...binding.config.allowedSenderIds],
   }
-}
-
-function isKnownPlatform(value: string): value is PlatformType {
-  return value === 'lark'
 }
 
 function isPlatformConfigured(config: MessagingConfig, platform: PlatformType): boolean {

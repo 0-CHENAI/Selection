@@ -175,9 +175,11 @@ const USER_INTERACTION_CHANNELS = new Set<string>([
 ])
 
 /** `null` means do not arm a request timer. */
-export function requestTimeoutMsForChannel(channel: string): number | null {
+export function requestTimeoutMsForChannel(channel: string, defaultTimeout = REQUEST_TIMEOUT_MS): number | null {
   if (USER_INTERACTION_CHANNELS.has(channel)) return null
-  return REQUEST_TIMEOUT_MS
+  // A QR status long poll (35 s) can be followed by a QR refresh (15 s).
+  if (channel === 'messaging:weixinLogin') return Math.max(60_000, defaultTimeout)
+  return defaultTimeout
 }
 
 // -- Reliable delivery constants --

@@ -14,7 +14,7 @@ describe('messaging bootstrap', () => {
       child: () => logger,
     }
     const handle = createMessagingBootstrap({
-      sessionManager: {} as ISessionManager,
+      sessionManager: { onSessionComplete: () => () => {} } as unknown as ISessionManager,
       credentialManager: {} as CredentialManager,
       getMessagingDir: (workspaceId) => workspaceId,
       logger,

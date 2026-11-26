@@ -5,6 +5,8 @@
  */
 
 import * as React from 'react'
+import type { MessagingBinding } from '@/atoms/messaging'
+import { Button } from '@/components/ui/button'
 import { Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -19,11 +21,13 @@ import {
 interface PairingCodeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  platform: 'lark'
+  platform: 'lark' | 'weixin'
   code: string | null
   expiresAt: number | null
   /** Error text to show in place of the code (e.g., rate limit, adapter down). */
   error?: string
+  existingBindings: MessagingBinding[]
+  onOpenSettings?: () => void
 }
 
 export function PairingCodeDialog({
@@ -33,6 +37,8 @@ export function PairingCodeDialog({
   code,
   expiresAt,
   error,
+  existingBindings,
+  onOpenSettings,
 }: PairingCodeDialogProps) {
   const { t } = useTranslation()
   const [secondsLeft, setSecondsLeft] = React.useState(0)
@@ -70,11 +76,23 @@ export function PairingCodeDialog({
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle>{t('dialog.pairingCode.title')}</DialogTitle>
-          <DialogDescription>{t(instructionsKey)}</DialogDescription>
+          <DialogDescription>{t(onOpenSettings ? (platform === 'weixin' ? 'settings.messaging.weixin.connectFirst' : 'dialog.pairingCode.connectFirst') : instructionsKey)}</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col items-center gap-4 py-4">
-          {error ? (
+          {existingBindings.length > 0 && (
+            <div className="w-full text-sm">
+              <p>{t('dialog.pairingCode.existingChats')}</p>
+              <ul className="mt-1 max-h-24 overflow-y-auto text-muted-foreground">
+                {existingBindings.map(binding => (
+                  <li key={binding.id} className="break-all">{binding.platform === 'weixin' ? binding.channelName ?? binding.channelId : binding.channelId}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {onOpenSettings ? (
+            <Button onClick={onOpenSettings}>{t(platform === 'weixin' ? 'settings.messaging.weixin.connect' : 'settings.messaging.lark.connectTitle')}</Button>
+          ) : error ? (
             <p className="text-sm text-destructive text-center">{error}</p>
           ) : code ? (
             <>

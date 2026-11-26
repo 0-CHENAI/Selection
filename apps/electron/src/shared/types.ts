@@ -1,3 +1,4 @@
+import type { WeixinLoginRequest, WeixinLoginResult } from '@craft-agent/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -802,6 +803,7 @@ export interface ElectronAPI {
     runtime: Record<string, MessagingPlatformRuntimeInfo | undefined>
   } | null>
   updateMessagingConfig(config: Record<string, unknown>): Promise<void>
+  weixinLogin(request: WeixinLoginRequest): Promise<WeixinLoginResult>
   testLarkCredentials(creds: { appId: string; appSecret: string; domain: 'lark' | 'feishu' }): Promise<{ success: boolean; botName?: string; error?: string }>
   saveLarkCredentials(creds: { appId: string; appSecret: string; domain: 'lark' | 'feishu' }): Promise<void>
   disconnectMessagingPlatform(platform: string): Promise<void>
@@ -829,6 +831,7 @@ export interface ElectronAPI {
 }
 
 export interface MessagingPlatformRuntimeInfo {
+  notifyOnCompletion?: boolean
   platform: string
   configured: boolean
   connected: boolean

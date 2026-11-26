@@ -7,6 +7,12 @@ describe('requestTimeoutMsForChannel', () => {
     expect(requestTimeoutMsForChannel('system:homeDir')).toBe(REQUEST_TIMEOUT_MS)
   })
 
+  it('allows the WeChat login poll and QR refresh to finish within one RPC', () => {
+    expect(requestTimeoutMsForChannel('messaging:weixinLogin', 5_000)).toBe(60_000)
+    expect(requestTimeoutMsForChannel('messaging:weixinLogin', 90_000)).toBe(90_000)
+    expect(requestTimeoutMsForChannel('sessions:get', 5_000)).toBe(5_000)
+  })
+
   it('does not time out native pickers or confirmations', () => {
     expect(requestTimeoutMsForChannel('dialog:openFolder')).toBeNull()
     expect(requestTimeoutMsForChannel('file:openDialog')).toBeNull()

@@ -475,6 +475,7 @@ export const CHANNEL_MAP = {
   // Messaging gateway
   getMessagingConfig: invoke(RPC_CHANNELS.messaging.GET_CONFIG),
   updateMessagingConfig: invoke(RPC_CHANNELS.messaging.UPDATE_CONFIG),
+  weixinLogin: invoke(RPC_CHANNELS.messaging.WEIXIN_LOGIN),
   testLarkCredentials: invoke(RPC_CHANNELS.messaging.TEST_LARK),
   saveLarkCredentials: invoke(RPC_CHANNELS.messaging.SAVE_LARK),
   disconnectMessagingPlatform: invoke(RPC_CHANNELS.messaging.DISCONNECT),

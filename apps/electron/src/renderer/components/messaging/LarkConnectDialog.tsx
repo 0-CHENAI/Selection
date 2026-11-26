@@ -1,212 +1,125 @@
-/**
- * LarkConnectDialog — App ID + App Secret pairing flow for Lark / Feishu.
- *
- * Credential-based connection dialog for Lark / Feishu. Differences from
- * token-based messaging setup:
- *   - Two secret fields (App ID + App Secret) instead of one (bot token)
- *   - A region selector — Lark and Feishu are separate Open Platforms;
- *     a bot belongs to one or the other and the choice is permanent.
- */
-
 import * as React from 'react'
-import { Check, X } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Spinner } from '@craft-agent/ui'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@craft-agent/ui'
-import { SettingsSecretInput } from '@/components/settings'
+import { SettingsInput, SettingsSecretInput, SettingsSegmentedControl } from '@/components/settings'
+import { LarkSetupGuide } from './LarkSetupGuide'
+import { LarkIcon } from './MessagingPlatformIcon'
 
 interface LarkConnectDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** When true, treat the flow as "replace existing credentials". */
   reconfigure?: boolean
   onSaved?: () => void
 }
 
-type TestResult =
-  | { state: 'idle' }
-  | { state: 'testing' }
-  | { state: 'success' }
-  | { state: 'error'; error: string }
+type LarkDomain = 'feishu' | 'lark'
+type Phase = 'editing' | 'testing' | 'verified' | 'saving'
 
-type LarkDomain = 'lark' | 'feishu'
-
-export function LarkConnectDialog({
-  open,
-  onOpenChange,
-  reconfigure = false,
-  onSaved,
-}: LarkConnectDialogProps) {
+export function LarkConnectDialog({ open, onOpenChange, reconfigure, onSaved }: LarkConnectDialogProps) {
   const { t } = useTranslation()
+  const [domain, setDomain] = React.useState<LarkDomain>('feishu')
   const [appId, setAppId] = React.useState('')
   const [appSecret, setAppSecret] = React.useState('')
-  const [domain, setDomain] = React.useState<LarkDomain>('lark')
-  const [saving, setSaving] = React.useState(false)
-  const [test, setTest] = React.useState<TestResult>({ state: 'idle' })
+  const [phase, setPhase] = React.useState<Phase>('editing')
+  const [error, setError] = React.useState('')
+  const busy = phase === 'testing' || phase === 'saving'
+  const verified = phase === 'verified' || phase === 'saving'
+  const ready = Boolean(appId.trim() && appSecret.trim())
 
-  React.useEffect(() => {
-    if (!open) {
-      setAppId('')
-      setAppSecret('')
-      setDomain('lark')
-      setTest({ state: 'idle' })
-      setSaving(false)
-    }
-  }, [open])
-
-  const ready = appId.trim().length > 0 && appSecret.trim().length > 0
-
-  const handleTest = async () => {
-    if (!ready) return
-    setTest({ state: 'testing' })
-    try {
-      const result = await window.electronAPI.testLarkCredentials({
-        appId: appId.trim(),
-        appSecret: appSecret.trim(),
-        domain,
-      })
-      if (result.success) {
-        setTest({ state: 'success' })
-      } else {
-        setTest({ state: 'error', error: result.error ?? t('common.error') })
-      }
-    } catch (err) {
-      setTest({ state: 'error', error: err instanceof Error ? err.message : t('common.error') })
-    }
+  function clearValidation() {
+    setError('')
+    setPhase('editing')
   }
 
-  const handleSave = async () => {
-    if (!ready) return
-    setSaving(true)
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!ready || busy) return
+    const credentials = { appId: appId.trim(), appSecret: appSecret.trim(), domain }
+    setError('')
+    setPhase(verified ? 'saving' : 'testing')
     try {
-      await window.electronAPI.saveLarkCredentials({
-        appId: appId.trim(),
-        appSecret: appSecret.trim(),
-        domain,
-      })
-      toast.success(t('settings.messaging.lark.saved'))
-      onSaved?.()
-      onOpenChange(false)
+      if (verified) {
+        await window.electronAPI.saveLarkCredentials(credentials)
+        toast.success(t('settings.messaging.lark.saved'))
+        onSaved?.()
+        onOpenChange(false)
+      } else {
+        const result = await window.electronAPI.testLarkCredentials(credentials)
+        if (!result.success) throw new Error(result.error || t('common.error'))
+        setPhase('verified')
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.messaging.lark.saveFailed'))
-    } finally {
-      setSaving(false)
+      setError(err instanceof Error ? err.message : t('common.error'))
+      setPhase('editing')
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
-          <DialogTitle>
-            {reconfigure
-              ? t('settings.messaging.lark.reconfigureTitle')
-              : t('settings.messaging.lark.connectTitle')}
+    <Dialog open={open} onOpenChange={next => { if (phase !== 'saving') onOpenChange(next) }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl sm:max-w-[420px]">
+        <DialogHeader className="text-left">
+          <DialogTitle className="flex items-center gap-2.5">
+            <LarkIcon size={24} />
+            {t(reconfigure ? 'settings.messaging.lark.reconfigureTitle' : 'settings.messaging.lark.connectTitle')}
           </DialogTitle>
-          <DialogDescription className="whitespace-pre-line">
-            {t('settings.messaging.lark.instructions')}
-          </DialogDescription>
+          <DialogDescription>{t('settings.messaging.lark.credentialHint')}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
-          {/* Region selector */}
-          <div>
-            <div className="mb-1.5 text-xs text-muted-foreground">
-              {t('settings.messaging.lark.domainLabel')}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant={domain === 'lark' ? 'default' : 'outline'}
+        <form onSubmit={submit} className="space-y-5">
+          <fieldset disabled={busy} className="min-w-0 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">{t('settings.messaging.lark.domainLabel')}</span>
+              <SettingsSegmentedControl<LarkDomain>
+                value={domain}
+                onValueChange={next => {
+                  if (next !== domain) { setDomain(next); clearValidation() }
+                }}
+                options={[
+                  { value: 'feishu', label: t('settings.messaging.lark.domainFeishu') },
+                  { value: 'lark', label: t('settings.messaging.lark.domainLark') },
+                ]}
                 size="sm"
-                onClick={() => setDomain('lark')}
-                disabled={saving}
-              >
-                {t('settings.messaging.lark.domainLark')}
-              </Button>
-              <Button
-                variant={domain === 'feishu' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setDomain('feishu')}
-                disabled={saving}
-              >
-                {t('settings.messaging.lark.domainFeishu')}
-              </Button>
+                className="rounded-lg bg-muted/60 p-0.5"
+              />
             </div>
-          </div>
-
-          <div>
-            <div className="mb-1.5 text-xs text-muted-foreground">
-              {t('settings.messaging.lark.appIdLabel')}
-            </div>
-            <SettingsSecretInput
+            <SettingsInput
+              label={t('settings.messaging.lark.appIdLabel')}
               value={appId}
-              onChange={setAppId}
+              onChange={value => { setAppId(value); clearValidation() }}
               placeholder={t('settings.messaging.lark.appIdPlaceholder')}
-              disabled={saving}
             />
-          </div>
-
-          <div>
-            <div className="mb-1.5 text-xs text-muted-foreground">
-              {t('settings.messaging.lark.appSecretLabel')}
-            </div>
             <SettingsSecretInput
+              label={t('settings.messaging.lark.appSecretLabel')}
               value={appSecret}
-              onChange={setAppSecret}
+              onChange={value => { setAppSecret(value); clearValidation() }}
               placeholder={t('settings.messaging.lark.appSecretPlaceholder')}
-              disabled={saving}
             />
-          </div>
+          </fieldset>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleTest}
-              disabled={!ready || test.state === 'testing' || saving}
-            >
-              {test.state === 'testing' && <Spinner className="mr-1 text-[14px]" />}
-              {t('settings.messaging.lark.testConnection')}
+          <LarkSetupGuide domain={domain} appId={appId} />
+
+          {error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}
+          <DialogFooter className="items-center">
+            {verified && (
+              <span role="status" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground sm:mr-auto">
+                <Check className="size-3.5 text-success" />{t('settings.messaging.lark.testOk')}
+              </span>
+            )}
+            <Button type="button" variant="ghost" size="sm" disabled={phase === 'saving'} onClick={() => onOpenChange(false)}>
+              {t('common.cancel')}
             </Button>
-
-            {test.state === 'success' && (
-              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                <Check className="h-3.5 w-3.5" />
-                {t('settings.messaging.lark.testOk')}
-              </span>
-            )}
-            {test.state === 'error' && (
-              <span className="inline-flex items-center gap-1 text-xs text-destructive">
-                <X className="h-3.5 w-3.5" />
-                {test.error}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSave}
-            disabled={!ready || test.state !== 'success' || saving}
-          >
-            {saving && <Spinner className="mr-1 text-[14px]" />}
-            {t('settings.messaging.lark.save')}
-          </Button>
-        </DialogFooter>
+            <Button type="submit" size="sm" disabled={!ready || busy}>
+              {busy && <Spinner className="text-[14px]" />}
+              {t(verified ? 'settings.messaging.lark.save' : 'settings.messaging.lark.testConnection')}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

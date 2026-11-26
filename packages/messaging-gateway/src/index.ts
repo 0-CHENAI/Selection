@@ -1,7 +1,7 @@
 /**
  * @craft-agent/messaging-gateway
  *
- * Messaging gateway for Selection's Lark / Feishu integration.
+ * Messaging gateway for Selection's messaging integrations.
  */
 
 export { MessagingGateway, type GatewayOptions } from './gateway'

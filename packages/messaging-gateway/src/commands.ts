@@ -18,6 +18,7 @@ import {
   readPlatformOwners,
   type AccessRejectReason,
 } from './access-control'
+import { WeixinSessionPicker, weixinSessionTitle } from './adapters/weixin/session-picker'
 import type { BindingStore } from './binding-store'
 import type { PendingSendersStore } from './pending-senders'
 import type {
@@ -103,6 +104,7 @@ export function parseCommand(text: string): { cmd: string; args: string } {
 }
 
 export class Commands {
+  private readonly weixinPicker: WeixinSessionPicker
   private readonly log: MessagingLogger
   private readonly access: AccessControlDeps
   private readonly recentRejectReplies = new Map<string, number>()
@@ -118,6 +120,7 @@ export class Commands {
       seedOwnerOnFirstPair: async () => [],
     },
   ) {
+    this.weixinPicker = new WeixinSessionPicker(workspaceId)
     this.log = logger
     this.access = access
   }
@@ -157,6 +160,8 @@ export class Commands {
       await this.handleUnbind(adapter, msg)
     } else if (cmd === '/help') {
       await this.handleHelp(adapter, msg)
+    } else if (adapter.platform === 'weixin') {
+      await this.handleBind(adapter, msg)
     } else {
       // Sender passed the access gate (owner or open workspace) and typed
       // free-form text into a chat with no binding. Show the help prompt.
@@ -173,7 +178,14 @@ export class Commands {
   }
 
   async handleCommand(adapter: PlatformAdapter, msg: IncomingMessage): Promise<boolean> {
-    const text = msg.text.trim()
+    let text = msg.text.trim()
+    if (adapter.platform === 'weixin') {
+      const selection = this.weixinPicker.commandForReply(JSON.stringify([msg.channelId, msg.senderId]), text)
+      if (selection) {
+        text = selection
+        msg = { ...msg, text }
+      }
+    }
     if (!text.startsWith('/')) return false
 
     // Strip the optional `@BotName` suffix used to disambiguate
@@ -277,7 +289,7 @@ export class Commands {
       const displayName = session.name || session.id
       await adapter.sendText(
         msg.channelId,
-        `Created "${displayName}" — you're connected. Just type to start.`,
+        adapter.platform === 'weixin' ? `「${weixinSessionTitle(session)}」已创建并绑定。` : `Created "${displayName}" — you're connected. Just type to start.`,
         replyOpts,
       )
       this.log.info('session created and bound from chat', {
@@ -303,11 +315,17 @@ export class Commands {
 
   private async handleBind(adapter: PlatformAdapter, msg: IncomingMessage): Promise<void> {
     const bindArg = parseCommand(msg.text).args
-    const recent = this.getRecentSessions()
     const replyOpts = msg.threadId !== undefined ? { threadId: msg.threadId } : {}
 
+    const weixin = adapter.platform === 'weixin'
+    const picked = weixin ? this.weixinPicker.select(JSON.stringify([msg.channelId, msg.senderId]), bindArg, this.sessionManager.getSessions(this.workspaceId)) : undefined
+    if (picked && 'text' in picked) {
+      await adapter.sendText(msg.channelId, picked.text, replyOpts)
+      return
+    }
+    const recent = picked ? [] : this.getRecentSessions()
     if (bindArg) {
-      const session = await this.resolveBindTarget(bindArg, recent)
+      const session = picked ? picked.session : await this.resolveBindTarget(bindArg, recent)
       if (!session) {
         await adapter.sendText(msg.channelId, `Session not found: ${bindArg}`, replyOpts)
         return
@@ -333,7 +351,8 @@ export class Commands {
         bindArg,
       })
 
-      await adapter.sendText(msg.channelId, `Bound to "${session.name || session.id}"`, replyOpts)
+      const name = session.name || session.id
+      await adapter.sendText(msg.channelId, weixin ? `「${weixinSessionTitle(session)}」已绑定。发送 /bind 可切换会话。` : `Bound to "${name}"`, replyOpts)
       return
     }
 
@@ -449,6 +468,12 @@ export class Commands {
       return
     }
 
+    const session = await this.sessionManager.getSession(entry.sessionId)
+    if (!session || session.workspaceId !== this.workspaceId) {
+      await adapter.sendText(msg.channelId, 'Session no longer exists.', replyOpts)
+      return
+    }
+
     // Seed the first owner. The seeder is a no-op when the list is already
     // populated, so it's safe to call unconditionally on every successful
     // redeem. Failures are logged but never block the pair itself — losing
@@ -468,12 +493,6 @@ export class Commands {
         senderId: msg.senderId,
         error: err,
       })
-    }
-
-    const session = await this.sessionManager.getSession(entry.sessionId)
-    if (!session) {
-      await adapter.sendText(msg.channelId, 'Session no longer exists.', replyOpts)
-      return
     }
 
     this.bindingStore.bind(
@@ -497,7 +516,9 @@ export class Commands {
 
     await adapter.sendText(
       msg.channelId,
-      `✅ Paired with "${session.name || session.id}". You can start chatting now.`,
+      adapter.platform === 'weixin'
+        ? `「${weixinSessionTitle(session)}」已绑定。发送 /bind 可选择普通会话或项目。`
+        : `✅ Paired with "${session.name || session.id}". You can start chatting now.`,
       replyOpts,
     )
   }
@@ -527,7 +548,8 @@ export class Commands {
 
     await adapter.sendText(
       msg.channelId,
-      `Bound to "${name}"\nApproval: ${mode}\nResponse mode: ${responseMode}`,
+      adapter.platform === 'weixin' && session ? `「${weixinSessionTitle(session)}」当前已绑定。` +
+        `\n审批渠道：${mode}\n回复模式：${responseMode}` : `Bound to "${name}"\nApproval: ${mode}\nResponse mode: ${responseMode}`,
       replyOpts,
     )
   }
@@ -553,7 +575,7 @@ export class Commands {
 
     await adapter.sendText(
       msg.channelId,
-      'Commands:\n' +
+      (adapter.platform === 'weixin' ? '发送 /bind 选择普通会话或项目。引用 AI 回复可以追问原会话；引用完成提醒回复“切换”可设为当前会话。收到澄清问题时，可引用它回复“答 2”，或按消息末尾的 /答 格式作答。\n\n' : '') + 'Commands:\n' +
       '/new [name] — create + bind new session\n' +
       '/bind — pick from recent sessions\n' +
       '/bind <id> — bind to specific session\n' +
@@ -583,6 +605,7 @@ export class Commands {
         return recent[index - 1]
       }
     }
-    return this.sessionManager.getSession(bindArg)
+    const session = await this.sessionManager.getSession(bindArg)
+    return session?.workspaceId === this.workspaceId ? session : undefined
   }
 }

@@ -2,7 +2,7 @@
  * Messaging RPC handlers — UI ↔ Server communication for messaging config and bindings.
  */
 
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type WeixinLoginRequest } from '@craft-agent/shared/protocol'
 import type { RpcServer } from '../../transport/types'
 import type { HandlerDeps } from '../handler-deps'
 import type {
@@ -25,6 +25,11 @@ export function registerMessagingHandlers(server: RpcServer, deps: HandlerDeps):
     if (!ctx.workspaceId) throw new Error('Missing workspaceId')
     await registry.updateConfig(ctx.workspaceId, config)
     return { success: true }
+  })
+
+  server.handle(RPC_CHANNELS.messaging.WEIXIN_LOGIN, async (ctx, request: WeixinLoginRequest) => {
+    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
+    return registry.weixinLogin(ctx.workspaceId, request)
   })
 
   server.handle(RPC_CHANNELS.messaging.TEST_LARK, async (

@@ -22,7 +22,7 @@ export interface SettingsPageDefinition {
   /** i18n key for display label in settings navigator */
   labelKey: string
   /** i18n key for short description shown in settings navigator */
-  descriptionKey: string
+  descriptionKey?: string
 }
 
 /**
@@ -43,7 +43,7 @@ export const SETTINGS_PAGES = [
   { id: 'advanced' as const, labelKey: 'settings.advanced.title', descriptionKey: 'settings.advanced.description' },
   { id: 'permissions' as const, labelKey: 'settings.permissions.title', descriptionKey: 'settings.permissions.description' },
   { id: 'labels' as const, labelKey: 'settings.labels.title', descriptionKey: 'settings.labels.description' },
-  { id: 'messaging' as const, labelKey: 'settings.messaging.title', descriptionKey: 'settings.messaging.description' },
+  { id: 'messaging' as const, labelKey: 'settings.messaging.title', descriptionKey: undefined },
   { id: 'shortcuts' as const, labelKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
   { id: 'preferences' as const, labelKey: 'settings.preferences.title', descriptionKey: 'settings.preferences.description' },
 ] satisfies readonly SettingsPageDefinition[]
@@ -62,7 +62,6 @@ export const HIDDEN_SETTINGS_SUBPAGES: readonly SettingsSubpage[] = [
   'input',
   'labels',
   'permissions',
-  'messaging',
 ]
 
 export function isVisibleSettingsSubpage(value: SettingsSubpage): boolean {

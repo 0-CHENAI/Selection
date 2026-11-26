@@ -62,7 +62,12 @@ describe('normalizeRemovedSessionClassification', () => {
     })
   })
 
-  it.each(['permissions', 'messaging'] as const)(
+  it('exposes the workspace messaging settings and resolves the direct route', () => {
+    expect(SETTINGS_ITEMS.some(item => item.id === 'messaging')).toBe(true)
+    expect(parseRouteToNavigationState('settings/messaging')).toEqual({ navigator: 'settings', subpage: 'messaging' })
+  })
+
+  it.each(['permissions'] as const)(
     'hides the %s settings page and redirects stale routes to app settings',
     (subpage) => {
       expect(SETTINGS_ITEMS.some(item => item.id === subpage)).toBe(false)

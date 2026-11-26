@@ -1,6 +1,10 @@
-/** Core types for the Lark/Feishu messaging gateway. */
+/** Core types for the workspace messaging gateway. */
 
-export type PlatformType = 'lark'
+export type PlatformType = 'lark' | 'weixin'
+
+export function isMessagingPlatform(value: unknown): value is PlatformType {
+  return value === 'lark' || value === 'weixin'
+}
 
 export interface MessagingLogContext {
   component?: string
@@ -29,6 +33,7 @@ export type MessagingPlatformRuntimeState =
   | 'error'
 
 export interface MessagingPlatformRuntimeInfo {
+  notifyOnCompletion?: boolean
   platform: PlatformType
   configured: boolean
   connected: boolean
@@ -43,7 +48,7 @@ export interface AdapterCapabilities {
   inlineButtons: boolean
   maxButtons: number
   maxMessageLength: number
-  markdown: 'lark-post'
+  markdown: 'lark-post' | 'plain'
   webhookSupport: boolean
 }
 
@@ -67,6 +72,7 @@ export interface IncomingMessage {
   senderIsBot?: boolean
   text: string
   attachments?: IncomingAttachment[]
+  weixinQuote?: { sessionId: string; kind: 'answer' | 'completion' }
   replyToMessageId?: string
   timestamp: number
   raw: unknown
@@ -98,6 +104,7 @@ export interface ButtonPress {
 }
 
 export interface SendOptions {
+  weixinSource?: import('./adapters/weixin/quotes').QuoteSource
   threadId?: number
 }
 
@@ -148,7 +155,8 @@ export const DEFAULT_BINDING_CONFIG: BindingConfig = {
   allowedSenderIds: [],
 }
 
-export function getDefaultBindingConfig(_platform: PlatformType): BindingConfig {
+export function getDefaultBindingConfig(platform: PlatformType): BindingConfig {
+  if (platform === 'weixin') return { ...DEFAULT_BINDING_CONFIG, responseMode: 'final_only', streamResponses: false, approvalChannel: 'app' }
   return { ...DEFAULT_BINDING_CONFIG }
 }
 
@@ -212,6 +220,7 @@ export interface PendingSender {
 export interface MessagingConfig {
   enabled: boolean
   platforms: {
+    weixin?: { enabled: boolean; notifyOnCompletion?: boolean; accessMode?: PlatformAccessMode; owners?: PlatformOwner[] }
     lark?: {
       enabled: boolean
       domain?: 'lark' | 'feishu'

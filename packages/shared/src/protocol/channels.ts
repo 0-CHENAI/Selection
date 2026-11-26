@@ -469,6 +469,7 @@ export const RPC_CHANNELS = {
     // UI ↔ Server (config/binding CRUD)
     GET_CONFIG: 'messaging:getConfig',
     UPDATE_CONFIG: 'messaging:updateConfig',
+    WEIXIN_LOGIN: 'messaging:weixinLogin',
     TEST_LARK: 'messaging:testLark',
     SAVE_LARK: 'messaging:saveLark',
     DISCONNECT: 'messaging:disconnect',

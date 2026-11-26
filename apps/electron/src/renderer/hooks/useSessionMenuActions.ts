@@ -28,6 +28,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAtomValue, useSetAtom } from 'jotai'
+import { openMessagingPairingAtom } from '@/atoms/messaging'
 import { handoverReviewSessionAtom } from '@/atoms/handover'
 import { navigate, routes } from '@/lib/navigate'
 import { officeSessionRoute, officeSessionSection } from '@/components/office/office-home'
@@ -48,6 +49,8 @@ export interface SessionMenuActions {
   copyPath: () => Promise<void>
   refreshTitle: () => Promise<void>
   openInNewPanel: () => void
+  bindToWeixin: () => void
+  bindToLark: () => void
   viewHandover: () => void
   openHandoverSource: () => void
   canOpenHandoverSource: boolean
@@ -66,6 +69,7 @@ export function useSessionMenuActions({
   onLabelsChange,
 }: UseSessionMenuActionsOptions): SessionMenuActions {
   const { t } = useTranslation()
+  const openMessagingPairing = useSetAtom(openMessagingPairingAtom)
   const setHandoverReview = useSetAtom(handoverReviewSessionAtom)
   const metadata = useAtomValue(sessionMetaMapAtom)
   const sessionId = item.id
@@ -167,6 +171,8 @@ export function useSessionMenuActions({
     copyPath,
     refreshTitle,
     openInNewPanel,
+    bindToWeixin: () => { void openMessagingPairing(item.workspaceId, sessionId, 'weixin') },
+    bindToLark: () => { void openMessagingPairing(item.workspaceId, sessionId) },
     viewHandover,
     openHandoverSource,
     canOpenHandoverSource,
