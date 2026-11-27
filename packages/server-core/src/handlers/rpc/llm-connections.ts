@@ -190,10 +190,19 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Skip when custom endpoint protocol is driving routing.
       if (setup.piAuthProvider && !isCustomEndpointCompat) {
         updates.piAuthProvider = setup.piAuthProvider
-        // Only set default models when using standard Pi provider AND user didn't pick explicit models
+        // Only set default models when using standard Pi provider AND user didn't pick explicit models.
+        // Preserve existing models/mode on credential-only edits for the same provider so auto-synced
+        // connections refresh with the new key without clobbering saved defaults/settings, and
+        // manually curated (userDefined3Tier) connections keep their selection intact.
         const hasAccountCatalog = connection.authType === 'oauth' && (setup.piAuthProvider === 'github-copilot'
           || (setup.piAuthProvider === 'openai-codex' && connection.chatgptCatalogFetchedAt !== undefined))
-        if (!hasConfiguredBaseUrl && !setup.models?.length && !hasAccountCatalog) {
+        const keepExistingModels = !isNewConnection
+          && connection.providerType === 'pi'
+          && !connection.customEndpoint
+          && connection.piAuthProvider === setup.piAuthProvider
+          && Array.isArray(connection.models)
+          && connection.models.length > 0
+        if (!hasConfiguredBaseUrl && !setup.models?.length && !hasAccountCatalog && !keepExistingModels) {
           updates.models = getDefaultModelsForConnection('pi', setup.piAuthProvider)
           updates.defaultModel = getDefaultModelForConnection('pi', setup.piAuthProvider)
           updates.modelSelectionMode ??= 'automaticallySyncedFromProvider'

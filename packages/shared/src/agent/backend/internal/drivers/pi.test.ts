@@ -394,29 +394,49 @@ describe('piDriver Google AI Studio', () => {
     }
   });
 
-  it('falls back to Pi SDK Google snapshot when live catalog fails', async () => {
+  it('propagates live catalog failures, empty catalogs, and missing keys instead of returning the static SDK snapshot', async () => {
     const originalFetch = globalThis.fetch;
+    const connection = {
+      slug: 'google',
+      name: 'Google AI Studio',
+      providerType: 'pi',
+      authType: 'api_key',
+      piAuthProvider: 'google',
+      createdAt: Date.now(),
+    } as any;
+
+    await expect(piDriver.fetchModels!({
+      connection,
+      credentials: {},
+      timeoutMs: 5_000,
+      hostRuntime: {} as never,
+      resolvedPaths: {} as never,
+    })).rejects.toThrow('API key is unavailable');
+
     globalThis.fetch = (async () => {
       throw new Error('offline');
     }) as unknown as typeof fetch;
 
     try {
-      const result = await piDriver.fetchModels!({
-        connection: {
-          slug: 'google',
-          name: 'Google AI Studio',
-          providerType: 'pi',
-          authType: 'api_key',
-          piAuthProvider: 'google',
-          createdAt: Date.now(),
-        } as any,
+      await expect(piDriver.fetchModels!({
+        connection,
         credentials: { apiKey: 'AIza-offline' },
         timeoutMs: 5_000,
         hostRuntime: {} as never,
         resolvedPaths: {} as never,
-      });
+      })).rejects.toThrow('offline');
 
-      expect(result.models.some((m) => m.id === 'pi/gemini-4-argon')).toBe(true);
+      globalThis.fetch = (async () => new Response(JSON.stringify({
+        models: [{ name: 'models/embedding-001', supportedGenerationMethods: ['embedContent'] }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+
+      await expect(piDriver.fetchModels!({
+        connection,
+        credentials: { apiKey: 'AIza-empty' },
+        timeoutMs: 5_000,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      })).rejects.toThrow('no chat-capable models');
     } finally {
       globalThis.fetch = originalFetch;
     }

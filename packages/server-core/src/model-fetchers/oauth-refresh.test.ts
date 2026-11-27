@@ -41,6 +41,28 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
         modelSelectionMode: 'automaticallySyncedFromProvider',
         createdAt: 1,
       },
+      {
+        slug: 'google-live-offline',
+        name: 'Google AI Studio Offline',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'google',
+        models: [{ id: 'pi/gemini-4-neon', name: 'Gemini 4 Neon', shortName: 'Gemini 4 Neon', description: '', provider: 'pi', contextWindow: 1048576, imageSupport: 'off', supportsImages: false, thinkingSource: 'explicit', thinkingMode: 'unsupported' }],
+        defaultModel: 'pi/gemini-4-neon',
+        modelSelectionMode: 'automaticallySyncedFromProvider',
+        createdAt: 1,
+      },
+      {
+        slug: 'google-empty-offline',
+        name: 'Google AI Studio Empty',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'google',
+        models: [],
+        defaultModel: '',
+        modelSelectionMode: 'automaticallySyncedFromProvider',
+        createdAt: 1,
+      },
     ]
     writeFileSync(configPath, JSON.stringify({
       workspaces: [{ id: 'ws', name: 'ws', rootPath: workspace, createdAt: 1 }],
@@ -51,7 +73,11 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
     const run = Bun.spawnSync([process.execPath, '--eval', `
       import { initModelRefreshService } from ${JSON.stringify(serviceUrl)};
       import { MODEL_FETCHERS } from ${JSON.stringify(registryUrl)};
-      import { updateLlmConnection } from '@craft-agent/shared/config';
+      import { registerPiModelResolver, updateLlmConnection } from '@craft-agent/shared/config';
+      registerPiModelResolver(provider => provider === 'google' ? [
+        { id: 'pi/gemini-2.5-flash', name: 'Gemini 2.5 Flash', shortName: '2.5 Flash', description: '', provider: 'pi', contextWindow: 1048576 },
+        { id: 'pi/gemini-4-argon', name: 'Gemini 4 Argon', shortName: '4 Argon', description: '', provider: 'pi', contextWindow: 1048576 },
+      ] : []);
       let copilotToken = 'account-one';
       let releaseCopilot;
       let copilotCalls = 0;
@@ -61,6 +87,7 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
         fetchModels: async connection => {
           if (connection.slug === 'copilot-none') return { models: [] };
           if (connection.slug.startsWith('copilot-') && connection.slug !== 'copilot-online') throw new Error('offline');
+          if (connection.slug === 'google-live-offline' || connection.slug === 'google-empty-offline') throw new Error('offline');
           if (connection.slug === 'race-chatgpt-settings') updateLlmConnection(connection.slug, {
             models: [{id: 'pi/old', imageSupport: 'off', thinkingSource: 'explicit', thinkingMode: 'unsupported'}],
           });
@@ -121,6 +148,20 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
       thinkingSource: 'explicit',
       thinkingMode: 'unsupported',
     })
+    const googleOffline = stored.find((entry: { slug: string }) => entry.slug === 'google-live-offline')
+    expect(googleOffline.defaultModel).toBe('pi/gemini-4-neon')
+    expect(googleOffline.models).toEqual([
+      expect.objectContaining({
+        id: 'pi/gemini-4-neon',
+        supportsImages: false,
+        imageSupport: 'off',
+        thinkingSource: 'explicit',
+        thinkingMode: 'unsupported',
+      }),
+    ])
+    const googleEmptyOffline = stored.find((entry: { slug: string }) => entry.slug === 'google-empty-offline')
+    expect(googleEmptyOffline.models.map((model: { id: string }) => model.id)).toEqual(['pi/gemini-4-argon', 'pi/gemini-2.5-flash'])
+    expect(googleEmptyOffline.defaultModel).toBe('pi/gemini-4-argon')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

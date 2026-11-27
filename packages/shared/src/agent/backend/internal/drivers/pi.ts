@@ -306,19 +306,20 @@ export const piDriver: ProviderDriver = {
       return { models };
     }
 
-    if (connection.piAuthProvider === 'google' && credentials.apiKey?.trim()) {
-      try {
-        const live = await fetchGoogleAiStudioCatalog({
-          apiKey: credentials.apiKey,
-          baseUrl: connection.baseUrl,
-          timeoutMs,
-        });
-        if (live.length > 0) {
-          return { models: googleCatalogToModelDefinitions(live) };
-        }
-      } catch (err) {
-        console.warn(`[fetchGoogleAiStudioModels] live catalog failed: ${(err as Error).message}`);
+    if (connection.piAuthProvider === 'google' && !connection.customEndpoint && connection.authType !== 'oauth') {
+      const apiKey = credentials.apiKey?.trim();
+      if (!apiKey) {
+        throw new Error('Google AI Studio API key is unavailable');
       }
+      const live = await fetchGoogleAiStudioCatalog({
+        apiKey,
+        baseUrl: connection.baseUrl,
+        timeoutMs,
+      });
+      if (live.length === 0) {
+        throw new Error('Google AI Studio returned no chat-capable models');
+      }
+      return { models: googleCatalogToModelDefinitions(live) };
     }
 
     if (connection.piAuthProvider === 'openrouter') {

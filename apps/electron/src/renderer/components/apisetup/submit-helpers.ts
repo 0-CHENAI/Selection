@@ -208,3 +208,38 @@ export function bedrockModelFieldMode(input: {
 }): 'picker' | 'manual' {
   return input.loading || input.catalogCount > 0 ? 'picker' : 'manual'
 }
+
+/**
+ * Resolve model-list fields for ApiKeyInput submission.
+ *
+ * Default-endpoint built-in providers (Google AI Studio, OpenAI, etc.) hide the
+ * model field in the form. Submitting preloaded hidden model IDs on edit would
+ * turn an auto-synced connection into a manual selection and block live sync.
+ */
+export function resolveApiKeyModelSubmission<TModels extends readonly unknown[]>(params: {
+  isDefaultProviderPreset: boolean
+  isPiApiKeyFlow: boolean
+  isOrderPreset: boolean
+  parsedModels: string[]
+  submittedModels: TModels
+}): {
+  connectionDefaultModel: string | undefined
+  models: TModels | undefined
+  modelSelectionMode: 'automaticallySyncedFromProvider' | 'userDefined3Tier' | undefined
+} {
+  if (params.isDefaultProviderPreset) {
+    return {
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: undefined,
+    }
+  }
+
+  return {
+    connectionDefaultModel: params.parsedModels[0],
+    models: params.submittedModels.length > 0 ? params.submittedModels : undefined,
+    modelSelectionMode: params.isPiApiKeyFlow
+      ? (params.parsedModels.length > 0 ? 'userDefined3Tier' : 'automaticallySyncedFromProvider')
+      : (params.isOrderPreset && params.parsedModels.length > 0 ? 'userDefined3Tier' : undefined),
+  }
+}

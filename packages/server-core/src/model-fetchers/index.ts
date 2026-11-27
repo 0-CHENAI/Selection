@@ -20,6 +20,7 @@ import {
   isCompatProvider,
   isUnsupportedLlmConnection,
   getModelsForProviderType,
+  getDefaultModelsForConnection,
 } from '@craft-agent/shared/config'
 import { MODEL_FETCHERS } from './registry'
 import { handlerLog } from './runtime'
@@ -212,7 +213,10 @@ class ModelRefreshService {
 
     // Layer 3: MODEL_REGISTRY hardcoded fallback
     if (!newModels) {
-      const registryModels = getModelsForProviderType(providerType, connection.piAuthProvider)
+      const registryModels = liveGoogleCatalog
+        ? getDefaultModelsForConnection(providerType, connection.piAuthProvider)
+          .filter((model): model is ModelDefinition => typeof model !== 'string')
+        : getModelsForProviderType(providerType, connection.piAuthProvider)
       if (registryModels.length > 0) {
         newModels = registryModels
         handlerLog.info(`Model refresh [${slug}]: using ${newModels.length} models from MODEL_REGISTRY`)

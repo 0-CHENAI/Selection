@@ -3,6 +3,7 @@ import {
   bedrockModelFieldMode,
   buildCustomEndpointModelSubmission,
   orderModelFieldMode,
+  resolveApiKeyModelSubmission,
   resolveCustomEndpointPayload,
   shouldAutoProbeModelCatalog,
   showCustomFormatPicker,
@@ -336,3 +337,46 @@ it('preserves unspecified thinking capability and distinguishes explicitly disab
   expect(buildCustomEndpointModelSubmission({ ...input, supportedThinkingLevels: [] }))
     .toMatchObject({ supportedThinkingLevels: [], supportsThinking: false })
 })
+
+describe('resolveApiKeyModelSubmission', () => {
+  it('omits hidden preloaded models and modelSelectionMode for default-endpoint presets like Google', () => {
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: true,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      parsedModels: ['pi/gemini-3.5-pro', 'pi/gemini-3-flash'],
+      submittedModels: ['pi/gemini-3.5-pro', 'pi/gemini-3-flash'],
+    })).toEqual({
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: undefined,
+    })
+  })
+
+  it('submits explicit user-selected models and mode for non-default Pi API key flows', () => {
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: false,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      parsedModels: ['deepseek-v4-pro'],
+      submittedModels: ['deepseek-v4-pro'],
+    })).toEqual({
+      connectionDefaultModel: 'deepseek-v4-pro',
+      models: ['deepseek-v4-pro'],
+      modelSelectionMode: 'userDefined3Tier',
+    })
+
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: false,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      parsedModels: [],
+      submittedModels: [],
+    })).toEqual({
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: 'automaticallySyncedFromProvider',
+    })
+  })
+})
+
