@@ -1,12 +1,13 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { TOOLBAR_CONTROL_HEIGHT, TOOLBAR_SHELL_MAX, toolbarCapsuleFit } from '@craft-agent/ui/chat'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { applyOptimisticPermissionModeChange } from '@/lib/permission-mode-selection'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useMessagingPlatformRuntime, useWeixinNotificationAction } from '@/hooks/useMessagingPlatformRuntime'
 import { navigate, routes } from '@/lib/navigate'
-import { Bell, BellRing, Check, ChevronDown, FolderOpen } from 'lucide-react'
+import { Bot, BotOff, Check, ChevronDown, FolderOpen } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 import type { TerminalOverlayData } from './TaskActionMenu'
@@ -180,10 +181,6 @@ function useToolbarCapsuleFit(enabled: boolean) {
       const permDelta = left.querySelector('[data-tutorial="permission-mode-dropdown"]')
         ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="perm-text"]')) - widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="perm-icon"]')))
         : 0
-      const unattendedDelta = left.querySelector('[data-toolbar-unattended]')
-        ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="unattended-text"]')) - TOOLBAR_CONTROL_HEIGHT)
-        : 0
-      const leftDelta = permDelta + unattendedDelta
       const filesDelta = right.querySelector('[data-toolbar-files]')
         ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="files-text"]')) - widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="files-icon"]')))
         : 0
@@ -192,9 +189,9 @@ function useToolbarCapsuleFit(enabled: boolean) {
       const currentIcons = iconsOnlyRef.current
       const fit = toolbarCapsuleFit({
         rowWidth: row.clientWidth,
-        leftTextWidth: currentIcons ? leftNow + leftDelta : leftNow,
+        leftTextWidth: currentIcons ? leftNow + permDelta : leftNow,
         rightTextWidth: currentIcons ? rightNow + filesDelta : rightNow,
-        leftIconWidth: currentIcons ? leftNow : Math.max(0, leftNow - leftDelta),
+        leftIconWidth: currentIcons ? leftNow : Math.max(0, leftNow - permDelta),
         rightIconWidth: currentIcons ? rightNow : Math.max(0, rightNow - filesDelta),
         shellNaturalWidth: natural.offsetWidth,
         shellMinWidth: minimum.offsetWidth,
@@ -353,7 +350,7 @@ export function ActiveOptionBadges({
         )}
 
         {messagingWorkspaceId && (
-          <UnattendedButton key={messagingWorkspaceId} workspaceId={messagingWorkspaceId} iconsOnly={iconsOnly} />
+          <UnattendedButton key={messagingWorkspaceId} workspaceId={messagingWorkspaceId} />
         )}
 
         {/* Swarm replaces the workflow-state badge in the composer toolbar. */}
@@ -557,35 +554,43 @@ function FilesPopoverButton({
   )
 }
 
-function UnattendedButton({ workspaceId, iconsOnly }: { workspaceId: string; iconsOnly: boolean }) {
+function UnattendedButton({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const runtime = useMessagingPlatformRuntime(workspaceId, 'weixin')
   const { saving, setEnabled } = useWeixinNotificationAction()
   const enabled = runtime.notifyOnCompletion === true
   const label = t('settings.messaging.weixin.unattended')
+  const description = t(runtime.connected ? 'settings.messaging.weixin.unattendedDescription' : 'settings.messaging.weixin.connectFirst')
   return (
-    <button
-      type="button"
-      data-toolbar-unattended=""
-      aria-label={label}
-      aria-pressed={enabled}
-      title={t(runtime.connected ? 'settings.messaging.weixin.unattendedDescription' : 'settings.messaging.weixin.connectFirst')}
-      disabled={saving}
-      className={cn(
-        toolbarControlLayout(iconsOnly, 'permission'),
-        'select-none focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait',
-        toolbarSurfaceMotion,
-        enabled ? [toolbarAccentSurface, 'shadow-tinted'] : [toolbarNeutralSurface, 'hover:bg-foreground/5'],
-      )}
-      style={{ ...toolbarControlStyle(iconsOnly), '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties}
-      onClick={() => runtime.connected ? void setEnabled(!enabled) : navigate(routes.view.settings('messaging'))}
-    >
-      <span aria-hidden="true" className="grid size-3.5 shrink-0">
-        <Bell className={cn(toolbarIconMotion, enabled && 'opacity-0 motion-safe:-rotate-12 motion-safe:scale-90')} />
-        <BellRing className={cn(toolbarIconMotion, !enabled && 'opacity-0 motion-safe:rotate-12 motion-safe:scale-90')} />
-      </span>
-      <span className={cn('whitespace-nowrap', iconsOnly && 'hidden')}>{label}</span>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          data-toolbar-unattended=""
+          aria-label={label}
+          aria-description={description}
+          aria-pressed={enabled}
+          disabled={saving}
+          className={cn(
+            toolbarControlLayout(true, 'permission'),
+            'select-none focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait',
+            toolbarSurfaceMotion,
+            enabled ? [toolbarAccentSurface, 'shadow-tinted'] : [toolbarNeutralSurface, 'hover:bg-foreground/5'],
+          )}
+          style={{ ...toolbarControlStyle(true), '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties}
+          onClick={() => runtime.connected ? void setEnabled(!enabled) : navigate(routes.view.settings('messaging'))}
+        >
+          <span aria-hidden="true" className="grid size-3.5 shrink-0">
+            <BotOff className={cn(toolbarIconMotion, enabled && 'opacity-0 motion-safe:-rotate-12 motion-safe:scale-90')} />
+            <Bot className={cn(toolbarIconMotion, !enabled && 'opacity-0 motion-safe:rotate-12 motion-safe:scale-90')} />
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64">
+        <div className="font-medium">{label}</div>
+        <div className="mt-0.5 text-foreground/80">{description}</div>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -618,10 +623,6 @@ function ToolbarWidthProbes({ permissionMode }: { permissionMode?: PermissionMod
       </span>
       <span data-toolbar-measure="perm-icon" className={toolbarControlLayout(true, 'permission')} style={toolbarControlStyle(true)}>
         {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
-      </span>
-      <span data-toolbar-measure="unattended-text" className={toolbarControlLayout(false, 'permission')} style={toolbarControlStyle(false)}>
-        <Bell className="h-3.5 w-3.5 shrink-0" />
-        <span className="whitespace-nowrap">{t('settings.messaging.weixin.unattended')}</span>
       </span>
       <span data-toolbar-measure="files-text" className={toolbarControlLayout(false, 'files')} style={toolbarControlStyle(false)}>
         <FolderOpen className="h-3.5 w-3.5 shrink-0" />

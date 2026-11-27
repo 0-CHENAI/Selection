@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { TooltipProvider } from '@craft-agent/ui'
 import { PanelRight } from 'lucide-react'
 import { CraftAgentsSymbol } from '@/components/icons/CraftAgentsSymbol'
 import { cn } from '@/lib/utils'
@@ -226,7 +227,9 @@ export function PlaygroundApp() {
     const Stage = selectedComponent.component
     return (
       <div className="h-dvh bg-background text-foreground">
-        <Stage {...props} />
+        <TooltipProvider>
+          <Stage {...props} />
+        </TooltipProvider>
       </div>
     )
   }
