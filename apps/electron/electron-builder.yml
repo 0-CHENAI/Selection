@@ -50,6 +50,8 @@ files:
   - resources/bin/officecli.cmd
   - resources/bin/officecli-morph-helper
   - resources/bin/officecli-morph-helper.cmd
+  # Prebuilt native macOS switch addon (universal2, N-API ABI-stable)
+  - resources/native/**/*
   # Include bundled uv binary (platform-specific, only the relevant one ships per build)
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*

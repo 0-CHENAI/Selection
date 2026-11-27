@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Trigger as PopoverTrigger } from '@radix-ui/react-popover'
 import { Popover, PopoverAnchor, PopoverContent } from './popover'
+import { useNativeSwitchSafeOpen } from './switch'
 import { Button } from './button'
 import {
   AlertDialog,
@@ -895,6 +896,7 @@ export function EditPopover({
   const [internalOpen, setInternalOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : internalOpen
+  const safeOpen = useNativeSwitchSafeOpen(open)
   const setOpen = useCallback((value: boolean) => {
     if (isControlled) {
       controlledOnOpenChange?.(value)
@@ -1472,7 +1474,7 @@ export function EditPopover({
   return (
     <>
       <AnimatePresence>
-        {open && isProcessing && !creationKind && (
+        {safeOpen && isProcessing && !creationKind && (
           <motion.div
             initial={reduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1482,7 +1484,7 @@ export function EditPopover({
           />
         )}
       </AnimatePresence>
-      <Popover open={open} onOpenChange={handleOpenChange} modal={modal}>
+      <Popover open={safeOpen} onOpenChange={handleOpenChange} modal={modal}>
         <PopoverTrigger ref={triggerRef} asChild className={triggerClassName} data-slot="popover-trigger">
           {trigger}
         </PopoverTrigger>

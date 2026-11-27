@@ -15,6 +15,7 @@ import {
 } from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
+import { changeZoomWithNativeSwitchesHidden } from '../native-switch'
 import {
   requestClientOpenExternal,
   requestClientOpenPath,
@@ -290,8 +291,9 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
     if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
-      const currentZoom = win.webContents.getZoomFactor()
-      win.webContents.setZoomFactor(Math.min(currentZoom + 0.1, 3.0))
+      const wc = win.webContents
+      const zoom = Math.min(wc.getZoomFactor() + 0.1, 3.0)
+      changeZoomWithNativeSwitchesHidden(wc, () => wc.setZoomFactor(zoom))
     }
   })
 
@@ -299,15 +301,19 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
     if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
-      const currentZoom = win.webContents.getZoomFactor()
-      win.webContents.setZoomFactor(Math.max(currentZoom - 0.1, 0.5))
+      const wc = win.webContents
+      const zoom = Math.max(wc.getZoomFactor() - 0.1, 0.5)
+      changeZoomWithNativeSwitchesHidden(wc, () => wc.setZoomFactor(zoom))
     }
   })
 
   server.handle(RPC_CHANNELS.menu.ZOOM_RESET, async (ctx) => {
     if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
-    win?.webContents.setZoomFactor(1.0)
+    if (win) {
+      const wc = win.webContents
+      changeZoomWithNativeSwitchesHidden(wc, () => wc.setZoomFactor(1.0))
+    }
   })
 
   server.handle(RPC_CHANNELS.menu.TOGGLE_DEV_TOOLS, async (ctx) => {

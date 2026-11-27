@@ -1164,8 +1164,37 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
   return parseSessionsKey(key)
 }
 
+/**
+ * Direct ipcRenderer bridge for embedding native macOS NSSwitch controls.
+ * Intentionally outside the WS RPC transport — the control must be embedded
+ * by the local window's main process even in thin-client mode.
+ */
+export interface NativeSwitchProps {
+  x: number
+  y: number
+  width: number
+  height: number
+  on: boolean
+  enabled: boolean
+  visible: boolean
+  appearance: 'light' | 'dark'
+}
+
+export interface NativeSwitchAPI {
+  readonly available: boolean
+  getZoomFactor(): number
+  // A null reply means the window geometry is changing. The instance can retry.
+  create(id: number, props: NativeSwitchProps): Promise<boolean | null>
+  update(id: number, props: NativeSwitchProps): Promise<boolean | null>
+  destroy(id: number): Promise<void>
+  destroyAll(): Promise<void>
+  onGeometryChange(callback: () => void): () => void
+  onClick(id: number, callback: () => void): () => void
+}
+
 declare global {
   interface Window {
     electronAPI: ElectronAPI
+    nativeSwitch?: NativeSwitchAPI
   }
 }

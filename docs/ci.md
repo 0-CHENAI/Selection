@@ -34,10 +34,25 @@ OfficeCLI 的路径过滤**不再**包含整棵 `packages/ui/src/**`、`packages
 | 检查名 | 何时跑 | Runner | 说明 |
 | --- | --- | --- | --- |
 | `officecli (macos-arm64)` | 每天 04:41 UTC，或手动 | `macos-15` | 打包运行时的 Darwin 集成。PR 上不再申请这台机器 |
-| `macos-native-validation` | 每天 02:17 UTC，或手动 | `macos-15` | `sandbox-exec` 隔离 + 带 Darwin-only 用例的 tracked tests |
-| Package Desktop Installers | 推到 `test` / `main`，或手动 | `macos-15` + `windows-2025` | 出安装包，不是 PR 门禁 |
+| `macos-native-validation` | 每天 02:17 UTC，或手动 | `macos-15` | `sandbox-exec` 隔离 + 带 Darwin-only 用例的 tracked tests + `--repo` 原生开关校验 |
+| Package Desktop Installers | 推到 `test` / `main`，或手动 | `macos-15` + `windows-2025` | 出安装包 + 打包后原生开关校验，不是 PR 门禁 |
 | Validate Server | 仅手动 | ubuntu / macos / windows | 需要已有密钥，不在 PR 上跑 |
 | OfficeCLI Upgrade Draft | 每天 03:23 UTC，或手动 | `ubuntu-latest` | 开升级 draft PR；权限保持 `contents` / `pull-requests` / `actions` write |
+
+### 原生开关（native switch）打包校验
+
+`resources/native/switch.node` 加载失败时 renderer 会静默回退成 web Switch，「app 能启动」不能证明 addon 可用。`scripts/check-macos-native-switch.ts` 提供正向证据：
+
+```bash
+bun run scripts/check-macos-native-switch.ts --repo              # 校验仓库里的预编译二进制（universal2 + 可加载）
+bun run scripts/check-macos-native-switch.ts --app apps/electron/release/mac-arm64/Selection.app
+bun run scripts/check-macos-native-switch.ts --app Selection.app --launch   # 加隔离 profile 实机启动 + CDP 验证
+bun run scripts/check-macos-native-switch.ts --dmg dist-packages/Selection-arm64.dmg
+```
+
+- `--app` / `--dmg`：断言 `Contents/Resources/app/resources/native/switch.node` 存在、Mach-O 架构覆盖 app 本体、在**打包产物自己的 Electron runtime**（`ELECTRON_RUN_AS_NODE`）里 `require()` 成功并导出 create/update/destroy。签名与 Gatekeeper 在 unsigned CI 产物上报 SKIP，Developer ID 产物上要求 addon 与 app 同 Team ID。
+- `--launch`：以 `CRAFT_CONFIG_DIR` + `--user-data-dir` 隔离 profile 启动 app，通过 CDP 断言 `window.nativeSwitch.available === true` 并完成一次 create/update/destroy 往返（真实嵌入 NSSwitch），同时扫 stderr 上的 `[native-switch]` 告警。适合本机验收，CI 上不用。
+- 接线：`package-macos-arm64` 打包后跑 `--app`（便宜、确定性）；`macos-native-validation` nightly 跑 `--repo`。两者都不是 PR 门禁，也没有新增 job。
 
 ## 取舍（请读）
 

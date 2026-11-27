@@ -1780,6 +1780,7 @@
   "settings.messaging.bindings.openSession": "打开",
   "settings.messaging.bindings.title": "活跃绑定",
   "settings.messaging.bindings.unbind": "断开连接",
+  "settings.messaging.description": "飞书、微信与会话绑定",
   "settings.messaging.lark.apiType": "开放平台 API",
   "settings.messaging.lark.appIdLabel": "应用 ID",
   "settings.messaging.lark.appIdPlaceholder": "cli_xxxxxxxxxxxx",

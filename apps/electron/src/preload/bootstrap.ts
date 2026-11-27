@@ -17,7 +17,7 @@
  */
 
 import '@sentry/electron/preload'
-import { contextBridge, ipcRenderer, shell, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, shell, webFrame, webUtils } from 'electron'
 import open from 'open'
 import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
@@ -39,7 +39,7 @@ import {
 import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from '@craft-agent/server-core/transport'
 import type { RpcClient } from '@craft-agent/server-core/transport'
 import type { RemoteServerConfig } from '@craft-agent/core/types'
-import type { ElectronAPI } from '../shared/types'
+import type { ElectronAPI, NativeSwitchAPI, NativeSwitchProps } from '../shared/types'
 import { GET_WINDOW_RESIZE_STATE, WINDOW_RESIZE_STATE } from '../shared/window-resize'
 
 // ---------------------------------------------------------------------------
@@ -462,3 +462,40 @@ client.onConnectionStateChanged((state) => {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
+
+// ---------------------------------------------------------------------------
+// Native macOS switch bridge — direct ipcRenderer channels, intentionally
+// outside the WS RPC transport: the native control must be embedded by the
+// local window's main process even in thin-client mode.
+// ---------------------------------------------------------------------------
+const nativeSwitchDocument: number = process.platform === 'darwin' && process.isMainFrame
+  ? ipcRenderer.sendSync('native-switch:available-sync')
+  : 0
+let nativeSwitchGeometryRevision = 0
+const nativeSwitchGeometryListeners = new Set<() => void>()
+if (nativeSwitchDocument) {
+  ipcRenderer.on('native-switch:geometry', (_event, document: number, revision: number) => {
+    if (document !== nativeSwitchDocument) return
+    nativeSwitchGeometryRevision = revision
+    for (const listener of nativeSwitchGeometryListeners) listener()
+  })
+}
+
+contextBridge.exposeInMainWorld('nativeSwitch', {
+  available: Boolean(nativeSwitchDocument),
+  getZoomFactor: () => webFrame.getZoomFactor(),
+  create: (id: number, props: NativeSwitchProps) => ipcRenderer.invoke('native-switch:create', nativeSwitchDocument, nativeSwitchGeometryRevision, id, props),
+  update: (id: number, props: NativeSwitchProps) => ipcRenderer.invoke('native-switch:update', nativeSwitchDocument, nativeSwitchGeometryRevision, id, props),
+  destroy: (id: number) => ipcRenderer.invoke('native-switch:destroy', nativeSwitchDocument, id),
+  destroyAll: () => ipcRenderer.invoke('native-switch:destroy-all', nativeSwitchDocument),
+  onGeometryChange: (callback: () => void) => {
+    nativeSwitchGeometryListeners.add(callback)
+    return () => { nativeSwitchGeometryListeners.delete(callback) }
+  },
+  onClick: (id: number, callback: () => void) => {
+    const channel = `native-switch:click:${id}`
+    const listener = () => callback()
+    ipcRenderer.on(channel, listener)
+    return () => ipcRenderer.removeListener(channel, listener)
+  },
+} satisfies NativeSwitchAPI)

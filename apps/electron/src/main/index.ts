@@ -115,6 +115,7 @@ import { handleDeepLink } from './deep-link'
 import { BrowserPaneManager } from './browser-pane-manager'
 import { OAuthFlowStore } from '@craft-agent/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
+import { registerNativeSwitchHandlers } from './native-switch'
 import log, { isDebugMode, mainLog, getLogFilePath, getMessagingGatewayLogFilePath, messagingGatewayLog, autoUpdateLog } from './logger'
 import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 import { registerPiModelResolver } from '@craft-agent/shared/config'
@@ -128,6 +129,10 @@ import { prepareDesktopHostRuntimes } from './host-runtime-cache'
 
 // Initialize electron-log for renderer process support
 log.initialize()
+
+// Direct ipcRenderer channels for embedding native macOS switches (local window only,
+// never routed through the WS RPC transport — see main/native-switch.ts).
+registerNativeSwitchHandlers()
 
 // Diagnostic: report main-process i18n hydration result. We log here (not inline
 // at the hydration site above) because mainLog is only available after this point.
