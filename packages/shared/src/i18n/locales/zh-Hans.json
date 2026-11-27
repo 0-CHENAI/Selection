@@ -222,6 +222,7 @@
   "chat.annotationSaveFailed": "未能保存反馈，请检查选区后重试。",
   "chat.annotationSourceChanged": "原正文已变化，请重新选择文字。反馈草稿已保留。",
   "chat.apiKey": "API 密钥",
+  "chat.approvalUnavailable": "这条审批请求已失效。",
   "chat.artifactChange.created": "新增",
   "chat.artifactChange.deleted": "删除",
   "chat.artifactChange.modified": "修改",

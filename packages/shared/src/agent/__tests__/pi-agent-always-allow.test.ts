@@ -81,6 +81,17 @@ describe('PiAgent "Always allow" in Smart Approval mode', () => {
     expect(prompts).toBe(2)
   })
 
+  it('delivers an existing approval after switching from ask to full control', async () => {
+    agent.onPermissionRequest = request => {
+      agent.setPermissionMode('allow-all')
+      agent.respondToPermission(request.requestId, true, false)
+    }
+    await runBash('mode-switch', 'rm -rf build')
+    expect(sent.filter(message => message.requestId === 'mode-switch')).toMatchObject([
+      { type: 'pre_tool_use_response', action: 'allow' },
+    ])
+  })
+
   it('a denied request is never remembered', async () => {
     agent.onPermissionRequest = request => {
       prompts++

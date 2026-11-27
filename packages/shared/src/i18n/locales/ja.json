@@ -222,6 +222,7 @@
   "chat.annotationSaveFailed": "フィードバックを保存できませんでした。選択範囲を確認して再試行してください。",
   "chat.annotationSourceChanged": "元の回答が変更されました。テキストを選択し直してください。フィードバックの下書きは保持されています。",
   "chat.apiKey": "API キー",
+  "chat.approvalUnavailable": "この承認リクエストは無効になりました。",
   "chat.artifactChange.created": "追加",
   "chat.artifactChange.deleted": "削除",
   "chat.artifactChange.modified": "変更",

@@ -222,6 +222,7 @@
   "chat.annotationSaveFailed": "Das Feedback konnte nicht gespeichert werden. Prüfe die Auswahl und versuche es erneut.",
   "chat.annotationSourceChanged": "Die ursprüngliche Antwort wurde geändert. Wähle den Text erneut aus; dein Feedbackentwurf bleibt erhalten.",
   "chat.apiKey": "API-Schlüssel",
+  "chat.approvalUnavailable": "Diese Genehmigungsanfrage ist nicht mehr verfügbar.",
   "chat.artifactChange.created": "Neu",
   "chat.artifactChange.deleted": "Gelöscht",
   "chat.artifactChange.modified": "Geändert",

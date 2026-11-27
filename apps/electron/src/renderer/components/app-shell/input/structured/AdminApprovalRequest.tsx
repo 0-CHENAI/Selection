@@ -4,9 +4,11 @@ import { ShieldAlert, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { useApprovalSubmission } from './useApprovalSubmission'
 import { cn } from '@/lib/utils'
 
 export interface AdminApprovalRequestData {
+  requestId: string
   appName: string
   reason: string
   command: string
@@ -17,8 +19,8 @@ export interface AdminApprovalRequestData {
 
 interface AdminApprovalRequestProps {
   request: AdminApprovalRequestData
-  onApprove: (options: { rememberForMinutes?: number }) => void
-  onCancel: () => void
+  onApprove: (options: { rememberForMinutes?: number }) => void | Promise<void>
+  onCancel: () => void | Promise<void>
   /** When true, removes container styling (shadow, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
 }
@@ -36,24 +38,11 @@ export function AdminApprovalRequest({
 }: AdminApprovalRequestProps) {
   const { t } = useTranslation()
   const [rememberChoice, setRememberChoice] = React.useState(false)
-  const [responded, setResponded] = React.useState(false)
-  const respondedRef = React.useRef(false)
-
+  const { responded, submit } = useApprovalSubmission()
   const rememberForMinutes = request.rememberForMinutes ?? 10
 
-  const handleApprove = () => {
-    if (respondedRef.current) return
-    respondedRef.current = true
-    setResponded(true)
-    onApprove({ rememberForMinutes: rememberChoice ? rememberForMinutes : undefined })
-  }
-
-  const handleCancel = () => {
-    if (respondedRef.current) return
-    respondedRef.current = true
-    setResponded(true)
-    onCancel()
-  }
+  const handleApprove = () => submit(() => onApprove({ rememberForMinutes: rememberChoice ? rememberForMinutes : undefined }))
+  const handleCancel = () => submit(onCancel)
 
   return (
     <div

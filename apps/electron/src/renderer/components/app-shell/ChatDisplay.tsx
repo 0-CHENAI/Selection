@@ -217,7 +217,7 @@ interface ChatDisplayProps {
     allowed: boolean,
     alwaysAllow: boolean,
     options?: import('../../../shared/types').PermissionResponseOptions
-  ) => void
+  ) => void | Promise<void>
   /** Pending credential request for this session */
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
@@ -1688,17 +1688,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if ((response.type === 'permission' || response.type === 'admin_approval') && pendingPermission && onRespondToPermission) {
       if (response.type === 'permission') {
         const permResponse = response as PermissionResponse
-        onRespondToPermission(
+        return onRespondToPermission(
           pendingPermission.sessionId,
           pendingPermission.requestId,
           permResponse.allowed,
           permResponse.alwaysAllow
         )
-        return
       }
 
       const adminResponse = response as AdminApprovalResponse
-      onRespondToPermission(
+      return onRespondToPermission(
         pendingPermission.sessionId,
         pendingPermission.requestId,
         adminResponse.approved,
@@ -1722,6 +1721,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         return {
           type: 'admin_approval',
           data: {
+            requestId: pendingPermission.requestId,
             appName: pendingPermission.appName || pendingPermission.toolName || 'System action',
             reason: pendingPermission.reason || pendingPermission.description,
             impact: pendingPermission.impact,

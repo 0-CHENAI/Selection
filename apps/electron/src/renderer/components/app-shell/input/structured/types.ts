@@ -22,10 +22,7 @@ export type StructuredInputData =
 /**
  * State for structured input
  */
-export interface StructuredInputState {
-  type: StructuredInputType
-  data: PermissionRequest | CredentialRequest | AdminApprovalRequestData
-}
+export type StructuredInputState = StructuredInputData
 
 /**
  * Response from permission request

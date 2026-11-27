@@ -84,17 +84,17 @@ export function ExternalResourceImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t('fileImport.mcpTitle')}</DialogTitle>
           <DialogDescription className="sr-only">{t('fileImport.mcpTitle')}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-2">
+        <div className="min-h-0 space-y-2 overflow-y-auto">
           <Textarea
             autoFocus
             aria-label={t('fileImport.mcpTitle')}
             aria-invalid={Boolean(mcpError)}
-            className="min-h-44 resize-y font-mono text-xs md:text-xs"
+            className="field-sizing-fixed h-44 min-h-0 max-h-[50dvh] resize-y overflow-y-auto font-mono text-xs md:text-xs"
             placeholder={MCP_JSON_PLACEHOLDER}
             spellCheck={false}
             value={mcpJson}

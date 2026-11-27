@@ -1814,38 +1814,18 @@ export default function App() {
     alwaysAllow: boolean,
     options?: import('../shared/types').PermissionResponseOptions,
   ) => {
-    const success = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
-
-    if (success) {
-      // Remove only the first permission from the queue (the one we just responded to)
-      setPendingPermissions(prev => {
-        const next = new Map(prev)
-        const queue = next.get(sessionId) || []
-        const remainingQueue = queue.slice(1) // Remove first item
-        if (remainingQueue.length === 0) {
-          next.delete(sessionId)
-        } else {
-          next.set(sessionId, remainingQueue)
-        }
-        return next
-      })
-      // Note: No need to force session refresh - per-session atoms update automatically
-    } else {
-      // Response failed (agent/session gone) - clear the permission anyway
-      // to avoid UI being stuck with stale permission
-      setPendingPermissions(prev => {
-        const next = new Map(prev)
-        const queue = next.get(sessionId) || []
-        const remainingQueue = queue.slice(1)
-        if (remainingQueue.length === 0) {
-          next.delete(sessionId)
-        } else {
-          next.set(sessionId, remainingQueue)
-        }
-        return next
-      })
-    }
-  }, [])
+    const delivered = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
+    setPendingPermissions(prev => {
+      const queue = prev.get(sessionId)
+      if (!queue?.some(request => request.requestId === requestId)) return prev
+      const next = new Map(prev)
+      const remaining = queue.filter(request => request.requestId !== requestId)
+      if (remaining.length) next.set(sessionId, remaining)
+      else next.delete(sessionId)
+      return next
+    })
+    if (!delivered) toast.error(t('chat.approvalUnavailable'))
+  }, [t])
 
   const handleRespondToClarification = useCallback(async (sessionId: string, requestId: string, response: ClarificationResponseInput) => {
     await window.electronAPI.respondToClarification(sessionId, requestId, response)

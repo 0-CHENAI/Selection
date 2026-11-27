@@ -107,7 +107,7 @@ export interface AppShellContextType {
     allowed: boolean,
     alwaysAllow: boolean,
     options?: import('../../shared/types').PermissionResponseOptions
-  ) => void
+  ) => void | Promise<void>
 
   // Credential handling
   onRespondToCredential?: (

@@ -204,6 +204,7 @@ test('Office approval routes to its child only while the parent owns that revisi
   expect(manager.respondToPermission('unrelated', 'request', true, false)).toBe(false)
   expect(responses).toHaveLength(0)
   expect(manager.respondToPermission('parent', 'request', true, false)).toBe(true)
+  expect(manager.respondToPermission('child', 'request', true, false)).toBe(false)
   expect(responses).toEqual([['request', true, false]])
   internal.pendingPermissionRequests.set('late', { sessionId: 'child', type: 'bash' })
   internal.officeRevisionRuns.delete('parent')

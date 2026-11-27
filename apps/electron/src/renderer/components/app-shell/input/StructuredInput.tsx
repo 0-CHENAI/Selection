@@ -1,4 +1,3 @@
-import type { PermissionRequest as PermissionRequestType, CredentialRequest as CredentialRequestType } from '../../../../shared/types'
 import { PermissionRequest } from './structured/PermissionRequest'
 import { CredentialRequest } from './structured/CredentialRequest'
 import { AdminApprovalRequest } from './structured/AdminApprovalRequest'
@@ -6,7 +5,7 @@ import type { StructuredInputState, StructuredResponse } from './structured/type
 
 interface StructuredInputProps {
   state: StructuredInputState
-  onResponse: (response: StructuredResponse) => void
+  onResponse: (response: StructuredResponse) => void | Promise<void>
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
 }
@@ -23,7 +22,8 @@ export function StructuredInput({ state, onResponse, unstyled = false }: Structu
     case 'permission':
       return (
         <PermissionRequest
-          request={state.data as PermissionRequestType}
+          key={state.data.requestId}
+          request={state.data}
           onResponse={onResponse}
           unstyled={unstyled}
         />
@@ -31,7 +31,7 @@ export function StructuredInput({ state, onResponse, unstyled = false }: Structu
     case 'credential':
       return (
         <CredentialRequest
-          request={state.data as CredentialRequestType}
+          request={state.data}
           onResponse={onResponse}
           unstyled={unstyled}
         />
@@ -39,7 +39,8 @@ export function StructuredInput({ state, onResponse, unstyled = false }: Structu
     case 'admin_approval':
       return (
         <AdminApprovalRequest
-          request={state.data as import('./structured/AdminApprovalRequest').AdminApprovalRequestData}
+          key={state.data.requestId}
+          request={state.data}
           onApprove={({ rememberForMinutes }) => onResponse({ type: 'admin_approval', approved: true, rememberForMinutes })}
           onCancel={() => onResponse({ type: 'admin_approval', approved: false })}
           unstyled={unstyled}

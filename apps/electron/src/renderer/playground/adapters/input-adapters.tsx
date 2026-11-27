@@ -31,6 +31,7 @@ export function mockPermissionRequest(overrides?: Partial<PermissionRequest>): P
  */
 export function mockAdminApprovalRequest(overrides?: Partial<AdminApprovalRequestData>): AdminApprovalRequestData {
   return {
+    requestId: 'mock-admin-approval',
     appName: 'Docker Desktop',
     reason: 'Homebrew needs admin access to complete post-install steps.',
     command: 'brew install --cask docker',

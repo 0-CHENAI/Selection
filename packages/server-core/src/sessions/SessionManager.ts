@@ -5229,21 +5229,17 @@ export class SessionManager implements ISessionManager {
           })
 
           this.pendingPermissionRequests.delete(request.requestId)
-
           if (brokerResult.ok) {
             this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
               sessionId: managed.id,
               requestId: request.requestId,
               commandHash: effectiveCommandHash,
             })
-            const liveAgent = managed.agent
-            if (liveAgent) {
-              liveAgent.respondToPermission(request.requestId, true, false)
-              return
-            }
+          } else {
+            sessionLog.warn(`Remember-window approval rejected for ${request.requestId}: ${brokerResult.reason}`)
           }
-
-          sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
+          managed.agent?.respondToPermission(request.requestId, brokerResult.ok, false)
+          return
         }
 
         this.sendEvent({
@@ -13663,17 +13659,18 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     alwaysAllow: boolean,
     options?: import('@craft-agent/shared/protocol').PermissionResponseOptions,
   ): boolean {
-    const owner = this.pendingPermissionRequests.get(requestId)?.sessionId
-    if (owner && owner !== sessionId && this.officeProgressParents.get(owner) === sessionId && this.officeRevisionRuns.has(sessionId)) {
+    const requestMeta = this.pendingPermissionRequests.get(requestId)
+    if (!requestMeta) return false
+    const owner = requestMeta.sessionId
+    if (owner !== sessionId && this.officeProgressParents.get(owner) === sessionId && this.officeRevisionRuns.has(sessionId)) {
       return this.respondToPermission(owner, requestId, allowed, alwaysAllow, options)
     }
-    if (owner && owner !== sessionId) return false
+    if (owner !== sessionId) return false
     const managed = this.sessions.get(sessionId)
     if (managed?.agent) {
-      const requestMeta = this.pendingPermissionRequests.get(requestId)
       this.pendingPermissionRequests.delete(requestId)
 
-      if (requestMeta?.type === 'admin_approval') {
+      if (requestMeta.type === 'admin_approval') {
         const brokerResult = this.privilegedExecutionBroker.resolveApproval(requestId, allowed, {
           expectedCommandHash: requestMeta.commandHash,
         })

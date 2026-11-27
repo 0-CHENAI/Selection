@@ -1,6 +1,6 @@
 import { readFile, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
-import { RPC_CHANNELS, type FileAttachment, type SendMessageOptions, type SessionEvent } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type FileAttachment, type PermissionResponseOptions, type SendMessageOptions, type SessionEvent } from '@craft-agent/shared/protocol'
 import { isOriginalFullResolutionAttachment } from '@craft-agent/shared/utils/image-attachment'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
@@ -285,8 +285,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Respond to a permission request (bash command approval)
   // Returns true if the response was delivered, false if agent/session is gone
-  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (_ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
-    return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (_ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions) => {
+    return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
   })
 
   // Respond to a credential request (secure auth input)

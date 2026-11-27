@@ -222,6 +222,7 @@
   "chat.annotationSaveFailed": "Nem sikerült menteni a visszajelzést. Ellenőrizd a kijelölést, és próbáld újra.",
   "chat.annotationSourceChanged": "Az eredeti válasz megváltozott. Jelöld ki újra a szöveget; a visszajelzés piszkozata megmaradt.",
   "chat.apiKey": "API kulcs",
+  "chat.approvalUnavailable": "Ez a jóváhagyási kérés már nem elérhető.",
   "chat.artifactChange.created": "Új",
   "chat.artifactChange.deleted": "Törölve",
   "chat.artifactChange.modified": "Módosítva",

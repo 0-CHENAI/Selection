@@ -222,6 +222,7 @@
   "chat.annotationSaveFailed": "Nie udało się zapisać uwagi. Sprawdź zaznaczenie i spróbuj ponownie.",
   "chat.annotationSourceChanged": "Oryginalna odpowiedź się zmieniła. Zaznacz tekst ponownie; szkic uwagi został zachowany.",
   "chat.apiKey": "Klucz API",
+  "chat.approvalUnavailable": "Ta prośba o zatwierdzenie nie jest już dostępna.",
   "chat.artifactChange.created": "Dodano",
   "chat.artifactChange.deleted": "Usunięto",
   "chat.artifactChange.modified": "Zmieniono",

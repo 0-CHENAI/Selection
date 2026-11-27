@@ -222,6 +222,7 @@
   "chat.annotationSaveFailed": "No se pudo guardar el comentario. Revisa la selección e inténtalo de nuevo.",
   "chat.annotationSourceChanged": "La respuesta original cambió. Selecciona el texto de nuevo; se conserva tu borrador.",
   "chat.apiKey": "Clave API",
+  "chat.approvalUnavailable": "Esta solicitud de aprobación ya no está disponible.",
   "chat.artifactChange.created": "Nuevo",
   "chat.artifactChange.deleted": "Eliminado",
   "chat.artifactChange.modified": "Modificado",

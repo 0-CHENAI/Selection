@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useApprovalSubmission } from './useApprovalSubmission'
 import { useTranslation } from 'react-i18next'
 import { ShieldAlert, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,7 @@ import type { PermissionResponse } from './types'
 
 interface PermissionRequestProps {
   request: PermissionRequestType
-  onResponse: (response: PermissionResponse) => void
+  onResponse: (response: PermissionResponse) => void | Promise<void>
   /** When true, removes container styling (shadow, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
 }
@@ -31,16 +31,8 @@ export function canAlwaysAllowPermission(toolName: string): boolean {
 export function PermissionRequest({ request, onResponse, unstyled = false }: PermissionRequestProps) {
   const { t } = useTranslation()
   const canAlwaysAllow = canAlwaysAllowPermission(request.toolName)
-  // Prevent double-submit while parent clears the pending queue asynchronously
-  const [responded, setResponded] = useState(false)
-  const respondedRef = useRef(false)
-
-  const respond = (response: PermissionResponse) => {
-    if (respondedRef.current) return
-    respondedRef.current = true
-    setResponded(true)
-    onResponse(response)
-  }
+  const { responded, submit } = useApprovalSubmission()
+  const respond = (response: PermissionResponse) => submit(() => onResponse(response))
 
   const handleAllow = () => {
     respond({ type: 'permission', allowed: true, alwaysAllow: false })
