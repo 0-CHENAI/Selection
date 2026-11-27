@@ -1,6 +1,6 @@
 import { acquireProjectLock } from './project-lock'
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
 export interface ArtifactVersion { ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string; summary?: string; summaryOrigin?: 'assistant' }
@@ -52,11 +52,206 @@ export function atomicWrite(path: string, data: string | Buffer, mode = 0o600): 
   try { fd = openSync(temp, 'wx', mode); writeFileSync(fd, data); fsyncSync(fd); closeSync(fd); fd = undefined; renameSync(temp, path) }
   finally { if (fd !== undefined) closeSync(fd); if (existsSync(temp)) unlinkSync(temp) }
 }
+const STORE_MUTATION_CACHE_LIMIT = 512
+const storeMutationGeneration = new Map<string, number>()
+function bumpStoreGeneration(canonicalRoot: string): number {
+  const next = (storeMutationGeneration.get(canonicalRoot) ?? 0) + 1
+  if (storeMutationGeneration.size >= STORE_MUTATION_CACHE_LIMIT && !storeMutationGeneration.has(canonicalRoot)) {
+    const oldest = storeMutationGeneration.keys().next().value
+    if (oldest !== undefined) storeMutationGeneration.delete(oldest)
+  }
+  storeMutationGeneration.set(canonicalRoot, next)
+  return next
+}
+
+interface IndexedRecordEntry {
+  record: ArtifactRecord
+  ino: bigint
+  mtimeNs: bigint
+  size: bigint
+}
+
+interface RegistryIndex {
+  dirMtimeNs: bigint
+  dirCtimeNs: bigint
+  mutationGen: number
+  entries: Map<string, IndexedRecordEntry>
+  byPath: Map<string, Set<string>>
+  byPreviousPath: Map<string, Set<string>>
+  byIdentity: Map<string, Set<string>>
+  byDevIno: Map<string, Set<string>>
+  withoutIdentity: Set<string>
+  byVersionId: Map<string, { recordId: string; sourceRunId?: string }>
+}
+
+function devInoFromIdentity(identity?: string): string | undefined {
+  if (!identity) return undefined
+  const first = identity.indexOf(':')
+  if (first < 0) return undefined
+  const second = identity.indexOf(':', first + 1)
+  return second > first ? identity.slice(0, second) : undefined
+}
+
+function addIndexSet(map: Map<string, Set<string>>, key: string, id: string): void {
+  let set = map.get(key)
+  if (!set) { set = new Set(); map.set(key, set) }
+  set.add(id)
+}
+
+function removeIndexSet(map: Map<string, Set<string>>, key: string, id: string): void {
+  const set = map.get(key)
+  if (!set) return
+  set.delete(id)
+  if (set.size === 0) map.delete(key)
+}
+
+function normalizeVersionOrdinals(record: ArtifactRecord): ArtifactRecord {
+  let lastOrdinal = 0
+  let changed = false
+  const versions = record.versions.map(version => {
+    const ordinal = version.ordinal ?? lastOrdinal + 1
+    if (!Number.isSafeInteger(ordinal) || ordinal <= lastOrdinal) throw new Error('Invalid artifact version order')
+    if (version.ordinal !== ordinal) changed = true
+    lastOrdinal = ordinal
+    return version.ordinal === ordinal ? version : { ...version, ordinal }
+  })
+  return changed ? { ...record, versions } : record
+}
+
 /** Called only after the host's existing file-access authorization. */
 export class ArtifactVersions {
-  constructor(private root: string, private hostId: string, private workspaceId: string) { mkdirSync(root, { recursive: true }) }
+  private canonicalRoot: string
+  private index?: RegistryIndex
+  private registryLockDepth = 0
+  private indexSyncedUnderLock = false
+  constructor(private root: string, private hostId: string, private workspaceId: string) {
+    mkdirSync(root, { recursive: true })
+    this.canonicalRoot = canonicalLocation(root)
+  }
   private recordPath(id: string) { return join(this.root, `${validId(id)}.json`) }
   private blobPath(digest: string) { if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid hash'); return join(this.root, 'blobs', digest) }
+  private unindexEntry(idx: RegistryIndex, id: string): void {
+    const prev = idx.entries.get(id)
+    if (!prev) return
+    idx.entries.delete(id)
+    removeIndexSet(idx.byPath, prev.record.path, id)
+    if (prev.record.previousPaths) {
+      for (const p of prev.record.previousPaths) removeIndexSet(idx.byPreviousPath, p, id)
+    }
+    if (prev.record.fileIdentity) {
+      removeIndexSet(idx.byIdentity, prev.record.fileIdentity, id)
+      const devIno = devInoFromIdentity(prev.record.fileIdentity)
+      if (devIno) removeIndexSet(idx.byDevIno, devIno, id)
+    } else {
+      idx.withoutIdentity.delete(id)
+    }
+    for (const v of prev.record.versions) {
+      if (idx.byVersionId.get(v.id)?.recordId === id) idx.byVersionId.delete(v.id)
+    }
+  }
+  private indexEntry(idx: RegistryIndex, id: string, entry: IndexedRecordEntry): void {
+    idx.entries.set(id, entry)
+    addIndexSet(idx.byPath, entry.record.path, id)
+    if (entry.record.previousPaths) {
+      for (const p of entry.record.previousPaths) addIndexSet(idx.byPreviousPath, p, id)
+    }
+    if (entry.record.fileIdentity) {
+      addIndexSet(idx.byIdentity, entry.record.fileIdentity, id)
+      const devIno = devInoFromIdentity(entry.record.fileIdentity)
+      if (devIno) addIndexSet(idx.byDevIno, devIno, id)
+    } else {
+      idx.withoutIdentity.add(id)
+    }
+    for (const v of entry.record.versions) {
+      idx.byVersionId.set(v.id, { recordId: id, sourceRunId: v.sourceRunId })
+    }
+  }
+  private writeRecord(id: string, record: ArtifactRecord): void {
+    const path = this.recordPath(id)
+    atomicWrite(path, JSON.stringify(record))
+    const gen = bumpStoreGeneration(this.canonicalRoot)
+    if (!this.index) return
+    try {
+      const normalized = normalizeVersionOrdinals(record)
+      const st = statSync(path, { bigint: true })
+      const dirStat = statSync(this.root, { bigint: true })
+      this.unindexEntry(this.index, id)
+      this.indexEntry(this.index, id, { record: normalized, ino: st.ino, mtimeNs: st.mtimeNs, size: st.size })
+      this.index.dirMtimeNs = dirStat.mtimeNs
+      this.index.dirCtimeNs = dirStat.ctimeNs
+      this.index.mutationGen = gen
+    } catch {
+      this.index = undefined
+    }
+  }
+  private syncIndex(): RegistryIndex {
+    if (this.index && this.registryLockDepth > 0 && this.indexSyncedUnderLock) return this.index
+    const dirStat = statSync(this.root, { bigint: true })
+    const gen = storeMutationGeneration.get(this.canonicalRoot) ?? 0
+    if (
+      this.index
+      && this.index.dirMtimeNs === dirStat.mtimeNs
+      && this.index.dirCtimeNs === dirStat.ctimeNs
+      && this.index.mutationGen === gen
+    ) {
+      if (this.registryLockDepth > 0) this.indexSyncedUnderLock = true
+      return this.index
+    }
+    const idx: RegistryIndex = this.index ?? {
+      dirMtimeNs: dirStat.mtimeNs,
+      dirCtimeNs: dirStat.ctimeNs,
+      mutationGen: gen,
+      entries: new Map(),
+      byPath: new Map(),
+      byPreviousPath: new Map(),
+      byIdentity: new Map(),
+      byDevIno: new Map(),
+      withoutIdentity: new Set(),
+      byVersionId: new Map(),
+    }
+    const present = new Set<string>()
+    try {
+      for (const entry of readdirSync(this.root)) {
+        if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
+        const id = entry.slice(0, -5)
+        present.add(id)
+        const filePath = join(this.root, entry)
+        let st: BigIntStats
+        try { st = statSync(filePath, { bigint: true }) } catch { continue }
+        const existing = idx.entries.get(id)
+        if (existing && existing.ino === st.ino && existing.mtimeNs === st.mtimeNs && existing.size === st.size) continue
+        const record = this.read(id)
+        this.unindexEntry(idx, id)
+        this.indexEntry(idx, id, { record, ino: st.ino, mtimeNs: st.mtimeNs, size: st.size })
+      }
+      for (const id of [...idx.entries.keys()]) {
+        if (!present.has(id)) this.unindexEntry(idx, id)
+      }
+      idx.dirMtimeNs = dirStat.mtimeNs
+      idx.dirCtimeNs = dirStat.ctimeNs
+      idx.mutationGen = gen
+      this.index = idx
+      if (this.registryLockDepth > 0) this.indexSyncedUnderLock = true
+      return idx
+    } catch (error) {
+      // Never retain a partially updated index after a corrupt-record or I/O error.
+      this.index = undefined
+      throw error
+    }
+  }
+  /** Hold the registry lock once across a synchronous batch of registrations or captures. */
+  withRegistryLock<T>(action: () => T): T {
+    if (this.registryLockDepth > 0) return action()
+    const release = acquireProjectLock(join(this.root, 'locks', 'registry'))
+    this.registryLockDepth++
+    this.indexSyncedUnderLock = false
+    try { return action() }
+    finally {
+      this.registryLockDepth--
+      this.indexSyncedUnderLock = false
+      release()
+    }
+  }
   private snapshot(path: string): { bytes: Buffer; digest: string } {
     if (lstatSync(path).isSymbolicLink() || !statSync(path).isFile()) throw new Error('Only regular files can be versioned')
     const bytes = readFileSync(path); return { bytes, digest: hash(bytes) }
@@ -68,8 +263,7 @@ export class ArtifactVersions {
     return digest
   }
   register(path: string, sourceRunId?: string, alternativePaths: string[] = [], summary?: string, summaryOrigin?: 'assistant'): ArtifactRecord {
-    const release = acquireProjectLock(join(this.root, 'locks', 'registry'))
-    try { return this.registerUnlocked(path, sourceRunId, alternativePaths, summary, summaryOrigin) } finally { release() }
+    return this.withRegistryLock(() => this.registerUnlocked(path, sourceRunId, alternativePaths, summary, summaryOrigin))
   }
   private registerUnlocked(path: string, sourceRunId?: string, alternativePaths: string[] = [], summary?: string, summaryOrigin?: 'assistant'): ArtifactRecord {
     const canonical = canonicalLocation(path)
@@ -82,23 +276,26 @@ export class ArtifactVersions {
         const record = this.read(existing.id)
         if (existsSync(record.path) && !isCurrentFile(record)) throw new ArtifactConflict()
         const refreshed = withFileIdentity(record)
-        if (record.fileIdentity !== refreshed.fileIdentity) atomicWrite(this.recordPath(record.id), JSON.stringify(refreshed))
+        if (record.fileIdentity !== refreshed.fileIdentity) this.writeRecord(record.id, refreshed)
         return refreshed
       }, true)
     }
     const identity = fileIdentity(canonical)
     if (identity) {
-      const moved = readdirSync(this.root).filter(name => /^[a-f0-9-]+\.json$/.test(name))
-        .map(name => this.read(name.slice(0, -5)))
-        .filter(record => !isCurrentFile(record) && record.fileIdentity === identity)
+      const idx = this.syncIndex()
+      const ids = idx.byIdentity.get(identity)
+      const moved = ids
+        ? [...ids].map(id => idx.entries.get(id)!.record).filter(record => !isCurrentFile(record) && record.fileIdentity === identity)
+        : []
       if (moved.length > 1) throw new Error('Artifact move is ambiguous')
       if (moved.length === 1) {
         const record = moved[0]!
         const relocated = this.locked(record.id, () => {
-          if (fileIdentity(canonical) !== record.fileIdentity || isCurrentFile(record)) return undefined
-          const relocated = withFileIdentity({ ...record, path: canonical,
-            previousPaths: [...new Set([...(record.previousPaths ?? []), record.path])] })
-          atomicWrite(this.recordPath(record.id), JSON.stringify(relocated))
+          const fresh = this.read(record.id)
+          if (fileIdentity(canonical) !== fresh.fileIdentity || isCurrentFile(fresh)) return undefined
+          const relocated = withFileIdentity({ ...fresh, path: canonical,
+            previousPaths: [...new Set([...(fresh.previousPaths ?? []), fresh.path])] })
+          this.writeRecord(fresh.id, relocated)
           return relocated
         }, true)
         if (relocated) return relocated
@@ -109,7 +306,7 @@ export class ArtifactVersions {
     const first: ArtifactVersion = { ordinal: 1, id: randomUUID(), hash: this.put(bytes), size: bytes.length, createdAt: Date.now(), sourceRunId, summary,
       ...(summaryOrigin ? { summaryOrigin } : {}) }
     const record: ArtifactRecord = withFileIdentity({ version: 1, id, hostId: this.hostId, workspaceId: this.workspaceId, path: canonical, currentVersion: first.id, versions: [first] })
-    atomicWrite(this.recordPath(id), JSON.stringify(record)); return record
+    this.writeRecord(id, record); return record
   }
   /** Exact recorded paths and missing historical aliases only, never filenames. */
   findByPath(path: string): ArtifactRecord | undefined {
@@ -119,12 +316,8 @@ export class ArtifactVersions {
   }
   findByVersionId(versionId: string): ArtifactRecord | undefined {
     validId(versionId)
-    for (const entry of readdirSync(this.root)) {
-      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
-      const record = this.read(entry.slice(0, -5))
-      if (record.versions.some(version => version.id === versionId)) return record
-    }
-    return undefined
+    const match = this.syncIndex().byVersionId.get(versionId)
+    return match ? this.read(match.recordId) : undefined
   }
   /** Follow a plain rename in the recorded directory without equating identical copies. */
   refreshMovedRecord(id: string): ArtifactRecord {
@@ -140,13 +333,43 @@ export class ArtifactVersions {
     return matches.length ? this.register(matches[0]!) : record
   }
   private findRegistered(candidates: string[]): ArtifactRecord | undefined {
+    const idx = this.syncIndex()
+    const candidateIds = new Set<string>()
+    const candidateInfo = candidates.map(canonical => {
+      const exists = existsSync(canonical)
+      let devIno: string | undefined
+      let identity: string | undefined
+      if (exists) {
+        try {
+          const st = statSync(canonical, { bigint: true })
+          if (st.ino !== 0n) {
+            devIno = `${st.dev}:${st.ino}`
+            if (st.birthtimeNs > 0n) identity = `${st.dev}:${st.ino}:${st.birthtimeNs}`
+          }
+        } catch { /* ignore */ }
+      }
+      return { canonical, exists, devIno, identity }
+    })
+    for (const info of candidateInfo) {
+      const byPath = idx.byPath.get(info.canonical)
+      if (byPath) for (const id of byPath) candidateIds.add(id)
+      if (!info.exists) {
+        const byPrev = idx.byPreviousPath.get(info.canonical)
+        if (byPrev) for (const id of byPrev) candidateIds.add(id)
+      } else if (info.devIno) {
+        const byDevIno = idx.byDevIno.get(info.devIno)
+        if (byDevIno) for (const id of byDevIno) candidateIds.add(id)
+      }
+    }
+    for (const id of idx.withoutIdentity) candidateIds.add(id)
+
     const matches: ArtifactRecord[] = []
-    for (const entry of readdirSync(this.root)) {
-      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
-      const existing = this.read(entry.slice(0, -5))
-      if (candidates.some(canonical => (sameArtifactLocation(existing.path, canonical)
-        && (!existsSync(canonical) || !existing.fileIdentity || fileIdentity(canonical) === existing.fileIdentity))
-        || (!existsSync(canonical) && existing.previousPaths?.includes(canonical)))) matches.push(existing)
+    for (const id of candidateIds) {
+      const existing = idx.entries.get(id)?.record
+      if (!existing) continue
+      if (candidateInfo.some(({ canonical, exists, identity }) => (sameArtifactLocation(existing.path, canonical)
+        && (!exists || !existing.fileIdentity || identity === existing.fileIdentity))
+        || (!exists && existing.previousPaths?.includes(canonical)))) matches.push(existing)
     }
     if (matches.length > 1) {
       // A live preview can register an atomic replacement before the tracked turn
@@ -197,14 +420,7 @@ export class ArtifactVersions {
     const record = JSON.parse(readFileSync(this.recordPath(id), 'utf8')) as ArtifactRecord
     this.validateRecord(record, id)
     // Assign legacy ordinals in memory; ordinary reads never rewrite history.
-    let lastOrdinal = 0
-    record.versions = record.versions.map(version => {
-      const ordinal = version.ordinal ?? lastOrdinal + 1
-      if (!Number.isSafeInteger(ordinal) || ordinal <= lastOrdinal) throw new Error('Invalid artifact version order')
-      lastOrdinal = ordinal
-      return { ...version, ordinal }
-    })
-    return record
+    return normalizeVersionOrdinals(record)
   }
   hasCurrentFile(id: string): boolean {
     const record = this.read(id)
@@ -212,27 +428,22 @@ export class ArtifactVersions {
   }
   /** Resolve historical message references without trusting the link text or current path. */
   versionSourceRunIds(versionIds: readonly string[]): Map<string, string | undefined> {
-    const wanted = new Set(versionIds)
     const found = new Map<string, string | undefined>()
-    if (!wanted.size) return found
-    for (const entry of readdirSync(this.root)) {
-      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
-      for (const version of this.read(entry.slice(0, -5)).versions) {
-        if (wanted.has(version.id)) found.set(version.id, version.sourceRunId)
-      }
-      if (found.size === wanted.size) break
+    if (!versionIds.length) return found
+    const byVersion = this.syncIndex().byVersionId
+    for (const versionId of versionIds) {
+      const match = byVersion.get(versionId)
+      if (match) found.set(versionId, match.sourceRunId)
     }
     return found
   }
   versionArtifactIds(versionIds: readonly string[]): Map<string, string> {
-    const wanted = new Set(versionIds)
     const found = new Map<string, string>()
-    if (!wanted.size) return found
-    for (const entry of readdirSync(this.root)) {
-      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
-      const record = this.read(entry.slice(0, -5))
-      for (const version of record.versions) if (wanted.has(version.id)) found.set(version.id, record.id)
-      if (found.size === wanted.size) break
+    if (!versionIds.length) return found
+    const byVersion = this.syncIndex().byVersionId
+    for (const versionId of versionIds) {
+      const match = byVersion.get(versionId)
+      if (match) found.set(versionId, match.recordId)
     }
     return found
   }
@@ -244,7 +455,7 @@ export class ArtifactVersions {
       const snapshot = this.snapshot(record.path)
       if (snapshot.digest === record.versions.find(version => version.id === record.currentVersion)!.hash) {
         const refreshed = withFileIdentity(record)
-        if (refreshed.fileIdentity !== record.fileIdentity) atomicWrite(this.recordPath(id), JSON.stringify(refreshed))
+        if (refreshed.fileIdentity !== record.fileIdentity) this.writeRecord(id, refreshed)
         return refreshed
       }
       const next: ArtifactVersion = { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(),
@@ -252,7 +463,7 @@ export class ArtifactVersions {
         ...(summaryOrigin ? { summaryOrigin } : {}) }
       const after = withFileIdentity({ ...record, currentVersion: next.id, versions: [...record.versions, next] })
       delete after.lastRestore
-      atomicWrite(this.recordPath(id), JSON.stringify(after))
+      this.writeRecord(id, after)
       return after
     })
   }
@@ -327,7 +538,7 @@ export class ArtifactVersions {
       // response cannot turn a successful retry into another mutation.
       if (requestId !== undefined) next.cleanupRequests = { ...record.cleanupRequests,
         [requestId]: { expectedVersion, versionIds: selected } }
-      atomicWrite(this.recordPath(id), JSON.stringify(next))
+      this.writeRecord(id, next)
       return next
     })
   }
@@ -368,11 +579,11 @@ export class ArtifactVersions {
     })
   }
   private locked<T>(id: string, action: () => T, registryHeld = false): T {
-    const releaseRegistry = registryHeld ? () => {} : acquireProjectLock(join(this.root, 'locks', 'registry'))
-    try {
+    const run = () => {
       const release = acquireProjectLock(join(this.root, 'locks', validId(id)))
       try { return action() } finally { release() }
-    } finally { releaseRegistry() }
+    }
+    return registryHeld || this.registryLockDepth > 0 ? run() : this.withRegistryLock(run)
   }
 
   /** Explicit maintenance only. Referenced versions are never aged out. */
@@ -423,7 +634,7 @@ export class ArtifactVersions {
       if (!isCurrentFile(record) || this.snapshot(record.path).digest !== base.hash) { unlinkSync(pendingPath); throw new ArtifactConflict() }
       atomicWrite(record.path, candidate.bytes, statSync(record.path).mode & 0o777)
       const published = withFileIdentity(after)
-      atomicWrite(this.recordPath(id), JSON.stringify(published))
+      this.writeRecord(id, published)
       unlinkSync(pendingPath)
       return published
     })
@@ -453,7 +664,7 @@ export class ArtifactVersions {
     const recovered = actual === afterHash ? journal.after : actual === beforeHash ? journal.before : undefined
     if (!recovered) throw new ArtifactConflict()
     const refreshed = withFileIdentity(recovered)
-    atomicWrite(this.recordPath(id), JSON.stringify(refreshed)); unlinkSync(path)
+    this.writeRecord(id, refreshed); unlinkSync(path)
     return refreshed
     }, registryHeld)
   }
@@ -475,20 +686,21 @@ export class ArtifactVersions {
       if (!isCurrentFile(record) || this.snapshot(record.path).digest !== current.hash) { unlinkSync(pendingPath); throw new ArtifactConflict() }
       atomicWrite(record.path, bytes, statSync(record.path).mode & 0o777)
       const published = withFileIdentity(after)
-      atomicWrite(this.recordPath(id), JSON.stringify(published))
+      this.writeRecord(id, published)
       unlinkSync(pendingPath)
       return published
     })
   }
   relocate(id: string, path: string, expectedVersion: string): ArtifactRecord {
-    const release = acquireProjectLock(join(this.root, 'locks', 'registry'))
-    try { return this.locked(id, () => {
+    return this.withRegistryLock(() => this.locked(id, () => {
     const record = this.read(id), canonical = realpathSync(path)
     if (record.currentVersion !== expectedVersion) throw new ArtifactConflict()
     if (existsSync(`${this.recordPath(id)}.pending`)) throw new Error('Reconcile the interrupted apply before relocating')
-    for (const name of readdirSync(this.root)) {
-      if (!/^[a-f0-9-]+\.json$/.test(name) || name === `${id}.json`) continue
-      if (this.read(name.slice(0, -5)).path === canonical) throw new Error('This location already belongs to another managed artifact')
+    const samePathIds = this.syncIndex().byPath.get(canonical)
+    if (samePathIds) {
+      for (const otherId of samePathIds) {
+        if (otherId !== id) throw new Error('This location already belongs to another managed artifact')
+      }
     }
     const current = record.versions.find(v => v.id === record.currentVersion)!
     const snapshot = this.snapshot(canonical)
@@ -496,7 +708,7 @@ export class ArtifactVersions {
     const relocated: ArtifactRecord = withFileIdentity({ ...record, path: canonical, previousPaths: [...new Set([...(record.previousPaths ?? []), record.path])], currentVersion: next?.id ?? record.currentVersion,
       versions: next ? [...record.versions, next] : record.versions })
     delete relocated.lastRestore
-    atomicWrite(this.recordPath(id), JSON.stringify(relocated)); return relocated
-    }, true) } finally { release() }
+    this.writeRecord(id, relocated); return relocated
+    }, true))
   }
 }

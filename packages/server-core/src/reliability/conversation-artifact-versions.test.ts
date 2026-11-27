@@ -397,3 +397,28 @@ test('a selected Chinese result is versioned even without a Markdown file link',
       .toMatchObject([{ path: file, ordinal: 1, change: 'created' }])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('batch capture registers many new deliverables without redundant store.capture re-reads', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-batch-capture-'))
+  try {
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    let registerCalls = 0
+    let captureCalls = 0
+    const origRegister = store.register.bind(store)
+    const origCapture = store.capture.bind(store)
+    store.register = (...args) => { registerCalls++; return origRegister(...args) }
+    store.capture = (...args) => { captureCalls++; return origCapture(...args) }
+
+    const files = Array.from({ length: 40 }, (_, i) => {
+      const p = join(root, `chapter-${i + 1}.md`)
+      writeFileSync(p, `# Chapter ${i + 1}\nBody content`)
+      return p
+    })
+    const turn = new ConversationArtifactVersions(store, [root], async p => realpathSync(p), () => {}, Date.now() - 1000)
+    const refs = await turn.capture('已批量生成 40 个章节文件。', 'session/user-batch', undefined, files, false)
+    expect(refs).toHaveLength(40)
+    expect(refs.every(ref => ref.change === 'created' && ref.ordinal === 1 && !!ref.artifactId)).toBe(true)
+    expect(registerCalls).toBe(40)
+    expect(captureCalls).toBe(0)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

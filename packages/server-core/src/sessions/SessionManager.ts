@@ -35,7 +35,7 @@ import { collectWorkspaceCandidates, discoverWorkspaceOutputs } from '../reliabi
 import { workspaceDeliveryContract } from '../reliability/workspace-delivery-contract'
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
-import { ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
+import { ArtifactVersions, atomicWrite, canonicalLocation, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions, artifactVersionTitle, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from '../reliability/conversation-artifact-versions'
 import { discoverOfficeFiles } from '../reliability/office-files'
 import { ArtifactCandidateInventory, ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
@@ -45,7 +45,7 @@ import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWork
 import { hostname as executionHostName } from 'node:os'
 import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync, unlinkSync } from 'node:fs'
 import { basename as feedbackBasename, extname as feedbackExtension } from 'node:path'
-import { validateWorkspaceFilePath } from '../handlers/utils'
+import { createWorkspaceFilePathValidator, validateWorkspaceFilePath } from '../handlers/utils'
 import { settleCheckpointTool, executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
 import { ProgressSupervisor, createProgressBudget, type ProgressBudget, type ProgressDecision, type ProgressSnapshot } from '../supervision/progress-supervisor'
 import { saveProgressCandidate, loadProgressCandidate, readProgressCheckpoint, writeProgressCheckpoint, type ProgressCheckpoint } from '../supervision/progress-store'
@@ -236,6 +236,11 @@ export { sanitizeForTitle }
 /** Inventory and tool paths are native filesystem names, not URL-encoded links. */
 function validateArtifactFilePath(path: string, workspaceId: string): Promise<string> {
   return validateWorkspaceFilePath(path.replaceAll('%', '%25'), workspaceId)
+}
+
+function createArtifactPathValidator(workspaceId: string): (path: string) => Promise<string> {
+  const validate = createWorkspaceFilePathValidator(workspaceId)
+  return (path: string) => validate(path.replaceAll('%', '%25'))
 }
 
 // Module-level platform ref — set once during init via setSessionPlatform()
@@ -1887,6 +1892,7 @@ export class SessionManager implements ISessionManager {
   private officeProgressParents = new Map<string, string>()
   private officeRevisionCandidates = new Map<string, { artifactId: string; path: string; childSessionId: string }>()
   private officePreviews = new OfficePreviewService()
+  private artifactStores = new Map<string, ArtifactVersions>()
   private activeArtifactFeedback = new Set<string>()
   private inlineFeedbackSessions = new Set<string>()
   private handoverCapturing = new Set<string>()
@@ -3352,11 +3358,21 @@ export class SessionManager implements ISessionManager {
     return managedToSession(m, { messages: this.deliveredArtifactMessages(m) })
   }
 
+  private getArtifactStore(workspace: { id: string; rootPath: string }): ArtifactVersions {
+    const storeRoot = join(workspace.rootPath, 'artifacts', 'versions')
+    const key = `${workspace.id}\0${storeRoot}`
+    const cached = this.artifactStores.get(key)
+    if (cached && existsSync(storeRoot)) return cached
+    const store = new ArtifactVersions(storeRoot, executionHostName(), workspace.id)
+    this.artifactStores.set(key, store)
+    return store
+  }
+
   private deliveredArtifactMessages(managed: ManagedSession): Message[] {
     if (!managed.messages.some(message => message.artifactVersions?.length
       || message.role === 'assistant' && message.turnId?.startsWith('artifact-restore-'))) return managed.messages
     try {
-      const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+      const store = this.getArtifactStore(managed.workspace)
       // Restore confirmations saved before they carried file refs still need a
       // result card. The app-generated turn ID binds the confirmation to its
       // completed action; only a surviving snapshot is shown.
@@ -8283,14 +8299,15 @@ export class SessionManager implements ISessionManager {
       managed.conversationArtifactVersions = undefined
       managed.artifactCandidateInventory = undefined
       if (!managed.isolatedWorkspace) {
-        const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+        const store = this.getArtifactStore(managed.workspace)
         const tracker = new ConversationArtifactVersions(store,
           [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
           path => validateArtifactFilePath(path, managed.workspace.id),
           () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
           Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()))
         managed.conversationArtifactVersions = tracker
-        if (userMessage.officeDocumentPath) await tracker.trackPath(userMessage.officeDocumentPath)
+        const authorizeTurnStart = createArtifactPathValidator(managed.workspace.id)
+        if (userMessage.officeDocumentPath) await tracker.trackPath(userMessage.officeDocumentPath, authorizeTurnStart)
         try {
           managed.artifactCandidateInventory = new ArtifactCandidateInventory(
             [managed.workingDirectory ?? managed.workspace.rootPath, getSessionStoragePath(managed.workspace.rootPath, managed.id)],
@@ -8299,9 +8316,16 @@ export class SessionManager implements ISessionManager {
         } catch (error) {
           sessionLog.warn('Artifact candidate baseline failed', { sessionId: managed.id, error })
         }
+        const seenPriorLinks = new Set<string>()
         for (const prior of managed.messages) {
           if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
-          if (prior.role === 'assistant' && !prior.isIntermediate && !prior.hidden) await tracker.track(prior.content)
+          if (prior.role !== 'assistant' || prior.isIntermediate || prior.hidden) continue
+          for (const link of localArtifactLinks(prior.content)) {
+            if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
+            if (seenPriorLinks.has(link)) continue
+            seenPriorLinks.add(link)
+            await tracker.trackPath(link, authorizeTurnStart)
+          }
         }
       }
       if (managed.processingGeneration !== myGeneration || managed.stopRequested) {
@@ -9090,10 +9114,14 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  private async authorizeOfficeDocumentPath(parent: ManagedSession, path: string): Promise<string> {
+  private async authorizeOfficeDocumentPath(
+    parent: ManagedSession,
+    path: string,
+    validatePath?: (filePath: string) => Promise<string>,
+  ): Promise<string> {
     if (parent.isolatedWorkspace) throw new Error('Office preview requires an active parent chat')
     if (!/\.(docx|xlsx|pptx)$/i.test(path)) throw new Error('请选择 Word、Excel 或 PowerPoint 文件')
-    await validateWorkspaceFilePath(path, parent.workspace.id)
+    await (validatePath ? validatePath(path) : validateWorkspaceFilePath(path, parent.workspace.id))
     const resolvedPath = realpathSync(path)
     const roots = [parent.workspace.rootPath, parent.workingDirectory].filter((root): root is string => !!root)
     const inWorkspace = roots.some(root => { try { return inside(realpathSync(root), resolvedPath) } catch { return false } })
@@ -9123,8 +9151,9 @@ export class SessionManager implements ISessionManager {
       ...(message.artifactVersions ?? []).map(ref => ref.path),
       ...(message.attachments ?? []).map(file => file.storedPath),
     ])
+    const validatePath = createWorkspaceFilePathValidator(parent.workspace.id)
     return discoverOfficeFiles([parent.workingDirectory, sessionDirectory].filter((path): path is string => !!path), excluded,
-      referenced, path => this.authorizeOfficeDocumentPath(parent, path))
+      referenced, path => this.authorizeOfficeDocumentPath(parent, path, validatePath))
   }
 
   /** Follow a pptx as it grows. Capture a version so a later element edit matches the bytes on screen. */
@@ -9990,7 +10019,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
-    this.assertOfficeDeliveryReady(managed)
+    const changedArtifacts = managed.artifactCandidateInventory?.changed()
+    this.assertOfficeDeliveryReady(managed, changedArtifacts)
     state.accepting = true
     const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
@@ -10014,9 +10044,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      const ppt = await this.pptDeliveryAnswer(managed, answer.content)
+      const ppt = await this.pptDeliveryAnswer(managed, answer.content, changedArtifacts)
       answer.content = ppt.content
-      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, submission.artifactVersionTitle, answer.content, ppt.blocked)
+      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, submission.artifactVersionTitle, answer.content, ppt.blocked, changedArtifacts)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -10138,10 +10168,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
    * layout; Excel workbooks with formulas must be recalculated. Failure denies the answer and returns the
    * needs_revision list to the model for another round.
    */
-  private officeDeliveryBlock(managed: ManagedSession): string | undefined {
+  private officeDeliveryBlock(managed: ManagedSession, precomputedChanged?: readonly string[]): string | undefined {
     const timing = this.activeOfficeTiming(managed)
     const start = performance.now()
-    const changed = managed.artifactCandidateInventory?.changed() ?? []
+    const changed = precomputedChanged ? [...precomputedChanged] : (managed.artifactCandidateInventory?.changed() ?? [])
     try {
       if (!changed.length) return undefined
       try {
@@ -10156,8 +10186,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
   }
 
-  private assertOfficeDeliveryReady(managed: ManagedSession): void {
-    const block = this.officeDeliveryBlock(managed)
+  private assertOfficeDeliveryReady(managed: ManagedSession, precomputedChanged?: readonly string[]): void {
+    const block = this.officeDeliveryBlock(managed, precomputedChanged)
     if (block) throw new Error(block)
   }
 
@@ -10175,23 +10205,27 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
   }
 
-  private async pptDeliveryAnswer(managed: ManagedSession, markdown: string): Promise<{ content: string; blocked: string[] }> {
+  private async pptDeliveryAnswer(managed: ManagedSession, markdown: string, precomputedChanged?: readonly string[]): Promise<{ content: string; blocked: string[] }> {
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
     const content = markdown.replace(/<ppt_g4>([\s\S]*?)<\/ppt_g4>/g, (_, packet: string) => {
       this.savePptVisualVerdict(managed, this.pptVisualTurns.get(managed)?.directReview(packet.trim()))
       return ''
     })
-    const candidates = new Set((managed.artifactCandidateInventory?.changed() ?? []).filter(path => /\.pptx$/i.test(path)))
-    for (const link of localArtifactLinks(content)) {
-      if (!/\.pptx$/i.test(link) || !isArtifactCardPath(link)) continue
-      try {
-        const path = await validateArtifactFilePath(link, managed.workspace.id)
-        const inventory = managed.artifactCandidateInventory
-        if (inventory && !inventory.covers(path)) {
-          const file = statSync(path)
-          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) candidates.add(path)
-        }
-      } catch { /* Inaccessible links are not deliverables. */ }
+    const changedFiles = precomputedChanged ?? managed.artifactCandidateInventory?.changed() ?? []
+    const candidates = new Set(changedFiles.filter(path => /\.pptx$/i.test(path)))
+    const pptLinks = localArtifactLinks(content).filter(link => /\.pptx$/i.test(link) && isArtifactCardPath(link))
+    if (pptLinks.length > 0) {
+      const authorize = createArtifactPathValidator(managed.workspace.id)
+      for (const link of pptLinks) {
+        try {
+          const path = await authorize(link)
+          const inventory = managed.artifactCandidateInventory
+          if (inventory && !inventory.covers(path)) {
+            const file = statSync(path)
+            if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) candidates.add(path)
+          }
+        } catch { /* Inaccessible links are not deliverables. */ }
+      }
     }
     const blocks: Array<{ path: string; result: PptVisualBlock }> = []
     for (const path of candidates) {
@@ -10225,21 +10259,43 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   }
 
   /** Finish file discovery before the answer is persisted and published. */
-  private async captureChangedArtifacts(managed: ManagedSession, userMessageId: string, title?: string, answerMarkdown = '', blocked: string[] = []): Promise<Message['artifactVersions']> {
+  private async captureChangedArtifacts(
+    managed: ManagedSession,
+    userMessageId: string,
+    title?: string,
+    answerMarkdown = '',
+    blocked: string[] = [],
+    precomputedChanged?: readonly string[],
+  ): Promise<Message['artifactVersions']> {
     const inventory = managed.artifactCandidateInventory
     const tracker = managed.conversationArtifactVersions
     if (!tracker) return undefined
     try {
+      const authorize = createArtifactPathValidator(managed.workspace.id)
+      const blockedCanonical = new Set<string>()
+      for (const file of blocked) {
+        try { blockedCanonical.add(canonicalLocation(file)) } catch { blockedCanonical.add(file) }
+      }
+      const isBlocked = (path: string) => {
+        if (blockedCanonical.size === 0) return false
+        if (blockedCanonical.has(path)) return true
+        try { return blockedCanonical.has(canonicalLocation(path)) } catch { return false }
+      }
       const candidates: string[] = []
-      const editedExistingFiles: string[] = []
-      for (const path of inventory?.changed() ?? []) {
-        if (blocked.some(file => sameArtifactLocation(file, path))) continue
+      const candidateCanonical = new Set<string>()
+      const editedExistingCanonical = new Set<string>()
+      const changedFiles = precomputedChanged ?? inventory?.changed() ?? []
+      for (const path of changedFiles) {
+        if (isBlocked(path)) continue
         if (!isArtifactCardPath(path)) continue
         try {
-          const safe = await validateArtifactFilePath(path, managed.workspace.id)
-          if (!isArtifactCardPath(safe) || candidates.some(candidate => sameArtifactLocation(candidate, safe))) continue
+          const safe = await authorize(path)
+          if (!isArtifactCardPath(safe)) continue
+          const canonicalSafe = canonicalLocation(safe)
+          if (candidateCanonical.has(canonicalSafe)) continue
+          candidateCanonical.add(canonicalSafe)
           candidates.push(safe)
-          if (inventory?.existedAtStart(path)) editedExistingFiles.push(safe)
+          if (inventory?.existedAtStart(path)) editedExistingCanonical.add(canonicalSafe)
         } catch { /* Inaccessible or deleted files cannot be opened from a card. */ }
       }
       // Explicit destinations outside the scanned roots are discoverable through
@@ -10247,22 +10303,27 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       if (inventory) for (const path of localArtifactLinks(answerMarkdown)) {
         if (!isArtifactCardPath(path)) continue
         try {
-          const safe = await validateArtifactFilePath(path, managed.workspace.id)
-          if (!isArtifactCardPath(safe) || inventory.covers(safe)
-            || candidates.some(candidate => sameArtifactLocation(candidate, safe))) continue
+          const safe = await authorize(path)
+          if (!isArtifactCardPath(safe) || inventory.covers(safe)) continue
+          const canonicalSafe = canonicalLocation(safe)
+          if (candidateCanonical.has(canonicalSafe)) continue
           const file = statSync(safe)
           if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) {
+            candidateCanonical.add(canonicalSafe)
             candidates.push(safe)
-            if (file.birthtimeMs < inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) editedExistingFiles.push(safe)
+            if (file.birthtimeMs < inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) editedExistingCanonical.add(canonicalSafe)
           }
         } catch { /* A missing or inaccessible link is a citation, not a card. */ }
       }
-      const versions = await tracker.capture(answerMarkdown, `${managed.id}/${userMessageId}`, title, candidates, !inventory, blocked)
+      const versions = await tracker.capture(answerMarkdown, `${managed.id}/${userMessageId}`, title, candidates, !inventory, blocked, authorize)
       const missing = managed.messages.flatMap(message => message.artifactVersions?.filter(ref => !ref.artifactId).map(ref => ref.versionId) ?? [])
-      const prior = missing.length ? withArtifactIdentities(managed.messages,
-        new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id).versionArtifactIds(missing)) : managed.messages
-      return numberSessionArtifactRefs(prior, versions.map(ref => ref.change === 'created' && editedExistingFiles.some(path => sameArtifactLocation(path, ref.path))
-        ? { ...ref, change: 'modified' as const } : ref))
+      const prior = missing.length ? withArtifactIdentities(managed.messages, tracker.store.versionArtifactIds(missing)) : managed.messages
+      return numberSessionArtifactRefs(prior, versions.map(ref => {
+        if (ref.change !== 'created' || editedExistingCanonical.size === 0) return ref
+        let key = ref.path
+        try { key = canonicalLocation(ref.path) } catch { /* keep raw path */ }
+        return editedExistingCanonical.has(key) ? { ...ref, change: 'modified' as const } : ref
+      }))
     } catch (error) {
       sessionLog.warn('Changed artifact capture failed', { sessionId: managed.id, error })
       return undefined
@@ -10297,7 +10358,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!draft) return undefined
     try { this.assertAnswerReady(managed, state, draft.content) }
     catch { return undefined }
-    const officeBlock = this.officeDeliveryBlock(managed)
+    const changedArtifacts = managed.artifactCandidateInventory?.changed()
+    const officeBlock = this.officeDeliveryBlock(managed, changedArtifacts)
     if (officeBlock) {
       state.officeDeliveryNote = officeBlock
       return undefined
@@ -10318,11 +10380,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       artifactVersions: draft.artifactVersions, timestamp: draft.timestamp }
     let rollbackFeedback: (() => void) | undefined
     try {
-      const ppt = await this.pptDeliveryAnswer(managed, draft.content)
-      const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, ppt.content, ppt.blocked)
+      const ppt = await this.pptDeliveryAnswer(managed, draft.content, changedArtifacts)
+      const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, ppt.content, ppt.blocked, changedArtifacts)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       this.assertAnswerReady(managed, state, draft.content)
-      this.assertOfficeDeliveryReady(managed)
+      if (!changedArtifacts) this.assertOfficeDeliveryReady(managed)
       Object.assign(draft, { content: ppt.content, isIntermediate: false, hidden: undefined, phase: 'final' as const,
         answerCommitted: true, answerSalvaged: mode === 'salvage' ? true : undefined, artifactVersions })
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, draft,
@@ -14662,9 +14724,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           const owner = managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
           if (owner) {
             try {
-              const ppt = await this.pptDeliveryAnswer(managed, content)
+              const changedArtifacts = managed.artifactCandidateInventory?.changed()
+              const ppt = await this.pptDeliveryAnswer(managed, content, changedArtifacts)
               assistantMessage.content = ppt.content
-              assistantMessage.artifactVersions = await this.captureChangedArtifacts(managed, owner.id, undefined, ppt.content, ppt.blocked)
+              assistantMessage.artifactVersions = await this.captureChangedArtifacts(managed, owner.id, undefined, ppt.content, ppt.blocked, changedArtifacts)
             } catch (error) {
               sessionLog.warn('Artifact version recording failed for streamed answer', { sessionId, messageId: assistantMessage.id, error })
             }

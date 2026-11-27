@@ -31,9 +31,9 @@ test('includes every allowed draft and modified document while excluding interna
     writeFileSync(report, 'after with edits')
     const drafts = Array.from({ length: 45 }, (_, index) => join(root, `draft-${index}.md`))
     for (const path of drafts) writeFileSync(path, 'draft')
-    for (const directory of ['node_modules', '.git']) {
+    for (const directory of ['node_modules', '.git', '.venv', '__pycache__', '.next', '.cache']) {
       mkdirSync(join(root, directory))
-      writeFileSync(join(root, directory, 'internal.txt'), 'internal')
+      writeFileSync(join(root, directory, 'internal.md'), 'internal')
     }
     expect(inventory.changed().sort()).toEqual([report, ...drafts].sort())
   } finally { rmSync(root, { recursive: true, force: true }) }
