@@ -3,6 +3,7 @@ import {
   bedrockModelFieldMode,
   buildCustomEndpointModelSubmission,
   orderModelFieldMode,
+  resolveApiKeyModelSubmission,
   resolveCustomEndpointPayload,
   shouldAutoProbeModelCatalog,
   showCustomFormatPicker,
@@ -336,3 +337,66 @@ it('preserves unspecified thinking capability and distinguishes explicitly disab
   expect(buildCustomEndpointModelSubmission({ ...input, supportedThinkingLevels: [] }))
     .toMatchObject({ supportedThinkingLevels: [], supportsThinking: false })
 })
+
+describe('resolveApiKeyModelSubmission', () => {
+  it('omits hidden preloaded models and modelSelectionMode for default-endpoint presets while keeping testModel on same-preset edits', () => {
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: true,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      preserveSavedTestModel: true,
+      parsedModels: ['pi/gpt-5.5', 'pi/gpt-5'],
+      submittedModels: ['pi/gpt-5.5', 'pi/gpt-5'],
+    })).toEqual({
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: undefined,
+      testModel: 'pi/gpt-5.5',
+    })
+  })
+
+  it('does not reuse a saved testModel when creating a new connection or switching presets', () => {
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: true,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      preserveSavedTestModel: false,
+      parsedModels: ['pi/gpt-5.5'],
+      submittedModels: ['pi/gpt-5.5'],
+    })).toEqual({
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: undefined,
+      testModel: undefined,
+    })
+  })
+
+  it('submits explicit user-selected models and mode for non-default Pi API key flows', () => {
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: false,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      parsedModels: ['deepseek-v4-pro'],
+      submittedModels: ['deepseek-v4-pro'],
+    })).toEqual({
+      connectionDefaultModel: 'deepseek-v4-pro',
+      models: ['deepseek-v4-pro'],
+      modelSelectionMode: 'userDefined3Tier',
+      testModel: undefined,
+    })
+
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: false,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      parsedModels: [],
+      submittedModels: [],
+    })).toEqual({
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: 'automaticallySyncedFromProvider',
+      testModel: undefined,
+    })
+  })
+})
+

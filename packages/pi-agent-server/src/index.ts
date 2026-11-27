@@ -3,6 +3,7 @@ import { waitForBridgeReply } from './bridge-wait.ts';
 import { isScreenshotProxyCall, proxyReplyDeadlineMs } from './proxy-reply-deadline.ts';
 import { replaceProxyTools, type ProxyToolDef } from './register-tools.ts';
 import { installFastServiceTier } from './gpt-oauth-fast.ts';
+import { installGoogleToolSchemaSanitizer } from './google-tool-schema.ts';
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
@@ -52,6 +53,8 @@ import { mkdirSync } from 'node:fs';
 import { createIsolatedPiSettings, resolveIsolatedAgentDir } from './pi-isolation.ts';
 import { applyProviderEndpointEnv } from './provider-endpoint-env.ts';
 import { withChatGptModels } from '../../shared/src/config/chatgpt-oauth-catalog.ts';
+import { withGoogleModels } from '../../shared/src/config/google-catalog.ts';
+import { PI_PREFERRED_DEFAULTS } from '../../shared/src/config/llm-connections.ts';
 import { piRuntimeProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 import { homedir } from 'node:os';
 
@@ -647,6 +650,19 @@ function resolveOpenRouterApiKey(): string | undefined {
   return key || undefined;
 }
 
+/** Additional Google model IDs requested dynamically at runtime outside the initial catalog. */
+const extraGoogleModelIds = new Set<string>();
+
+function googleConnectionModels() {
+  if (initConfig?.piAuth?.provider !== 'google') return [];
+  const configured = initConfig?.customModels ?? [];
+  const extras: string[] = [];
+  if (initConfig?.model) extras.push(initConfig.model);
+  for (const id of extraGoogleModelIds) extras.push(id);
+  if (extras.length === 0) return configured;
+  return [...configured, ...extras];
+}
+
 function registerConfiguredOpenRouterModels(registry: PiModelRegistry): void {
   if (initConfig?.piAuth?.provider !== 'openrouter') return;
   const apiKey = resolveOpenRouterApiKey();
@@ -815,6 +831,10 @@ async function createAuthenticatedRuntime(): Promise<AuthenticatedRuntime> {
       const codexProvider = modelRuntime.getProvider('openai-codex');
       if (codexProvider && initConfig?.piAuth?.provider === 'openai-codex') {
         modelRuntime.registerNativeProvider(withChatGptModels(codexProvider, () => initConfig?.customModels));
+      }
+      const googleProvider = modelRuntime.getProvider('google');
+      if (googleProvider) {
+        modelRuntime.registerNativeProvider(withGoogleModels(googleProvider, googleConnectionModels));
       }
       const modelRegistry = new PiModelRegistry(modelRuntime);
 
@@ -1043,6 +1063,7 @@ async function ensureSession(): Promise<AgentSession> {
   applyContextMeterConnection();
   installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
   installFastServiceTier(session, () => initConfig?.fastMode);
+  installGoogleToolSchemaSanitizer(session);
   applyCompactionPolicy(session.model, true);
   piSession = session;
 
@@ -1627,6 +1648,9 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
     }
   };
 
+  const providerPreferredFallbacks = piAuthProvider
+    ? (PI_PREFERRED_DEFAULTS[piAuthProvider] ?? []).map((id) => (id.startsWith('pi/') ? id : `pi/${id}`))
+    : [];
   // Custom endpoints stay on custom-endpoint. Catalog fallbacks (gpt-5-mini,
   // Haiku) would send the retry somewhere else and leave the local worker idle.
   const fallbackCandidates = shouldPreferCustomEndpoint()
@@ -1639,6 +1663,7 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
         // The connection-configured miniModel is still tried via `initConfig.miniModel`.
         'pi/gpt-5-mini',
         initConfig.miniModel,
+        ...providerPreferredFallbacks,
         getDefaultSummarizationModel(),
       ].filter((candidate): candidate is string => !!candidate && !isDeniedMiniModelId(candidate, piAuthProvider));
 
@@ -2467,6 +2492,9 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       vlHighResolutionImages: msg.vlHighResolutionImages,
       imageMaxPixels: msg.imageMaxPixels,
     };
+    if (initConfig.piAuth?.provider !== 'google') {
+      extraGoogleModelIds.clear();
+    }
     applyContextMeterConnection();
     syncProviderEndpointEnv(initConfig);
 
@@ -2494,6 +2522,10 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
         registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), [entry]);
         piModel = piModelRegistry.find('custom-endpoint', entry.id) ?? undefined;
         debugLog(`[runtime_config] Dynamically registered custom endpoint model: ${entry.id}`);
+      } else if (!piModel && initConfig.piAuth?.provider === 'google' && !shouldPreferCustomEndpoint()) {
+        extraGoogleModelIds.add(msg.model);
+        piModel = resolveSessionPiModel(piModelRegistry, msg.model);
+        if (piModel) debugLog(`[runtime_config] Dynamically resolved live Google model: ${piModel.id}`);
       }
 
       if (!piModel) {
@@ -2535,6 +2567,10 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
     registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl!.trim(), [entry]);
     piModel = piModelRegistry.find('custom-endpoint', entry.id) ?? undefined;
     debugLog(`[set_model] Dynamically registered custom endpoint model: ${entry.id}`);
+  } else if (!piModel && initConfig?.piAuth?.provider === 'google' && !shouldPreferCustomEndpoint()) {
+    extraGoogleModelIds.add(msg.model);
+    piModel = resolveSessionPiModel(piModelRegistry, msg.model);
+    if (piModel) debugLog(`[set_model] Dynamically resolved live Google model: ${piModel.id}`);
   }
 
   if (!piModel) {

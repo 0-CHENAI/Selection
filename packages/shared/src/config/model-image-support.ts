@@ -45,7 +45,7 @@ export function usesBuiltInPiCatalogLookup(connection?: {
 }
 
 // Bounded tokens so `octopus`, `omnibox`, and `foo-vllm` are not treated as vision names.
-const VISION_TOKEN = /(?:^|[^a-z0-9])(?:opus|sonnet|haiku|claude|gemini|pixtral|internvl|omni|multimodal|vision|llama-4|gemma-3|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|qwen-vl|qwen2\.5-vl|qwen2-vl)(?:[^a-z0-9]|$)/
+const VISION_TOKEN = /(?:^|[^a-z0-9])(?:opus|sonnet|haiku|claude|gemini|pixtral|internvl|omni|multimodal|vision|llama-4|gemma-[34]|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|qwen-vl|qwen2\.5-vl|qwen2-vl)(?:[^a-z0-9]|$)/
 const VL_AFFIX = /(?:^|[.-])vl(?:[^a-z]|$)/
 
 /**

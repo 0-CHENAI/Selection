@@ -341,3 +341,176 @@ describe('piDriver.testConnection custom endpoints', () => {
     }
   });
 });
+
+describe('piDriver Google AI Studio', () => {
+  it('fetches live Google AI Studio models via GET /v1beta/models', async () => {
+    const originalFetch = globalThis.fetch;
+    let seenKey = '';
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      expect(String(input)).toBe('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000');
+      seenKey = (init?.headers as Record<string, string>)['x-goog-api-key'] ?? '';
+      return new Response(JSON.stringify({
+        models: [
+          {
+            name: 'models/gemini-4-neon',
+            displayName: 'Gemini 4 Neon',
+            inputTokenLimit: 1_048_576,
+            outputTokenLimit: 65_536,
+            supportedGenerationMethods: ['generateContent'],
+            thinking: true,
+          },
+          {
+            name: 'models/gemini-3.8-flash',
+            displayName: 'Gemini 3.8 Flash',
+            inputTokenLimit: 1_048_576,
+            outputTokenLimit: 65_536,
+            supportedGenerationMethods: ['generateContent'],
+            thinking: true,
+          },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await piDriver.fetchModels!({
+        connection: {
+          slug: 'google',
+          name: 'Google AI Studio',
+          providerType: 'pi',
+          authType: 'api_key',
+          piAuthProvider: 'google',
+          createdAt: Date.now(),
+        } as any,
+        credentials: { apiKey: 'AIza-live-test' },
+        timeoutMs: 5_000,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+
+      expect(seenKey).toBe('AIza-live-test');
+      expect(result.models.map((m) => m.id)).toEqual(['pi/gemini-4-neon', 'pi/gemini-3.8-flash']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('propagates live catalog failures, empty catalogs, and missing keys instead of returning the static SDK snapshot', async () => {
+    const originalFetch = globalThis.fetch;
+    const connection = {
+      slug: 'google',
+      name: 'Google AI Studio',
+      providerType: 'pi',
+      authType: 'api_key',
+      piAuthProvider: 'google',
+      createdAt: Date.now(),
+    } as any;
+
+    await expect(piDriver.fetchModels!({
+      connection,
+      credentials: {},
+      timeoutMs: 5_000,
+      hostRuntime: {} as never,
+      resolvedPaths: {} as never,
+    })).rejects.toThrow('API key is unavailable');
+
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+
+    try {
+      await expect(piDriver.fetchModels!({
+        connection,
+        credentials: { apiKey: 'AIza-offline' },
+        timeoutMs: 5_000,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      })).rejects.toThrow('offline');
+
+      globalThis.fetch = (async () => new Response(JSON.stringify({
+        models: [{ name: 'models/embedding-001', supportedGenerationMethods: ['embedContent'] }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+
+      await expect(piDriver.fetchModels!({
+        connection,
+        credentials: { apiKey: 'AIza-empty' },
+        timeoutMs: 5_000,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      })).rejects.toThrow('no chat-capable models');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('tests Google AI Studio API keys via GET /v1beta/models instead of a hardcoded model', async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ models: [{ name: 'models/gemini-4-neon' }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await piDriver.testConnection!({
+        provider: 'pi',
+        apiKey: 'AIza-valid-key',
+        model: 'pi/gemini-4-argon',
+        timeoutMs: 5_000,
+        connection: {
+          providerType: 'pi',
+          piAuthProvider: 'google',
+        },
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+
+      expect(result).toEqual({ success: true });
+      expect(urls).toEqual(['https://generativelanguage.googleapis.com/v1beta/models?pageSize=1']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('validates stored Google AI Studio connections and requests model refresh on success', async () => {
+    const originalFetch = globalThis.fetch;
+    let statusToReturn = 200;
+    let bodyToReturn = JSON.stringify({ models: [{ name: 'models/gemini-4-neon' }] });
+    globalThis.fetch = (async () => new Response(bodyToReturn, { status: statusToReturn })) as unknown as typeof fetch;
+
+    const connection = {
+      slug: 'google',
+      name: 'Google AI Studio',
+      providerType: 'pi',
+      authType: 'api_key',
+      piAuthProvider: 'google',
+      createdAt: Date.now(),
+    } as any;
+    const credentialManager = {
+      getLlmApiKey: async () => 'AIza-stored-key',
+    } as any;
+
+    try {
+      const ok = await piDriver.validateStoredConnection!({
+        slug: 'google',
+        connection,
+        credentialManager,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+      expect(ok).toEqual({ success: true, shouldRefreshModels: true });
+
+      statusToReturn = 400;
+      bodyToReturn = JSON.stringify({ error: { message: 'API key not valid.', details: [{ reason: 'API_KEY_INVALID' }] } });
+      const bad = await piDriver.validateStoredConnection!({
+        slug: 'google',
+        connection,
+        credentialManager,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+      expect(bad).toEqual({ success: false, error: 'Invalid API key' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

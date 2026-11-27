@@ -30,6 +30,7 @@ import {
 } from './model-context-window.ts';
 import type { CredentialManager } from '../credentials/manager.ts';
 import { isOrderGatewayUrl } from './order-gateway.ts';
+import { GOOGLE_PREFERRED_MODELS } from './google-catalog.ts';
 
 /** Stable fallback label when the OAuth token does not expose a known plan. */
 export const CHATGPT_OAUTH_CONNECTION_NAME = 'ChatGPT';
@@ -395,6 +396,21 @@ export function getSummarizationModel(
  * Skips models denied by {@link isDeniedMiniModelId} for the connection's
  * auth flavor.
  */
+const SMALL_MODEL_KEYWORD_PATTERNS: Record<string, RegExp> = {
+  haiku: /(?:^|[^a-z])haiku(?:[^a-z]|$)/,
+  mini: /(?:^|[^a-z])mini(?:[^a-z]|$)/,
+  flash: /(?:^|[^a-z])flash(?:[^a-z]|$)/,
+};
+
+function smallModelKeywordPattern(keyword: string): RegExp {
+  const cached = SMALL_MODEL_KEYWORD_PATTERNS[keyword];
+  if (cached) return cached;
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const compiled = new RegExp(`(?:^|[^a-z])${escaped}(?:[^a-z]|$)`);
+  SMALL_MODEL_KEYWORD_PATTERNS[keyword] = compiled;
+  return compiled;
+}
+
 function findSmallModel(
   connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
@@ -436,10 +452,11 @@ function findSmallModel(
   }
 
   if (keywords.length > 0) {
+    const patterns = keywords.map(smallModelKeywordPattern);
     const match = connection.models.find(m => {
       if (!isAllowedModel(m)) return false;
       const searchStr = toSearchStr(m);
-      return keywords.some(k => searchStr.includes(k));
+      return patterns.some(pattern => pattern.test(searchStr));
     });
     if (match) {
       return toId(match);
@@ -768,12 +785,9 @@ export const PI_PREFERRED_DEFAULTS: Record<string, string[]> = {
   openai: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3'],
   // ChatGPT subscription models are resolved against the OAuth catalog.
   'openai-codex': ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
-  // Stable models first so the connection-setup test (which uses
-  // getDefaultModelForConnection) lands on a reliable model.
-  // gemini-3-pro-preview and gemini-3.1-pro-preview are intermittently
-  // unresponsive on generateContent — verified against the live API in
-  // April 2026 — and are deliberately excluded from defaults.
-  google: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview'],
+  // Active Gemini 4 & 3.x models first. Legacy Gemini 2.5 models are scheduled
+  // for shutdown and already return 404 on newly created AI Studio API keys.
+  google: [...GOOGLE_PREFERRED_MODELS],
   deepseek: ['deepseek-v4-pro', 'deepseek-flash'],
   moonshotai: ['kimi-k3', 'kimi-k2.6'],
   'moonshotai-cn': ['kimi-k3', 'kimi-k2.6'],

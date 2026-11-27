@@ -275,7 +275,7 @@ export function fallbackThinkingCapability(modelId: string): ThinkingCapability 
   if (/gemini-3(\.1)?-(flash|flash-lite|flash-preview|flash-lite-preview)|gemini-3\.(5|6)-flash|gemini-flash/.test(id)) {
     return levelsCapability(['minimal', 'low', 'medium', 'high'], 'static')
   }
-  if (/gemini-3(\.1)?-pro|gemini-3\.(7|8)/.test(id)) return levelsCapability(['low', 'medium', 'high'], 'static')
+  if (/gemini-3(\.1)?-pro|gemini-3\.(7|8)|gemini-(?:[4-9]|[1-9]\d)/.test(id)) return levelsCapability(['low', 'medium', 'high'], 'static')
   if (id.startsWith('gemini-') || id.startsWith('gemma-')) return levelsCapability(['off', 'high'], 'static')
 
   if (/deepseek-(r1|reasoner)/.test(id)) return alwaysOn('static')

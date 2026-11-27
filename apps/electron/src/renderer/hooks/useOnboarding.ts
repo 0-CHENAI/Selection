@@ -145,10 +145,14 @@ function firstTokenFromModelList(value: string | undefined): string | undefined 
   return value.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean)[0]
 }
 
-function firstSetupTestModel(data: Pick<ApiKeySubmitData, 'models' | 'connectionDefaultModel'>): string | undefined {
+export function firstSetupTestModel(
+  data: Pick<ApiKeySubmitData, 'models' | 'connectionDefaultModel' | 'testModel'>,
+): string | undefined {
   const first = data.models?.[0]
   const raw = typeof first === 'string' ? first : first?.id
-  return firstTokenFromModelList(raw) ?? firstTokenFromModelList(data.connectionDefaultModel)
+  return firstTokenFromModelList(raw)
+    ?? firstTokenFromModelList(data.connectionDefaultModel)
+    ?? firstTokenFromModelList(data.testModel)
 }
 
 function isLoopbackEndpoint(baseUrl?: string): boolean {

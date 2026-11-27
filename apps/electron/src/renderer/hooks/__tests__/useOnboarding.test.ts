@@ -7,6 +7,7 @@ mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDo
 const {
   resolveSlugForMethod,
   apiSetupMethodToConnectionSetup,
+  firstSetupTestModel,
   BASE_SLUG_FOR_METHOD,
 } = await import('../useOnboarding')
 
@@ -165,3 +166,22 @@ describe('reauth slug resolution', () => {
     expect(slug).toBe('github-copilot')
   })
 })
+
+describe('firstSetupTestModel', () => {
+  it('uses validation-only testModel when models and connectionDefaultModel are omitted on credential-only edits', () => {
+    expect(firstSetupTestModel({
+      models: undefined,
+      connectionDefaultModel: undefined,
+      testModel: 'pi/gpt-5.5',
+    })).toBe('pi/gpt-5.5')
+  })
+
+  it('prefers explicit submitted models over testModel', () => {
+    expect(firstSetupTestModel({
+      models: ['deepseek-v4-pro'],
+      connectionDefaultModel: 'deepseek-v4-pro',
+      testModel: 'pi/gpt-5.5',
+    })).toBe('deepseek-v4-pro')
+  })
+})
+

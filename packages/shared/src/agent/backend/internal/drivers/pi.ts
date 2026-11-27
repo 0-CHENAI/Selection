@@ -12,6 +12,12 @@ import {
   fetchOpenRouterCatalog,
   openRouterCatalogToModelDefinitions,
 } from '../../../../config/openrouter-catalog.ts';
+import {
+  fetchGoogleAiStudioCatalog,
+  googleCatalogToModelDefinitions,
+  testGoogleAiStudioAccess,
+} from '../../../../config/google-catalog.ts';
+import { parseValidationError } from '../../../../config/llm-validation.ts';
 
 // ── Copilot model types ────────────────────────────────────────────────
 type RawCopilotModel = {
@@ -300,6 +306,22 @@ export const piDriver: ProviderDriver = {
       return { models };
     }
 
+    if (connection.piAuthProvider === 'google' && !connection.customEndpoint && connection.authType !== 'oauth') {
+      const apiKey = credentials.apiKey?.trim();
+      if (!apiKey) {
+        throw new Error('Google AI Studio API key is unavailable');
+      }
+      const live = await fetchGoogleAiStudioCatalog({
+        apiKey,
+        baseUrl: connection.baseUrl,
+        timeoutMs,
+      });
+      if (live.length === 0) {
+        throw new Error('Google AI Studio returned no chat-capable models');
+      }
+      return { models: googleCatalogToModelDefinitions(live) };
+    }
+
     if (connection.piAuthProvider === 'openrouter') {
       try {
         const live = await fetchOpenRouterCatalog({
@@ -344,6 +366,13 @@ export const piDriver: ProviderDriver = {
       return null;
     }
 
+    // Google AI Studio: validate the API key directly via GET /v1beta/models.
+    // Probing a single static model ID fails with 404 on fresh keys when Google
+    // retires legacy models (e.g. gemini-2.5-flash).
+    if (piAuthProvider === 'google') {
+      return testGoogleAiStudioAccess(args.apiKey, args.baseUrl, args.timeoutMs);
+    }
+
     // Resolve the model's API type from the Pi SDK registry.
     // For anthropic-messages providers, do a lightweight direct HTTP test
     // instead of spawning a full Pi subprocess (which can exceed the timeout).
@@ -378,5 +407,18 @@ export const piDriver: ProviderDriver = {
     }
     return testAnthropicCompatible(args.apiKey, baseUrl, bareModel, args.timeoutMs);
   },
-  validateStoredConnection: async () => ({ success: true }),
+  validateStoredConnection: async ({ slug, connection, credentialManager }) => {
+    if (connection.piAuthProvider === 'google' && !connection.customEndpoint && connection.authType !== 'none') {
+      const apiKey = await credentialManager.getLlmApiKey(slug);
+      if (!apiKey?.trim()) {
+        return { success: false, error: 'No API key configured' };
+      }
+      const result = await testGoogleAiStudioAccess(apiKey, connection.baseUrl, 15_000);
+      if (!result.success) {
+        return { success: false, error: parseValidationError(result.error || 'Validation failed') };
+      }
+      return { success: true, shouldRefreshModels: true };
+    }
+    return { success: true };
+  },
 };

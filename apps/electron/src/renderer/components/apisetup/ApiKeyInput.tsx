@@ -60,6 +60,7 @@ import {
   showCustomFormatPicker,
   bedrockModelFieldMode,
   orderModelFieldMode,
+  resolveApiKeyModelSubmission,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
   showsEndpointModelLimits,
@@ -112,6 +113,8 @@ export interface ApiKeySubmitData {
   apiKey: string
   baseUrl?: string
   connectionDefaultModel?: string
+  /** Saved model used only for connection validation on credential-only edits; never persisted. */
+  testModel?: string
   models?: SubmittedConnectionModel[]
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
@@ -885,15 +888,23 @@ export function ApiKeyInput({
       fallbackPiAuthProvider: effectivePiAuthProvider,
     })
 
+    const modelSubmission = resolveApiKeyModelSubmission({
+      isDefaultProviderPreset,
+      isPiApiKeyFlow,
+      isOrderPreset,
+      preserveSavedTestModel: Boolean(initialValues && activePreset === initialPreset),
+      parsedModels,
+      submittedModels,
+    })
+
     onSubmit({
       apiKey: apiKey.trim(),
       baseUrl: isUsingDefaultEndpoint ? undefined : effectiveBaseUrl,
-      connectionDefaultModel: parsedModels[0],
-      models: submittedModels.length > 0 ? submittedModels : undefined,
+      connectionDefaultModel: modelSubmission.connectionDefaultModel,
+      testModel: modelSubmission.testModel,
+      models: modelSubmission.models,
       piAuthProvider: resolvedPiAuthProvider,
-      modelSelectionMode: isPiApiKeyFlow
-        ? (parsedModels.length > 0 ? 'userDefined3Tier' : 'automaticallySyncedFromProvider')
-        : (isOrderPreset && parsedModels.length > 0 ? 'userDefined3Tier' : undefined),
+      modelSelectionMode: modelSubmission.modelSelectionMode,
       customEndpoint,
     })
   }
