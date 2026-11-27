@@ -8,9 +8,9 @@ const end = badges.indexOf('// Stack the translated labels', start)
 const unattended = badges.slice(start, end)
 
 describe('unattended mode toolbar button', () => {
-  it('uses an icon-only agent control instead of a notification bell and visible label', () => {
-    expect(unattended).toContain('<BotOff')
-    expect(unattended).toContain('<Bot')
+  it('uses an icon-only cloud control instead of a notification bell and visible label', () => {
+    expect(unattended).toContain('<CloudOff')
+    expect(unattended).toContain('<CloudUpload')
     expect(unattended).not.toContain('<Bell')
     expect(unattended).not.toContain('<BellRing')
     expect(unattended).not.toContain('whitespace-nowrap')

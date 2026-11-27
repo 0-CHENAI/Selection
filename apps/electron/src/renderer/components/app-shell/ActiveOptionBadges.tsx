@@ -7,7 +7,7 @@ import { applyOptimisticPermissionModeChange } from '@/lib/permission-mode-selec
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useMessagingPlatformRuntime, useWeixinNotificationAction } from '@/hooks/useMessagingPlatformRuntime'
 import { navigate, routes } from '@/lib/navigate'
-import { Bot, BotOff, Check, ChevronDown, FolderOpen } from 'lucide-react'
+import { Check, ChevronDown, CloudOff, CloudUpload, FolderOpen } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 import type { TerminalOverlayData } from './TaskActionMenu'
@@ -581,8 +581,8 @@ function UnattendedButton({ workspaceId }: { workspaceId: string }) {
           onClick={() => runtime.connected ? void setEnabled(!enabled) : navigate(routes.view.settings('messaging'))}
         >
           <span aria-hidden="true" className="grid size-3.5 shrink-0">
-            <BotOff className={cn(toolbarIconMotion, enabled && 'opacity-0 motion-safe:-rotate-12 motion-safe:scale-90')} />
-            <Bot className={cn(toolbarIconMotion, !enabled && 'opacity-0 motion-safe:rotate-12 motion-safe:scale-90')} />
+            <CloudOff className={cn(toolbarIconMotion, enabled && 'opacity-0 motion-safe:-rotate-12 motion-safe:scale-90')} />
+            <CloudUpload className={cn(toolbarIconMotion, !enabled && 'opacity-0 motion-safe:rotate-12 motion-safe:scale-90')} />
           </span>
         </button>
       </TooltipTrigger>
