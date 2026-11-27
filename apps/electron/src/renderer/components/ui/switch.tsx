@@ -22,6 +22,22 @@ const pendingUpdates = new Set<Promise<void>>()
 let frame = 0
 let nextSwitchId = 1
 let openOverlays = 0
+
+// Keyboard vs pointer interaction tracking. AppKit clicks on the native overlay
+// bypass Chromium's input pipeline entirely, so the browser's own :focus-visible
+// heuristics never observe the pointer interaction — a programmatic focus() after
+// a physical mouse click on the NSSwitch wrongly matches :focus-visible (Chromium
+// shows the ring when modality is unknown or keyboard). The native click IS pointer
+// input by definition, so the IPC click handler below marks it explicitly; real DOM
+// key/pointer events keep the rest of the modality state honest.
+let keyboardInteraction = false
+let modalityListenersAttached = false
+function ensureModalityListeners(): void {
+  if (modalityListenersAttached || typeof document === 'undefined') return
+  modalityListenersAttached = true
+  window.addEventListener('keydown', () => { keyboardInteraction = true }, true)
+  window.addEventListener('pointerdown', () => { keyboardInteraction = false }, true)
+}
 let clearingSwitches: Promise<void> | undefined
 
 function invalidateNativeSwitch(inst: NativeSwitchInstance): void {
@@ -129,8 +145,13 @@ function nativeSyncFrame(): void {
     const { button } = inst
     const rect = button.getBoundingClientRect()
     const { x, y, width, height } = rect
+    // Keyboard-focus fallback: when focus genuinely arrives from keyboard interaction,
+    // hide the native overlay so the web control's focus ring is visible and operable.
+    // Gated on tracked keyboard interaction rather than :focus-visible alone, which
+    // misfires after native mouse clicks (see modality note above).
+    const keyboardFocusFallback = keyboardInteraction && button.matches(':focus-visible')
     // Native views cannot be clipped by web scroll containers or layered under portals.
-    const visible = zoom === 1 && !overlayOpen && inst.fullyVisible && !button.matches(':focus-visible') &&
+    const visible = zoom === 1 && !overlayOpen && inst.fullyVisible && !keyboardFocusFallback &&
       button.checkVisibility({ visibilityProperty: true }) &&
       isSwitchExposed(button, rect)
     const on = button.getAttribute('aria-checked') === 'true'
@@ -164,6 +185,7 @@ const Switch = React.forwardRef<HTMLButtonElement, React.ComponentPropsWithoutRe
     const button = ref.current
     const api = window.nativeSwitch
     if (!button || !api?.available) return
+    ensureModalityListeners()
     const id = nextSwitchId++
     const observer = new IntersectionObserver(([entry]) => {
       inst.fullyVisible = entry.isIntersecting && entry.intersectionRatio === 1
@@ -172,6 +194,10 @@ const Switch = React.forwardRef<HTMLButtonElement, React.ComponentPropsWithoutRe
     const unsubscribeClick = api.onClick(id, () => {
       if (!button.isConnected || button.disabled || openOverlays || clearingSwitches ||
           api.getZoomFactor() !== 1 || isOverlayOpen() || !isSwitchExposed(button, button.getBoundingClientRect())) return
+      // A physical click on the NSSwitch is pointer input even though Chromium
+      // never sees it — record the modality before focusing so the programmatic
+      // focus cannot be mistaken for keyboard focus.
+      keyboardInteraction = false
       button.focus({ preventScroll: true })
       if (button.isConnected) button.click()
       // The Radix button is authoritative, including when its click or change is rejected.
