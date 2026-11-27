@@ -22,7 +22,16 @@ export interface LlmValidationResult {
 
 export function parseValidationError(msg: string): string {
   const lower = msg.toLowerCase();
-  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid api key')) {
+  if (lower.includes('api_key_expired') || lower.includes('api key expired') || lower.includes('api key has expired')) {
+    return 'API key has expired. Create a new key in Google AI Studio.';
+  }
+  if (
+    lower.includes('401')
+    || lower.includes('unauthorized')
+    || lower.includes('invalid api key')
+    || lower.includes('api_key_invalid')
+    || lower.includes('api key not valid')
+  ) {
     return 'Invalid API key';
   }
   if (lower.includes('403')) {

@@ -166,6 +166,21 @@ describe('getDefaultModelForConnection', () => {
     }
   })
 
+  it('Pi google defaults to active Gemini 4 / 3.x models instead of deprecated gemini-2.5-flash', () => {
+    const defaultModel = getDefaultModelForConnection('pi', 'google')
+    const models = getDefaultModelsForConnection('pi', 'google')
+    const modelIds = models.map(model => typeof model === 'string' ? model : model.id)
+    expect(defaultModel).toBe('pi/gemini-4-argon')
+    expect(modelIds[0]).toBe(defaultModel)
+    expect(defaultModel).not.toBe('pi/gemini-2.5-flash')
+    expect(getMiniModel({
+      providerType: 'pi',
+      piAuthProvider: 'google',
+      defaultModel,
+      models,
+    })).toBe('pi/gemini-3.8-flash')
+  })
+
   it('returns empty string for pi_compat (dynamic provider)', () => {
     const defaultModel = getDefaultModelForConnection('pi_compat')
     expect(defaultModel).toBe('')

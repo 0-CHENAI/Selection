@@ -8,7 +8,11 @@
 
 import { createSearchSignal, normalizeSearchUrl, type WebSearchProvider, type WebSearchResult } from '../types.ts';
 
-const GROUNDING_MODEL = 'gemini-2.5-flash';
+const GROUNDING_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+  'gemini-3.5-flash',
+] as const;
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 interface GroundingChunk {
@@ -23,27 +27,46 @@ interface GroundingMetadata {
 
 export class GoogleSearchProvider implements WebSearchProvider {
   name = 'Google';
+  private preferredModelIndex = 0;
 
   constructor(private apiKey: string) {}
 
   async search(query: string, count: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
-    const url = `${API_BASE}/${GROUNDING_MODEL}:generateContent`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': this.apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: query }] }],
-        tools: [{ googleSearch: {} }],
-      }),
-      signal: createSearchSignal(signal),
-    });
+    let response: Response | undefined;
+    let lastErrorText = '';
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Google Search failed (HTTP ${response.status}): ${errorText}`);
+    for (let i = this.preferredModelIndex; i < GROUNDING_MODELS.length; i += 1) {
+      const model = GROUNDING_MODELS[i]!;
+      const url = `${API_BASE}/${model}:generateContent`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: query }] }],
+          tools: [{ googleSearch: {} }],
+        }),
+        signal: createSearchSignal(signal),
+      });
+
+      if (res.ok) {
+        this.preferredModelIndex = i;
+        response = res;
+        break;
+      }
+
+      lastErrorText = await res.text();
+      const hasNext = i < GROUNDING_MODELS.length - 1;
+      if (res.status === 404 && hasNext) {
+        continue;
+      }
+      throw new Error(`Google Search failed (HTTP ${res.status}): ${lastErrorText}`);
+    }
+
+    if (!response) {
+      throw new Error(`Google Search failed: ${lastErrorText}`);
     }
 
     const data = (await response.json()) as any;

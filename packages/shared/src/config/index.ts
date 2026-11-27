@@ -9,6 +9,7 @@ export * from './connection-display-name.ts';
 export * from './llm-validation.ts';
 export * from './models.ts';
 export * from './models-pi.ts';
+export * from './google-catalog.ts';
 export * from './openrouter-catalog.ts';
 export * from './pi-provider-picker-models.ts';
 export * from './model-fetcher.ts';

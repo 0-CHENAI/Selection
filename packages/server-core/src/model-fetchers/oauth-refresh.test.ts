@@ -30,6 +30,17 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
       connection('race-provider', 'xai'),
       connection('invalid-default', 'xai'),
       connection('race-copilot-credentials', 'github-copilot', 'oauth', ['pi/policy-cached']),
+      {
+        slug: 'google-live',
+        name: 'Google AI Studio',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'google',
+        models: [{ id: 'pi/old', name: 'Old', shortName: 'Old', description: '', provider: 'pi', contextWindow: 100000, imageSupport: 'off', supportsImages: false, thinkingSource: 'explicit', thinkingMode: 'unsupported' }],
+        defaultModel: 'pi/old',
+        modelSelectionMode: 'automaticallySyncedFromProvider',
+        createdAt: 1,
+      },
     ]
     writeFileSync(configPath, JSON.stringify({
       workspaces: [{ id: 'ws', name: 'ws', rootPath: workspace, createdAt: 1 }],
@@ -101,6 +112,15 @@ it('refreshes OAuth catalogs, preserves API-key selections and keeps Copilot cac
     expect(stored.find((entry: { slug: string }) => entry.slug === 'race-provider').models).toEqual(['pi/old'])
     expect(stored.find((entry: { slug: string }) => entry.slug === 'invalid-default').defaultModel).toBe('pi/new')
     expect(stored.find((entry: { slug: string }) => entry.slug === 'race-copilot-credentials').models.map((model: { id: string }) => model.id)).toEqual(['pi/old', 'pi/new'])
+    const googleLive = stored.find((entry: { slug: string }) => entry.slug === 'google-live')
+    expect(googleLive.models.map((model: { id: string }) => model.id)).toEqual(['pi/old', 'pi/new'])
+    expect(googleLive.models[0]).toMatchObject({
+      id: 'pi/old',
+      supportsImages: false,
+      imageSupport: 'off',
+      thinkingSource: 'explicit',
+      thinkingMode: 'unsupported',
+    })
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

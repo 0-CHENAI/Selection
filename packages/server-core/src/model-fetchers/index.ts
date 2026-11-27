@@ -32,9 +32,16 @@ function hasAccountCatalog(connection: LlmConnection): boolean {
     && (connection.piAuthProvider === 'openai-codex' || connection.piAuthProvider === 'github-copilot')
 }
 
-// Model availability belongs to the account. Keep local overrides only for IDs
+function hasLiveGoogleCatalog(connection: LlmConnection): boolean {
+  return connection.providerType === 'pi'
+    && connection.authType !== 'oauth'
+    && connection.piAuthProvider === 'google'
+    && !connection.customEndpoint
+}
+
+// Model availability belongs to the provider. Keep local overrides only for IDs
 // that are still visible, using the settings reread after the network request.
-function mergeChatGptModelSettings(models: ModelDefinition[], stored: LlmConnection['models']): ModelDefinition[] {
+function mergePersistedModelSettings(models: ModelDefinition[], stored: LlmConnection['models']): ModelDefinition[] {
   const previous = new Map((stored ?? []).filter((item): item is ModelDefinition => typeof item !== 'string')
     .map(item => [item.id, item]))
   return models.map(model => {
@@ -146,11 +153,15 @@ class ModelRefreshService {
     }
 
     const accountCatalog = hasAccountCatalog(connection)
-    if (newModels && accountCatalog) {
+    const liveGoogleCatalog = hasLiveGoogleCatalog(connection)
+    if (newModels && (accountCatalog || liveGoogleCatalog)) {
       try {
         const currentCredentials = await this.getCredentials(slug, connection)
-        if ((usedCredentials?.oauthRefreshToken || usedCredentials?.oauthAccessToken)
-          !== (currentCredentials.oauthRefreshToken || currentCredentials.oauthAccessToken)) {
+        const credentialsChanged = accountCatalog
+          ? (usedCredentials?.oauthRefreshToken || usedCredentials?.oauthAccessToken)
+            !== (currentCredentials.oauthRefreshToken || currentCredentials.oauthAccessToken)
+          : usedCredentials?.apiKey !== currentCredentials.apiKey
+        if (credentialsChanged) {
           handlerLog.info(`Model refresh [${slug}]: credentials changed during fetch; discarding result`)
           return
         }
@@ -175,10 +186,15 @@ class ModelRefreshService {
 
     const hasLiveChatGptCatalog = accountCatalog && connection.piAuthProvider === 'openai-codex' && newModels !== null
     if (hasLiveChatGptCatalog && newModels) {
-      newModels = mergeChatGptModelSettings(newModels, connection.models)
+      newModels = mergePersistedModelSettings(newModels, connection.models)
       const validDefault = newModels.length ? newModels.some(model => model.id === connection.defaultModel) : !connection.defaultModel
       if (validDefault && connection.chatgptCatalogFetchedAt !== undefined
         && connection.modelSelectionMode === 'automaticallySyncedFromProvider' && isDeepStrictEqual(connection.models, newModels)) return
+    }
+    if (liveGoogleCatalog && newModels && newModels.length > 0) {
+      newModels = mergePersistedModelSettings(newModels, connection.models)
+      const validDefault = !!connection.defaultModel && newModels.some(model => model.id === connection.defaultModel)
+      if (validDefault && isDeepStrictEqual(connection.models, newModels)) return
     }
     const chatgptLive = hasLiveChatGptCatalog ? { chatgptCatalogFetchedAt: Date.now() } : {}
 

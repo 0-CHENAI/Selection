@@ -1063,4 +1063,45 @@ describe('generic API-key connection names', () => {
     expect(names['pi-api-key-3']).toBe('工作 DeepSeek')
     expect(names['pi-api-key-4']).toBe('Selection Backend (OpenAI)')
   })
+
+  it('preserves live Google AI Studio models in both auto-synced and userDefined3Tier modes', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const stamp = Date.now()
+    const liveModels = ['pi/gemini-4-neon', 'pi/gemini-4-carbon', 'pi/gemini-4-hydrogen']
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'google-auto',
+        name: 'Google AI Studio',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'google',
+        modelSelectionMode: 'automaticallySyncedFromProvider',
+        createdAt: stamp,
+        models: liveModels,
+        defaultModel: 'pi/gemini-4-hydrogen',
+      },
+      {
+        slug: 'google-pinned',
+        name: 'Google AI Studio 2',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'google',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: stamp,
+        models: liveModels,
+        defaultModel: 'pi/gemini-4-neon',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const autoConn = findConnection(configPath, 'google-auto')
+    expect(getModelIds(autoConn)).toEqual(liveModels)
+    expect(autoConn.defaultModel).toBe('pi/gemini-4-hydrogen')
+
+    const pinnedConn = findConnection(configPath, 'google-pinned')
+    expect(getModelIds(pinnedConn)).toEqual(liveModels)
+    expect(pinnedConn.defaultModel).toBe('pi/gemini-4-neon')
+  })
 })

@@ -1840,6 +1840,7 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       // models are enabled), so force automaticallySyncedFromProvider regardless
       // of what inferModelSelectionMode would compute from stale static SDK data.
       const isCopilot = connection.piAuthProvider === 'github-copilot';
+      const isGoogleLive = connection.piAuthProvider === 'google';
       // OAuth model availability is provider-managed, including connections
       // saved by older versions with a user-defined subset.
       const restoreCodexCatalog = shouldRestoreOpenAiCodexCatalogSync(connection, providerDefaultModelIds);
@@ -1860,12 +1861,12 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
 
       if (mode === 'automaticallySyncedFromProvider') {
         const currentIds = normalizeModelIds(connection.models);
-        // Keep a saved account catalog when the bundled SDK differs.
-        if (!preserveAccountCatalog && (!isCopilot || currentIds.length === 0) && providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
+        // Keep a saved account / live provider catalog when the bundled SDK differs.
+        if (!preserveAccountCatalog && ((!isCopilot && !isGoogleLive) || currentIds.length === 0) && providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
           connection.models = defaultModels;
           changed = true;
         }
-      } else {
+      } else if (!isGoogleLive) {
         const currentIds = normalizeModelIds(connection.models);
         if (providerDefaultModelIds.length > 0) {
           const allowedIds = new Set(providerDefaultModelIds);
@@ -1902,6 +1903,15 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
             connection.models = defaultModels;
             changed = true;
           }
+        }
+      } else {
+        // Live Google AI Studio connections can contain models newer than the
+        // bundled Pi SDK snapshot (e.g. Gemini 4 Neon/Carbon/Hydrogen). Never
+        // prune them against the static allowlist — only backfill when empty.
+        const currentIds = normalizeModelIds(connection.models);
+        if (currentIds.length === 0 && defaultModels.length > 0) {
+          connection.models = defaultModels;
+          changed = true;
         }
       }
     }
