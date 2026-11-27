@@ -18,6 +18,14 @@ const playgroundMessagingState = {
     state: 'disconnected',
     updatedAt: Date.now(),
   } as MessagingPlatformRuntimeInfo,
+  weixinRuntime: {
+    platform: 'weixin',
+    configured: true,
+    connected: true,
+    state: 'connected',
+    notifyOnCompletion: false,
+    updatedAt: Date.now(),
+  } as MessagingPlatformRuntimeInfo,
   bindings: [] as MessagingBinding[],
   owners: [] as MessagingPlatformOwnerInfo[],
   pending: [] as MessagingPendingSenderInfo[],
@@ -32,6 +40,12 @@ const PLAYGROUND_WORKSPACE_ID = 'playground-workspace'
 function emitBindingChanged() {
   for (const listener of playgroundMessagingState.bindingListeners) {
     listener(PLAYGROUND_WORKSPACE_ID)
+  }
+}
+
+function emitPlatformStatus(platform: string, status: MessagingPlatformRuntimeInfo) {
+  for (const listener of playgroundMessagingState.platformListeners) {
+    listener(PLAYGROUND_WORKSPACE_ID, platform, status)
   }
 }
 
@@ -266,13 +280,29 @@ export const mockElectronAPI = {
     console.log('[Playground] getMessagingConfig called')
     return {
       enabled: true,
-      platforms: { lark: { enabled: playgroundMessagingState.runtime.configured } },
-      runtime: { lark: playgroundMessagingState.runtime },
+      platforms: {
+        lark: { enabled: playgroundMessagingState.runtime.configured },
+        weixin: { enabled: playgroundMessagingState.weixinRuntime.configured },
+      },
+      runtime: {
+        lark: playgroundMessagingState.runtime,
+        weixin: playgroundMessagingState.weixinRuntime,
+      },
     }
   },
 
   updateMessagingConfig: async (config: Record<string, unknown>) => {
     console.log('[Playground] updateMessagingConfig called:', config)
+    const platforms = config.platforms as Record<string, { notifyOnCompletion?: unknown } | undefined> | undefined
+    const notifyOnCompletion = platforms?.weixin?.notifyOnCompletion
+    if (typeof notifyOnCompletion === 'boolean') {
+      playgroundMessagingState.weixinRuntime = {
+        ...playgroundMessagingState.weixinRuntime,
+        notifyOnCompletion,
+        updatedAt: Date.now(),
+      }
+      emitPlatformStatus('weixin', playgroundMessagingState.weixinRuntime)
+    }
   },
 
   disconnectMessagingPlatform: async (platform: string) => {
