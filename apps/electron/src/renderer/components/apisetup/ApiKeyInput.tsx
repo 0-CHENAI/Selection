@@ -113,6 +113,8 @@ export interface ApiKeySubmitData {
   apiKey: string
   baseUrl?: string
   connectionDefaultModel?: string
+  /** Saved model used only for connection validation on credential-only edits; never persisted. */
+  testModel?: string
   models?: SubmittedConnectionModel[]
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
@@ -890,6 +892,7 @@ export function ApiKeyInput({
       isDefaultProviderPreset,
       isPiApiKeyFlow,
       isOrderPreset,
+      preserveSavedTestModel: Boolean(initialValues && activePreset === initialPreset),
       parsedModels,
       submittedModels,
     })
@@ -898,6 +901,7 @@ export function ApiKeyInput({
       apiKey: apiKey.trim(),
       baseUrl: isUsingDefaultEndpoint ? undefined : effectiveBaseUrl,
       connectionDefaultModel: modelSubmission.connectionDefaultModel,
+      testModel: modelSubmission.testModel,
       models: modelSubmission.models,
       piAuthProvider: resolvedPiAuthProvider,
       modelSelectionMode: modelSubmission.modelSelectionMode,

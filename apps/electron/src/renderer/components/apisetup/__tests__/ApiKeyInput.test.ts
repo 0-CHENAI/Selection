@@ -339,17 +339,35 @@ it('preserves unspecified thinking capability and distinguishes explicitly disab
 })
 
 describe('resolveApiKeyModelSubmission', () => {
-  it('omits hidden preloaded models and modelSelectionMode for default-endpoint presets like Google', () => {
+  it('omits hidden preloaded models and modelSelectionMode for default-endpoint presets while keeping testModel on same-preset edits', () => {
     expect(resolveApiKeyModelSubmission({
       isDefaultProviderPreset: true,
       isPiApiKeyFlow: true,
       isOrderPreset: false,
-      parsedModels: ['pi/gemini-3.5-pro', 'pi/gemini-3-flash'],
-      submittedModels: ['pi/gemini-3.5-pro', 'pi/gemini-3-flash'],
+      preserveSavedTestModel: true,
+      parsedModels: ['pi/gpt-5.5', 'pi/gpt-5'],
+      submittedModels: ['pi/gpt-5.5', 'pi/gpt-5'],
     })).toEqual({
       connectionDefaultModel: undefined,
       models: undefined,
       modelSelectionMode: undefined,
+      testModel: 'pi/gpt-5.5',
+    })
+  })
+
+  it('does not reuse a saved testModel when creating a new connection or switching presets', () => {
+    expect(resolveApiKeyModelSubmission({
+      isDefaultProviderPreset: true,
+      isPiApiKeyFlow: true,
+      isOrderPreset: false,
+      preserveSavedTestModel: false,
+      parsedModels: ['pi/gpt-5.5'],
+      submittedModels: ['pi/gpt-5.5'],
+    })).toEqual({
+      connectionDefaultModel: undefined,
+      models: undefined,
+      modelSelectionMode: undefined,
+      testModel: undefined,
     })
   })
 
@@ -364,6 +382,7 @@ describe('resolveApiKeyModelSubmission', () => {
       connectionDefaultModel: 'deepseek-v4-pro',
       models: ['deepseek-v4-pro'],
       modelSelectionMode: 'userDefined3Tier',
+      testModel: undefined,
     })
 
     expect(resolveApiKeyModelSubmission({
@@ -376,6 +395,7 @@ describe('resolveApiKeyModelSubmission', () => {
       connectionDefaultModel: undefined,
       models: undefined,
       modelSelectionMode: 'automaticallySyncedFromProvider',
+      testModel: undefined,
     })
   })
 })
