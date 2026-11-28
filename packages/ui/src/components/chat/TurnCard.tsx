@@ -3166,6 +3166,7 @@ export function ResponseCard({
                   key={messageId ?? revealIdentity}
                   artifacts={deliveredArtifacts}
                   versions={artifactVersions}
+                  responseText={responseText}
                   onOpenFile={onOpenFile}
                   onOpenArtifact={onOpenArtifact}
                   anchors={artifactAnchors}

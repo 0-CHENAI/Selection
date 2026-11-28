@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { isSessionScratchPath, localArtifactLinks } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
 import { compactArtifactVersionSummary } from '@craft-agent/core/utils'
-import { ArtifactVersions, sameArtifactLocation, type ArtifactRecord } from './artifact-versions'
+import { ArtifactLocationMap, ArtifactLocationSet, ArtifactVersions, canonicalLocation, type ArtifactRecord } from './artifact-versions'
 import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from './artifact-candidate-inventory'
 
 /** Use the agent's delivered prose as the version title, never the user's request. */
@@ -113,7 +113,7 @@ export class ConversationArtifactVersions {
   private pendingWrites = new Set<string>()
   /** Bytes observed before this turn's edits. Opening a file does not move this snapshot. */
   private baselines = new Map<string, { artifactId: string; versionId: string; ordinal: number }>()
-  constructor(private store: ArtifactVersions, private bases: string[], private authorize: (path: string) => Promise<string>,
+  constructor(readonly store: ArtifactVersions, private bases: string[], private authorize: (path: string) => Promise<string>,
     private onFailure: () => void, private turnStartedAt = Date.now()) {}
 
   private writtenThisTurn(path: string): boolean {
@@ -124,13 +124,14 @@ export class ConversationArtifactVersions {
     return Math.max(file.birthtimeMs, file.mtimeMs) >= this.turnStartedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS
   }
 
-  async track(markdown: string): Promise<void> {
-    for (const path of localArtifactLinks(markdown)) await this.trackPath(path)
+  async track(markdown: string, authorizeOverride?: (path: string) => Promise<string>): Promise<void> {
+    for (const path of localArtifactLinks(markdown)) await this.trackPath(path, authorizeOverride)
   }
-  async trackPath(path: string): Promise<void> {
+  async trackPath(path: string, authorizeOverride?: (path: string) => Promise<string>): Promise<void> {
+    const authorize = authorizeOverride ?? this.authorize
     for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
       try {
-        const safe = await this.authorize(candidate)
+        const safe = await authorize(candidate)
         if (isSessionScratchPath(safe)) continue
         if (this.paths.has(safe)) return
         if (!existsSync(safe)) { this.pendingWrites.add(safe); continue }
@@ -147,60 +148,148 @@ export class ConversationArtifactVersions {
       } catch { this.onFailure() }
     }
   }
-  async capture(markdown: string, sourceRunId: string, aiTitle?: string, changedPaths: readonly string[] = [], includeAnswerLinks = true, excludedPaths: readonly string[] = []): Promise<ArtifactDeliveryRef[]> {
+  async capture(markdown: string, sourceRunId: string, aiTitle?: string, changedPaths: readonly string[] = [], includeAnswerLinks = true, excludedPaths: readonly string[] = [], authorizeOverride?: (path: string) => Promise<string>): Promise<ArtifactDeliveryRef[]> {
+    const authorize = authorizeOverride ?? this.authorize
     const title = suppliedVersionTitle(aiTitle) ?? artifactVersionTitle(markdown)
     const deliveries = new Map<string, string>()
     const writtenPaths = [...changedPaths, ...this.pendingWrites]
-    const excluded = (path: string) => excludedPaths.some(file => sameArtifactLocation(file, path))
-    // A link can cite an unchanged source file. Only add untracked files that
-    // appeared during this turn; known files are compared against their baseline.
+    const excludedLocations = new ArtifactLocationSet(excludedPaths)
+    const excluded = (path: string) => excludedLocations.size > 0 && excludedLocations.has(path)
+    const writtenByLocation = new ArtifactLocationMap<string>()
+    for (const path of writtenPaths) writtenByLocation.setIfAbsent(path, path)
+
+    // Phase 1: authorize all candidate and tracked paths asynchronously before
+    // taking the synchronous registry lock once for the whole batch.
+    const authorizedCandidates: Array<{ safe: string; canonicalSafe: string; originalPath: string; changedPath?: string }> = []
+    const seenCandidateLocations = new ArtifactLocationSet()
+    const authorizedCanonicalByPath = new Map<string, string>()
+    const seenInputPaths = new Set<string>()
     for (const path of [...(includeAnswerLinks ? localArtifactLinks(markdown) : []), ...writtenPaths]) {
+      if (seenInputPaths.has(path)) continue
+      seenInputPaths.add(path)
       const candidates = isAbsolute(path) ? [path] : this.bases.map(base => join(base, path))
       for (const candidate of candidates) {
         try {
-          const safe = await this.authorize(candidate)
+          const safe = await authorize(candidate)
           if (isSessionScratchPath(safe) || excluded(safe)) continue
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
-          const existing = this.store.findByPath(safe)
-          const changedPath = writtenPaths.find(path => sameArtifactLocation(path, safe))
-          if (!existing && !changedPath && !this.writtenThisTurn(safe)) break
-          // A file tracked before this turn can be atomically replaced by an
-          // editor without becoming a new document. Untracked replacements
-          // instead start their own history at the same path.
-          const baseline = this.baselines.get(safe)
-          const record = baseline ? this.store.read(baseline.artifactId)
-            : existing ?? this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
-          this.paths.add(record.path)
-          deliveries.set(record.path, changedPath ?? path)
+          const canonicalSafe = canonicalLocation(safe)
+          authorizedCanonicalByPath.set(safe, canonicalSafe)
+          authorizedCanonicalByPath.set(canonicalSafe, canonicalSafe)
+          if (!seenCandidateLocations.has(safe)) {
+            seenCandidateLocations.add(safe)
+            const changedPath = writtenByLocation.get(safe)
+            authorizedCandidates.push({ safe, canonicalSafe, originalPath: path, changedPath })
+          }
           break
         } catch { this.onFailure() }
       }
     }
-    const result: ArtifactDeliveryRef[] = []
+
+    const authFailedTracked = new Set<string>()
     for (const path of this.paths) {
+      if (authorizedCanonicalByPath.has(path)) continue
+      if (!existsSync(path) || !lstatSync(path).isFile()) continue
       try {
-        const tracked = this.baselines.get(path)
-        const record = tracked ? this.store.read(tracked.artifactId) : this.store.findByPath(path)
-        if (!record) continue
-        const baseline = this.baselines.get(record.path)
-        const published = deliveries.get(record.path) ?? record.path
-        if (isSessionScratchPath(record.path) || isSessionScratchPath(published) || excluded(record.path) || excluded(published)) continue
-        // The path was authorized when it was tracked. A deleted file can no
-        // longer be canonicalized by a fresh authorization.
-        if (!existsSync(path) || !lstatSync(path).isFile()) {
-          if (baseline) result.push({ path: published, artifactId: record.id, versionId: baseline.versionId, ordinal: baseline.ordinal, change: 'deleted' })
-          continue
-        }
-        await this.authorize(path)
-        const after = this.store.capture(record.id, sourceRunId, title, title ? 'assistant' : undefined)
-        const current = after.versions.find(version => version.id === after.currentVersion)!
-        const restored = after.lastRestore?.versionId === current.id && after.lastRestore.sourceRunId === sourceRunId
-        if (baseline?.versionId === current.id && !restored) continue
-        if (!baseline && current.sourceRunId !== sourceRunId && !restored) continue
-        const change = restored || current.restoredFrom ? 'restored' : current.ordinal === 1 ? 'created' : 'modified'
-        result.push({ path: published, artifactId: record.id, versionId: current.id, ordinal: current.ordinal!, change })
-      } catch { this.onFailure() }
+        const safe = await authorize(path)
+        const canonicalSafe = canonicalLocation(safe)
+        authorizedCanonicalByPath.set(path, canonicalSafe)
+        authorizedCanonicalByPath.set(canonicalSafe, canonicalSafe)
+      } catch {
+        authFailedTracked.add(path)
+      }
     }
-    return result
+
+    // Re-verify synchronously right before reading bytes so a symlink swap on a
+    // parent directory between Phase 1 authorization and Phase 2 capture cannot
+    // redirect the snapshot outside the authorized location.
+    const assertStillAuthorized = (path: string, expectedCanonical: string): void => {
+      if (lstatSync(path).isSymbolicLink() || !lstatSync(path).isFile()) {
+        throw new Error('Artifact path changed to non-regular file after authorization')
+      }
+      if (canonicalLocation(path) !== expectedCanonical) {
+        throw new Error('Artifact path redirected after authorization')
+      }
+    }
+
+    // Phase 2: batch registration and snapshot capture under a single registry lock.
+    return this.store.withRegistryLock(() => {
+      const freshlyRegistered = new Map<string, ArtifactRecord>()
+      // A link can cite an unchanged source file. Only add untracked files that
+      // appeared during this turn; known files are compared against their baseline.
+      for (const { safe, canonicalSafe, originalPath, changedPath } of authorizedCandidates) {
+        try {
+          if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
+          assertStillAuthorized(safe, canonicalSafe)
+          const existing = this.store.findByPath(safe)
+          if (!existing && !changedPath && !this.writtenThisTurn(safe)) continue
+          // A file tracked before this turn can be atomically replaced by an
+          // editor without becoming a new document. Untracked replacements
+          // instead start their own history at the same path.
+          const baseline = this.baselines.get(canonicalSafe) ?? this.baselines.get(safe)
+          let record: ArtifactRecord
+          if (baseline) {
+            record = this.store.read(baseline.artifactId)
+          } else if (existing) {
+            record = existing
+          } else {
+            record = this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
+            const first = record.versions[0]
+            if (
+              !record.previousPaths?.length
+              && record.versions.length === 1
+              && first
+              && first.id === record.currentVersion
+              && first.sourceRunId === sourceRunId
+            ) {
+              freshlyRegistered.set(record.path, record)
+            }
+          }
+          this.paths.add(record.path)
+          deliveries.set(record.path, changedPath ?? originalPath)
+        } catch { this.onFailure() }
+      }
+
+      const result: ArtifactDeliveryRef[] = []
+      for (const path of this.paths) {
+        try {
+          if (authFailedTracked.has(path)) {
+            this.onFailure()
+            continue
+          }
+          const fresh = freshlyRegistered.get(path)
+          if (fresh) {
+            const published = deliveries.get(fresh.path) ?? fresh.path
+            if (isSessionScratchPath(fresh.path) || isSessionScratchPath(published) || excluded(fresh.path) || excluded(published)) continue
+            const current = fresh.versions[0]!
+            result.push({ path: published, artifactId: fresh.id, versionId: current.id, ordinal: current.ordinal!, change: 'created' })
+            continue
+          }
+          const tracked = this.baselines.get(path)
+          const record = tracked ? this.store.read(tracked.artifactId) : this.store.findByPath(path)
+          if (!record) continue
+          const baseline = this.baselines.get(record.path)
+          const published = deliveries.get(record.path) ?? record.path
+          if (isSessionScratchPath(record.path) || isSessionScratchPath(published) || excluded(record.path) || excluded(published)) continue
+          // The path was authorized when it was tracked. A deleted file can no
+          // longer be canonicalized by a fresh authorization.
+          if (!existsSync(path) || !lstatSync(path).isFile()) {
+            if (baseline) result.push({ path: published, artifactId: record.id, versionId: baseline.versionId, ordinal: baseline.ordinal, change: 'deleted' })
+            continue
+          }
+          const expectedCanonical = authorizedCanonicalByPath.get(record.path) ?? authorizedCanonicalByPath.get(path)
+          if (!expectedCanonical) throw new Error('Artifact path was not authorized for capture')
+          assertStillAuthorized(record.path, expectedCanonical)
+          const after = this.store.capture(record.id, sourceRunId, title, title ? 'assistant' : undefined)
+          const current = after.versions.find(version => version.id === after.currentVersion)!
+          const restored = after.lastRestore?.versionId === current.id && after.lastRestore.sourceRunId === sourceRunId
+          if (baseline?.versionId === current.id && !restored) continue
+          if (!baseline && current.sourceRunId !== sourceRunId && !restored) continue
+          const change = restored || current.restoredFrom ? 'restored' : current.ordinal === 1 ? 'created' : 'modified'
+          result.push({ path: published, artifactId: record.id, versionId: current.id, ordinal: current.ordinal!, change })
+        } catch { this.onFailure() }
+      }
+      return result
+    })
   }
 }

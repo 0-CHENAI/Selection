@@ -7,11 +7,33 @@ type Fingerprint = { size: bigint; mtimeNs: bigint; ctimeNs: bigint }
 // Windows wall-clock ticks can lead NTFS timestamps by more than 2 ms.
 export const ARTIFACT_WRITE_CLOCK_SKEW_MS = process.platform === 'win32' ? 32 : 2
 
+/** Tool, dependency and build cache directories are never user-facing deliverables. */
+const IGNORED_SCAN_DIRS = new Set([
+  '.git',
+  'node_modules',
+  '__pycache__',
+  '.venv',
+  '.next',
+  '.nuxt',
+  '.cache',
+  '.turbo',
+  '.parcel-cache',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.pnpm-store',
+])
+
 /** A turn-local filesystem ledger. Names come from the filesystem, never answer prose. */
 export class ArtifactCandidateInventory {
   private before = new Map<string, Fingerprint>()
+  private resolvedRoots: string[]
   readonly startedAt = Date.now()
   constructor(private roots: readonly string[], private workspaceRoot?: string) {
+    this.resolvedRoots = roots.map(root => {
+      try { return realpathSync(root) }
+      catch { return resolve(root) }
+    })
     this.before = this.scan()
   }
 
@@ -28,10 +50,7 @@ export class ArtifactCandidateInventory {
   }
 
   covers(path: string): boolean {
-    return this.roots.some(root => {
-      let base: string
-      try { base = realpathSync(root) }
-      catch { base = resolve(root) }
+    return this.resolvedRoots.some(base => {
       const location = relative(base, path)
       return location === '' || (location !== '..' && !location.startsWith(`..${sep}`) && !isAbsolute(location))
     })
@@ -54,8 +73,7 @@ export class ArtifactCandidateInventory {
       for (const entry of entries) {
         if (directory === sessionRoot && (entry.name === 'meta' || entry.name === 'session.jsonl')) continue
         if (directory === internalRoot && (entry.name === 'sessions' || entry.name === 'artifacts')) continue
-        // Dependency and Git internals are never user-facing deliverables.
-        if (entry.isDirectory() && (entry.name.toLowerCase() === '.git' || entry.name.toLowerCase() === 'node_modules')) continue
+        if (entry.isDirectory() && IGNORED_SCAN_DIRS.has(entry.name.toLowerCase())) continue
         const path = join(directory, entry.name)
         if (isSessionScratchPath(path) || entry.isSymbolicLink()) continue
         if (entry.isDirectory()) { walk(path); continue }

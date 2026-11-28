@@ -573,3 +573,52 @@ test('a preview registration during atomic replacement does not make the complet
     expect(() => reloaded.findByPath(file)).toThrow('ambiguous')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('indexed registry stays consistent across sibling instances and batch registry locks', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-indexed-sync-'))
+  try {
+    const storage = join(root, 'store')
+    const writer = new ArtifactVersions(storage, 'host', 'workspace')
+    const reader = new ArtifactVersions(storage, 'host', 'workspace')
+    const files = Array.from({ length: 25 }, (_, i) => {
+      const p = join(root, `doc-${i}.md`)
+      writeFileSync(p, `content-${i}`)
+      return p
+    })
+
+    const initial = writer.withRegistryLock(() => files.slice(0, 15).map(p => writer.register(p, 'sess/u1')))
+    expect(reader.findByPath(files[0]!)?.id).toBe(initial[0]!.id)
+    expect(reader.versionSourceRunIds(initial.map(r => r.currentVersion)).size).toBe(15)
+
+    // Register more files from writer; reader must detect the mutation immediately.
+    const more = writer.withRegistryLock(() => files.slice(15).map(p => writer.register(p, 'sess/u2')))
+    expect(reader.findByPath(files[24]!)?.id).toBe(more[9]!.id)
+    expect(reader.findByVersionId(more[9]!.currentVersion)?.id).toBe(more[9]!.id)
+    expect(reader.versionArtifactIds([more[9]!.currentVersion]).get(more[9]!.currentVersion)).toBe(more[9]!.id)
+
+    // Rename a file via writer; reader must see the moved record via index invalidation.
+    const moved = join(root, 'moved-doc-0.md')
+    renameSync(files[0]!, moved)
+    const relocated = writer.register(moved)
+    expect(relocated.id).toBe(initial[0]!.id)
+    expect(reader.findByPath(moved)?.id).toBe(initial[0]!.id)
+
+    // A corrupt record mid-sync must not leave a partially mutated index behind.
+    const badRecord = join(storage, '00000000-0000-4000-8000-000000000000.json')
+    writeFileSync(badRecord, '{not-json')
+    expect(() => reader.findByPath(moved)).toThrow()
+    rmSync(badRecord)
+    expect(reader.findByPath(moved)?.id).toBe(initial[0]!.id)
+
+    // Sibling registration followed by ID-based capture on the original instance
+    // must invalidate the stale index rather than stamping it current.
+    const siblingFile = join(root, 'sibling-only.docx')
+    writeFileSync(siblingFile, 'preview-v1')
+    const siblingRecord = reader.register(siblingFile, 'preview/u1')
+    writeFileSync(moved, 'edited-after-sibling-register')
+    writer.capture(initial[0]!.id, 'sess/u3')
+    expect(writer.findByPath(siblingFile)?.id).toBe(siblingRecord.id)
+    expect(writer.findByVersionId(siblingRecord.currentVersion)?.id).toBe(siblingRecord.id)
+    expect(writer.register(siblingFile).id).toBe(siblingRecord.id)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

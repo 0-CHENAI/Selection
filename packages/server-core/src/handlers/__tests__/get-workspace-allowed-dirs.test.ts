@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, sep } from 'path'
 import { normalizePathForComparison, resolveFsPath } from '@craft-agent/shared/utils'
 import {
   FILE_ACCESS_MISSING_WORKSPACE_MESSAGE,
   FILE_ACCESS_OUTSIDE_ALLOWED_MESSAGE,
+  createWorkspaceFilePathValidator,
   getWorkspaceAllowedDirs,
   listLocalFolderPaths,
   listProjectWorkingDirectories,
@@ -180,5 +181,48 @@ describe('validateWorkspaceFilePath', () => {
     writeFileSync(spaced, 'spaced')
     expect(await validateFilePath(literal)).toBe(realpathSync(literal))
     expect(await validateFilePath(spaced.replace(' ', '%20'))).toBe(realpathSync(spaced))
+  })
+
+  it('skips workspace allowlist scans for tmp/home paths and caches external allowlist lookups per batch', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-batch-validator-'))
+    tempRoots.push(root)
+    const tmpFile = join(root, 'report.md')
+    writeFileSync(tmpFile, 'hello')
+
+    let sessionScans = 0
+    const trackedSources = sources({
+      getSessionWorkingDirectories: () => {
+        sessionScans++
+        return [offHomeDir]
+      },
+    })
+
+    const validate = createWorkspaceFilePathValidator('ws-1', trackedSources)
+    for (let i = 0; i < 20; i++) {
+      expect(await validate(tmpFile)).toBe(realpathSync(tmpFile))
+    }
+    expect(sessionScans).toBe(0)
+
+    for (let i = 0; i < 20; i++) {
+      const external = join(offHomeDir, `batch-${i}.docx`)
+      expect(await validate(external)).toContain(`batch-${i}.docx`)
+    }
+    expect(sessionScans).toBe(1)
+  })
+
+  it('always resolves target symlinks live so mid-batch symlink swaps cannot bypass sensitive-file checks', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-symlink-live-'))
+    tempRoots.push(root)
+    const secret = join(root, '.env')
+    const target = join(root, 'output.md')
+    writeFileSync(secret, 'SECRET=1')
+
+    const validate = createWorkspaceFilePathValidator('ws-1', sources())
+    // Before target exists, path is allowed under tmpdir().
+    expect(await validate(target)).toBe(join(realpathSync(root), 'output.md'))
+
+    // Swap target to a symlink pointing at a sensitive file; live realpath must reject it.
+    symlinkSync(secret, target)
+    await expect(validate(target)).rejects.toThrow('cannot read sensitive files')
   })
 })

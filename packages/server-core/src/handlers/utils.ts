@@ -233,9 +233,48 @@ export function resolveWorkspaceIdForFileAccess(
  * Allowed directories: user's home directory, /tmp, and any additional dirs passed by the caller
  * (e.g. workspace root, workspace working directory).
  */
-export async function validateFilePath(
+const SENSITIVE_FILE_PATTERNS = [
+  /\.ssh[\\/]/,
+  /\.gnupg[\\/]/,
+  /\.aws[\\/]credentials/,
+  /\.env$/,
+  /\.env\./,
+  /credentials\.json$/,
+  /secrets?\./i,
+  /\.pem$/,
+  /\.key$/,
+]
+
+async function resolveCanonicalPath(path: string): Promise<string> {
+  let ancestor = path
+  const missing: string[] = []
+  for (;;) {
+    try {
+      return join(await realpath(ancestor), ...missing)
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error
+        ? (error as NodeJS.ErrnoException).code : undefined
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+      const parent = dirname(ancestor)
+      if (parent === ancestor) {
+        return path
+      }
+      missing.unshift(basename(ancestor))
+      ancestor = parent
+    }
+  }
+}
+
+interface FilePathValidationContext {
+  getAdditionalDirs?: () => string[]
+  realBaseDirsPromise?: Promise<string[]>
+  realExtraDirsPromise?: Promise<string[]>
+}
+
+async function validateFilePathInternal(
   filePath: string,
   additionalAllowedDirs?: string[],
+  context?: FilePathValidationContext,
 ): Promise<string> {
   // Normalize the path to resolve . and .. components
   let normalizedPath = normalize(normalizeAccessibleFilePath(filePath))
@@ -250,41 +289,39 @@ export async function validateFilePath(
     throw new Error('Only absolute file paths are allowed')
   }
 
-  // Resolve the nearest existing ancestor too: a missing path may sit below
-  // a symlink such as macOS /var -> /private/var or a linked workspace root.
-  const canonicalPath = async (path: string): Promise<string> => {
-    let ancestor = path
-    const missing: string[] = []
-    for (;;) {
-      try {
-        return join(await realpath(ancestor), ...missing)
-      } catch (error) {
-        const code = error instanceof Error && 'code' in error
-          ? (error as NodeJS.ErrnoException).code : undefined
-        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
-        const parent = dirname(ancestor)
-        if (parent === ancestor) return path
-        missing.unshift(basename(ancestor))
-        ancestor = parent
+  // Always resolve the target path live against disk so newly created symlinks
+  // cannot bypass containment or sensitive-file checks.
+  const realFilePath = await resolveCanonicalPath(normalizedPath)
+
+  // Fast path: check base allowed directories (home, tmp) before loading workspace allowlists.
+  const baseDirs = [homedir(), tmpdir()].filter(Boolean)
+  let isAllowed = baseDirs.some(dir => isPathInside(dir, realFilePath))
+  if (!isAllowed) {
+    const getRealBaseDirs = () => {
+      if (context?.realBaseDirsPromise) return context.realBaseDirsPromise
+      const promise = Promise.all(baseDirs.map(dir => resolveCanonicalPath(normalize(dir))))
+      if (context) context.realBaseDirsPromise = promise
+      return promise
+    }
+    const realBaseDirs = await getRealBaseDirs()
+    isAllowed = realBaseDirs.some(dir => isPathInside(dir, realFilePath))
+  }
+
+  if (!isAllowed) {
+    const extraDirs = (additionalAllowedDirs ?? context?.getAdditionalDirs?.() ?? []).filter(Boolean)
+    if (extraDirs.length > 0) {
+      isAllowed = extraDirs.some(dir => isPathInside(dir, realFilePath))
+      if (!isAllowed) {
+        const getRealExtraDirs = () => {
+          if (context?.realExtraDirsPromise) return context.realExtraDirsPromise
+          const promise = Promise.all(extraDirs.map(dir => resolveCanonicalPath(normalize(dir))))
+          if (context) context.realExtraDirsPromise = promise
+          return promise
+        }
+        const realExtraDirs = await getRealExtraDirs()
+        isAllowed = realExtraDirs.some(dir => isPathInside(dir, realFilePath))
       }
     }
-  }
-  const realFilePath = await canonicalPath(normalizedPath)
-
-  // Define allowed base directories
-  const allowedDirs = [
-    homedir(),
-    tmpdir(),
-    ...(additionalAllowedDirs ?? []),
-  ].filter(Boolean)
-
-  // Unicode-safe containment (handles Chinese paths + NFC/NFD differences on macOS)
-  let isAllowed = allowedDirs.some(dir => isPathInside(dir, realFilePath))
-  if (!isAllowed) {
-    // Compare canonical paths on both sides only when needed. macOS maps /var
-    // to /private/var, and workspace roots may themselves be symlinks.
-    const realAllowedDirs = await Promise.all(allowedDirs.map(dir => canonicalPath(normalize(dir))))
-    isAllowed = realAllowedDirs.some(dir => isPathInside(dir, realFilePath))
   }
 
   if (!isAllowed) {
@@ -293,39 +330,59 @@ export async function validateFilePath(
 
   // Block sensitive files even within allowed directories.
   // Use [\\/] to match both Unix / and Windows \ separators.
-  const sensitivePatterns = [
-    /\.ssh[\\/]/,
-    /\.gnupg[\\/]/,
-    /\.aws[\\/]credentials/,
-    /\.env$/,
-    /\.env\./,
-    /credentials\.json$/,
-    /secrets?\./i,
-    /\.pem$/,
-    /\.key$/,
-  ]
-
-  if (sensitivePatterns.some(pattern => pattern.test(realFilePath))) {
+  if (SENSITIVE_FILE_PATTERNS.some(pattern => pattern.test(realFilePath))) {
     throw new Error('Access denied: cannot read sensitive files')
   }
 
   return realFilePath
 }
 
+export async function validateFilePath(
+  filePath: string,
+  additionalAllowedDirs?: string[],
+): Promise<string> {
+  return validateFilePathInternal(filePath, additionalAllowedDirs)
+}
+
+/**
+ * Create a reusable path validator scoped to a single batch operation.
+ * Lazily resolves workspace allowlist directories at most once (and skips disk
+ * scans altogether when all checked paths live under home or tmp), while always
+ * resolving each target file live against disk symlinks.
+ */
+export function createWorkspaceFilePathValidator(
+  workspaceId?: string | null,
+  sources?: WorkspaceAllowlistSources,
+): (filePath: string) => Promise<string> {
+  let cachedDirs: string[] | undefined
+  const context: FilePathValidationContext = {
+    getAdditionalDirs: () => {
+      if (cachedDirs === undefined) {
+        cachedDirs = getWorkspaceAllowedDirs(workspaceId, sources)
+      }
+      return cachedDirs
+    },
+  }
+
+  return async (filePath: string): Promise<string> => {
+    try {
+      return await validateFilePathInternal(filePath, undefined, context)
+    } catch (error) {
+      if (
+        !workspaceId
+        && error instanceof Error
+        && error.message.startsWith('Access denied: file path is outside allowed directories')
+      ) {
+        throw new Error(FILE_ACCESS_MISSING_WORKSPACE_MESSAGE)
+      }
+      throw error
+    }
+  }
+}
+
 export async function validateWorkspaceFilePath(
   filePath: string,
   workspaceId?: string | null,
 ): Promise<string> {
-  try {
-    return await validateFilePath(filePath, getWorkspaceAllowedDirs(workspaceId))
-  } catch (error) {
-    if (
-      !workspaceId
-      && error instanceof Error
-      && error.message.startsWith('Access denied: file path is outside allowed directories')
-    ) {
-      throw new Error(FILE_ACCESS_MISSING_WORKSPACE_MESSAGE)
-    }
-    throw error
-  }
+  return createWorkspaceFilePathValidator(workspaceId)(filePath)
 }
