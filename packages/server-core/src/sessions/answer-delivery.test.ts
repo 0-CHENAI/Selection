@@ -728,6 +728,68 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     } finally { ConversationArtifactVersions.prototype.trackPath = trackPath }
   })
 
+  it('still delivers a created artifact card when Write creates the file before tool_start is processed', async () => {
+    const docsDir = join(root, 'docs')
+    mkdirSync(docsDir, { recursive: true })
+    const file = join(docsDir, 'misaka-architecture.html')
+    managed.workingDirectory = root
+    install(async function* () {
+      // Simulate Pi subprocess writing the new file to disk before SessionManager consumes tool_start.
+      writeFileSync(file, '<!doctype html><html><body>MISAKA Diagram</body></html>')
+      yield { type: 'tool_start', toolName: 'Write', toolUseId: 'write-race-1', input: { file_path: './docs/misaka-architecture.html' } }
+      yield { type: 'tool_result', toolName: 'Write', toolUseId: 'write-race-1', result: 'Successfully wrote to ./docs/misaka-architecture.html', isError: false }
+      await control!.submit({
+        ...submission,
+        markdown: `[查看 MISAKA 项目架构图](${file})\n\n架构图已完成绘制并通过视觉复核。`,
+      })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '画出这个项目的架构图')
+    const answer = loadStoredSession(root, managed.id)!.messages.find(message => message.answerCommitted)!
+    const event = events.find(event => event.type === 'text_complete' && event.answerCommitted)!
+    expect(event.artifactVersions).toEqual(answer.artifactVersions)
+    expect(answer.artifactVersions).toHaveLength(1)
+    expect(answer.artifactVersions![0]).toMatchObject({ ordinal: 1, sessionOrdinal: 1, change: 'created' })
+    expect(sameArtifactLocation(answer.artifactVersions![0]!.path, file)).toBe(true)
+    const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
+    const record = versions.findByPath(file)!
+    expect(record.versions).toHaveLength(1)
+    expect(record.versions[0]).toMatchObject({
+      ordinal: 1,
+      summary: '架构图已完成绘制并通过视觉复核。',
+      summaryOrigin: 'assistant',
+    })
+    expect(record.versions[0]!.sourceRunId).toStartWith(`${managed.id}/`)
+  })
+
+  it('captures pre-edit baseline in PreToolUse before Write overwrites an existing untracked file', async () => {
+    const file = join(root, 'existing-diagram.html')
+    writeFileSync(file, '<!doctype html><html><body>v1 before edit</body></html>')
+    managed.workingDirectory = root
+    install(async function* () {
+      // Simulate PreToolUse onToolExecutionAllowed running before the subprocess writes to disk,
+      // followed by disk write and then delayed tool_start consumption.
+      await managed.conversationArtifactVersions?.trackPath('./existing-diagram.html')
+      writeFileSync(file, '<!doctype html><html><body>v2 after edit</body></html>')
+      yield { type: 'tool_start', toolName: 'Write', toolUseId: 'write-edit-1', input: { file_path: './existing-diagram.html' } }
+      yield { type: 'tool_result', toolName: 'Write', toolUseId: 'write-edit-1', result: 'Successfully wrote to ./existing-diagram.html', isError: false }
+      await control!.submit({
+        ...submission,
+        markdown: `[查看更新后的图](${file})\n\n已更新架构图内容。`,
+      })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '更新现有架构图')
+    const answer = loadStoredSession(root, managed.id)!.messages.find(message => message.answerCommitted)!
+    expect(answer.artifactVersions).toHaveLength(1)
+    expect(answer.artifactVersions![0]).toMatchObject({ ordinal: 2, sessionOrdinal: 1, change: 'modified' })
+    const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
+    const record = versions.findByPath(file)!
+    expect(record.versions).toHaveLength(2)
+    expect(versions.versionBytes(record.id, record.versions[0]!.id).toString()).toBe('<!doctype html><html><body>v1 before edit</body></html>')
+    expect(versions.versionBytes(record.id, record.versions[1]!.id).toString()).toBe('<!doctype html><html><body>v2 after edit</body></html>')
+  })
+
   it('context admission failure preserves input and preview without starting answer recovery or promoting a draft', async () => {
     install(async function* () {
       yield { type: 'text_complete', text: 'Incomplete work preview' }

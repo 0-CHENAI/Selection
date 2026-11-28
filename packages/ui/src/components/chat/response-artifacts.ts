@@ -74,6 +74,25 @@ export function artifactCategory(extension: string): ArtifactCategory {
   return 'other'
 }
 
+export function canOpenLiveHtmlArtifact(
+  artifact: Pick<ResponseArtifact, 'extension' | 'change'>,
+  canOpenHtmlInBrowser?: boolean,
+): boolean {
+  return canOpenHtmlInBrowser === true
+    && artifactCategory(artifact.extension) === 'html'
+    && artifact.change !== 'deleted'
+}
+
+export function resolveArtifactPrimaryAction(opts: {
+  artifact: Pick<ResponseArtifact, 'extension' | 'change'>
+  canOpenHtmlInBrowser?: boolean
+  hasArtifactHandler: boolean
+}): 'preview' | 'live' | 'versions' {
+  if (opts.artifact.change === 'deleted' && opts.hasArtifactHandler) return 'versions'
+  if (opts.hasArtifactHandler && canOpenLiveHtmlArtifact(opts.artifact, opts.canOpenHtmlInBrowser)) return 'live'
+  return 'preview'
+}
+
 /** Show recorded, openable changes in the supported document formats. */
 export function extractDeliveredResponseArtifacts(
   versions?: readonly { path: string; ordinal?: number; change?: ArtifactChange }[],

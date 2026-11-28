@@ -321,7 +321,7 @@ export function PptArtifactScope({ session, children }: { session: Session | nul
 export function PptSessionArtifactShelf({ sessionId, onOpenFile, onOpenArtifact }: {
   sessionId?: string
   onOpenFile?: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void | boolean | Promise<void | boolean>
+  onOpenArtifact?: (path: string, action: 'preview' | 'live' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void | boolean | Promise<void | boolean>
 }) {
   if (!sessionId) return null
   return <ArtifactSupplementShelf

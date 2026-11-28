@@ -1,3 +1,5 @@
+import { localArtifactPath } from '@craft-agent/shared/utils/artifact-links'
+
 /**
  * Shared file-preview spec validation for MarkdownDocBlock and MarkdownHtmlBlock.
  *
@@ -73,4 +75,77 @@ export function normalizePreviewItems(spec: MarkdownPreviewSpec | null): Markdow
   if (spec.items && spec.items.length > 0) return spec.items
   if (spec.src) return [{ src: spec.src }]
   return []
+}
+
+function isWindowsPreviewPathKey(key: string): boolean {
+  return /^[a-z]:\//i.test(key) || key.startsWith('//')
+}
+
+function normalizePreviewPathKey(rawPath: string): string | null {
+  const local = localArtifactPath(rawPath)
+  if (!local) return null
+  const normalized = local.replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
+  if (!normalized) return null
+  return isWindowsPreviewPathKey(normalized) ? normalized.toLowerCase() : normalized
+}
+
+function isAbsolutePreviewPathKey(key: string): boolean {
+  return key.startsWith('/') || isWindowsPreviewPathKey(key)
+}
+
+function resolveRelativePreviewKey(baseDir: string, relativeKey: string): string | null {
+  const baseKey = normalizePreviewPathKey(baseDir)
+  if (!baseKey || !isAbsolutePreviewPathKey(baseKey)) return null
+  const driveMatch = /^[a-z]:/i.exec(baseKey)
+  const drive = driveMatch ? driveMatch[0] : ''
+  const prefix = drive ? '' : baseKey.startsWith('//') ? '//' : baseKey.startsWith('/') ? '/' : ''
+  const baseRest = drive ? baseKey.slice(drive.length) : baseKey.slice(prefix.length)
+  const segments = baseRest.split('/').filter(Boolean)
+  for (const part of relativeKey.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (segments.length === 0) return null
+      segments.pop()
+      continue
+    }
+    segments.push(part)
+  }
+  const joined = drive ? `${drive}/${segments.join('/')}` : `${prefix}${segments.join('/')}`
+  return isWindowsPreviewPathKey(joined) ? joined.toLowerCase() : joined
+}
+
+function expandCandidateKeys(rawPath: string, baseDirs: readonly string[]): Set<string> {
+  const key = normalizePreviewPathKey(rawPath)
+  if (!key) return new Set()
+  const keys = new Set<string>([key])
+  if (!isAbsolutePreviewPathKey(key)) {
+    for (const base of baseDirs) {
+      const resolved = resolveRelativePreviewKey(base, key)
+      if (resolved) keys.add(resolved)
+    }
+  }
+  return keys
+}
+
+/**
+ * Single-file `html-preview` blocks duplicate the deliverable shelf when the
+ * same file is already shown in `ResponseArtifacts`. Multi-item tab sets,
+ * scratch/untracked HTML files (e.g. emails or templates in `data/`), and
+ * unresolved relative paths whose identity cannot be established remain visible.
+ */
+export function isHtmlPreviewCoveredByArtifacts(
+  items: readonly MarkdownPreviewItem[],
+  deliveredArtifactPaths: readonly string[],
+  baseDirs: readonly string[] = [],
+): boolean {
+  if (items.length !== 1 || deliveredArtifactPaths.length === 0) return false
+  const srcKeys = expandCandidateKeys(items[0]!.src, baseDirs)
+  if (srcKeys.size === 0) return false
+  for (const deliveredPath of deliveredArtifactPaths) {
+    const deliveredKeys = expandCandidateKeys(deliveredPath, baseDirs)
+    for (const deliveredKey of deliveredKeys) {
+      if (srcKeys.has(deliveredKey)) return true
+    }
+  }
+  return false
 }

@@ -58,7 +58,7 @@ import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import { TaskTurnSummary } from './TaskProgressCard'
 import type { TodoRailMode } from './task-progress'
-import { MemoizedMarkdown } from '../markdown'
+import { DeliveredArtifactPathsProvider, MemoizedMarkdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { type IslandTransitionConfig } from '../ui'
@@ -453,7 +453,7 @@ export interface TurnCardProps {
   /** Callback when file path is clicked */
   onOpenFile?: (path: string) => void
   /** Resolve and open a generated artifact with the requested action. */
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'live' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   /** Callback when URL is clicked */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -2061,7 +2061,7 @@ export interface ResponseCardProps {
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
   /** Resolve and open a generated artifact with the requested action. */
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'live' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -2070,6 +2070,8 @@ export interface ResponseCardProps {
   variant?: 'response' | 'plan'
   /** Parent session ID (used to reset local annotation/island UI state on session switches) */
   sessionId?: string
+  /** Session folder path used to resolve relative preview paths for artifact deduplication */
+  sessionFolderPath?: string
   /** Underlying message ID for annotation actions */
   revealIdentity?: string
   messageId?: string
@@ -2214,6 +2216,7 @@ export function ResponseCard({
   onPopOut,
   variant = 'response',
   sessionId,
+  sessionFolderPath,
   messageId,
   revealIdentity,
   annotations,
@@ -2274,13 +2277,30 @@ export function ResponseCard({
     [artifactVersions],
   )
   const artifactSupplements = useArtifactSupplements()
-  const artifactAnchors = [messageId, revealIdentity].filter((value): value is string => !!value)
+  const artifactAnchors = useMemo(
+    () => [messageId, revealIdentity].filter((value): value is string => !!value),
+    [messageId, revealIdentity],
+  )
   const presentationStreaming = isStreaming
   const artifactShelfSettled = showArtifacts && !presentationStreaming
-  const artifactRows = canCollectSources
-    ? mergeArtifactSupplements(deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled ? 'settled' : 'pending')
-    : []
+  const artifactRows = useMemo(
+    () => canCollectSources
+      ? mergeArtifactSupplements(deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled ? 'settled' : 'pending')
+      : [],
+    [canCollectSources, deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled],
+  )
   const showArtifactShelf = artifactRows.length > 0 && (artifactShelfSettled || artifactRows.some(row => row.supplement))
+  const shownArtifactPaths = useMemo(
+    () => (showArtifactShelf ? artifactRows.map(row => row.artifact.path) : []),
+    [showArtifactShelf, artifactRows],
+  )
+  const previewBaseDirs = useMemo(() => {
+    if (!sessionFolderPath) return []
+    const workspacePath = normalizePath(sessionFolderPath).replace(/\/sessions\/[^/]+$/, '')
+    return workspacePath && workspacePath !== normalizePath(sessionFolderPath)
+      ? [sessionFolderPath, workspacePath]
+      : [sessionFolderPath]
+  }, [sessionFolderPath])
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Pending text selection waiting for explicit follow-up action
@@ -3142,16 +3162,18 @@ export function ResponseCard({
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div data-ca-annotatable ref={contentLayerRef} className="relative">
-              <MemoizedMarkdown
-                id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
-                isStreaming={presentationStreaming && variant === 'response'}
-                revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
-                mode="minimal"
-                onUrlClick={onOpenUrl}
-                onFileClick={onOpenFile}
-              >
-                {bodyText}
-              </MemoizedMarkdown>
+              <DeliveredArtifactPathsProvider paths={shownArtifactPaths} baseDirs={previewBaseDirs}>
+                <MemoizedMarkdown
+                  id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
+                  isStreaming={presentationStreaming && variant === 'response'}
+                  revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
+                  mode="minimal"
+                  onUrlClick={onOpenUrl}
+                  onFileClick={onOpenFile}
+                >
+                  {bodyText}
+                </MemoizedMarkdown>
+              </DeliveredArtifactPathsProvider>
               {annotationOverlayLayer}
             </div>
           </div>
@@ -3949,6 +3971,7 @@ function TurnCardContent({
                 streamStartTime={response.streamStartTime}
                 completedRevealStartTime={response.completedRevealStartTime}
                 sessionId={sessionId}
+                sessionFolderPath={sessionFolderPath}
                 onOpenFile={onOpenFile}
                 onOpenArtifact={onOpenArtifact}
                 onOpenUrl={onOpenUrl}
@@ -4016,6 +4039,7 @@ function TurnCardContent({
             streamStartTime={response.streamStartTime}
             completedRevealStartTime={response.completedRevealStartTime}
             sessionId={sessionId}
+            sessionFolderPath={sessionFolderPath}
             onOpenFile={onOpenFile}
             onOpenArtifact={onOpenArtifact}
             onOpenUrl={onOpenUrl}

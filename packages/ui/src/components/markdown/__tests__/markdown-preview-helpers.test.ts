@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   parseMarkdownPreviewSpec,
   normalizePreviewItems,
+  isHtmlPreviewCoveredByArtifacts,
 } from '../markdown-preview-helpers'
 
 describe('parseMarkdownPreviewSpec', () => {
@@ -137,5 +138,66 @@ describe('shared document preview spec validation', () => {
     expect(normalizePreviewItems(spec)).toEqual([
       { src: '/report.html' }, { src: '/report.md', label: '报告' },
     ])
+  })
+})
+
+describe('isHtmlPreviewCoveredByArtifacts', () => {
+  it('suppresses a single-item html-preview whose path matches a delivered artifact', () => {
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: '/Users/me/project/outputs/misaka-architecture.html' }],
+      ['/Users/me/project/outputs/misaka-architecture.html'],
+    )).toBe(true)
+  })
+
+  it('matches across file:// URLs, percent-encoding, Windows slashes/case, and baseDir-resolved relative paths', () => {
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: 'file:///Users/me/project/outputs/my%20diagram.html' }],
+      ['/Users/me/project/outputs/my diagram.html'],
+    )).toBe(true)
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: 'C:\\Users\\Me\\Docs\\Report.html' }],
+      ['c:/users/me/docs/report.html'],
+    )).toBe(true)
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: './outputs/misaka-architecture.html' }],
+      ['/Users/me/project/outputs/misaka-architecture.html'],
+      ['/Users/me/project'],
+    )).toBe(true)
+  })
+
+  it('keeps scratch/unmatched previews, preserves POSIX case sensitivity, and never matches arbitrary relative suffixes', () => {
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: '/Users/me/.selection/workspaces/ws/sessions/s1/data/email.html' }],
+      ['/Users/me/project/outputs/misaka-architecture.html'],
+    )).toBe(false)
+    // Distinct POSIX casing must not be conflated.
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: '/Users/me/project/Report.html' }],
+      ['/Users/me/project/report.html'],
+    )).toBe(false)
+    // Relative path without matching baseDir must not match a same-name file in a different directory.
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: 'report.html' }],
+      ['/Users/me/project/archive/report.html'],
+      ['/Users/me/project'],
+    )).toBe(false)
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: 'architecture.html' }],
+      ['/Users/me/project/outputs/misaka-architecture.html'],
+    )).toBe(false)
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: '/Users/me/project/outputs/misaka-architecture.html' }],
+      [],
+    )).toBe(false)
+  })
+
+  it('keeps multi-item html-preview tab sets even if one or all files are delivered artifacts', () => {
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [
+        { src: '/Users/me/project/outputs/v1.html', label: 'V1' },
+        { src: '/Users/me/project/outputs/v2.html', label: 'V2' },
+      ],
+      ['/Users/me/project/outputs/v1.html', '/Users/me/project/outputs/v2.html'],
+    )).toBe(false)
   })
 })

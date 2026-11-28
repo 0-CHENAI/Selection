@@ -30,13 +30,13 @@ The `html-preview` block opens HTML files in an isolated built-in browser window
 ## When to Use
 
 Use `html-preview` when:
-- **Email HTML bodies** — Gmail, Outlook, or any email API returns HTML content
+- **Email HTML bodies** — Gmail, Outlook, or any email API returns HTML content saved under session `data/`
 - **Newsletters** — Substack, Mailchimp, etc. have complex CSS layouts that markdown can't replicate
-- **HTML reports** — API responses containing pre-formatted HTML (analytics dashboards, generated reports)
-- **Rich documents** — Any content with complex CSS, table layouts, background images, or custom fonts
-- **Web content** — HTML snapshots or previews where layout fidelity matters
+- **Source template / scratch HTML previews** — `render_template` or `transform_data` outputs stored under session `data/` (which do not appear in the deliverable artifact shelf)
+- **Multi-file HTML tab sets** — Multiple related HTML pages grouped under `items` (e.g., an email thread or comparison set)
 
 Do NOT use `html-preview` when:
+- **The file is a saved HTML deliverable** (architecture diagrams, standalone reports, interactive pages saved in the working directory, workspace, or session root) — Selection automatically renders a deliverable artifact card with version history and open options below your reply; emitting `html-preview` creates a duplicate card. Summarize the result in prose (optionally referencing the file with a standard link).
 - Content is simple text — just output it as markdown
 - Content is structured data — use `datatable` or `spreadsheet` instead
 - Content is a code snippet — use regular code blocks with syntax highlighting

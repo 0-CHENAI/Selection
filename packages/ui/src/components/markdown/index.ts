@@ -23,8 +23,14 @@ export {
 } from './markdown-image-source'
 export { MarkdownDocBlock, type MarkdownDocBlockProps } from './MarkdownDocBlock'
 export {
+  MarkdownHtmlBlock,
+  DeliveredArtifactPathsProvider,
+  type MarkdownHtmlBlockProps,
+} from './MarkdownHtmlBlock'
+export {
   parseMarkdownPreviewSpec,
   normalizePreviewItems,
+  isHtmlPreviewCoveredByArtifacts,
   type MarkdownPreviewItem,
   type MarkdownPreviewSpec,
 } from './markdown-preview-helpers'

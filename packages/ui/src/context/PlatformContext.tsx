@@ -21,6 +21,8 @@ export interface PlatformActions {
   onReadAnnotationDraft?: (key: string) => string | undefined
   onWriteAnnotationDraft?: (key: string, value: string | undefined) => void
   onManageArtifact?: (path: string, sessionId?: string, alternativePaths?: string[], versionId?: string) => void | Promise<void>
+  /** Whether the host exposes an in-app HTML browser that can open live HTML files with local assets. */
+  canOpenHtmlInBrowser?: boolean
 
   /**
    * Open a file in the default application (Electron: shell.openPath)

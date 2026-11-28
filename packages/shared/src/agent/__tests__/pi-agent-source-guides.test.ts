@@ -70,6 +70,77 @@ describe('PiAgent source guide preparation', () => {
     expect(sent.at(-1)).toMatchObject({ action: 'block', reason: 'checkpoint probe' });
   });
 
+  it('awaits onToolExecutionAllowed with final input before replying allow/modify, and skips it when blocked', async () => {
+    const order: string[] = [];
+    const seenInputs: Array<{ toolName: string; input: Record<string, unknown>; toolCallId?: string }> = [];
+    let releasePrep!: () => void;
+    const prepGate = new Promise<void>(resolve => { releasePrep = resolve; });
+
+    agent.onToolExecutionAllowed = async (toolName, input, toolCallId) => {
+      order.push('prep:start');
+      seenInputs.push({ toolName, input: { ...input }, toolCallId });
+      await prepGate;
+      order.push('prep:end');
+    };
+    const origSend = (agent as any).send;
+    (agent as any).send = (message: Record<string, unknown>) => {
+      order.push(`send:${String(message.action)}`);
+      origSend(message);
+    };
+
+    const reqPromise = (agent as any).handlePreToolUseRequest({
+      requestId: 'write-allow',
+      toolCallId: 'write-call-1',
+      toolName: 'Write',
+      recoveryClass: 'file-verifiable',
+      input: { file_path: '~/docs/arch.html', content: '<html/>' },
+    });
+
+    // Wait a microtask: onToolExecutionAllowed must have started, and no reply may have been sent yet.
+    await Promise.resolve();
+    expect(order).toEqual(['prep:start']);
+    expect(sent).toHaveLength(0);
+
+    releasePrep();
+    await reqPromise;
+
+    expect(order).toEqual(['prep:start', 'prep:end', 'send:modify']);
+    expect(seenInputs).toHaveLength(1);
+    expect(seenInputs[0]!.toolName).toBe('Write');
+    expect(seenInputs[0]!.toolCallId).toBe('write-call-1');
+    // Tilde expansion from runPreToolUseChecks must already be applied in the input passed to onToolExecutionAllowed.
+    expect(seenInputs[0]!.input.file_path).not.toBe('~/docs/arch.html');
+    expect(String(seenInputs[0]!.input.file_path)).toEndWith('/docs/arch.html');
+
+    // When PreToolUse blocks a tool (safe/explore mode), onToolExecutionAllowed must NOT be called.
+    agent.setPermissionMode('safe');
+    await (agent as any).handlePreToolUseRequest({
+      requestId: 'write-blocked',
+      toolCallId: 'write-call-2',
+      toolName: 'Write',
+      recoveryClass: 'file-verifiable',
+      input: { file_path: join(workspaceRootPath, 'blocked.html'), content: '<html/>' },
+    });
+    expect(seenInputs).toHaveLength(1);
+    expect(sent.at(-1)).toMatchObject({ requestId: 'write-blocked', action: 'block' });
+
+    // If onToolExecutionAllowed rejects (e.g., session stopped while awaiting), reply with block.
+    agent.setPermissionMode('allow-all');
+    agent.onToolExecutionAllowed = async () => { throw new Error('Execution is no longer active'); };
+    await (agent as any).handlePreToolUseRequest({
+      requestId: 'write-prep-fail',
+      toolCallId: 'write-call-3',
+      toolName: 'Write',
+      recoveryClass: 'file-verifiable',
+      input: { file_path: join(workspaceRootPath, 'aborted.html'), content: '<html/>' },
+    });
+    expect(sent.at(-1)).toMatchObject({
+      requestId: 'write-prep-fail',
+      action: 'block',
+      reason: 'Execution is no longer active',
+    });
+  });
+
   it.each(['read', 'bash'])('keeps skill prerequisites pending until %s succeeds', toolName => {
     const skillPath = join(workspaceRootPath, 'skills', 'writing', 'SKILL.md');
     const manager = (agent as any).prerequisiteManager;

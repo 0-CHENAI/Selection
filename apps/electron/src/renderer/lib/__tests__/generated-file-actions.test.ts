@@ -156,4 +156,98 @@ describe('generated artifact actions', () => {
       readArtifact: async () => ({ path: '/reports/old.docx', currentFileAvailable: false }) })).rejects.toThrow('no longer available')
     expect(opened).toHaveLength(1)
   })
+
+  test('explicit live action opens the verified current HTML file without calling previewVersion, and refuses unavailable paths', async () => {
+    const opened: string[] = []
+    let snapshotCalls = 0
+    const options = {
+      requestedPath: '/project/dashboard.html',
+      action: 'live' as const,
+      artifactId: 'html-artifact',
+      statPath: async (path: string) => ({ path, type: 'file' as const }),
+      searchFiles: async () => [],
+      previewVersion: async () => { snapshotCalls++; return '/snapshots/html-artifact/v1/dashboard.html' },
+      openPreview: (path: string) => { opened.push(path) },
+      reveal: () => {},
+      readArtifact: async () => ({ path: '/project/renamed/dashboard.html', currentVersion: 'v2', currentFileAvailable: true }),
+    }
+    expect(await openGeneratedFileAction(options)).toBe(true)
+    expect(opened).toEqual(['/project/renamed/dashboard.html'])
+    expect(snapshotCalls).toBe(0)
+
+    await expect(openGeneratedFileAction({
+      ...options,
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentVersion: 'v2', currentFileAvailable: false }),
+    })).rejects.toThrow('no longer available')
+    expect(opened).toHaveLength(1)
+  })
+
+  test('versioned live action opens live HTML while current, and falls back to immutable snapshot for historical or unavailable versions', async () => {
+    const opened: string[] = []
+    const snapshots: string[] = []
+    const baseOptions = {
+      requestedPath: '/project/dashboard.html',
+      action: 'live' as const,
+      artifactId: 'html-artifact',
+      versionId: 'v1',
+      statPath: async (path: string) => ({ path, type: 'file' as const }),
+      searchFiles: async () => [],
+      previewVersion: async (artifactId: string, versionId: string) => {
+        const snapshot = `/snapshots/${artifactId}/${versionId}/dashboard.html`
+        snapshots.push(snapshot)
+        return snapshot
+      },
+      openPreview: (path: string) => { opened.push(path) },
+      reveal: () => {},
+    }
+
+    // Current version on disk: open the live file so relative assets (JS/CSS/images) load.
+    expect(await openGeneratedFileAction({
+      ...baseOptions,
+      readArtifact: async () => ({ path: '/project/renamed/dashboard.html', currentVersion: 'v1', currentFileAvailable: true }),
+    })).toBe(true)
+    expect(opened).toEqual(['/project/renamed/dashboard.html'])
+    expect(snapshots).toEqual([])
+
+    // Historical version after a newer version exists: preserve the immutable snapshot.
+    expect(await openGeneratedFileAction({
+      ...baseOptions,
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentVersion: 'v2', currentFileAvailable: true }),
+    })).toBe(true)
+    expect(opened).toEqual(['/project/renamed/dashboard.html', '/snapshots/html-artifact/v1/dashboard.html'])
+    expect(snapshots).toEqual(['/snapshots/html-artifact/v1/dashboard.html'])
+
+    // Original file replaced or deleted: preserve the immutable snapshot.
+    expect(await openGeneratedFileAction({
+      ...baseOptions,
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentVersion: 'v1', currentFileAvailable: false }),
+    })).toBe(true)
+    expect(opened).toHaveLength(3)
+    expect(opened[2]).toBe('/snapshots/html-artifact/v1/dashboard.html')
+
+    // File disappears between readArtifact and statPath: fall back to immutable snapshot.
+    expect(await openGeneratedFileAction({
+      ...baseOptions,
+      statPath: async () => null,
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentVersion: 'v1', currentFileAvailable: true }),
+    })).toBe(true)
+    expect(opened).toHaveLength(4)
+    expect(opened[3]).toBe('/snapshots/html-artifact/v1/dashboard.html')
+
+    // Access denied must not bypass checks by falling back to snapshot.
+    await expect(openGeneratedFileAction({
+      ...baseOptions,
+      statPath: async () => { throw new Error('Access denied') },
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentVersion: 'v1', currentFileAvailable: true }),
+    })).rejects.toThrow('Access denied')
+    expect(opened).toHaveLength(4)
+
+    // Without previewVersion, a non-current version must fail instead of falling through to requestedPath.
+    await expect(openGeneratedFileAction({
+      ...baseOptions,
+      previewVersion: undefined,
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentVersion: 'v2', currentFileAvailable: true }),
+    })).rejects.toThrow('preview is unavailable')
+    expect(opened).toHaveLength(4)
+  })
 })

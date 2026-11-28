@@ -231,3 +231,108 @@ it('cancellation during completion settlement wins over a late successful end', 
   expect(completed.map(event => event.reason)).toEqual(['interrupted']);
   expect(managed.isProcessing).toBe(false);
 });
+
+it('auth retry suppresses trailing teardown errors and avoids premature interrupted cleanup', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'auth-retry-teardown-'));
+  const manager = new SessionManager();
+  const managed = createManagedSession(
+    { id: 'auth-retry-teardown', name: 'Auth retry session' },
+    { id: 'ws', name: 'test', rootPath: directory, createdAt: Date.now() } as never,
+    { messagesLoaded: true },
+  );
+  const internal = manager as any;
+  internal.sessions.set(managed.id, managed);
+  const emitted: any[] = [];
+  const completed: Array<{ reason: string }> = [];
+  manager.setEventSink((_channel, _target, event) => emitted.push(event));
+  manager.onSessionComplete(event => completed.push(event));
+
+  let releaseTrailing!: () => void;
+  const trailingGate = new Promise<void>(resolve => { releaseTrailing = resolve; });
+  let firstLoopFinished!: () => void;
+  const firstLoopDone = new Promise<void>(resolve => { firstLoopFinished = resolve; });
+  let attempt = 0;
+
+  const firstAgent = {
+    setAllSources() {},
+    getModel() { return 'pi/k3.1-pro'; },
+    getSessionId() { return 'sdk-session-1'; },
+    destroy() {},
+    async disposeForRestart() {
+      // Wait for trailing events and loop exit while managed.isProcessing && managed.authRetryInProgress are true.
+      releaseTrailing();
+      await firstLoopDone;
+      await Bun.sleep(10);
+    },
+    chat() {
+      return (async function* () {
+        yield {
+          type: 'typed_error' as const,
+          error: {
+            code: 'invalid_api_key' as const,
+            title: 'Invalid API Key',
+            message: '401 expired',
+            canRetry: false,
+            actions: [],
+          },
+        };
+        await trailingGate;
+        // Simulate trailing transport errors from a dying subprocess and exiting without complete.
+        yield {
+          type: 'typed_error' as const,
+          error: {
+            code: 'service_error' as const,
+            title: 'Agent Process Unavailable',
+            message: 'The local agent process could not start or its connection was lost.',
+            originalError: 'Pi subprocess exited unexpectedly (signal stdout closed)',
+            canRetry: true,
+            actions: [],
+          },
+        };
+        yield { type: 'error' as const, message: 'Pi subprocess exited unexpectedly (signal stdout closed)' };
+        firstLoopFinished();
+      })();
+    },
+  };
+
+  const secondAgent = {
+    setAllSources() {},
+    getModel() { return 'pi/k3.1-pro'; },
+    getSessionId() { return 'sdk-session-1'; },
+    destroy() {},
+    async disposeForRestart() {},
+    chat() {
+      return (async function* () {
+        yield { type: 'text_complete' as const, text: 'Recovered after token refresh', isIntermediate: false };
+        yield { type: 'complete' as const };
+      })();
+    },
+  };
+
+  internal.getOrCreateAgent = async () => {
+    attempt++;
+    const next = attempt === 1 ? firstAgent : secondAgent;
+    managed.agent = next as never;
+    return next;
+  };
+
+  try {
+    await manager.sendMessage(managed.id, 'Draw architecture diagram');
+    const startedAt = Date.now();
+    while (completed.length === 0 || managed.isProcessing) {
+      if (Date.now() - startedAt > 2000) throw new Error('timed out waiting for auth retry completion');
+      await Bun.sleep(10);
+    }
+
+    expect(attempt).toBe(2);
+    expect(emitted.some(event => event.type === 'info' && event.message === 'Token expired, refreshing session…')).toBe(true);
+    expect(emitted.some(event => event.type === 'typed_error' || event.type === 'error')).toBe(false);
+    expect(managed.messages.some(message => message.role === 'error')).toBe(false);
+    expect(managed.messages.some(message => message.role === 'assistant' && message.content === 'Recovered after token refresh')).toBe(true);
+    expect(completed.map(event => event.reason)).toEqual(['complete']);
+    expect(managed.isProcessing).toBe(false);
+  } finally {
+    manager.cleanup();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -5194,6 +5194,15 @@ export class SessionManager implements ISessionManager {
           this.checkpointExecution(managed)
         }
       }
+      // Capture pre-write artifact baselines strictly before approving Write/Edit so
+      // the subprocess cannot create or overwrite the file before baseline snapshotting.
+      managed.agent.onToolExecutionAllowed = async (toolName, input) => {
+        if (!/^(?:Write|Edit|MultiEdit)$/i.test(toolName) || !input || typeof input !== 'object') return
+        const path = input.file_path ?? input.path
+        if (typeof path !== 'string') return
+        await managed.conversationArtifactVersions?.trackPath(path)
+        if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
+      }
       managed.agent.onPermissionRequest = (request: {
         requestId: string;
         toolName: string;
@@ -8299,15 +8308,6 @@ export class SessionManager implements ISessionManager {
       managed.conversationArtifactVersions = undefined
       managed.artifactCandidateInventory = undefined
       if (!managed.isolatedWorkspace) {
-        const store = this.getArtifactStore(managed.workspace)
-        const tracker = new ConversationArtifactVersions(store,
-          [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
-          path => validateArtifactFilePath(path, managed.workspace.id),
-          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
-          Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()))
-        managed.conversationArtifactVersions = tracker
-        const authorizeTurnStart = createArtifactPathValidator(managed.workspace.id)
-        if (userMessage.officeDocumentPath) await tracker.trackPath(userMessage.officeDocumentPath, authorizeTurnStart)
         try {
           managed.artifactCandidateInventory = new ArtifactCandidateInventory(
             [managed.workingDirectory ?? managed.workspace.rootPath, getSessionStoragePath(managed.workspace.rootPath, managed.id)],
@@ -8316,6 +8316,21 @@ export class SessionManager implements ISessionManager {
         } catch (error) {
           sessionLog.warn('Artifact candidate baseline failed', { sessionId: managed.id, error })
         }
+        const store = this.getArtifactStore(managed.workspace)
+        const existedAtStart = (safe: string): boolean | undefined => {
+          const inventory = managed.artifactCandidateInventory
+          if (!inventory || !inventory.tracks(safe)) return undefined
+          return inventory.existedAtStart(safe)
+        }
+        const tracker = new ConversationArtifactVersions(store,
+          [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
+          path => validateArtifactFilePath(path, managed.workspace.id),
+          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
+          Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()),
+          existedAtStart)
+        managed.conversationArtifactVersions = tracker
+        const authorizeTurnStart = createArtifactPathValidator(managed.workspace.id)
+        if (userMessage.officeDocumentPath) await tracker.trackPath(userMessage.officeDocumentPath, authorizeTurnStart)
         const seenPriorLinks = new Set<string>()
         for (const prior of managed.messages) {
           if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
@@ -8327,6 +8342,7 @@ export class SessionManager implements ISessionManager {
             await tracker.trackPath(link, authorizeTurnStart)
           }
         }
+        tracker.markToolsStarted()
       }
       if (managed.processingGeneration !== myGeneration || managed.stopRequested) {
         await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
@@ -8598,8 +8614,12 @@ export class SessionManager implements ISessionManager {
         // This ensures we don't lose in-flight messages.
       }
 
-      // Loop exited - either via complete event (normal) or generator ended after soft interrupt
-      if (!managed.isProcessing) {
+      // Loop exited - either via complete event (normal) or generator ended after soft interrupt/restart
+      if (managed.authRetryInProgress) {
+        sessionLog.info('Chat loop exited while auth retry is in progress, skipping unexpected-exit cleanup')
+        sendSpan.mark('chat.exit.auth_retry_pending')
+        sendSpan.end()
+      } else if (!managed.isProcessing) {
         sessionLog.info('Chat loop exited after explicit handoff/stop')
         sendSpan.mark('chat.exit.already_stopped')
         sendSpan.end()
@@ -8659,8 +8679,9 @@ export class SessionManager implements ISessionManager {
       }
       // Only handle cleanup for unexpected exits (loop break without complete event)
       // Normal completion returns early after calling onProcessingStopped
+      // Auth retry owns teardown and replacement of the old runtime
       // Errors are handled in catch block
-      if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+      if (managed.isProcessing && managed.processingGeneration === myGeneration && !managed.authRetryInProgress) {
         sessionLog.info('Finally block cleanup - unexpected exit')
         sendSpan.mark('chat.unexpected_exit')
         sendSpan.end()
@@ -15178,10 +15199,15 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       }
 
       case 'error': {
-        // Skip errors after handoff (plan submission, auth request) — the SDK may emit
-        // an error from the interrupted query after we've already stopped processing.
-        if (!managed.isProcessing) {
-          sessionLog.info('Skipping error event after handoff/stop:', event.message)
+        // Skip errors after handoff (plan submission, auth request) or during auth-retry teardown —
+        // the old SDK subprocess may emit a trailing transport error while being replaced.
+        if (!managed.isProcessing || managed.authRetryInProgress) {
+          sessionLog.info(
+            managed.authRetryInProgress
+              ? 'Skipping trailing error event during auth retry:'
+              : 'Skipping error event after handoff/stop:',
+            event.message,
+          )
           break
         }
 
@@ -15225,9 +15251,14 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       }
 
       case 'typed_error':
-        // Skip errors after handoff (plan submission, auth request)
-        if (!managed.isProcessing) {
-          sessionLog.info('Skipping typed_error event after handoff/stop:', event.error.message || event.error.title)
+        // Skip errors after handoff (plan submission, auth request) or during auth-retry teardown
+        if (!managed.isProcessing || managed.authRetryInProgress) {
+          sessionLog.info(
+            managed.authRetryInProgress
+              ? 'Skipping trailing typed_error event during auth retry:'
+              : 'Skipping typed_error event after handoff/stop:',
+            event.error.message || event.error.title,
+          )
           break
         }
 

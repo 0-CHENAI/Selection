@@ -196,7 +196,7 @@ interface ChatDisplayProps {
   session: Session | null
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: SendMessageOptions['annotationFollowUps']) => boolean | void | Promise<boolean | void>
   onOpenFile: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'live' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   onOpenUrl: (url: string) => void
   // Model selection
   currentModel: string

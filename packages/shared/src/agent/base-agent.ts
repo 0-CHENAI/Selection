@@ -352,6 +352,7 @@ export abstract class BaseAgent implements AgentBackend {
   // Callbacks (public for facade wiring)
   // ============================================================
   onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
+  onToolExecutionAllowed?: (toolName: string, input: Record<string, unknown>, toolCallId?: string) => void | Promise<void>;
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;

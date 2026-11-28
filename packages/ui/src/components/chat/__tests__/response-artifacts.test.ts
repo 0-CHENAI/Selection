@@ -5,7 +5,14 @@ import i18next from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import zhHans from '../../../../../shared/src/i18n/locales/zh-Hans.json'
 import { TooltipProvider } from '../../tooltip'
-import { extractDeliveredResponseArtifacts, organizeArtifactShelf, type ResponseArtifact } from '../response-artifacts'
+import { PlatformProvider } from '../../../context/PlatformContext'
+import {
+  canOpenLiveHtmlArtifact,
+  extractDeliveredResponseArtifacts,
+  organizeArtifactShelf,
+  resolveArtifactPrimaryAction,
+  type ResponseArtifact,
+} from '../response-artifacts'
 import type { MergedArtifactRow } from '../artifact-supplements'
 import { ResponseArtifacts } from '../ResponseArtifacts'
 
@@ -217,4 +224,57 @@ it('handles Windows mixed-case folder grouping, deep folder label elision, CJK m
     expect(driveRootGroup.label).toBe('C:/')
     expect(driveRootGroup.revealPath).toBe('C:/')
   }
+})
+
+it('gates live HTML browser opening behind platform capability and uses live primary open on capable hosts', async () => {
+  const htmlArtifact: ResponseArtifact = {
+    path: '/work/proj/report.html',
+    name: 'report.html',
+    extension: 'html',
+    change: 'created',
+  }
+  const deletedHtml: ResponseArtifact = { ...htmlArtifact, change: 'deleted' }
+  const pdfArtifact: ResponseArtifact = {
+    path: '/work/proj/report.pdf',
+    name: 'report.pdf',
+    extension: 'pdf',
+    change: 'created',
+  }
+
+  expect(canOpenLiveHtmlArtifact(htmlArtifact, true)).toBe(true)
+  expect(canOpenLiveHtmlArtifact(htmlArtifact, false)).toBe(false)
+  expect(canOpenLiveHtmlArtifact(htmlArtifact, undefined)).toBe(false)
+  expect(canOpenLiveHtmlArtifact(deletedHtml, true)).toBe(false)
+  expect(canOpenLiveHtmlArtifact(pdfArtifact, true)).toBe(false)
+
+  expect(resolveArtifactPrimaryAction({ artifact: htmlArtifact, canOpenHtmlInBrowser: true, hasArtifactHandler: true })).toBe('live')
+  expect(resolveArtifactPrimaryAction({ artifact: htmlArtifact, canOpenHtmlInBrowser: false, hasArtifactHandler: true })).toBe('preview')
+  expect(resolveArtifactPrimaryAction({ artifact: htmlArtifact, canOpenHtmlInBrowser: true, hasArtifactHandler: false })).toBe('preview')
+  expect(resolveArtifactPrimaryAction({ artifact: deletedHtml, canOpenHtmlInBrowser: true, hasArtifactHandler: true })).toBe('versions')
+  expect(resolveArtifactPrimaryAction({ artifact: pdfArtifact, canOpenHtmlInBrowser: true, hasArtifactHandler: true })).toBe('preview')
+
+  const i18n = i18next.createInstance()
+  await i18n.init({ lng: 'zh-Hans', resources: { 'zh-Hans': { translation: zhHans } } })
+
+  const renderCard = (canOpenHtmlInBrowser: boolean) => renderToStaticMarkup(
+    React.createElement(
+      I18nextProvider,
+      { i18n },
+      React.createElement(
+        PlatformProvider,
+        { actions: { canOpenHtmlInBrowser } },
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(ResponseArtifacts, {
+            artifacts: [htmlArtifact],
+            onOpenFile: () => {},
+          }),
+        ),
+      ),
+    ),
+  )
+
+  expect(renderCard(true)).toContain('打开方式')
+  expect(renderCard(false)).not.toContain('打开方式')
 })
