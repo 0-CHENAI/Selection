@@ -252,13 +252,13 @@ test('Office discovery RPC uses the owning host and refuses foreign workspaces b
   expect(calls).toEqual(['session'])
 })
 
-test('HTML artifact preview RPC opens the live original file when it still matches the requested version, and falls back to snapshot otherwise', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'artifact-html-live-preview-'))
+test('HTML artifact version preview RPC always serves an immutable snapshot inside previews/', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-html-snapshot-preview-'))
   const workspace = { id: 'workspace', rootPath: root, name: 'Workspace' }
   const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
   try {
     const html = join(root, 'dashboard.html')
-    writeFileSync(html, '<!doctype html><script src="assets/app.js"></script>')
+    writeFileSync(html, '<!doctype html><main>v1</main>')
     const store = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), workspace.id)
     const v1 = store.register(html, 'session/user-1')
     const handlers = new Map<string, HandlerFn>()
@@ -266,22 +266,17 @@ test('HTML artifact preview RPC opens the live original file when it still match
     const preview = handlers.get(RPC_CHANNELS.artifacts.PREVIEW)!
     const context = { clientId: 'client', workspaceId: workspace.id } as RequestContext
 
-    // Current untouched HTML returns live original path so relative sibling assets resolve.
-    expect(await preview(context, v1.id, v1.currentVersion)).toBe(v1.path)
-
-    // After a new version is captured, historical v1 falls back to its immutable snapshot copy,
-    // while current v2 still opens the live path.
-    writeFileSync(html, '<!doctype html><script src="assets/app.js"></script><main>v2</main>')
-    const v2 = store.capture(v1.id, 'session/user-2')
+    // Even while v1 is current, version preview returns an isolated snapshot copy
+    // so subsequent edits do not drift on reload and neighboring files stay isolated.
     const v1Preview = await preview(context, v1.id, v1.currentVersion) as string
     expect(v1Preview).not.toBe(v1.path)
     expect(v1Preview).toContain('previews')
-    expect(await preview(context, v2.id, v2.currentVersion)).toBe(v2.path)
 
-    // External modification after capture forces snapshot fallback so preview still reflects v2 bytes.
-    writeFileSync(html, '<!doctype html><main>external edit</main>')
-    const v2Fallback = await preview(context, v2.id, v2.currentVersion) as string
-    expect(v2Fallback).not.toBe(v2.path)
-    expect(v2Fallback).toContain('previews')
+    writeFileSync(html, '<!doctype html><main>v2</main>')
+    const v2 = store.capture(v1.id, 'session/user-2')
+    const v2Preview = await preview(context, v2.id, v2.currentVersion) as string
+    expect(v2Preview).not.toBe(v2.path)
+    expect(v2Preview).not.toBe(v1Preview)
+    expect(v2Preview).toContain('previews')
   } finally { lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
 })

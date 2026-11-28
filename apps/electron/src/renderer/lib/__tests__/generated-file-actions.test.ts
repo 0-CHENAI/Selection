@@ -156,4 +156,30 @@ describe('generated artifact actions', () => {
       readArtifact: async () => ({ path: '/reports/old.docx', currentFileAvailable: false }) })).rejects.toThrow('no longer available')
     expect(opened).toHaveLength(1)
   })
+
+  test('live action opens the verified original HTML file without calling previewVersion, and refuses unavailable paths', async () => {
+    const opened: string[] = []
+    let snapshotCalls = 0
+    const options = {
+      requestedPath: '/project/dashboard.html',
+      action: 'live' as const,
+      artifactId: 'html-artifact',
+      versionId: 'v1',
+      statPath: async (path: string) => ({ path, type: 'file' as const }),
+      searchFiles: async () => [],
+      previewVersion: async () => { snapshotCalls++; return '/snapshots/html-artifact/v1/dashboard.html' },
+      openPreview: (path: string) => { opened.push(path) },
+      reveal: () => {},
+      readArtifact: async () => ({ path: '/project/renamed/dashboard.html', currentFileAvailable: true }),
+    }
+    expect(await openGeneratedFileAction(options)).toBe(true)
+    expect(opened).toEqual(['/project/renamed/dashboard.html'])
+    expect(snapshotCalls).toBe(0)
+
+    await expect(openGeneratedFileAction({
+      ...options,
+      readArtifact: async () => ({ path: '/project/dashboard.html', currentFileAvailable: false }),
+    })).rejects.toThrow('no longer available')
+    expect(opened).toHaveLength(1)
+  })
 })

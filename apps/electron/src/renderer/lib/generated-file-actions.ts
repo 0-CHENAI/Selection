@@ -5,7 +5,7 @@ import {
   type StatGeneratedPath,
 } from './generated-file-path'
 
-export type GeneratedArtifactAction = 'preview' | 'external' | 'reveal' | 'versions'
+export type GeneratedArtifactAction = 'preview' | 'live' | 'external' | 'reveal' | 'versions'
 
 export async function openGeneratedFileAction(opts: {
   requestedPath: string
@@ -32,7 +32,7 @@ export async function openGeneratedFileAction(opts: {
     return true
   }
   let requestedPath = opts.requestedPath
-  if ((opts.action === 'external' || opts.action === 'reveal') && opts.artifactId && opts.readArtifact) {
+  if ((opts.action === 'live' || opts.action === 'external' || opts.action === 'reveal') && opts.artifactId && opts.readArtifact) {
     const record = await opts.readArtifact(opts.artifactId)
     if (record.currentFileAvailable === false) throw new Error('The original artifact file is no longer available')
     requestedPath = record.path
@@ -51,7 +51,7 @@ export async function openGeneratedFileAction(opts: {
   if (opts.action === 'versions') {
     if (type === 'directory' || !opts.manageArtifact) throw new Error('Version management is available for files only')
     await opts.manageArtifact(path)
-  } else if (opts.action === 'external' || (opts.action === 'preview' && type === 'directory')) {
+  } else if (opts.action === 'external' || ((opts.action === 'preview' || opts.action === 'live') && type === 'directory')) {
     if (!opts.openExternal) throw new Error('External file opening is unavailable')
     return (await opts.openExternal(path)) !== false
   } else if (opts.action === 'reveal') {

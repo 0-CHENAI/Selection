@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { AlertTriangle, ExternalLink, Folder, FolderOpen, ChevronDown, ChevronUp, Layers3, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Folder, FolderOpen, ChevronDown, ChevronUp, Globe, Layers3, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { FileTypeIcon } from './attachment-helpers'
 import { mergeArtifactSupplements, useArtifactSupplements, type MergedArtifactRow } from './artifact-supplements'
@@ -37,7 +37,7 @@ function officeAppName(extension: string): string | undefined {
 }
 
 type ArtifactVersionRef = NonNullable<import('@craft-agent/core').Message['artifactVersions']>[number]
-type OpenArtifactFn = (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void | boolean | Promise<void | boolean>
+type OpenArtifactFn = (path: string, action: 'preview' | 'live' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void | boolean | Promise<void | boolean>
 
 /** Compact delivery shelf, outside the annotated reply body and above message actions. */
 export function ResponseArtifacts({ artifacts, versions, responseText, onOpenFile, onOpenArtifact, anchors = [], mode = 'settled' }: {
@@ -69,7 +69,7 @@ export function ResponseArtifacts({ artifacts, versions, responseText, onOpenFil
   const sectionRef = React.useRef<HTMLElement>(null)
   const wasExpanded = React.useRef(false)
 
-  const open = async (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => {
+  const open = async (path: string, action: 'preview' | 'live' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => {
     const request = (openRequests.current.get(path) ?? 0) + 1
     const versionRequestId = action === 'versions' ? ++versionRequest.current : 0
     if (action === 'versions') setOpeningVersion(path)
@@ -155,7 +155,13 @@ export function ResponseArtifacts({ artifacts, versions, responseText, onOpenFil
       if (supplement?.onActivate) supplement.onActivate()
       else void open(artifact.path, openAction, version?.versionId, version?.artifactId)
     }
+    const isLiveHtml = artifactCategory(artifact.extension) === 'html' && change !== 'deleted'
     const standardItems = <>
+      {isLiveHtml && (onOpenArtifact || onOpenFile) && (
+        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'live', undefined, version?.artifactId) }}>
+          <Globe />{t('preview.openInBrowser')}
+        </StyledDropdownMenuItem>
+      )}
       {version && onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions', version.versionId) }}><Layers3 />{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
       {(onOpenArtifact || onOpenFileExternal) && (
         <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'external', version?.versionId, version?.artifactId) }}>
@@ -222,7 +228,7 @@ export function ResponseArtifacts({ artifacts, versions, responseText, onOpenFil
               {artifact.name}
             </TooltipContent>
           </Tooltip>
-          {(onOpenArtifact || onOpenFileExternal || onRevealInFinder) && (
+          {(onOpenArtifact || onOpenFileExternal || onRevealInFinder || (isLiveHtml && onOpenFile)) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button type="button" aria-label={`${t('chat.artifactOpenWith')} ${artifact.name}`} aria-busy={openingVersion === artifact.path} className="mr-2 inline-flex shrink-0 items-center gap-1 border-0 bg-transparent px-1 py-2 text-xs text-muted-foreground shadow-none outline-none hover:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:text-foreground">

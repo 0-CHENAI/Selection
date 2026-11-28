@@ -97,12 +97,6 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
     const record = store.read(artifactId)
     await validateWorkspaceFilePath(record.path, workspaceId)
-    // For HTML artifacts whose live file still matches this exact version byte-for-byte,
-    // open the live path so relative sibling assets (scripts, styles, images) resolve.
-    if (/\.(?:html?|xhtml)$/i.test(record.path)) {
-      const live = store.livePathMatchingVersion(artifactId, versionId)
-      if (live) return live
-    }
     return store.preview(artifactId, versionId)
   })
   server.handle(RPC_CHANNELS.artifacts.FEEDBACK_LIST, async (ctx, sessionId: string, artifactId: string) => {
