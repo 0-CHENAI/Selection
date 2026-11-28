@@ -510,6 +510,21 @@ export class ArtifactVersions {
     const record = this.read(id)
     return existsSync(record.path) && isCurrentFile(record)
   }
+  /** Return the live file path when it still matches the exact recorded version byte-for-byte. */
+  livePathMatchingVersion(id: string, versionId: string): string | undefined {
+    validId(versionId)
+    return this.locked(id, () => {
+      const record = this.read(id)
+      const version = record.versions.find(v => v.id === versionId)
+      if (!version || record.currentVersion !== versionId) return undefined
+      if (!existsSync(record.path) || !isCurrentFile(record)) return undefined
+      try {
+        return this.snapshot(record.path).digest === version.hash ? record.path : undefined
+      } catch {
+        return undefined
+      }
+    })
+  }
   /** Resolve historical message references without trusting the link text or current path. */
   versionSourceRunIds(versionIds: readonly string[]): Map<string, string | undefined> {
     const found = new Map<string, string | undefined>()

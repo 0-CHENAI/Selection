@@ -9,18 +9,26 @@ import { ItemNavigator } from '../overlay/ItemNavigator'
 import { FileTypeIcon } from '../chat/attachment-helpers'
 import { isHtmlPreviewCoveredByArtifacts, parseMarkdownPreviewSpec, normalizePreviewItems } from './markdown-preview-helpers'
 
-const EMPTY_ARTIFACT_PATHS: readonly string[] = []
-const DeliveredArtifactPathsContext = React.createContext<readonly string[]>(EMPTY_ARTIFACT_PATHS)
+interface DeliveredArtifactContextValue {
+  paths: readonly string[]
+  baseDirs: readonly string[]
+}
+
+const EMPTY_ARTIFACT_CONTEXT: DeliveredArtifactContextValue = { paths: [], baseDirs: [] }
+const DeliveredArtifactPathsContext = React.createContext<DeliveredArtifactContextValue>(EMPTY_ARTIFACT_CONTEXT)
 
 export function DeliveredArtifactPathsProvider({
   paths,
+  baseDirs = EMPTY_ARTIFACT_CONTEXT.baseDirs,
   children,
 }: {
   paths: readonly string[]
+  baseDirs?: readonly string[]
   children: React.ReactNode
 }) {
+  const value = React.useMemo(() => ({ paths, baseDirs }), [paths, baseDirs])
   return (
-    <DeliveredArtifactPathsContext.Provider value={paths}>
+    <DeliveredArtifactPathsContext.Provider value={value}>
       {children}
     </DeliveredArtifactPathsContext.Provider>
   )
@@ -31,7 +39,7 @@ export interface MarkdownHtmlBlockProps { code: string; className?: string }
 export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
   const { t } = useTranslation()
   const { onOpenFile } = usePlatform()
-  const deliveredArtifactPaths = React.useContext(DeliveredArtifactPathsContext)
+  const { paths: deliveredArtifactPaths, baseDirs } = React.useContext(DeliveredArtifactPathsContext)
   const spec = React.useMemo(() => parseMarkdownPreviewSpec(code), [code])
   const items = React.useMemo(() => normalizePreviewItems(spec), [spec])
   const [activeIndex, setActiveIndex] = React.useState(0)
@@ -39,7 +47,7 @@ export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
   const item = items[selectedIndex]
 
   if (!spec || !item) return <CodeBlock code={code} language="json" mode="full" className={className} />
-  if (isHtmlPreviewCoveredByArtifacts(items, deliveredArtifactPaths)) return null
+  if (isHtmlPreviewCoveredByArtifacts(items, deliveredArtifactPaths, baseDirs)) return null
 
   const title = item.label || spec.title || item.src.split(/[\\/]/).pop() || item.src
   const fileName = item.src.split(/[\\/]/).pop() || item.src

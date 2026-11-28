@@ -1,8 +1,42 @@
 import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
 
 type Fingerprint = { size: bigint; mtimeNs: bigint; ctimeNs: bigint }
+
+const nativeRealpathSync = realpathSync.native ?? realpathSync
+
+/**
+ * Canonicalize an existing or not-yet-existing path using native realpath so
+ * Windows 8.3 short paths (e.g. RUNNER~1) and long paths (runneradmin) agree
+ * with `fs/promises.realpath` used by file-access authorization.
+ */
+function canonicalPath(path: string): string {
+  let ancestor = resolve(path)
+  const missing: string[] = []
+  for (;;) {
+    try {
+      return join(nativeRealpathSync(ancestor), ...missing)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return resolve(path)
+      const parent = dirname(ancestor)
+      if (parent === ancestor) return resolve(path)
+      missing.unshift(basename(ancestor))
+      ancestor = parent
+    }
+  }
+}
+
+function canonicalKey(path: string): string {
+  return process.platform === 'win32' ? path.toLowerCase() : path
+}
+
+function relativeWithin(base: string, target: string): string | null {
+  const rel = relative(canonicalKey(base), canonicalKey(target))
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null
+  return rel
+}
 
 // Windows wall-clock ticks can lead NTFS timestamps by more than 2 ms.
 export const ARTIFACT_WRITE_CLOCK_SKEW_MS = process.platform === 'win32' ? 32 : 2
@@ -28,19 +62,14 @@ const IGNORED_SCAN_DIRS = new Set([
 export class ArtifactCandidateInventory {
   private before = new Map<string, Fingerprint>()
   private beforeCanonical = new Set<string>()
+  private skippedDirs = new Set<string>()
   private resolvedRoots: string[]
   private resolvedInternalRoot?: string
   readonly startedAt = Date.now()
   constructor(private roots: readonly string[], private workspaceRoot?: string) {
-    this.resolvedRoots = roots.map(root => {
-      try { return realpathSync(root) }
-      catch { return resolve(root) }
-    })
-    this.resolvedInternalRoot = workspaceRoot ? (() => {
-      try { return realpathSync(workspaceRoot) }
-      catch { return resolve(workspaceRoot) }
-    })() : undefined
-    this.before = this.scan(this.beforeCanonical)
+    this.resolvedRoots = roots.map(root => canonicalPath(root))
+    this.resolvedInternalRoot = workspaceRoot ? canonicalPath(workspaceRoot) : undefined
+    this.before = this.scan(this.beforeCanonical, this.skippedDirs)
   }
 
   changed(): string[] {
@@ -52,28 +81,29 @@ export class ArtifactCandidateInventory {
   }
 
   existedAtStart(path: string): boolean {
-    if (this.before.has(path) || this.beforeCanonical.has(path)) return true
-    try {
-      return this.beforeCanonical.has(realpathSync(path))
-    } catch {
-      return false
-    }
+    if (this.before.has(path) || this.beforeCanonical.has(canonicalKey(path))) return true
+    return this.beforeCanonical.has(canonicalKey(canonicalPath(path)))
   }
 
   covers(path: string): boolean {
-    return this.resolvedRoots.some(base => {
-      const location = relative(base, path)
-      return location === '' || (location !== '..' && !location.startsWith(`..${sep}`) && !isAbsolute(location))
-    })
+    const target = canonicalPath(path)
+    return this.resolvedRoots.some(base => relativeWithin(base, target) !== null)
   }
 
-  /** Whether `path` lies in a scanned subtree (excluding caches, scratch, and sibling sessions). */
+  /**
+   * Whether `path` lies in a completely scanned subtree (excluding caches,
+   * scratch, sibling sessions, and directories that could not be listed).
+   */
   tracks(path: string): boolean {
     if (!isArtifactCardPath(path) || isSessionScratchPath(path)) return false
+    const target = canonicalPath(path)
+    for (const skipped of this.skippedDirs) {
+      if (relativeWithin(skipped, target) !== null) return false
+    }
     const resolvedSessionRoot = this.resolvedRoots[1]
     return this.resolvedRoots.some((base, index) => {
-      const rel = relative(base, path)
-      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false
+      const rel = relativeWithin(base, target)
+      if (!rel) return false
       const segments = rel.split(sep)
       const first = segments[0]!
       const dirs = segments.slice(0, -1)
@@ -84,7 +114,7 @@ export class ArtifactCandidateInventory {
     })
   }
 
-  private scan(canonicalOut?: Set<string>): Map<string, Fingerprint> {
+  private scan(canonicalOut?: Set<string>, skippedDirsOut?: Set<string>): Map<string, Fingerprint> {
     const files = new Map<string, Fingerprint>()
     const visited = new Set<string>()
     const sessionRoot = this.roots[1] ? resolve(this.roots[1]) : undefined
@@ -95,7 +125,12 @@ export class ArtifactCandidateInventory {
       let entries: Dirent[]
       try { entries = readdirSync(directory, { withFileTypes: true }) }
       catch (error) {
-        if (['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) return
+        const code = (error as NodeJS.ErrnoException).code ?? ''
+        if (skippedDirsOut && (code === 'EACCES' || code === 'EPERM')) {
+          const canonicalDir = resolvedRoot === rawRoot ? directory : join(resolvedRoot, relative(rawRoot, directory))
+          skippedDirsOut.add(canonicalDir)
+        }
+        if (['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes(code)) return
         throw error
       }
       for (const entry of entries) {
@@ -110,7 +145,8 @@ export class ArtifactCandidateInventory {
           const file = statSync(path, { bigint: true })
           files.set(path, { size: file.size, mtimeNs: file.mtimeNs, ctimeNs: file.ctimeNs })
           if (canonicalOut) {
-            canonicalOut.add(resolvedRoot === rawRoot ? path : join(resolvedRoot, relative(rawRoot, path)))
+            const canonicalFile = resolvedRoot === rawRoot ? path : join(resolvedRoot, relative(rawRoot, path))
+            canonicalOut.add(canonicalKey(canonicalFile))
           }
         } catch (error) {
           if (!['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error

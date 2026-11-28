@@ -130,10 +130,13 @@ export class ConversationArtifactVersions {
   }
 
   private createdAfterTurnStart(safe: string, canonical: string): boolean {
+    // Before markToolsStarted(), trackPath() records pre-turn baselines (such as
+    // officeDocumentPath and prior assistant links); nothing on disk can have
+    // been created by this turn's tools yet.
+    if (this.toolsStartedAt === undefined) return false
     const existed = this.existedAtStart?.(canonical) ?? this.existedAtStart?.(safe)
     if (existed === false) return true
     if (existed === true) return false
-    if (this.toolsStartedAt === undefined) return false
     try {
       const file = statSync(safe)
       return file.birthtimeMs > this.toolsStartedAt + ARTIFACT_WRITE_CLOCK_SKEW_MS

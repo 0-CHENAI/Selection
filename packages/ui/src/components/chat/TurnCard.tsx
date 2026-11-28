@@ -2070,6 +2070,8 @@ export interface ResponseCardProps {
   variant?: 'response' | 'plan'
   /** Parent session ID (used to reset local annotation/island UI state on session switches) */
   sessionId?: string
+  /** Session folder path used to resolve relative preview paths for artifact deduplication */
+  sessionFolderPath?: string
   /** Underlying message ID for annotation actions */
   revealIdentity?: string
   messageId?: string
@@ -2214,6 +2216,7 @@ export function ResponseCard({
   onPopOut,
   variant = 'response',
   sessionId,
+  sessionFolderPath,
   messageId,
   revealIdentity,
   annotations,
@@ -2291,6 +2294,13 @@ export function ResponseCard({
     () => (showArtifactShelf ? artifactRows.map(row => row.artifact.path) : []),
     [showArtifactShelf, artifactRows],
   )
+  const previewBaseDirs = useMemo(() => {
+    if (!sessionFolderPath) return []
+    const workspacePath = normalizePath(sessionFolderPath).replace(/\/sessions\/[^/]+$/, '')
+    return workspacePath && workspacePath !== normalizePath(sessionFolderPath)
+      ? [sessionFolderPath, workspacePath]
+      : [sessionFolderPath]
+  }, [sessionFolderPath])
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Pending text selection waiting for explicit follow-up action
@@ -3152,7 +3162,7 @@ export function ResponseCard({
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div data-ca-annotatable ref={contentLayerRef} className="relative">
-              <DeliveredArtifactPathsProvider paths={shownArtifactPaths}>
+              <DeliveredArtifactPathsProvider paths={shownArtifactPaths} baseDirs={previewBaseDirs}>
                 <MemoizedMarkdown
                   id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
                   isStreaming={presentationStreaming && variant === 'response'}
@@ -3961,6 +3971,7 @@ function TurnCardContent({
                 streamStartTime={response.streamStartTime}
                 completedRevealStartTime={response.completedRevealStartTime}
                 sessionId={sessionId}
+                sessionFolderPath={sessionFolderPath}
                 onOpenFile={onOpenFile}
                 onOpenArtifact={onOpenArtifact}
                 onOpenUrl={onOpenUrl}
@@ -4028,6 +4039,7 @@ function TurnCardContent({
             streamStartTime={response.streamStartTime}
             completedRevealStartTime={response.completedRevealStartTime}
             sessionId={sessionId}
+            sessionFolderPath={sessionFolderPath}
             onOpenFile={onOpenFile}
             onOpenArtifact={onOpenArtifact}
             onOpenUrl={onOpenUrl}

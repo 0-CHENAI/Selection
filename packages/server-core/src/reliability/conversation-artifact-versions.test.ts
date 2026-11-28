@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
@@ -460,6 +460,7 @@ test('a newly written file already on disk when trackPath runs is not misrecorde
       Date.now(),
       p => (inventory.tracks(p) ? inventory.existedAtStart(p) : undefined),
     )
+    turn.markToolsStarted()
 
     // Simulate subprocess Write creating the new HTML file before tool_start calls trackPath().
     const diagram = join(root, 'docs', 'misaka-architecture.html')
@@ -561,5 +562,44 @@ test('a file created outside scanned roots after markToolsStarted is not registe
   } finally {
     rmSync(root, { recursive: true, force: true })
     rmSync(external, { recursive: true, force: true })
+  }
+})
+
+test('a readable existing file in an unlistable directory preserves its pre-edit baseline', async () => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) return
+  const root = mkdtempSync(join(tmpdir(), 'conversation-unlistable-baseline-'))
+  const reports = join(root, 'reports')
+  try {
+    mkdirSync(reports)
+    const report = join(reports, 'report.html')
+    writeFileSync(report, '<h1>Original v1</h1>')
+    chmodSync(reports, 0o111)
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 15)
+
+    const inventory = new ArtifactCandidateInventory([root])
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(
+      store,
+      [root],
+      async p => realpathSync(p),
+      () => {},
+      Date.now(),
+      p => (inventory.tracks(p) ? inventory.existedAtStart(p) : undefined),
+    )
+
+    // Turn-start tracking of a prior link must record v1 baseline even though reports/ cannot be listed.
+    await turn.trackPath(report)
+    turn.markToolsStarted()
+    writeFileSync(report, '<h1>Edited v2</h1>')
+    const refs = await turn.capture(`已修改报告。[报告](${report})`, 'session/user-2', undefined, [], true)
+    expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({ ordinal: 2, change: 'modified' })
+    const record = store.findByPath(report)!
+    expect(record.versions).toHaveLength(2)
+    expect(store.versionBytes(record.id, record.versions[0]!.id).toString()).toBe('<h1>Original v1</h1>')
+    expect(store.versionBytes(record.id, record.versions[1]!.id).toString()).toBe('<h1>Edited v2</h1>')
+  } finally {
+    chmodSync(reports, 0o700)
+    rmSync(root, { recursive: true, force: true })
   }
 })

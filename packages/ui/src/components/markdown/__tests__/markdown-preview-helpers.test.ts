@@ -149,7 +149,7 @@ describe('isHtmlPreviewCoveredByArtifacts', () => {
     )).toBe(true)
   })
 
-  it('matches across file:// URLs, percent-encoding, Windows slashes/case, and relative paths', () => {
+  it('matches across file:// URLs, percent-encoding, Windows slashes/case, and baseDir-resolved relative paths', () => {
     expect(isHtmlPreviewCoveredByArtifacts(
       [{ src: 'file:///Users/me/project/outputs/my%20diagram.html' }],
       ['/Users/me/project/outputs/my diagram.html'],
@@ -161,13 +161,25 @@ describe('isHtmlPreviewCoveredByArtifacts', () => {
     expect(isHtmlPreviewCoveredByArtifacts(
       [{ src: './outputs/misaka-architecture.html' }],
       ['/Users/me/project/outputs/misaka-architecture.html'],
+      ['/Users/me/project'],
     )).toBe(true)
   })
 
-  it('keeps scratch/unmatched HTML previews and avoids partial filename collisions', () => {
+  it('keeps scratch/unmatched previews, preserves POSIX case sensitivity, and never matches arbitrary relative suffixes', () => {
     expect(isHtmlPreviewCoveredByArtifacts(
       [{ src: '/Users/me/.selection/workspaces/ws/sessions/s1/data/email.html' }],
       ['/Users/me/project/outputs/misaka-architecture.html'],
+    )).toBe(false)
+    // Distinct POSIX casing must not be conflated.
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: '/Users/me/project/Report.html' }],
+      ['/Users/me/project/report.html'],
+    )).toBe(false)
+    // Relative path without matching baseDir must not match a same-name file in a different directory.
+    expect(isHtmlPreviewCoveredByArtifacts(
+      [{ src: 'report.html' }],
+      ['/Users/me/project/archive/report.html'],
+      ['/Users/me/project'],
     )).toBe(false)
     expect(isHtmlPreviewCoveredByArtifacts(
       [{ src: 'architecture.html' }],

@@ -129,3 +129,22 @@ test('existedAtStart matches canonical paths and tracks excludes ignored or sibl
     expect(inventory.tracks(canonicalMeta)).toBe(false)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('tracks returns false for files inside a traversable but unlistable directory', () => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) return
+  const root = mkdtempSync(join(tmpdir(), 'artifact-unlistable-'))
+  const reports = join(root, 'reports')
+  try {
+    mkdirSync(reports)
+    const report = join(reports, 'report.html')
+    writeFileSync(report, '<h1>Existing</h1>')
+    // Execute-only directory: exact path is readable, but readdirSync fails with EACCES.
+    chmodSync(reports, 0o111)
+    const inventory = new ArtifactCandidateInventory([root])
+    expect(inventory.tracks(report)).toBe(false)
+    expect(inventory.tracks(realpathSync(report))).toBe(false)
+  } finally {
+    chmodSync(reports, 0o700)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
