@@ -18,7 +18,6 @@ import {
 } from '@/components/settings'
 import { InlineColorPickerRow } from '@/components/ui/inline-color-picker-row'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
-import { cn } from '@/lib/utils'
 import { PROJECT_COLOR_PALETTE } from '@/utils/project-colors'
 import { projectWorkingDirectorySaveIssue } from '@craft-agent/shared/projects/working-directory'
 
@@ -79,7 +78,7 @@ export function ProjectSettingsPanel({
   const pathLabel = workingDirectory.trim()
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8">
       <SettingsSection
         title={t('projectInfo.settingsBasic')}
         description={t('projectInfo.settingsBasicHint')}
@@ -138,26 +137,31 @@ export function ProjectSettingsPanel({
                 {t('projectInfo.settingsFolderRequired')}
               </div>
             )}
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3 overflow-hidden">
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.04] text-foreground">
                 <FolderOpen className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">{t('projectInfo.workingDirectory')}</div>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      tabIndex={pathLabel ? 0 : undefined}
-                      className={cn('truncate text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring', pathLabel ? 'font-mono text-foreground/80' : 'text-muted-foreground')}
-                      title={pathLabel || undefined}
-                    >
-                      {pathLabel || t('projectsList.createDialogFolderPlaceholder')}
-                    </div>
-                  </TooltipTrigger>
-                  {pathLabel && <TooltipContent className="max-w-sm break-all">{pathLabel}</TooltipContent>}
-                </Tooltip>
+                {pathLabel ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        tabIndex={0}
+                        className="truncate text-xs font-mono text-foreground/80 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        {pathLabel}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-sm break-all">{pathLabel}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <div className="truncate text-xs text-muted-foreground">
+                    {t('projectsList.createDialogFolderPlaceholder')}
+                  </div>
+                )}
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={onPickFolder}>
+              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={onPickFolder}>
                 {pathLabel ? t('projectInfo.settingsFolderChange') : t('projectsList.createDialogFolderButton')}
               </Button>
             </div>

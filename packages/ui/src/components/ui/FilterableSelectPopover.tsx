@@ -161,12 +161,12 @@ export function FilterableSelectPopover<T>({
       />
 
       <div
-        className="fixed z-floating-menu overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small"
+        className="fixed z-floating-menu max-w-[calc(100vw-1rem)] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small"
         style={{
           top: position.top - 8,
           left: position.left,
-          minWidth,
-          maxWidth,
+          minWidth: `min(${minWidth}px, calc(100vw - 1rem))`,
+          maxWidth: `min(${maxWidth}px, calc(100vw - 1rem))`,
           transform: 'translateY(-100%)',
         }}
       >

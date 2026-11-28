@@ -154,7 +154,7 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
   // Terminal mode: raw monospace with minimal styling
   if (mode === 'terminal') {
     return (
-      <pre className={cn('font-mono text-sm whitespace-pre-wrap', className)}>
+      <pre className={cn('font-mono text-sm whitespace-pre-wrap break-words', className)}>
         <code>{code}</code>
       </pre>
     )
@@ -164,7 +164,7 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
   if (mode === 'minimal') {
     if (isLoading || !highlighted) {
       return (
-        <pre className={cn('font-mono text-sm whitespace-pre-wrap', className)}>
+        <pre className={cn('font-mono text-sm whitespace-pre-wrap break-words', className)}>
           <code>{code}</code>
         </pre>
       )
@@ -227,7 +227,7 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
 export function InlineCode({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <code className={cn(
-      'pl-1 pr-1 py-0 rounded bg-foreground/[0.04] font-mono text-[13px]',
+      'pl-1 pr-1 py-0 rounded bg-foreground/[0.04] font-mono text-[13px] break-words',
       className
     )}>
       {children}

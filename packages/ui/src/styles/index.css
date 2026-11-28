@@ -305,6 +305,7 @@ html[data-font="inter"] {
     font-family: var(--font-default);
     background: var(--background);
     color: var(--foreground);
+    overflow-wrap: break-word;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }

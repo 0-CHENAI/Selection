@@ -602,6 +602,7 @@ html[data-font="inter"] {
     font-family: var(--font-default);
     background: transparent;
     color: var(--foreground);
+    overflow-wrap: break-word;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -1269,6 +1270,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   -webkit-box-orient: vertical !important;
   -webkit-line-clamp: 2 !important;
   overflow: hidden !important;
+  overflow-wrap: anywhere !important;
   min-width: 0 !important;
 }
 

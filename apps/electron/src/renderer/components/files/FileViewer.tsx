@@ -51,18 +51,18 @@ export function FileViewer({ path }: FileViewerProps) {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full min-w-0 flex flex-col">
       {/* File path header */}
-      <div className="px-4 py-3 bg-muted/50 border-b flex items-center gap-2 shrink-0">
+      <div className="px-4 py-3 bg-muted/50 border-b flex min-w-0 items-center gap-2 shrink-0">
         <FileText className="size-4 text-muted-foreground shrink-0" />
-        <p className="text-xs font-mono text-muted-foreground truncate select-all" title={path}>
+        <p className="min-w-0 flex-1 text-xs font-mono text-muted-foreground truncate select-all" title={path}>
           {path}
         </p>
       </div>
 
       {/* File content */}
-      <ScrollArea className="flex-1">
-        <div className="p-4">
+      <ScrollArea className="flex-1 min-w-0">
+        <div className="p-4 min-w-0">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-3">
               <Spinner className="text-lg" />
@@ -71,10 +71,10 @@ export function FileViewer({ path }: FileViewerProps) {
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-32 text-destructive gap-2">
               <p className="text-sm font-medium">{t("fileViewer.errorLoading")}</p>
-              <p className="text-xs">{error}</p>
+              <p className="text-xs break-words max-w-full text-center">{error}</p>
             </div>
           ) : (
-            <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed selection:bg-foreground/20">
+            <pre className="text-sm whitespace-pre-wrap break-words font-mono leading-relaxed selection:bg-foreground/20">
               {content}
             </pre>
           )}

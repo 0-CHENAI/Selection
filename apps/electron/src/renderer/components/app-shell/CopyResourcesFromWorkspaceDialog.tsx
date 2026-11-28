@@ -203,7 +203,7 @@ export function CopyResourcesFromWorkspaceDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Copy className="h-4 w-4" />
+            <Copy className="h-4 w-4 shrink-0" />
             {t('copyFromWorkspace.title')}
           </DialogTitle>
           <DialogDescription>
@@ -238,7 +238,7 @@ export function CopyResourcesFromWorkspaceDialog({
                     className="h-5 w-5 rounded-full ring-1 ring-border/50 shrink-0"
                     fallbackClassName="rounded-full"
                   />
-                  <span className="flex-1 truncate">{workspace.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
                   <Monitor className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
                 </button>
               ))
@@ -293,12 +293,13 @@ export function CopyResourcesFromWorkspaceDialog({
                     >
                       <input
                         type="checkbox"
+                        className="shrink-0"
                         checked={checked}
                         disabled={isCopying}
                         onChange={() => toggle(item.id)}
                       />
-                      <span className="flex-1 truncate">{item.label}</span>
-                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                      <span className="max-w-[40%] shrink-0 truncate text-[10px] uppercase tracking-wide text-muted-foreground/70">
                         {item.hint}
                       </span>
                     </label>
@@ -311,23 +312,23 @@ export function CopyResourcesFromWorkspaceDialog({
               <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
                 <input
                   type="checkbox"
-                  className="mt-0.5"
+                  className="mt-0.5 shrink-0"
                   checked={mode === 'overwrite'}
                   disabled={isCopying}
                   onChange={(e) => setMode(e.target.checked ? 'overwrite' : 'skip')}
                 />
-                <span>{t('sendResource.overwriteIfExists')}</span>
+                <span className="min-w-0 break-words">{t('sendResource.overwriteIfExists')}</span>
               </label>
               {resourceType === 'source' && (
                 <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
                   <input
                     type="checkbox"
-                    className="mt-0.5"
+                    className="mt-0.5 shrink-0"
                     checked={includeCredentials}
                     disabled={isCopying}
                     onChange={(e) => setIncludeCredentials(e.target.checked)}
                   />
-                  <span>{t('sendResource.includeCredentials')}</span>
+                  <span className="min-w-0 break-words">{t('sendResource.includeCredentials')}</span>
                 </label>
               )}
             </div>

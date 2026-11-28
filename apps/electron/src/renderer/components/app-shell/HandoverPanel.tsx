@@ -94,14 +94,14 @@ export function HandoverPanel({ sessionId, mode: _mode, sourceLink, headerOnly =
       <DialogContent className={`flex max-h-[80dvh] flex-col overflow-hidden ${selected ? 'sm:max-w-[560px]' : 'sm:max-w-[420px]'}`}
         showCloseButton={!!selected} overlayClassName="bg-black/15 dark:bg-black/35">
         <DialogHeader className="shrink-0 text-left"><DialogTitle className={selected ? 'pr-6' : undefined}>{t('handover.title')}</DialogTitle><DialogDescription className="leading-relaxed">{t('handover.description')}</DialogDescription></DialogHeader>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-          {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto">
+          {error && <p role="alert" className="break-words rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
           {!selected && <p className="text-xs leading-relaxed text-muted-foreground">{t('handover.empty')}</p>}
           {inspecting && records.length > 1 && <div className="flex flex-wrap gap-2">{records.map(record => <button key={record.handoverId} type="button" className={`rounded-md px-2 py-1 text-xs ${selected?.handoverId === record.handoverId ? 'bg-foreground/10' : 'text-muted-foreground'}`} onClick={() => { setSelectedId(record.handoverId); void run({ type: 'get', handoverId: record.handoverId }) }}>{record.targetMode} · {t(`handover.status.${record.status}`)}</button>)}</div>}
           {selected && <>
             <div className="flex flex-wrap items-center gap-2 text-sm"><span className="rounded-md bg-foreground/5 px-2 py-1">{selected.targetMode}</span><span role="status">{t(`handover.status.${selected.status}`)}</span></div>
             {selected.status === 'waiting' && <p className="rounded-lg bg-foreground/5 px-3 py-2 text-sm text-muted-foreground">{t('handover.waiting')}</p>}
-            {selected.error && selected.status !== 'waiting' && <p role="alert" className="text-sm text-destructive">{selected.error}</p>}
+            {selected.error && selected.status !== 'waiting' && <p role="alert" className="break-words text-sm text-destructive">{selected.error}</p>}
             {selected.snapshot && <>
               <Button variant="outline" size="sm" disabled={busy} onClick={() => void run({ type: 'get', handoverId: selected.handoverId, checkSources: true })}>{t('handover.checkSources')}</Button>
               <Detail title={t('handover.goal')} values={[...selected.snapshot.goal, ...selected.snapshot.acceptance]} />

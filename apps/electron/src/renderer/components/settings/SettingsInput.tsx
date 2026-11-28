@@ -91,9 +91,9 @@ export function SettingsInput({
           )}
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="flex min-w-0 gap-2">
         <div className={cn(
-          'relative flex-1 rounded-md shadow-minimal has-[:focus-visible]:bg-background',
+          'relative min-w-0 flex-1 rounded-md shadow-minimal has-[:focus-visible]:bg-background',
           error && 'ring-1 ring-destructive'
         )}>
           <Input
@@ -127,7 +127,7 @@ export function SettingsInput({
         </div>
         {action}
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive break-words">{error}</p>}
     </div>
   )
 }
@@ -298,7 +298,7 @@ export function SettingsSecretInput({
           )}
         </button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive break-words">{error}</p>}
     </div>
   )
 }

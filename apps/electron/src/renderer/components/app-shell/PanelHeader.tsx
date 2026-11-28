@@ -154,7 +154,7 @@ export function PanelHeader({
       initial={false}
       animate={{ opacity: title ? 1 : 0 }}
       transition={{ duration: 0.15 }}
-      className="flex items-center gap-1"
+      className="flex min-w-0 items-center gap-1"
     >
       <h1 className={cn(
         "text-sm font-semibold truncate font-sans leading-tight",

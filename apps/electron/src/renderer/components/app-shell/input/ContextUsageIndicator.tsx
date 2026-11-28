@@ -205,20 +205,20 @@ function ContextUsagePopoverBody({
   const shares = contextBarShares(rows, inputTokens, contextWindow)
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-foreground">{title}</div>
+    <div className="min-w-0 space-y-3">
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="min-w-0 truncate text-sm text-foreground">{title}</div>
         <button
           type="button"
           aria-label={t('common.close')}
           onClick={onClose}
-          className="-mr-1 inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground transition-opacity hover:bg-foreground/5 hover:opacity-100"
+          className="-mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-opacity hover:bg-foreground/5 hover:opacity-100"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
-        <div>{fullLabel}</div>
+      <div className="flex min-w-0 items-baseline justify-between gap-3 text-xs text-muted-foreground">
+        <div className="min-w-0 truncate">{fullLabel}</div>
         <div className="shrink-0 font-mono">{usedOf}</div>
       </div>
       <div className="flex h-1 overflow-hidden rounded-full bg-foreground/10">
@@ -234,9 +234,9 @@ function ContextUsagePopoverBody({
         <BreakdownSegment share={shares.remaining} className="bg-foreground/12" />
       </div>
       {rows.length > 0 && (
-        <ul className="grid gap-2 text-xs">
+        <ul className="grid grid-cols-1 gap-2 [&>*]:min-w-0 text-xs">
           {rows.map((row) => (
-            <li key={row.id} className="flex items-center justify-between gap-3">
+            <li key={row.id} className="flex min-w-0 items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <span
                   aria-hidden
@@ -253,9 +253,9 @@ function ContextUsagePopoverBody({
         </ul>
       )}
       {cacheLabel && (
-        <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-2 text-xs">
-          <span className="text-muted-foreground">{t('chat.contextCacheHitRate')}</span>
-          <span className="font-mono text-foreground/80">{cacheLabel}</span>
+        <div className="flex min-w-0 items-center justify-between gap-3 border-t border-border/50 pt-2 text-xs">
+          <span className="min-w-0 truncate text-muted-foreground">{t('chat.contextCacheHitRate')}</span>
+          <span className="shrink-0 font-mono text-foreground/80">{cacheLabel}</span>
         </div>
       )}
     </div>

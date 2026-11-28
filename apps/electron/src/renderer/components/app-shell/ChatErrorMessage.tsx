@@ -46,9 +46,9 @@ export function ErrorMessage({
   const retryActions = actions?.filter(action => action.action === 'retry') ?? []
   const otherActions = actions?.filter(action => action.action !== 'retry') ?? []
 
-  const detailsContent = <div className="mt-2 pt-2 border-t border-destructive/20 space-y-3">
+  const detailsContent = <div className="mt-2 pt-2 border-t border-destructive/20 space-y-3 min-w-0">
     {executionRecovery && <ExecutionRecoveryStatus {...executionRecovery} />}
-    <div className="text-xs text-destructive/60 font-mono space-y-0.5">
+    <div className="min-w-0 text-xs text-destructive/60 font-mono space-y-0.5 break-words [overflow-wrap:anywhere]">
       {message.errorDetails?.map((detail, i) => <div key={i}>{detail}</div>)}
       {message.errorOriginal && !message.errorDetails?.some(d => d.includes('Raw error:')) && <div className="mt-1">Raw: {message.errorOriginal.slice(0, 200)}{message.errorOriginal.length > 200 ? '...' : ''}</div>}
     </div>
@@ -59,7 +59,7 @@ export function ErrorMessage({
       {/* Subtle bg (3% opacity) + tinted shadow for softer error appearance */}
       <div className="flex justify-start">
         <div
-          className="max-w-[80%] shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"
+          className="max-w-[80%] min-w-0 shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"
           style={{
             backgroundColor: terminalCode === 'context_limit' ? 'oklch(from var(--info) l c h / 0.03)' : 'oklch(from var(--destructive) l c h / 0.03)',
             '--shadow-color': terminalCode === 'context_limit' ? 'var(--info-rgb)' : 'var(--destructive-rgb)',

@@ -120,7 +120,7 @@ export function SearchableModelInput({
             sideOffset={4}
             collisionPadding={8}
             className="p-1.5 w-[var(--radix-popover-trigger-width)]"
-            style={{ minWidth: 280 }}
+            style={{ minWidth: 'min(280px, calc(100vw - 2rem))' }}
           >
             {/* Search input */}
             <div className="relative mb-1.5">
@@ -151,10 +151,11 @@ export function SearchableModelInput({
                     key={model.id}
                     type="button"
                     className={cn(
-                      'w-full px-2.5 py-2 text-left text-sm rounded-lg',
+                      'w-full min-w-0 truncate px-2.5 py-2 text-left text-sm rounded-lg',
                       'hover:bg-foreground/5 transition-colors',
                       value === model.id && 'bg-foreground/3'
                     )}
+                    title={model.name || model.id}
                     onClick={() => handleSelect(model.id)}
                   >
                     {model.name || model.id}

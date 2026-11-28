@@ -207,7 +207,7 @@ export function SourcesListPanel({
                   </span>
                 </EntityListBadge>
               )}
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{source.config.slug}</span>
+              <span className="max-w-[140px] shrink-0 truncate font-mono text-[10px] text-muted-foreground">{source.config.slug}</span>
               {subtitle && <span className="truncate">{subtitle}</span>}
             </>
           ),

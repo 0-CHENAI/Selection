@@ -86,7 +86,7 @@ function Info_PageRoot({
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground p-4">
           <AlertCircle className="h-10 w-10 text-destructive" />
           <p className="text-sm font-medium">{t('common.errorLoadingContent')}</p>
-          <p className="text-xs text-center max-w-md">{error}</p>
+          <p className="text-xs text-center max-w-md break-words">{error}</p>
         </div>
       </div>
     )
@@ -106,7 +106,7 @@ function Info_PageRoot({
 
   // Normal content
   return (
-    <div className={cn('h-full flex flex-col', className)}>
+    <div className={cn('h-full min-w-0 flex flex-col', className)}>
       {header}
       {otherChildren}
     </div>
@@ -139,7 +139,7 @@ function Info_PageHero({ avatar, title, tagline, onTitleClick, className }: Info
               <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" />
             </button>
           ) : (
-            <h2 className="text-base font-semibold text-foreground leading-tight">
+            <h2 className="text-base font-semibold text-foreground leading-tight break-words">
               {title}
             </h2>
           )

@@ -123,7 +123,7 @@ export const StyledDropdownMenuContent = React.forwardRef<
         'data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2',
         'data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
         // styled additions
-        'w-fit font-sans whitespace-nowrap text-xs flex flex-col gap-0.5',
+        'w-fit max-w-[calc(100vw-1rem)] font-sans whitespace-nowrap text-xs flex flex-col gap-0.5',
         minWidth,
         className,
       )}
@@ -148,7 +148,7 @@ export const StyledDropdownMenuItem = React.forwardRef<
     ref={ref}
     className={cn(
       // shadcn base layer
-      'relative flex cursor-default items-center gap-2 px-2 py-1.5 text-sm outline-hidden select-none',
+      'relative flex min-w-0 cursor-default items-center gap-2 px-2 py-1.5 text-sm outline-hidden select-none',
       '[&_svg]:pointer-events-none [&_svg]:shrink-0',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       // styled additions
@@ -185,7 +185,7 @@ export const StyledDropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      'relative flex cursor-default items-center gap-2 px-2 py-1.5 text-sm outline-hidden select-none',
+      'relative flex min-w-0 cursor-default items-center gap-2 px-2 py-1.5 text-sm outline-hidden select-none',
       '[&_svg]:pointer-events-none [&_svg]:shrink-0',
       'pr-1.5 rounded-[4px] hover:bg-foreground/10 focus:bg-foreground/10 data-[state=open]:bg-foreground/10',
       '[&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg]:shrink-0',
@@ -215,7 +215,7 @@ export const StyledDropdownMenuSubContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'popover-styled w-fit font-sans whitespace-nowrap text-xs flex flex-col gap-0.5 z-dropdown overflow-x-hidden overflow-y-auto p-1',
+        'popover-styled w-fit max-w-[calc(100vw-1rem)] font-sans whitespace-nowrap text-xs flex flex-col gap-0.5 z-dropdown overflow-x-hidden overflow-y-auto p-1',
         'max-h-(--radix-dropdown-menu-content-available-height)',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
@@ -237,7 +237,7 @@ export function DropdownMenuShortcut({
 }: React.ComponentProps<'span'>) {
   return (
     <span
-      className={cn('text-muted-foreground ml-auto text-xs tracking-widest', className)}
+      className={cn('text-muted-foreground ml-auto shrink-0 text-xs tracking-widest', className)}
       {...props}
     />
   )

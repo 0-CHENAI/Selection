@@ -104,7 +104,7 @@ export function CompactWorkingDirectorySelector({
           hasFolder ? (
             <span className="flex flex-col gap-0.5">
               <span className="font-medium">{t('chat.workingDirectory')}</span>
-              <span className="text-xs opacity-70">{formatPath(workingDirectory, homeDir)}</span>
+              <span className="text-xs opacity-70 break-all">{formatPath(workingDirectory, homeDir)}</span>
               {gitBranch && (
                 <span className="text-xs opacity-70">{t('chat.onBranch', { branch: gitBranch })}</span>
               )}
@@ -139,7 +139,7 @@ export function CompactWorkingDirectorySelector({
           <div className="px-2 pb-2 flex flex-col gap-0.5 max-h-[50vh] overflow-y-auto">
             {/* Current folder — pinned at top, non-interactive */}
             {hasFolder && (
-              <div className="flex items-center gap-3 px-3 py-3 rounded-[10px] bg-foreground/5">
+              <div className="flex min-w-0 items-center gap-3 px-3 py-3 rounded-[10px] bg-foreground/5">
                 <Icon_Folder className="h-5 w-5 shrink-0 text-foreground/60" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{displayFolderName}</div>
@@ -170,7 +170,7 @@ export function CompactWorkingDirectorySelector({
                       type="button"
                       onClick={() => handleSelectRecent(path)}
                       className={cn(
-                        'flex items-center gap-3 px-3 py-3 rounded-[10px] text-left transition-colors hover:bg-foreground/5 group/row',
+                        'flex min-w-0 items-center gap-3 px-3 py-3 rounded-[10px] text-left transition-colors hover:bg-foreground/5 group/row',
                       )}
                     >
                       <Icon_Folder className="h-5 w-5 shrink-0 text-foreground/60" />
