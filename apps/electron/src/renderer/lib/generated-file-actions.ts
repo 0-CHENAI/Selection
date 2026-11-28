@@ -18,12 +18,30 @@ export async function openGeneratedFileAction(opts: {
   searchFiles: SearchGeneratedFiles
   openPreview: (path: string) => void | boolean | Promise<void | boolean>
   previewVersion?: (artifactId: string, versionId: string) => Promise<string>
-  readArtifact?: (artifactId: string) => Promise<{ path: string; currentFileAvailable?: boolean }>
+  readArtifact?: (artifactId: string) => Promise<{ path: string; currentVersion?: string; currentFileAvailable?: boolean }>
   manageArtifact?: (path: string, alternativePaths?: string[], versionId?: string) => void | Promise<void>
   openExternal?: (path: string) => void | boolean | Promise<void | boolean>
   reveal: (path: string) => void | Promise<void>
 }): Promise<boolean> {
   if (opts.action === 'preview' && opts.versionId) {
+    if (!opts.artifactId || !opts.previewVersion) throw new Error('Artifact version preview is unavailable')
+    return (await opts.openPreview(await opts.previewVersion(opts.artifactId, opts.versionId))) !== false
+  }
+  if (opts.action === 'live' && opts.versionId) {
+    // Primary click on an HTML artifact card: open the live original file with
+    // its sibling assets while this version is still current, and preserve the
+    // immutable snapshot preview for historical or replaced versions.
+    if (opts.artifactId && opts.readArtifact) {
+      const record = await opts.readArtifact(opts.artifactId)
+      if (record.currentVersion === opts.versionId && record.currentFileAvailable !== false) {
+        try {
+          const picked = await resolveOpenableGeneratedPath({ ...opts, requestedPath: record.path })
+          return (await opts.openPreview(picked.path)) !== false
+        } catch (error) {
+          if (!(error instanceof GeneratedFileUnavailableError) || !opts.previewVersion) throw error
+        }
+      }
+    }
     if (!opts.artifactId || !opts.previewVersion) throw new Error('Artifact version preview is unavailable')
     return (await opts.openPreview(await opts.previewVersion(opts.artifactId, opts.versionId))) !== false
   }

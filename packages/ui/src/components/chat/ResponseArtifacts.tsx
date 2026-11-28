@@ -6,8 +6,10 @@ import { mergeArtifactSupplements, useArtifactSupplements, type MergedArtifactRo
 import {
   artifactCategory,
   artifactPathKey,
+  canOpenLiveHtmlArtifact,
   extractDeliveredResponseArtifacts,
   organizeArtifactShelf,
+  resolveArtifactPrimaryAction,
   type ArtifactCategory,
   type ArtifactChange,
   type ArtifactFolderGroup,
@@ -53,7 +55,7 @@ export function ResponseArtifacts({ artifacts, versions, responseText, onOpenFil
   mode?: 'settled' | 'pending'
 }) {
   const { t } = useTranslation()
-  const { onManageArtifact, onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
+  const { onManageArtifact, onOpenFileExternal, onRevealInFinder, fileManagerName, canOpenHtmlInBrowser } = usePlatform()
   const supplements = useArtifactSupplements()
   const [expanded, setExpanded] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<'grouped' | 'flat'>('grouped')
@@ -150,12 +152,16 @@ export function ResponseArtifacts({ artifacts, versions, responseText, onOpenFil
     const supplement = row.supplement
     const version = versionByPath.get(artifactPathKey(artifact.path))
     const change = artifact.change
-    const openAction = change === 'deleted' && onOpenArtifact ? 'versions' : 'preview'
+    const isLiveHtml = canOpenLiveHtmlArtifact(artifact, canOpenHtmlInBrowser)
+    const openAction = resolveArtifactPrimaryAction({
+      artifact,
+      canOpenHtmlInBrowser,
+      hasArtifactHandler: Boolean(onOpenArtifact),
+    })
     const activate = () => {
       if (supplement?.onActivate) supplement.onActivate()
       else void open(artifact.path, openAction, version?.versionId, version?.artifactId)
     }
-    const isLiveHtml = artifactCategory(artifact.extension) === 'html' && change !== 'deleted'
     const standardItems = <>
       {isLiveHtml && (onOpenArtifact || onOpenFile) && (
         <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'live', undefined, version?.artifactId) }}>

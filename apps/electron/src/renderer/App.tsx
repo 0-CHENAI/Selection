@@ -2191,6 +2191,7 @@ export default function App() {
       else draftStorage.setRaw(draftStorage.KEYS.annotationFeedbackDrafts, value, key)
     },
     onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[], versionId?: string) => loadManagedArtifact(path, alternativePaths, sessionId, versionId) : undefined,
+    canOpenHtmlInBrowser: window.electronAPI.isChannelAvailable(RPC_CHANNELS.browserPane.OPEN_HTML_FILE) && typeof window.electronAPI.browserPane?.openHtmlFile === 'function',
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
