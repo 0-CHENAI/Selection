@@ -1,3 +1,5 @@
+import { localArtifactPath } from '@craft-agent/shared/utils/artifact-links'
+
 /**
  * Shared file-preview spec validation for MarkdownDocBlock and MarkdownHtmlBlock.
  *
@@ -73,4 +75,46 @@ export function normalizePreviewItems(spec: MarkdownPreviewSpec | null): Markdow
   if (spec.items && spec.items.length > 0) return spec.items
   if (spec.src) return [{ src: spec.src }]
   return []
+}
+
+function normalizePreviewPathKey(rawPath: string): string | null {
+  const local = localArtifactPath(rawPath)
+  if (!local) return null
+  const normalized = local.replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
+  if (!normalized) return null
+  return /^[a-z]:\//i.test(normalized) || normalized.startsWith('//') ? normalized.toLowerCase() : normalized
+}
+
+function isAbsolutePreviewPathKey(key: string): boolean {
+  return key.startsWith('/') || /^[a-z]:\//i.test(key) || key.startsWith('//')
+}
+
+/**
+ * Single-file `html-preview` blocks duplicate the deliverable shelf when the
+ * same file is already shown in `ResponseArtifacts`. Multi-item tab sets and
+ * scratch/untracked HTML files (e.g. emails or templates in `data/`) remain visible.
+ */
+export function isHtmlPreviewCoveredByArtifacts(
+  items: readonly MarkdownPreviewItem[],
+  deliveredArtifactPaths: readonly string[],
+): boolean {
+  if (items.length !== 1 || deliveredArtifactPaths.length === 0) return false
+  const srcKey = normalizePreviewPathKey(items[0]!.src)
+  if (!srcKey) return false
+  const srcAbsolute = isAbsolutePreviewPathKey(srcKey)
+  const srcLower = srcKey.toLowerCase()
+  for (const deliveredPath of deliveredArtifactPaths) {
+    const deliveredKey = normalizePreviewPathKey(deliveredPath)
+    if (!deliveredKey) continue
+    if (deliveredKey === srcKey) return true
+    const deliveredAbsolute = isAbsolutePreviewPathKey(deliveredKey)
+    if (!srcAbsolute && deliveredAbsolute) {
+      const lowerDelivered = deliveredKey.toLowerCase()
+      if (lowerDelivered === srcLower || lowerDelivered.endsWith(`/${srcLower}`)) return true
+    } else if (srcAbsolute && !deliveredAbsolute) {
+      const lowerDelivered = deliveredKey.toLowerCase()
+      if (srcLower === lowerDelivered || srcLower.endsWith(`/${lowerDelivered}`)) return true
+    }
+  }
+  return false
 }

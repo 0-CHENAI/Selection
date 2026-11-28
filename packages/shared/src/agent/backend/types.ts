@@ -682,6 +682,8 @@ export interface AgentBackend {
 
   /** Called when a tool requires permission */
   onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
+  /** Called after PreToolUse checks approve a tool, before allowing the subprocess to execute it. */
+  onToolExecutionAllowed?: (toolName: string, input: Record<string, unknown>, toolCallId?: string) => void | Promise<void>;
   onPermissionRequest: PermissionCallback | null;
 
   /** Called when agent submits a plan */

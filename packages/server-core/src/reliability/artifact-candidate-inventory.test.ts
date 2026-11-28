@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ArtifactCandidateInventory } from './artifact-candidate-inventory'
@@ -89,5 +89,43 @@ test('session outputs become card candidates while identical data files remain s
     writeFileSync(join(session, 'outputs', '报告.docx'), 'final')
     writeFileSync(join(session, 'data', '报告.docx'), 'draft')
     expect(inventory.changed()).toEqual([join(session, 'outputs', '报告.docx')])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('existedAtStart matches canonical paths and tracks excludes ignored or sibling subtrees', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-tracks-'))
+  const session = join(root, 'sessions', 'current')
+  const sibling = join(root, 'sessions', 'other')
+  const nodeModules = join(root, 'node_modules', 'pkg')
+  const sessionMeta = join(session, 'meta')
+  try {
+    for (const dir of [session, sibling, nodeModules, sessionMeta]) mkdirSync(dir, { recursive: true })
+    const existing = join(root, 'existing.html')
+    const siblingFile = join(sibling, 'old.html')
+    const depReadme = join(nodeModules, 'README.md')
+    const metaDoc = join(sessionMeta, 'note.md')
+    writeFileSync(existing, 'before')
+    writeFileSync(siblingFile, 'sibling')
+    writeFileSync(depReadme, 'dep')
+    writeFileSync(metaDoc, 'meta')
+
+    const inventory = new ArtifactCandidateInventory([root, session], root)
+    const canonicalExisting = realpathSync(existing)
+    const canonicalNew = join(realpathSync(root), 'new-diagram.html')
+    const canonicalSessionNew = join(realpathSync(session), 'summary.md')
+    const canonicalSibling = realpathSync(siblingFile)
+    const canonicalDep = realpathSync(depReadme)
+    const canonicalMeta = realpathSync(metaDoc)
+
+    expect(inventory.existedAtStart(existing)).toBe(true)
+    expect(inventory.existedAtStart(canonicalExisting)).toBe(true)
+    expect(inventory.existedAtStart(canonicalNew)).toBe(false)
+
+    expect(inventory.tracks(canonicalExisting)).toBe(true)
+    expect(inventory.tracks(canonicalNew)).toBe(true)
+    expect(inventory.tracks(canonicalSessionNew)).toBe(true)
+    expect(inventory.tracks(canonicalSibling)).toBe(false)
+    expect(inventory.tracks(canonicalDep)).toBe(false)
+    expect(inventory.tracks(canonicalMeta)).toBe(false)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

@@ -27,14 +27,20 @@ const IGNORED_SCAN_DIRS = new Set([
 /** A turn-local filesystem ledger. Names come from the filesystem, never answer prose. */
 export class ArtifactCandidateInventory {
   private before = new Map<string, Fingerprint>()
+  private beforeCanonical = new Set<string>()
   private resolvedRoots: string[]
+  private resolvedInternalRoot?: string
   readonly startedAt = Date.now()
   constructor(private roots: readonly string[], private workspaceRoot?: string) {
     this.resolvedRoots = roots.map(root => {
       try { return realpathSync(root) }
       catch { return resolve(root) }
     })
-    this.before = this.scan()
+    this.resolvedInternalRoot = workspaceRoot ? (() => {
+      try { return realpathSync(workspaceRoot) }
+      catch { return resolve(workspaceRoot) }
+    })() : undefined
+    this.before = this.scan(this.beforeCanonical)
   }
 
   changed(): string[] {
@@ -46,7 +52,12 @@ export class ArtifactCandidateInventory {
   }
 
   existedAtStart(path: string): boolean {
-    return this.before.has(path)
+    if (this.before.has(path) || this.beforeCanonical.has(path)) return true
+    try {
+      return this.beforeCanonical.has(realpathSync(path))
+    } catch {
+      return false
+    }
   }
 
   covers(path: string): boolean {
@@ -56,12 +67,29 @@ export class ArtifactCandidateInventory {
     })
   }
 
-  private scan(): Map<string, Fingerprint> {
+  /** Whether `path` lies in a scanned subtree (excluding caches, scratch, and sibling sessions). */
+  tracks(path: string): boolean {
+    if (!isArtifactCardPath(path) || isSessionScratchPath(path)) return false
+    const resolvedSessionRoot = this.resolvedRoots[1]
+    return this.resolvedRoots.some((base, index) => {
+      const rel = relative(base, path)
+      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false
+      const segments = rel.split(sep)
+      const first = segments[0]!
+      const dirs = segments.slice(0, -1)
+      if (base === resolvedSessionRoot && (first === 'meta' || first === 'session.jsonl')) return false
+      if (index === 0 && base === this.resolvedInternalRoot && (first === 'sessions' || first === 'artifacts')) return false
+      if (dirs.some(dir => IGNORED_SCAN_DIRS.has(dir.toLowerCase()))) return false
+      return true
+    })
+  }
+
+  private scan(canonicalOut?: Set<string>): Map<string, Fingerprint> {
     const files = new Map<string, Fingerprint>()
     const visited = new Set<string>()
     const sessionRoot = this.roots[1] ? resolve(this.roots[1]) : undefined
     const internalRoot = this.workspaceRoot ? resolve(this.workspaceRoot) : undefined
-    const walk = (directory: string) => {
+    const walk = (directory: string, rawRoot: string, resolvedRoot: string) => {
       if (!existsSync(directory) || visited.has(directory)) return
       visited.add(directory)
       let entries: Dirent[]
@@ -76,17 +104,23 @@ export class ArtifactCandidateInventory {
         if (entry.isDirectory() && IGNORED_SCAN_DIRS.has(entry.name.toLowerCase())) continue
         const path = join(directory, entry.name)
         if (isSessionScratchPath(path) || entry.isSymbolicLink()) continue
-        if (entry.isDirectory()) { walk(path); continue }
+        if (entry.isDirectory()) { walk(path, rawRoot, resolvedRoot); continue }
         if (!entry.isFile() || !isArtifactCardPath(path)) continue
         try {
           const file = statSync(path, { bigint: true })
           files.set(path, { size: file.size, mtimeNs: file.mtimeNs, ctimeNs: file.ctimeNs })
+          if (canonicalOut) {
+            canonicalOut.add(resolvedRoot === rawRoot ? path : join(resolvedRoot, relative(rawRoot, path)))
+          }
         } catch (error) {
           if (!['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
         }
       }
     }
-    for (const root of this.roots) walk(resolve(root))
+    for (let i = 0; i < this.roots.length; i++) {
+      const rawRoot = resolve(this.roots[i]!)
+      walk(rawRoot, rawRoot, this.resolvedRoots[i]!)
+    }
     return files
   }
 }

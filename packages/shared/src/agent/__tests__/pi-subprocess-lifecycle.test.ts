@@ -338,3 +338,34 @@ it('reports the tool timeout once, aborts host waits and preserves real stream e
     expect(events.some(event => event.type === 'typed_error' && event.error.code === 'stream_interrupted')).toBe(true);
   } finally { await f.cleanup(); }
 });
+
+it('disposeForRestart while processing stops the subprocess without emitting a stdout-closed error', async () => {
+  const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(false);
+  const f = fixture(`
+    const send = message => console.log(JSON.stringify(message));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+      const message = JSON.parse(line);
+      if (message.type === 'init') send({ type: 'ready' });
+      if (message.type === 'set_auto_compaction') send({ type: 'set_auto_compaction_result', id: message.id, enabled: true });
+      if (message.type === 'shutdown') process.exit(0);
+    });
+  `);
+  try {
+    await f.internal.ensureSubprocess(2000);
+    expect(f.internal.subprocess).not.toBeNull();
+    f.internal._isProcessing = true;
+    f.internal.eventQueue.reset();
+    const drained: any[] = [];
+    const draining = (async () => {
+      for await (const event of f.internal.eventQueue.drain()) drained.push(event);
+    })();
+
+    await f.agent.disposeForRestart();
+    await draining;
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(f.internal.subprocess).toBeNull();
+    expect(f.internal._isProcessing).toBe(false);
+    expect(drained.some(event => event.type === 'typed_error' || event.type === 'error')).toBe(false);
+  } finally { await f.cleanup(); browserSetting.mockRestore(); }
+});

@@ -58,7 +58,7 @@ import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import { TaskTurnSummary } from './TaskProgressCard'
 import type { TodoRailMode } from './task-progress'
-import { MemoizedMarkdown } from '../markdown'
+import { DeliveredArtifactPathsProvider, MemoizedMarkdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { type IslandTransitionConfig } from '../ui'
@@ -2274,13 +2274,23 @@ export function ResponseCard({
     [artifactVersions],
   )
   const artifactSupplements = useArtifactSupplements()
-  const artifactAnchors = [messageId, revealIdentity].filter((value): value is string => !!value)
+  const artifactAnchors = useMemo(
+    () => [messageId, revealIdentity].filter((value): value is string => !!value),
+    [messageId, revealIdentity],
+  )
   const presentationStreaming = isStreaming
   const artifactShelfSettled = showArtifacts && !presentationStreaming
-  const artifactRows = canCollectSources
-    ? mergeArtifactSupplements(deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled ? 'settled' : 'pending')
-    : []
+  const artifactRows = useMemo(
+    () => canCollectSources
+      ? mergeArtifactSupplements(deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled ? 'settled' : 'pending')
+      : [],
+    [canCollectSources, deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled],
+  )
   const showArtifactShelf = artifactRows.length > 0 && (artifactShelfSettled || artifactRows.some(row => row.supplement))
+  const shownArtifactPaths = useMemo(
+    () => (showArtifactShelf ? artifactRows.map(row => row.artifact.path) : []),
+    [showArtifactShelf, artifactRows],
+  )
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Pending text selection waiting for explicit follow-up action
@@ -3142,16 +3152,18 @@ export function ResponseCard({
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div data-ca-annotatable ref={contentLayerRef} className="relative">
-              <MemoizedMarkdown
-                id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
-                isStreaming={presentationStreaming && variant === 'response'}
-                revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
-                mode="minimal"
-                onUrlClick={onOpenUrl}
-                onFileClick={onOpenFile}
-              >
-                {bodyText}
-              </MemoizedMarkdown>
+              <DeliveredArtifactPathsProvider paths={shownArtifactPaths}>
+                <MemoizedMarkdown
+                  id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
+                  isStreaming={presentationStreaming && variant === 'response'}
+                  revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
+                  mode="minimal"
+                  onUrlClick={onOpenUrl}
+                  onFileClick={onOpenFile}
+                >
+                  {bodyText}
+                </MemoizedMarkdown>
+              </DeliveredArtifactPathsProvider>
               {annotationOverlayLayer}
             </div>
           </div>

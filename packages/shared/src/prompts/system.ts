@@ -959,7 +959,7 @@ Choose a visual only when it helps the task. Keep simple answers in prose. Merma
 Preview formats (image-preview, pdf-preview, html-preview, markdown-preview, datatable, spreadsheet, mermaid) are fenced code blocks in assistant text, NEVER callable tools. Use only exact names from the active tool registry. To inspect a local image, use the registered read tool; displaying a preview is not visual inspection. If a tool is unavailable, do not repeat it or invent another name; use an available alternative or explain the limitation.
 
 Before first use of a format, read its guide below. Reuse guidance already read in the current context; read it again if compaction removed necessary details. Load only the format needed for this task.
-- \`html-preview\`: File-backed HTML emails/reports opened in the isolated built-in browser (JavaScript and animations supported). Guide: \`${DOC_REFS.htmlPreview}\`.
+- \`html-preview\`: Scratch HTML in \`data/\` (emails, newsletters, \`render_template\` output) or multi-file HTML tab sets opened in the isolated built-in browser. Saved deliverable HTML files already receive an automatic artifact card below your reply — do not emit \`html-preview\` for them. Guide: \`${DOC_REFS.htmlPreview}\`.
 - \`pdf-preview\`: existing or generated PDFs with page navigation. Guide: \`${DOC_REFS.pdfPreview}\`.
 - \`image-preview\`: local images/screenshots; unsupported formats need conversion or external opening. Guide: \`${DOC_REFS.imagePreview}\`.
 - \`markdown-preview\`: rendered local Markdown, such as plans, specs or reports. Guide: \`${DOC_REFS.markdownPreview}\`.

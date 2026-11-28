@@ -111,10 +111,36 @@ export function sessionArtifactRecord(record: ArtifactRecord, messages: readonly
 export class ConversationArtifactVersions {
   private paths = new Set<string>()
   private pendingWrites = new Set<string>()
+  private pendingWriteCanonicals = new Set<string>()
   /** Bytes observed before this turn's edits. Opening a file does not move this snapshot. */
   private baselines = new Map<string, { artifactId: string; versionId: string; ordinal: number }>()
+  private toolsStartedAt?: number
   constructor(readonly store: ArtifactVersions, private bases: string[], private authorize: (path: string) => Promise<string>,
-    private onFailure: () => void, private turnStartedAt = Date.now()) {}
+    private onFailure: () => void, private turnStartedAt = Date.now(),
+    private existedAtStart?: (path: string) => boolean | undefined) {}
+
+  /** Mark the boundary after turn-start baseline tracking, right before tools can execute. */
+  markToolsStarted(at = Date.now()): void {
+    this.toolsStartedAt = at
+  }
+
+  private canonicalOrSelf(path: string): string {
+    try { return canonicalLocation(path) }
+    catch { return path }
+  }
+
+  private createdAfterTurnStart(safe: string, canonical: string): boolean {
+    const existed = this.existedAtStart?.(canonical) ?? this.existedAtStart?.(safe)
+    if (existed === false) return true
+    if (existed === true) return false
+    if (this.toolsStartedAt === undefined) return false
+    try {
+      const file = statSync(safe)
+      return file.birthtimeMs > this.toolsStartedAt + ARTIFACT_WRITE_CLOCK_SKEW_MS
+    } catch {
+      return false
+    }
+  }
 
   private writtenThisTurn(path: string): boolean {
     const file = statSync(path)
@@ -133,9 +159,22 @@ export class ConversationArtifactVersions {
       try {
         const safe = await authorize(candidate)
         if (isSessionScratchPath(safe)) continue
-        if (this.paths.has(safe)) return
-        if (!existsSync(safe)) { this.pendingWrites.add(safe); continue }
+        const canonical = this.canonicalOrSelf(safe)
+        if (this.paths.has(safe) || this.paths.has(canonical)) return
+        if (this.pendingWrites.has(safe) || this.pendingWriteCanonicals.has(canonical)) return
+        if (!existsSync(safe)) {
+          this.pendingWrites.add(safe)
+          this.pendingWriteCanonicals.add(canonical)
+          continue
+        }
         if (!lstatSync(safe).isFile()) continue
+        // Never snapshot a file newly created during this turn as a pre-turn baseline:
+        // otherwise capture() sees baseline === current and drops the deliverable.
+        if (this.createdAfterTurnStart(safe, canonical)) {
+          this.pendingWrites.add(safe)
+          this.pendingWriteCanonicals.add(canonical)
+          return
+        }
         // Before work starts, retain any externally edited baseline separately.
         let record = this.store.register(safe)
         if (!this.baselines.has(record.path)) {

@@ -445,3 +445,121 @@ test('excluded blocked paths also exclude tracked hard-link aliases of the same 
     expect(store.findByPath(sharedDeck)!.versions).toHaveLength(1)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('a newly written file already on disk when trackPath runs is not misrecorded as a pre-turn baseline', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-write-race-'))
+  try {
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    const inventory = new ArtifactCandidateInventory([root])
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(
+      store,
+      [root],
+      async p => realpathSync(p),
+      () => {},
+      Date.now(),
+      p => (inventory.tracks(p) ? inventory.existedAtStart(p) : undefined),
+    )
+
+    // Simulate subprocess Write creating the new HTML file before tool_start calls trackPath().
+    const diagram = join(root, 'docs', 'misaka-architecture.html')
+    writeFileSync(diagram, '<!doctype html><html><body>Architecture</body></html>')
+    await turn.trackPath('./docs/misaka-architecture.html')
+
+    // Must not have created a premature sourceless baseline record before capture().
+    expect(store.findByPath(diagram)).toBeUndefined()
+
+    const refs = await turn.capture(
+      '[查看架构图](./docs/misaka-architecture.html)\n\n已完成系统架构图绘制。',
+      'session/user-1',
+      undefined,
+      inventory.changed(),
+      false,
+    )
+    expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({ ordinal: 1, change: 'created' })
+    const record = store.findByPath(diagram)!
+    expect(record.versions).toHaveLength(1)
+    expect(record.versions[0]).toMatchObject({
+      ordinal: 1,
+      sourceRunId: 'session/user-1',
+      summary: '已完成系统架构图绘制。',
+      summaryOrigin: 'assistant',
+    })
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('creating a new file with Write and later calling Edit in the same turn publishes a single v1 created deliverable', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-write-then-edit-'))
+  try {
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(store, [root], async p => p, () => {})
+    const report = join(root, 'new-report.html')
+
+    // PreToolUse before Write: file does not exist yet -> queued in pendingWrites.
+    await turn.trackPath(report)
+    writeFileSync(report, '<h1>Draft</h1>')
+    // PreToolUse before a follow-up Edit (or delayed tool_start): file now exists, must stay pending (no phantom baseline).
+    await turn.trackPath(report)
+    expect(store.findByPath(report)).toBeUndefined()
+
+    // Even if Edit made no changes, the newly created file must still be delivered as v1 created.
+    const refs = await turn.capture('已生成新报告。', 'session/user-1', undefined, [], false)
+    expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({ path: report, ordinal: 1, change: 'created' })
+    expect(store.findByPath(report)!.versions).toHaveLength(1)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('an untouched old file in an untracked sibling session is treated as pre-existing baseline, never a new deliverable', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-sibling-session-'))
+  const current = join(root, 'sessions', 'current')
+  const sibling = join(root, 'sessions', 'other')
+  try {
+    mkdirSync(current, { recursive: true })
+    mkdirSync(sibling, { recursive: true })
+    const siblingReport = join(sibling, 'old-report.html')
+    writeFileSync(siblingReport, '<h1>Old</h1>')
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
+
+    const inventory = new ArtifactCandidateInventory([root, current], root)
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(
+      store,
+      [root, current],
+      async p => realpathSync(p),
+      () => {},
+      Date.now(),
+      p => (inventory.tracks(p) ? inventory.existedAtStart(p) : undefined),
+    )
+
+    // Prior assistant message cited a file from another session; tracking it at turn start must not publish it if unchanged.
+    await turn.trackPath(siblingReport)
+    const refs = await turn.capture('未修改任何文件。', 'session/user-2', undefined, inventory.changed(), false)
+    expect(refs).toEqual([])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a file created outside scanned roots after markToolsStarted is not registered as a pre-turn baseline', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-external-midturn-'))
+  const external = mkdtempSync(join(tmpdir(), 'conversation-external-dest-'))
+  try {
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(store, [root], async p => realpathSync(p), () => {}, Date.now())
+    turn.markToolsStarted(Date.now())
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 15)
+
+    // File created by Bash outside scanned roots after tools started, then later targeted by Edit.
+    const out = join(external, 'midturn-diagram.html')
+    writeFileSync(out, '<html>v1</html>')
+    await turn.trackPath(out)
+    expect(store.findByPath(out)).toBeUndefined()
+
+    const refs = await turn.capture('已生成外部架构图。', 'session/user-1', undefined, [], false)
+    expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({ ordinal: 1, change: 'created' })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(external, { recursive: true, force: true })
+  }
+})
