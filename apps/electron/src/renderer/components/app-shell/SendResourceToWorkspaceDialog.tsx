@@ -260,7 +260,7 @@ export function SendResourceToWorkspaceDialog({
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Send className="h-4 w-4" />
+            <Send className="h-4 w-4 shrink-0" />
             {t('sendResource.title')}
           </DialogTitle>
           <DialogDescription>
@@ -301,7 +301,7 @@ export function SendResourceToWorkspaceDialog({
                     className="h-5 w-5 rounded-full ring-1 ring-border/50 shrink-0"
                     fallbackClassName="rounded-full"
                   />
-                  <span className="flex-1 truncate">{workspace.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
                   {isRemote ? (
                     isDisconnected ? (
                       <CloudOff className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
@@ -324,23 +324,23 @@ export function SendResourceToWorkspaceDialog({
           <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
-              className="mt-0.5"
+              className="mt-0.5 shrink-0"
               checked={mode === 'overwrite'}
               disabled={isSending}
               onChange={(e) => setMode(e.target.checked ? 'overwrite' : 'skip')}
             />
-            <span>{t('sendResource.overwriteIfExists')}</span>
+            <span className="min-w-0 break-words">{t('sendResource.overwriteIfExists')}</span>
           </label>
           {showCredentialToggle && (
             <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
               <input
                 type="checkbox"
-                className="mt-0.5"
+                className="mt-0.5 shrink-0"
                 checked={includeCredentials}
                 disabled={isSending}
                 onChange={(e) => setIncludeCredentials(e.target.checked)}
               />
-              <span>{t('sendResource.includeCredentials')}</span>
+              <span className="min-w-0 break-words">{t('sendResource.includeCredentials')}</span>
             </label>
           )}
           {selectedIsRemote && resourceType === 'source' && (

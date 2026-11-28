@@ -252,8 +252,8 @@ function TiptapCodeBlockView({ node, updateAttributes }: TiptapCodeBlockViewProp
                     onMouseEnter={() => setHighlightedLanguageIndex(index)}
                     className={cn('pl-2.5', isActive && 'text-accent', isHighlighted && 'bg-foreground/[0.05]')}
                   >
-                    <span className="flex w-full items-center justify-between gap-2">
-                      <span>{option.label}</span>
+                    <span className="flex min-w-0 w-full items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{option.label}</span>
                       {isActive ? <Check className="w-3.5 h-3.5 shrink-0" /> : <span className="w-3.5 h-3.5 shrink-0" />}
                     </span>
                   </SimpleDropdownItem>

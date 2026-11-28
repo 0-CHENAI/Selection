@@ -78,7 +78,7 @@ export function WeixinConnectDialog({ onOpenChange }: { onOpenChange: (open: boo
           </div>
         ) : error ? (
           <div className="space-y-3">
-            <p role="alert" className="text-sm text-destructive">{error}</p>
+            <p role="alert" className="break-words text-sm text-destructive">{error}</p>
             <Button size="sm" onClick={() => setGeneration(value => value + 1)}>{t('common.retry')}</Button>
           </div>
         ) : needsPin ? (
@@ -97,7 +97,7 @@ export function WeixinConnectDialog({ onOpenChange }: { onOpenChange: (open: boo
             <Button type="submit" size="sm" disabled={!/^\d+$/.test(pin)}>{t('common.continue')}</Button>
           </form>
         ) : qr ? (
-          <QRCodeSVG value={qr} size={200} marginSize={4} className="mx-auto rounded-md" title={t('settings.messaging.weixin.scan')} />
+          <QRCodeSVG value={qr} size={200} marginSize={4} className="mx-auto max-w-full h-auto rounded-md" title={t('settings.messaging.weixin.scan')} />
         ) : <p role="status" className="text-sm text-muted-foreground">{t('common.loading')}</p>}
       </DialogContent>
     </Dialog>

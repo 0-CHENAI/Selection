@@ -60,7 +60,7 @@ export function SettingsCardContent({
   children: React.ReactNode
   className?: string
 }) {
-  return <div className={cn('px-4 py-3.5', className)}>{children}</div>
+  return <div className={cn('min-w-0 px-4 py-3.5', className)}>{children}</div>
 }
 
 /**
@@ -76,7 +76,7 @@ export function SettingsCardFooter({
   return (
     <div
       className={cn(
-        'px-4 py-3 border-t border-border/50 bg-muted/30 flex items-center justify-end gap-2',
+        'min-w-0 px-4 py-3 border-t border-border/50 bg-muted/30 flex flex-wrap items-center justify-end gap-2',
         className
       )}
     >

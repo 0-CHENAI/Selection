@@ -269,7 +269,7 @@ export function EntityRow({
 
   // Build the inner content (shared between with-context-menu and without)
   const innerContent = (
-    <div className="relative group select-none pl-2 mr-2">
+    <div className="relative group select-none pl-2 mr-2 min-w-0">
       {/* Selection indicator bar — suppressed when an outer wrapper draws its
           own leading stripe (e.g. project color) so they don't stack on top of
           each other. Background tint on the inner button still indicates selection. */}
@@ -281,7 +281,7 @@ export function EntityRow({
       <button
         {...(buttonProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
         className={cn(
-          "entity-row-btn flex w-full items-start gap-2 pl-2 pr-4 py-3 text-left text-sm outline-none rounded-[8px]",
+          "entity-row-btn flex w-full min-w-0 items-start gap-2 pl-2 pr-4 py-3 text-left text-sm outline-none rounded-[8px]",
           "transition-[background-color] duration-75",
           (isSelected || isInMultiSelect)
             ? "bg-foreground/3"
@@ -367,7 +367,7 @@ export function EntityRow({
                   {icon}
                 </div>
               )}
-              <div className={cn("font-medium font-sans line-clamp-2 min-w-0 -mb-[2px]", titleClassName)}>
+              <div className={cn("font-medium font-sans line-clamp-2 min-w-0 break-words -mb-[2px]", titleClassName)}>
                 {title}
               </div>
               {titleSuffix && <div className="shrink-0 self-center flex items-center">{titleSuffix}</div>}
@@ -382,7 +382,7 @@ export function EntityRow({
                   {icon}
                 </div>
               )}
-              <div className="min-w-0 flex-1 line-clamp-2 leading-[1.35]">
+              <div className="min-w-0 flex-1 line-clamp-2 break-words leading-[1.35]">
                 {subtitle}
               </div>
             </div>

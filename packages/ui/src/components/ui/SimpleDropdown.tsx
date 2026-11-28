@@ -78,7 +78,7 @@ export function SimpleDropdownItem({
       onMouseEnter={handleMouseEnter}
       onFocus={() => dropdownCtx?.setHighlightedId(itemId)}
       className={cn(
-        'flex items-center gap-2 w-full px-2.5 py-1.5 text-left text-[13px] rounded-[4px]',
+        'flex min-w-0 items-center gap-2 w-full px-2.5 py-1.5 text-left text-[13px] rounded-[4px]',
         'hover:bg-foreground/[0.05] focus:bg-foreground/[0.05] focus:outline-none',
         'transition-colors',
         isHighlighted && 'bg-foreground/[0.05]',
@@ -91,7 +91,7 @@ export function SimpleDropdownItem({
           {icon}
         </span>
       )}
-      <span className="flex-1">{children}</span>
+      <span className="min-w-0 flex-1 break-words">{children}</span>
     </button>
   )
 }
@@ -170,7 +170,7 @@ export function SimpleDropdown({
     if (!triggerRef.current) return
 
     const rect = triggerRef.current.getBoundingClientRect()
-    const menuWidth = 160 // Approximate menu width
+    const menuWidth = menuRef.current?.offsetWidth || 160
 
     let left = align === 'end' ? rect.right - menuWidth : rect.left
     const top = rect.bottom + 4
@@ -178,7 +178,7 @@ export function SimpleDropdown({
     // Keep menu within viewport
     if (left < 8) left = 8
     if (left + menuWidth > window.innerWidth - 8) {
-      left = window.innerWidth - menuWidth - 8
+      left = Math.max(8, window.innerWidth - menuWidth - 8)
     }
 
     setPosition({ top, left })
@@ -317,7 +317,7 @@ export function SimpleDropdown({
           <div
             ref={menuRef}
             className={cn(
-              'fixed z-50 min-w-[140px] p-1',
+              'fixed z-50 min-w-[140px] max-w-[calc(100vw-1rem)] overflow-x-hidden p-1',
               'bg-background rounded-[8px] shadow-strong border border-border/50',
               'animate-in fade-in-0 zoom-in-95 duration-100',
               className

@@ -87,7 +87,7 @@ export function PreviewHeaderBadge({
 }: PreviewHeaderBadgeProps) {
   const variantClasses = PREVIEW_BADGE_VARIANTS[variant]
   const baseClasses = cn(
-    'flex items-center gap-1.5 h-[26px] px-2.5 rounded-[6px] font-sans text-[13px] font-medium bg-background shadow-minimal',
+    'flex max-w-full items-center gap-1.5 h-[26px] px-2.5 rounded-[6px] font-sans text-[13px] font-medium bg-background shadow-minimal',
     variantClasses,
     className
   )
@@ -149,7 +149,7 @@ export function PreviewHeader({
   return (
     <div
       className={cn(
-        'shrink-0 flex items-center justify-between px-3',
+        'shrink-0 min-w-0 overflow-hidden flex items-center justify-between px-3',
         className
       )}
       style={mergePreviewHeaderStyle(height, windowsCaptionInsetPadding, style)}

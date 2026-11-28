@@ -28,19 +28,19 @@ export function Info_Section({
   className,
 }: Info_SectionProps) {
   return (
-    <section className={cn('space-y-3 pt-2', className)}>
-      <div className="flex items-start justify-between pl-1">
-        <div className="space-y-0.5">
-          <h3 className="text-base font-semibold">
+    <section className={cn('min-w-0 space-y-3 pt-2', className)}>
+      <div className="flex min-w-0 items-start justify-between gap-2 pl-1">
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <h3 className="text-base font-semibold break-words">
             {title}
           </h3>
           {description && (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="text-sm text-muted-foreground break-words">{description}</p>
           )}
         </div>
-        {actions}
+        {actions && <div className="shrink-0">{actions}</div>}
       </div>
-      <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden">
+      <div className="min-w-0 bg-background shadow-minimal rounded-[8px] overflow-hidden">
         {children}
       </div>
     </section>

@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRegisterModal } from '@/context/ModalContext'
@@ -110,26 +111,37 @@ export function CreateProjectDialog({ open, onCancel, onSubmit, pickFolder }: Cr
           <DialogTitle>{t('projectsList.createDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 pt-2">
-          <div className="space-y-1.5">
+        <div className="min-w-0 space-y-4 pt-2">
+          <div className="min-w-0 space-y-1.5">
             <div className="text-sm font-medium">{t('projectsList.createDialogFolderLabel')}</div>
             <div
               role="group"
               aria-invalid={showFolderError || undefined}
               aria-describedby="create-project-folder-hint"
               className={cn(
-                'flex items-center gap-3 rounded-xl border bg-background px-3 py-3',
+                'flex min-w-0 items-center gap-3 overflow-hidden rounded-xl border bg-background px-3 py-3',
                 showFolderError ? 'border-destructive/60' : 'border-border/60',
               )}
             >
               <FolderOpen className="h-4 w-4 shrink-0 text-foreground/70" />
-              <p
-                className={cn('min-w-0 flex-1 truncate text-sm', folder ? 'font-mono text-foreground' : 'text-muted-foreground')}
-                title={folder || undefined}
-              >
-                {folder || t('projectsList.createDialogFolderPlaceholder')}
-              </p>
-              <Button type="button" variant="outline" size="sm" onClick={handleChooseFolder}>
+              {folder ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p
+                      tabIndex={0}
+                      className="min-w-0 flex-1 truncate text-sm font-mono text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      {folder}
+                    </p>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-sm break-all">{folder}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                  {t('projectsList.createDialogFolderPlaceholder')}
+                </p>
+              )}
+              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={handleChooseFolder}>
                 {t('projectsList.createDialogFolderButton')}
               </Button>
             </div>
@@ -138,7 +150,7 @@ export function CreateProjectDialog({ open, onCancel, onSubmit, pickFolder }: Cr
             </p>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <label className="text-sm font-medium" htmlFor="create-project-name">
               {t('projectInfo.title')}
             </label>

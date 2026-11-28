@@ -89,7 +89,7 @@ export function ExternalResourceImportDialog({
           <DialogTitle>{t('fileImport.mcpTitle')}</DialogTitle>
           <DialogDescription className="sr-only">{t('fileImport.mcpTitle')}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 space-y-2 overflow-y-auto">
+        <div className="min-h-0 min-w-0 space-y-2 overflow-y-auto">
           <Textarea
             autoFocus
             aria-label={t('fileImport.mcpTitle')}
@@ -103,7 +103,7 @@ export function ExternalResourceImportDialog({
               setMcpError(null)
             }}
           />
-          {mcpError && <p role="alert" className="text-sm text-destructive">{mcpError}</p>}
+          {mcpError && <p role="alert" className="break-words text-sm text-destructive">{mcpError}</p>}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
@@ -277,15 +277,15 @@ export function SkillFileImportDialog({
           <DialogTitle>{t('fileImport.skillTitle')}</DialogTitle>
           <DialogDescription>{t('fileImport.skillDescription')}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-2 text-sm">
-          <div className="font-medium">{preview.name}</div>
-          <div className="text-muted-foreground">{preview.description}</div>
-          <div className="text-muted-foreground">{preview.suggestedSlug}</div>
+        <div className="min-w-0 space-y-2 text-sm">
+          <div className="font-medium break-words">{preview.name}</div>
+          <div className="text-muted-foreground break-words">{preview.description}</div>
+          <div className="text-muted-foreground break-all font-mono text-xs">{preview.suggestedSlug}</div>
           {preview.conflict && <div className="text-warning">{t('fileImport.conflict')}</div>}
-          <div className="text-muted-foreground">{preview.files.join(', ')}</div>
+          <div className="text-muted-foreground break-all">{preview.files.join(', ')}</div>
           <select
             aria-label={t('fileImport.confirm')}
-            className="w-full rounded-[6px] bg-background px-2 py-1"
+            className="w-full min-w-0 rounded-[6px] bg-background px-2 py-1"
             value={action}
             onChange={event => setAction(event.target.value as ExternalImportAction)}
           >
@@ -296,7 +296,7 @@ export function SkillFileImportDialog({
           {action === 'rename' && (
             <input
               aria-label={t('fileImport.rename')}
-              className="w-full rounded-[6px] bg-background px-2 py-1"
+              className="w-full min-w-0 rounded-[6px] bg-background px-2 py-1"
               value={renameTo}
               onChange={event => setRenameTo(event.target.value)}
               placeholder={t('fileImport.renamePlaceholder')}

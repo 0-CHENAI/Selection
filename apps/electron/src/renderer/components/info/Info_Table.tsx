@@ -51,14 +51,14 @@ function Info_TableRow({ label, value, children, className }: Info_TableRowProps
   const content = children ?? value
 
   return (
-    <div className={cn('flex py-2.5 px-4 text-sm', className)}>
+    <div className={cn('flex min-w-0 py-2.5 px-4 text-sm', className)}>
       <dt
-        className="text-muted-foreground shrink-0"
+        className="text-muted-foreground shrink-0 truncate pr-2"
         style={{ width: 'var(--label-width)' }}
       >
         {label}
       </dt>
-      <dd className="flex-1 min-w-0">{content}</dd>
+      <dd className="flex-1 min-w-0 break-words">{content}</dd>
     </div>
   )
 }

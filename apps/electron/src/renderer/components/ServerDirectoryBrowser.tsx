@@ -182,7 +182,7 @@ export function ServerDirectoryBrowser({
   const renderBrowseMode = () => (
     <>
       {/* Path input */}
-      <div className="flex gap-2">
+      <div className="flex min-w-0 gap-2">
         <Input
           ref={inputRef}
           value={pathInput}
@@ -191,16 +191,16 @@ export function ServerDirectoryBrowser({
             if (e.key === 'Enter') handlePathSubmit()
           }}
           placeholder={t("common.enterPath")}
-          className="flex-1 font-mono text-xs"
+          className="min-w-0 flex-1 font-mono text-xs"
         />
-        <Button variant="outline" size="sm" onClick={handlePathSubmit} disabled={loading}>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={handlePathSubmit} disabled={loading}>
           Go
         </Button>
       </div>
 
       {/* Breadcrumbs */}
       {listing && (
-        <div className="flex items-center gap-0.5 text-xs text-muted-foreground overflow-x-auto py-1 min-h-[24px]">
+        <div className="flex min-w-0 items-center gap-0.5 text-xs text-muted-foreground overflow-x-auto py-1 min-h-[24px]">
           {listing.breadcrumbs.map((crumb, i) => (
             <span key={crumb.path} className="flex items-center gap-0.5 shrink-0">
               {i > 0 && <ChevronRightIcon className="size-3 text-muted-foreground/50" />}
@@ -227,7 +227,7 @@ export function ServerDirectoryBrowser({
           )}
 
           {error && (
-            <div className="px-3 py-4 text-sm text-destructive">
+            <div className="px-3 py-4 text-sm text-destructive break-words">
               {error}
             </div>
           )}
@@ -250,7 +250,7 @@ export function ServerDirectoryBrowser({
               type="button"
               onClick={() => handleEntryClick(entry.path)}
               onDoubleClick={() => handleEntryDoubleClick(entry.path)}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors hover:bg-foreground/5 ${
+              className={`w-full min-w-0 flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors hover:bg-foreground/5 ${
                 selectedEntry === entry.path ? 'bg-foreground/5' : ''
               }`}
             >
@@ -258,7 +258,7 @@ export function ServerDirectoryBrowser({
                 ? <FolderSymlinkIcon className="size-4 shrink-0 text-muted-foreground" />
                 : <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
               }
-              <span className="truncate">{entry.name}</span>
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
               {entry.isSymlink && (
                 <span className="text-xs text-muted-foreground/60 shrink-0">symlink</span>
               )}
@@ -291,12 +291,12 @@ export function ServerDirectoryBrowser({
 
   return (
     <Dialog open={open} onOpenChange={isOpen => { if (!isOpen) onCancel() }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("settings.server.selectDirectory")}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex min-w-0 flex-col gap-2">
           {mode === 'browse' ? renderBrowseMode() : renderManualMode()}
         </div>
 

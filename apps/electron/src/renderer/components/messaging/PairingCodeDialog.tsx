@@ -79,9 +79,9 @@ export function PairingCodeDialog({
           <DialogDescription>{t(onOpenSettings ? (platform === 'weixin' ? 'settings.messaging.weixin.connectFirst' : 'dialog.pairingCode.connectFirst') : instructionsKey)}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col items-center gap-4 py-4">
+        <div className="flex min-w-0 flex-col items-center gap-4 py-4">
           {existingBindings.length > 0 && (
-            <div className="w-full text-sm">
+            <div className="w-full min-w-0 text-sm">
               <p>{t('dialog.pairingCode.existingChats')}</p>
               <ul className="mt-1 max-h-24 overflow-y-auto text-muted-foreground">
                 {existingBindings.map(binding => (
@@ -93,19 +93,19 @@ export function PairingCodeDialog({
           {onOpenSettings ? (
             <Button onClick={onOpenSettings}>{t(platform === 'weixin' ? 'settings.messaging.weixin.connect' : 'settings.messaging.lark.connectTitle')}</Button>
           ) : error ? (
-            <p className="text-sm text-destructive text-center">{error}</p>
+            <p className="w-full break-words text-sm text-destructive text-center">{error}</p>
           ) : code ? (
             <>
-              <div className="rounded-lg bg-muted px-6 py-4 font-mono text-3xl font-bold tracking-[0.3em]">
+              <div className="max-w-full overflow-x-auto rounded-lg bg-muted px-6 py-4 font-mono text-3xl font-bold tracking-[0.3em]">
                 {code}
               </div>
 
-              <div className="flex items-center gap-2 text-sm">
-                <code className="rounded bg-muted px-2 py-1 font-mono">{pairCommand}</code>
+              <div className="flex max-w-full min-w-0 items-center gap-2 text-sm">
+                <code className="min-w-0 truncate rounded bg-muted px-2 py-1 font-mono">{pairCommand}</code>
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent"
+                  className="inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent"
                   title={t('common.copy')}
                 >
                   <Copy className="h-3.5 w-3.5" />

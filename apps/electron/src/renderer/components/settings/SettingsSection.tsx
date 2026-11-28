@@ -43,19 +43,19 @@ export function SettingsSection({
   action,
 }: SettingsSectionProps) {
   return (
-    <section className={cn('space-y-3', className)}>
-      <div className="flex items-start justify-between gap-4 pl-1">
-        <div className="space-y-0.5">
+    <section className={cn('min-w-0 space-y-3', className)}>
+      <div className="flex min-w-0 items-start justify-between gap-4 pl-1">
+        <div className="min-w-0 flex-1 space-y-0.5">
           <h3
             className={cn(
-              'text-base font-semibold',
+              'text-base font-semibold break-words',
               variant === 'danger' && 'text-destructive'
             )}
           >
             {title}
           </h3>
           {description && (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="text-sm text-muted-foreground break-words">{description}</p>
           )}
         </div>
         {action && <div className="shrink-0">{action}</div>}

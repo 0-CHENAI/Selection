@@ -112,4 +112,15 @@ describe('project page is one scroll without a session list', () => {
     expect(html).not.toContain('mx-0.5')
     expect(html).not.toContain('项目工作文件夹')
   })
+
+  it('constrains DialogContent grid tracks and CreateProjectDialog folder paths so long paths truncate with ellipsis', () => {
+    const dialogSource = readFileSync(join(import.meta.dir, '../../ui/dialog.tsx'), 'utf8')
+    expect(dialogSource).toContain('grid grid-cols-1')
+
+    const createDialogSource = readFileSync(join(import.meta.dir, '../CreateProjectDialog.tsx'), 'utf8')
+    expect(createDialogSource).toContain('min-w-0 space-y-4')
+    expect(createDialogSource).toContain('flex min-w-0 items-center gap-3 overflow-hidden')
+    expect(createDialogSource).toContain('min-w-0 flex-1 truncate text-sm')
+    expect(createDialogSource).toContain('className="shrink-0" onClick={handleChooseFolder}')
+  })
 })

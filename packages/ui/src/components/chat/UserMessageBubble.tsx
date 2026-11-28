@@ -49,8 +49,8 @@ function isEditRequestBadge(badge: ContentBadge): boolean {
 function EditRequestBadge({ badge }: { badge: ContentBadge }) {
   const displayLabel = badge.collapsedLabel || badge.label
   return (
-    <span className="inline-flex items-center h-[28px] px-2.5 rounded-[8px] bg-background shadow-minimal text-[13px] text-muted-foreground">
-      {displayLabel}
+    <span className="inline-flex max-w-full items-center h-[28px] px-2.5 rounded-[8px] bg-background shadow-minimal text-[13px] text-muted-foreground">
+      <span className="truncate">{displayLabel}</span>
     </span>
   )
 }
@@ -555,7 +555,7 @@ export function UserMessageBubble({
       <div className="flex flex-col items-end max-w-[80%] min-w-0">
       <div
         className={cn(
-          "bg-user-message-bubble rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
+          "bg-user-message-bubble max-w-full rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
           compactMode ? "px-4 py-2" : "px-5 py-3.5"
         )}
       >

@@ -365,7 +365,7 @@ function FileTreeItem({
               {/* Wrapper div matches LeftSidebar recursive structure - min-w-0 allows shrinking */}
               <div className="flex flex-col select-none min-w-0">
                 <motion.nav
-                  className="grid gap-0.5 pl-5 pr-0 relative"
+                  className="grid grid-cols-1 gap-0.5 [&>*]:min-w-0 pl-5 pr-0 relative"
                   variants={containerVariants}
                   initial="hidden"
                   animate="visible"
@@ -587,7 +587,7 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
           </div>
         ) : (
           /* Root nav has px-2 to match LeftSidebar exactly - this constrains grid width */
-          <nav className="grid gap-0.5 px-2">
+          <nav className="grid grid-cols-1 gap-0.5 [&>*]:min-w-0 px-2">
             {files.map((file) => (
               <FileTreeItem
                 key={file.path}

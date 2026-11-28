@@ -105,7 +105,7 @@ export function SwarmRunDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-hidden"
+      <DialogContent className="max-h-[80vh] sm:max-w-2xl overflow-hidden"
         onOpenAutoFocus={() => {
           openingWorker.current = false
           returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -119,9 +119,9 @@ export function SwarmRunDetailsDialog({
           <DialogDescription>{t('swarm.detailsDescription')}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-          <div className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
-            <span>
+        <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto">
+          <div className="flex min-w-0 items-center justify-between gap-3 text-[12px] text-muted-foreground">
+            <span className="min-w-0 truncate">
               {details
                 ? details.tokenBudget === undefined
                   ? t('swarm.tokensUnlimited', { used: details.tokensUsed })
@@ -132,7 +132,7 @@ export function SwarmRunDetailsDialog({
             </span>
             <button
               type="button"
-              className="inline-flex items-center gap-1 hover:text-foreground disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1 hover:text-foreground disabled:opacity-50"
               disabled={loading}
               onClick={() => void load()}
             >
@@ -141,7 +141,7 @@ export function SwarmRunDetailsDialog({
             </button>
           </div>
 
-          {error && <div role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-[12px] text-red-600">{error}</div>}
+          {error && <div role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-[12px] text-red-600 break-words">{error}</div>}
           {!loading && !error && !details && (
             <div className="rounded-lg bg-foreground/[0.04] px-3 py-4 text-center text-[12px] text-muted-foreground">
               {t('swarm.noRunDetails')}
@@ -151,24 +151,24 @@ export function SwarmRunDetailsDialog({
           {details?.blocker && (
             <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px]">
               <div className="font-semibold text-amber-700 dark:text-amber-300">{t('swarm.blockerTitle')}</div>
-              <p className="mt-1 whitespace-pre-wrap text-foreground/75">{details.blocker}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-foreground/75">{details.blocker}</p>
             </div>
           )}
 
           {details?.nodes.map((node) => (
             <div
               key={node.sessionId}
-              className="rounded-lg border border-border bg-card px-3 py-2.5"
+              className="min-w-0 rounded-lg border border-border bg-card px-3 py-2.5"
               style={{ marginLeft: Math.min(node.depth, 2) * 12 }}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{node.name}</span>
-                <span className="text-[10.5px] text-muted-foreground">{nodeRoleLabel(node, t)}</span>
-                <span className={cn('text-[10.5px] font-medium', statusClass(node.status))}>{node.status}</span>
+                <span className="shrink-0 text-[10.5px] text-muted-foreground">{nodeRoleLabel(node, t)}</span>
+                <span className={cn('shrink-0 text-[10.5px] font-medium', statusClass(node.status))}>{node.status}</span>
                 {node.role !== 'coordinator' && (
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 text-[10.5px] font-medium text-indigo-500 hover:underline"
+                    className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-indigo-500 hover:underline"
                     onClick={() => {
                       openingWorker.current = true
                       onOpenChange(false)
@@ -232,13 +232,13 @@ export function SwarmRunDetailsDialog({
                   </details>
                 )
               })()}
-              {node.blocker && <p className="mt-1 whitespace-pre-wrap text-[11px] text-amber-700 dark:text-amber-300">{node.blocker}</p>}
-              {node.summary && <p className="mt-1 whitespace-pre-wrap text-[11px] text-foreground/70">{node.summary}</p>}
+              {node.blocker && <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-amber-700 dark:text-amber-300">{node.blocker}</p>}
+              {node.summary && <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-foreground/70">{node.summary}</p>}
             </div>
           ))}
         </div>
 
-        {fileError && <p role="alert" className="text-sm text-destructive">{fileError}</p>}
+        {fileError && <p role="alert" className="break-words text-sm text-destructive">{fileError}</p>}
         {details && (
           <div className="flex items-center gap-2 border-t border-border pt-3">
             {details.status === 'running' && onStop && (

@@ -465,7 +465,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
                 <div className="px-4 py-2 border-t border-border/30 bg-destructive/5">
                   <div className="flex items-start gap-2 text-sm text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <span className="flex-1">{source.config.connectionError}</span>
+                    <span className="min-w-0 flex-1 break-words">{source.config.connectionError}</span>
                     {source.config.type === 'mcp' && (
                       <button
                         type="button"

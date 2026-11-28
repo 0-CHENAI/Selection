@@ -186,7 +186,7 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
     <div className={cn("flex flex-col select-none", !isNested && "py-1")}>
       <NavWrapper
         className={cn(
-          "grid gap-0.5",
+          "grid grid-cols-1 gap-0.5 [&>*]:min-w-0",
           isNested ? "pl-5 pr-0 relative" : "px-2"
         )}
         role="navigation"
@@ -251,7 +251,7 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
           // ContextMenuTrigger with asChild sets data-state="open" on the button
           // so only the clicked item highlights, not the entire section.
           const content = (
-            <div className="group/section">
+            <div className="group/section min-w-0">
               {link.contextMenu ? (
                 <ContextMenu modal={true}>
                   <ContextMenuTrigger asChild>
@@ -406,9 +406,9 @@ function SortableStatusList({ items, onReorder, getItemProps, focusedItemId, tra
         <SortableList
           items={sortableItems}
           onReorder={handleReorder}
-          className="grid gap-0.5"
+          className="grid grid-cols-1 gap-0.5 [&>*]:min-w-0"
           renderItem={(item) => (
-            <div className="group/section">
+            <div className="group/section min-w-0">
               {item.contextMenu ? (
                 <ContextMenu modal={true}>
                   <ContextMenuTrigger asChild>
@@ -460,9 +460,9 @@ function SortableStatusList({ items, onReorder, getItemProps, focusedItemId, tra
             <div className="my-1 ml-2" aria-hidden="true">
               <div className="h-px bg-foreground/5" />
             </div>
-            <div className="grid gap-0.5">
+            <div className="grid grid-cols-1 gap-0.5 [&>*]:min-w-0">
               {trailingItems.map(item => (
-                <div key={item.id} className="group/section">
+                <div key={item.id} className="group/section min-w-0">
                   <SidebarButton
                     link={item}
                     itemProps={getItemProps?.(item.id)}

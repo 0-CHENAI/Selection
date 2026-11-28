@@ -54,7 +54,7 @@ export function SettingsSegmentedControl<T extends string = string>({
   return (
     <div
       role="radiogroup"
-      className={cn('inline-flex gap-1', className)}
+      className={cn('inline-flex max-w-full flex-wrap gap-1', className)}
     >
       {options.map((option) => {
         const isSelected = option.value === value
@@ -129,7 +129,7 @@ export function SettingsSegmentedControlCard<T extends string = string>({
     <div
       role="radiogroup"
       className={cn(
-        'grid gap-2',
+        'grid gap-2 [&>*]:min-w-0',
         columns === 2 && 'grid-cols-2',
         columns === 3 && 'grid-cols-3',
         columns === 4 && 'grid-cols-4',
@@ -147,7 +147,7 @@ export function SettingsSegmentedControlCard<T extends string = string>({
             aria-checked={isSelected}
             onClick={() => onValueChange(option.value)}
             className={cn(
-              'flex items-center gap-2 px-3 py-2.5 rounded-xl transition-colors text-left',
+              'flex min-w-0 items-center gap-2 px-3 py-2.5 rounded-xl transition-colors text-left',
               isSelected ? 'bg-muted' : 'bg-muted/50 hover:bg-muted/70'
             )}
           >
@@ -167,7 +167,7 @@ export function SettingsSegmentedControlCard<T extends string = string>({
             </div>
 
             {/* Label */}
-            <span className="text-sm">{option.label}</span>
+            <span className="min-w-0 truncate text-sm">{option.label}</span>
 
             {/* Icon on right */}
             {option.icon && (

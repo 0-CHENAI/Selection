@@ -161,7 +161,7 @@ export function SettingsMenuSelect({
         <button
           type="button"
           className={cn(
-            'inline-flex items-center h-8 px-3 gap-1 text-sm rounded-lg',
+            'inline-flex max-w-full min-w-0 items-center h-8 px-3 gap-1 text-sm rounded-lg',
             'bg-background shadow-minimal',
             'hover:bg-foreground/[0.02] transition-colors',
             'disabled:cursor-not-allowed disabled:opacity-50',
@@ -169,7 +169,7 @@ export function SettingsMenuSelect({
             className
           )}
         >
-          <span className="truncate">{selectedOption?.label || placeholder}</span>
+          <span className="min-w-0 truncate">{selectedOption?.label || placeholder}</span>
           <ChevronDown className="opacity-50 shrink-0 size-3.5" />
         </button>
       </PopoverTrigger>
@@ -208,11 +208,12 @@ export function SettingsMenuSelect({
                   )}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className={settingsUI.label}>{option.label}</div>
+                    <div className={cn(settingsUI.label, 'break-words')}>{option.label}</div>
                     {option.description && (
                       <div className={cn(
                         settingsUI.descriptionSmall,
                         settingsUI.labelDescriptionGap,
+                        'break-words',
                         option.unavailable && 'text-destructive/80',
                       )}>
                         {option.description}
@@ -287,15 +288,15 @@ export function SettingsMenuSelectRow({
     <div
       data-layout="settings-row"
       className={cn(
-        'flex items-center justify-between',
+        'min-w-0 flex items-center justify-between',
         inCard ? 'px-4 py-3.5' : 'py-3',
         className
       )}
     >
       <div className="flex-1 min-w-0">
-        <div className={settingsUI.label}>{label}</div>
+        <div className={cn(settingsUI.label, 'break-words')}>{label}</div>
         {description && (
-          <p className={cn(settingsUI.description, settingsUI.labelDescriptionGap)}>{description}</p>
+          <p className={cn(settingsUI.description, settingsUI.labelDescriptionGap, 'break-words')}>{description}</p>
         )}
       </div>
       <div data-layout="settings-control" className="ml-4 shrink-0">

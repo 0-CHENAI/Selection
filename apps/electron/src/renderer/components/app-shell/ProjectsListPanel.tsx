@@ -124,7 +124,12 @@ interface ProjectRowProps {
 
 function ProjectRow({ hasUnread, isProcessing, project, isSelected, isFirst, onClick, onDelete, onJumpToSessions }: ProjectRowProps) {
   const config = project.config
-  const subtitle = config.description?.trim() || config.workingDirectory || ''
+  const description = config.description?.trim()
+  const subtitle = description
+    ? description
+    : config.workingDirectory
+      ? <span className="block w-full truncate" title={config.workingDirectory}>{config.workingDirectory}</span>
+      : ''
 
   return (
     <ContextMenu modal={true}>

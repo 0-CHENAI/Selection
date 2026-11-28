@@ -324,14 +324,14 @@ export function ResourceTransferDialog({
                     {groupItems.map(item => {
                       const key = keyFor(item.type, item.id)
                       return (
-                        <label key={key} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-foreground/[0.02]">
-                          <input type="checkbox" checked={selected.has(key)} onChange={() => setSelected(current => {
+                        <label key={key} className="flex min-w-0 items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-foreground/[0.02]">
+                          <input type="checkbox" className="shrink-0" checked={selected.has(key)} onChange={() => setSelected(current => {
                             const next = new Set(current)
                             if (next.has(key)) next.delete(key); else next.add(key)
                             return next
                           })} />
                           <span className="min-w-0 flex-1 text-sm truncate">{item.name}</span>
-                          <span className="text-xs text-muted-foreground truncate">{item.id}</span>
+                          <span className="max-w-[40%] shrink-0 text-xs text-muted-foreground truncate">{item.id}</span>
                         </label>
                       )
                     })}
@@ -349,14 +349,14 @@ export function ResourceTransferDialog({
                 <div className="rounded-lg bg-foreground/[0.03] p-3"><div className="text-xs text-muted-foreground">{t('resourceTransfer.autoAdded')}</div><div className="text-lg font-medium">{autoAdded.length}</div></div>
                 <div className="rounded-lg bg-foreground/[0.03] p-3"><div className="text-xs text-muted-foreground">{t('resourceTransfer.redacted')}</div><div className="text-lg font-medium">{manifest?.redactions.length ?? 0}</div></div>
               </div>
-              {autoAdded.length > 0 && <div><h3 className="font-medium">{t('resourceTransfer.autoAddedDependencies')}</h3><p className="mt-1 text-muted-foreground">{autoAdded.map(item => `${item.type}: ${item.name ?? item.id}`).join(', ')}</p></div>}
-              {externalDependencies.length > 0 && <div><h3 className="font-medium">{t('resourceTransfer.externalDependencies')}</h3><p className="mt-1 text-muted-foreground">{externalDependencies.map(item => `${item.to.type}: ${item.to.id}`).join(', ')}</p></div>}
+              {autoAdded.length > 0 && <div className="min-w-0"><h3 className="font-medium">{t('resourceTransfer.autoAddedDependencies')}</h3><p className="mt-1 break-words text-muted-foreground">{autoAdded.map(item => `${item.type}: ${item.name ?? item.id}`).join(', ')}</p></div>}
+              {externalDependencies.length > 0 && <div className="min-w-0"><h3 className="font-medium">{t('resourceTransfer.externalDependencies')}</h3><p className="mt-1 break-words text-muted-foreground">{externalDependencies.map(item => `${item.to.type}: ${item.to.id}`).join(', ')}</p></div>}
               {(exportWarnings.length > 0 || (manifest?.redactions.length ?? 0) > 0) && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                  <div className="flex items-center gap-2 font-medium"><ShieldAlert className="h-4 w-4" />{t('resourceTransfer.securityReview')}</div>
-                  <ul className="mt-2 list-disc pl-5 text-xs text-muted-foreground space-y-1">
+                  <div className="flex items-center gap-2 font-medium"><ShieldAlert className="h-4 w-4 shrink-0" />{t('resourceTransfer.securityReview')}</div>
+                  <ul className="mt-2 list-disc pl-5 text-xs text-muted-foreground space-y-1 break-words">
                     {exportWarnings.map((warning, index) => <li key={index}>{warning}</li>)}
-                    {manifest?.redactions.map((redaction, index) => <li key={`r-${index}`}>{redaction.resource.type} {redaction.resource.id}: {redaction.path}</li>)}
+                    {manifest?.redactions.map((redaction, index) => <li key={`r-${index}`} className="break-all">{redaction.resource.type} {redaction.resource.id}: {redaction.path}</li>)}
                   </ul>
                 </div>
               )}
@@ -370,8 +370,8 @@ export function ResourceTransferDialog({
                 <span>{t(preview.integrityVerified ? 'resourceTransfer.integrityVerified' : 'resourceTransfer.integrityUnavailable')}</span>
                 <span>{t(preview.valid ? 'resourceTransfer.securityPassed' : 'resourceTransfer.securityFailed')}</span>
               </div>
-              {!preview.valid && <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{preview.errors.join('; ')}</div>}
-              {preview.warnings.length > 0 && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">{preview.warnings.join(' · ')}</div>}
+              {!preview.valid && <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive break-words">{preview.errors.join('; ')}</div>}
+              {preview.warnings.length > 0 && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground break-words">{preview.warnings.join(' · ')}</div>}
               {preview.valid && preview.items.some(item => item.status !== 'new') && (
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <span className="text-xs text-muted-foreground mr-auto">{t('resourceTransfer.applyConflicts')}</span>
@@ -391,22 +391,22 @@ export function ResourceTransferDialog({
                   ...(item.highRisk ? [t('resourceTransfer.highRisk')] : []),
                 ]
                 return (
-                  <div key={key} className={cn('rounded-lg border p-3 space-y-2', item.highRisk && 'border-amber-500/40')}>
-                    <div className="flex items-start gap-3">
-                      <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{item.name ?? item.id}</div><div className="text-xs text-muted-foreground">{item.type} · {item.id} · {t(`resourceTransfer.status.${item.status}`)}</div></div>
-                      <select className="h-8 rounded-md border border-border bg-background px-2 text-xs" value={decision?.action ?? 'skip'} onChange={event => updateDecision(item.type, item.id, { action: event.target.value as ResourceImportAction })}>
+                  <div key={key} className={cn('min-w-0 rounded-lg border p-3 space-y-2', item.highRisk && 'border-amber-500/40')}>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{item.name ?? item.id}</div><div className="text-xs text-muted-foreground break-all">{item.type} · {item.id} · {t(`resourceTransfer.status.${item.status}`)}</div></div>
+                      <select className="h-8 shrink-0 rounded-md border border-border bg-background px-2 text-xs" value={decision?.action ?? 'skip'} onChange={event => updateDecision(item.type, item.id, { action: event.target.value as ResourceImportAction })}>
                         <option value="skip">{t('resourceTransfer.actions.skip')}</option>
                         {item.status !== 'name-conflict' && <option value="overwrite">{t(item.status === 'new' ? 'resourceTransfer.actions.import' : 'resourceTransfer.actions.overwrite')}</option>}
                         <option value="rename">{t('resourceTransfer.actions.rename')}</option>
                       </select>
                     </div>
                     {decision?.action === 'rename' && (
-                      <div className={cn('grid gap-2', item.type === 'automation' && 'grid-cols-2')}>
-                        <input className={cn('w-full h-8 rounded-md border bg-background px-2 text-sm', !isValidRename(item.type, decision.newId ?? '') && 'border-destructive')} value={decision.newId ?? ''} onChange={event => updateDecision(item.type, item.id, { newId: event.target.value })} placeholder={item.suggestedId} />
-                        {item.type === 'automation' && <input className="w-full h-8 rounded-md border bg-background px-2 text-sm" value={decision.newName ?? item.name ?? ''} onChange={event => updateDecision(item.type, item.id, { newName: event.target.value })} placeholder={t('common.name')} />}
+                      <div className={cn('grid gap-2 [&>*]:min-w-0', item.type === 'automation' ? 'grid-cols-2' : 'grid-cols-1')}>
+                        <input className={cn('w-full min-w-0 h-8 rounded-md border bg-background px-2 text-sm', !isValidRename(item.type, decision.newId ?? '') && 'border-destructive')} value={decision.newId ?? ''} onChange={event => updateDecision(item.type, item.id, { newId: event.target.value })} placeholder={item.suggestedId} />
+                        {item.type === 'automation' && <input className="w-full min-w-0 h-8 rounded-md border bg-background px-2 text-sm" value={decision.newName ?? item.name ?? ''} onChange={event => updateDecision(item.type, item.id, { newName: event.target.value })} placeholder={t('common.name')} />}
                       </div>
                     )}
-                    {itemNotices.length > 0 && <p className="text-xs text-amber-600 dark:text-amber-400">{itemNotices.join(' · ')}</p>}
+                    {itemNotices.length > 0 && <p className="text-xs text-amber-600 dark:text-amber-400 break-words">{itemNotices.join(' · ')}</p>}
                     {item.type === 'automation' && (
                       <label className={cn('flex items-center gap-2 text-xs', !canEnable && 'text-muted-foreground')} title={!canEnable ? t('resourceTransfer.enableBlocked') : undefined}>
                         <input type="checkbox" disabled={!canEnable || decision?.action === 'skip'} checked={decision?.enableAfterImport === true} onChange={event => updateDecision(item.type, item.id, { enableAfterImport: event.target.checked })} />
@@ -426,7 +426,7 @@ export function ResourceTransferDialog({
                 <div className="rounded-lg bg-foreground/[0.03] p-3"><div className="text-2xl font-medium">{totals.skipped}</div><div className="text-xs text-muted-foreground">{t('resourceTransfer.result.skipped')}</div></div>
                 <div className="rounded-lg bg-foreground/[0.03] p-3"><div className="text-2xl font-medium">{totals.failed}</div><div className="text-xs text-muted-foreground">{t('resourceTransfer.result.failed')}</div></div>
               </div>
-              {(totals.failures.length > 0 || totals.warnings.length > 0) && <div className="rounded-lg border border-border p-3 text-xs text-muted-foreground space-y-1">{totals.failures.map(item => <p key={item.id}>{item.id}: {item.error}</p>)}{totals.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
+              {(totals.failures.length > 0 || totals.warnings.length > 0) && <div className="rounded-lg border border-border p-3 text-xs text-muted-foreground space-y-1 break-words">{totals.failures.map(item => <p key={item.id}>{item.id}: {item.error}</p>)}{totals.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
               <p className="text-sm text-muted-foreground">{t('resourceTransfer.postImportNotice')}</p>
             </div>
           )}

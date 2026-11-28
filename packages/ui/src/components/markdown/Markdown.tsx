@@ -280,7 +280,7 @@ function createComponents(
           title={fileName}
           className={fileName
             ? cn('inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg py-1 pl-1 pr-2.5 align-middle text-[0.9em] font-bold !text-foreground !no-underline transition-colors hover:!no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', fileTint)
-            : 'text-accent hover:underline cursor-pointer'}
+            : 'text-accent hover:underline cursor-pointer break-words'}
         >
           {fileName ? <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-background/80"><FileTypeIcon fileName={fileName} className="size-4" /></span>
             : safeHref && /^https?:\/\//i.test(safeHref) && <WebsiteIcon key={safeHref} href={safeHref} />}
@@ -299,10 +299,10 @@ function createComponents(
       ...baseComponents,
       // No special code handling - just monospace
       code: ({ children }) => (
-        <code className="font-mono">{children}</code>
+        <code className="font-mono break-words">{children}</code>
       ),
       pre: ({ children }) => (
-        <pre className="font-mono whitespace-pre-wrap my-2">{children}</pre>
+        <pre className="font-mono whitespace-pre-wrap break-words my-2">{children}</pre>
       ),
       // Minimal paragraph spacing
       p: ({ children }) => <p className="my-1">{children}</p>,
@@ -312,7 +312,9 @@ function createComponents(
       li: ({ children }) => <li className="my-0.5">{children}</li>,
       // Plain tables
       table: ({ children }) => (
-        <table className="my-2 font-mono text-sm">{children}</table>
+        <div className="max-w-full overflow-x-auto my-2">
+          <table className="font-mono text-sm">{children}</table>
+        </div>
       ),
       th: ({ children }) => <th className="text-left pr-4">{children}</th>,
       td: ({ children }) => <td className="pr-4">{children}</td>,
@@ -686,7 +688,7 @@ export function Markdown({
   ], [arrivalChunks])
 
   return (
-    <div ref={revealRoot} className={cn('markdown-content', className)}>
+    <div ref={revealRoot} className={cn('markdown-content min-w-0 max-w-full break-words', className)}>
       <MemoizedReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}

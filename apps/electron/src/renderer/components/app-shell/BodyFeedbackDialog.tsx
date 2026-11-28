@@ -43,11 +43,11 @@ export function BodyFeedbackDialog({ target, onClose, onRestoreFocus, onOpenFile
         <DialogDescription>{t('chat.bodyFeedback.description')}</DialogDescription>
       </DialogHeader>
       {loading && <p role="status">{t('chat.artifactVersions.loading')}</p>}
-      {error && <div role="alert" className="space-y-2 text-destructive"><p>{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>{t('chat.bodyFeedback.retry')}</Button></div>}
+      {error && <div role="alert" className="space-y-2 text-destructive"><p className="break-words">{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>{t('chat.bodyFeedback.retry')}</Button></div>}
       {!loading && !error && !revision && <p>{t('chat.bodyFeedback.unavailable')}</p>}
       {revision && <>
         <label className="text-sm font-medium" htmlFor="body-feedback-revision">{t('chat.artifactVersions.history')}</label>
-        <select id="body-feedback-revision" value={selected} onChange={event => setSelected(event.target.value)} className="rounded-md border bg-background p-2 text-sm">
+        <select id="body-feedback-revision" value={selected} onChange={event => setSelected(event.target.value)} className="w-full min-w-0 rounded-md border bg-background p-2 text-sm">
           {revisions.map((item, index) => <option key={item.requestMessageId} value={item.requestMessageId}>{t('chat.artifactVersions.version', { number: index + 1 })} · {new Date(item.createdAt).toLocaleString()}</option>)}
         </select>
         <section className="space-y-2"><h3 className="text-sm font-medium">{t('chat.artifactVersions.feedback')}</h3><p className="whitespace-pre-wrap break-words text-sm">{revision.instruction}</p></section>

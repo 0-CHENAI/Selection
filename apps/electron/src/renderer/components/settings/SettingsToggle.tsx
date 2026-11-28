@@ -55,16 +55,16 @@ export function SettingsToggle({
     <div
       data-layout="settings-row"
       className={cn(
-        'flex items-center justify-between',
+        'min-w-0 flex items-center justify-between',
         inCard ? 'px-4 py-3.5' : 'py-3',
         disabled && 'opacity-50',
         className
       )}
     >
       <label htmlFor={id} className="flex-1 min-w-0 cursor-pointer select-none">
-        <div className={settingsUI.label}>{label}</div>
+        <div className={cn(settingsUI.label, 'break-words')}>{label}</div>
         {description && (
-          <div className={cn(settingsUI.description, settingsUI.labelDescriptionGap)}>{description}</div>
+          <div className={cn(settingsUI.description, settingsUI.labelDescriptionGap, 'break-words')}>{description}</div>
         )}
       </label>
       <Switch
