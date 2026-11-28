@@ -45,6 +45,69 @@ export function sameArtifactLocation(left: string, right: string): boolean {
   } catch { /* Missing files still need path comparison for deletion history. */ }
   return canonicalLocation(left) === canonicalLocation(right)
 }
+
+function liveDevInoKey(path: string): string | undefined {
+  try {
+    const st = statSync(path, { bigint: true })
+    return st.ino !== 0n ? `${st.dev}:${st.ino}` : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function canonicalOrRaw(path: string): string {
+  try { return canonicalLocation(path) }
+  catch { return path }
+}
+
+/** O(1) location map matching `sameArtifactLocation` across Windows short/long spellings and hard links. */
+export class ArtifactLocationMap<V> {
+  private byPath = new Map<string, V>()
+  private byDevIno = new Map<string, V>()
+
+  set(path: string, value: V): void {
+    this.byPath.set(canonicalOrRaw(path), value)
+    const devIno = liveDevInoKey(path)
+    if (devIno) this.byDevIno.set(devIno, value)
+  }
+
+  setIfAbsent(path: string, value: V): boolean {
+    if (this.has(path)) return false
+    this.set(path, value)
+    return true
+  }
+
+  has(path: string): boolean {
+    return this.get(path) !== undefined
+  }
+
+  get(path: string): V | undefined {
+    if (this.byPath.size === 0 && this.byDevIno.size === 0) return undefined
+    const devIno = liveDevInoKey(path)
+    if (devIno) {
+      const hit = this.byDevIno.get(devIno)
+      if (hit !== undefined) return hit
+    }
+    const rawHit = this.byPath.get(path)
+    if (rawHit !== undefined) return rawHit
+    return this.byPath.get(canonicalOrRaw(path))
+  }
+
+  get size(): number {
+    return this.byPath.size
+  }
+}
+
+/** O(1) location set matching `sameArtifactLocation` across Windows short/long spellings and hard links. */
+export class ArtifactLocationSet {
+  private map = new ArtifactLocationMap<true>()
+  constructor(paths: readonly string[] = []) {
+    for (const path of paths) this.add(path)
+  }
+  add(path: string): void { this.map.set(path, true) }
+  has(path: string): boolean { return this.map.has(path) }
+  get size(): number { return this.map.size }
+}
 export function atomicWrite(path: string, data: string | Buffer, mode = 0o600): void {
   mkdirSync(dirname(path), { recursive: true })
   const temp = `${path}.${randomUUID()}.tmp`
@@ -168,9 +231,29 @@ export class ArtifactVersions {
   }
   private writeRecord(id: string, record: ArtifactRecord): void {
     const path = this.recordPath(id)
+    let indexWasFresh = false
+    if (this.index) {
+      try {
+        const beforeDirStat = statSync(this.root, { bigint: true })
+        const beforeGen = storeMutationGeneration.get(this.canonicalRoot) ?? 0
+        indexWasFresh =
+          this.index.dirMtimeNs === beforeDirStat.mtimeNs
+          && this.index.dirCtimeNs === beforeDirStat.ctimeNs
+          && this.index.mutationGen === beforeGen
+      } catch {
+        indexWasFresh = false
+      }
+    }
     atomicWrite(path, JSON.stringify(record))
     const gen = bumpStoreGeneration(this.canonicalRoot)
     if (!this.index) return
+    if (!indexWasFresh) {
+      // Another instance or process mutated the registry since our last sync;
+      // invalidate instead of stamping a stale index as current.
+      this.index = undefined
+      this.indexSyncedUnderLock = false
+      return
+    }
     try {
       const normalized = normalizeVersionOrdinals(record)
       const st = statSync(path, { bigint: true })
@@ -182,6 +265,7 @@ export class ArtifactVersions {
       this.index.mutationGen = gen
     } catch {
       this.index = undefined
+      this.indexSyncedUnderLock = false
     }
   }
   private syncIndex(): RegistryIndex {

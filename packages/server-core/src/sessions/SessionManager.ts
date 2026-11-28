@@ -35,7 +35,7 @@ import { collectWorkspaceCandidates, discoverWorkspaceOutputs } from '../reliabi
 import { workspaceDeliveryContract } from '../reliability/workspace-delivery-contract'
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
-import { ArtifactVersions, atomicWrite, canonicalLocation, sameArtifactLocation } from '../reliability/artifact-versions'
+import { ArtifactLocationSet, ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions, artifactVersionTitle, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from '../reliability/conversation-artifact-versions'
 import { discoverOfficeFiles } from '../reliability/office-files'
 import { ArtifactCandidateInventory, ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
@@ -10272,30 +10272,21 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!tracker) return undefined
     try {
       const authorize = createArtifactPathValidator(managed.workspace.id)
-      const blockedCanonical = new Set<string>()
-      for (const file of blocked) {
-        try { blockedCanonical.add(canonicalLocation(file)) } catch { blockedCanonical.add(file) }
-      }
-      const isBlocked = (path: string) => {
-        if (blockedCanonical.size === 0) return false
-        if (blockedCanonical.has(path)) return true
-        try { return blockedCanonical.has(canonicalLocation(path)) } catch { return false }
-      }
+      const blockedLocations = new ArtifactLocationSet(blocked)
+      const isBlocked = (path: string) => blockedLocations.size > 0 && blockedLocations.has(path)
       const candidates: string[] = []
-      const candidateCanonical = new Set<string>()
-      const editedExistingCanonical = new Set<string>()
+      const candidateLocations = new ArtifactLocationSet()
+      const editedExistingLocations = new ArtifactLocationSet()
       const changedFiles = precomputedChanged ?? inventory?.changed() ?? []
       for (const path of changedFiles) {
         if (isBlocked(path)) continue
         if (!isArtifactCardPath(path)) continue
         try {
           const safe = await authorize(path)
-          if (!isArtifactCardPath(safe)) continue
-          const canonicalSafe = canonicalLocation(safe)
-          if (candidateCanonical.has(canonicalSafe)) continue
-          candidateCanonical.add(canonicalSafe)
+          if (!isArtifactCardPath(safe) || candidateLocations.has(safe)) continue
+          candidateLocations.add(safe)
           candidates.push(safe)
-          if (inventory?.existedAtStart(path)) editedExistingCanonical.add(canonicalSafe)
+          if (inventory?.existedAtStart(path)) editedExistingLocations.add(safe)
         } catch { /* Inaccessible or deleted files cannot be opened from a card. */ }
       }
       // Explicit destinations outside the scanned roots are discoverable through
@@ -10304,26 +10295,21 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (!isArtifactCardPath(path)) continue
         try {
           const safe = await authorize(path)
-          if (!isArtifactCardPath(safe) || inventory.covers(safe)) continue
-          const canonicalSafe = canonicalLocation(safe)
-          if (candidateCanonical.has(canonicalSafe)) continue
+          if (!isArtifactCardPath(safe) || inventory.covers(safe) || candidateLocations.has(safe)) continue
           const file = statSync(safe)
           if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) {
-            candidateCanonical.add(canonicalSafe)
+            candidateLocations.add(safe)
             candidates.push(safe)
-            if (file.birthtimeMs < inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) editedExistingCanonical.add(canonicalSafe)
+            if (file.birthtimeMs < inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) editedExistingLocations.add(safe)
           }
         } catch { /* A missing or inaccessible link is a citation, not a card. */ }
       }
       const versions = await tracker.capture(answerMarkdown, `${managed.id}/${userMessageId}`, title, candidates, !inventory, blocked, authorize)
       const missing = managed.messages.flatMap(message => message.artifactVersions?.filter(ref => !ref.artifactId).map(ref => ref.versionId) ?? [])
       const prior = missing.length ? withArtifactIdentities(managed.messages, tracker.store.versionArtifactIds(missing)) : managed.messages
-      return numberSessionArtifactRefs(prior, versions.map(ref => {
-        if (ref.change !== 'created' || editedExistingCanonical.size === 0) return ref
-        let key = ref.path
-        try { key = canonicalLocation(ref.path) } catch { /* keep raw path */ }
-        return editedExistingCanonical.has(key) ? { ...ref, change: 'modified' as const } : ref
-      }))
+      return numberSessionArtifactRefs(prior, versions.map(ref =>
+        ref.change === 'created' && editedExistingLocations.size > 0 && editedExistingLocations.has(ref.path)
+          ? { ...ref, change: 'modified' as const } : ref))
     } catch (error) {
       sessionLog.warn('Changed artifact capture failed', { sessionId: managed.id, error })
       return undefined

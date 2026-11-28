@@ -108,9 +108,12 @@ function isWindowsLikePath(normalized: string): boolean {
 function parentDirOf(path: string): string {
   const normalized = normalizedSlashPath(path)
   const idx = normalized.lastIndexOf('/')
-  if (idx <= 0) return ''
+  if (idx < 0) return ''
+  if (idx === 0) return '/'
   if (normalized.startsWith('//') && idx <= 1) return ''
-  return normalized.slice(0, idx)
+  const dir = normalized.slice(0, idx)
+  // Preserve the root separator for Windows drive roots (e.g. "C:/").
+  return /^[a-z]:$/i.test(dir) ? `${dir}/` : dir
 }
 
 function commonParentDir(paths: readonly string[]): string {
@@ -155,6 +158,7 @@ function folderDisplayLabel(dirPath: string, commonDir: string): string {
   const rel = relativeDirSegments(dirPath, commonDir)
   if (rel.length > 2) return `…/${rel.slice(-2).join('/')}/`
   if (rel.length > 0) return `${rel.join('/')}/`
+  if (dirPath === '/' || /^[a-z]:\/$/i.test(dirPath)) return dirPath
   const base = dirPath.replace(/\/+$/, '').split('/').filter(Boolean).pop()
   return base ? `${base}/` : './'
 }
@@ -393,7 +397,7 @@ export function organizeArtifactShelf(
           label: folderDisplayLabel(dirPath, commonDir),
           rows: bucket.map(item => item.row),
           extensions,
-          revealPath: bucket[0]!.row.artifact.path,
+          revealPath: dirPath || bucket[0]!.row.artifact.path,
         },
       })
     } else {

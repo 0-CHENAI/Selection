@@ -609,5 +609,16 @@ test('indexed registry stays consistent across sibling instances and batch regis
     expect(() => reader.findByPath(moved)).toThrow()
     rmSync(badRecord)
     expect(reader.findByPath(moved)?.id).toBe(initial[0]!.id)
+
+    // Sibling registration followed by ID-based capture on the original instance
+    // must invalidate the stale index rather than stamping it current.
+    const siblingFile = join(root, 'sibling-only.docx')
+    writeFileSync(siblingFile, 'preview-v1')
+    const siblingRecord = reader.register(siblingFile, 'preview/u1')
+    writeFileSync(moved, 'edited-after-sibling-register')
+    writer.capture(initial[0]!.id, 'sess/u3')
+    expect(writer.findByPath(siblingFile)?.id).toBe(siblingRecord.id)
+    expect(writer.findByVersionId(siblingRecord.currentVersion)?.id).toBe(siblingRecord.id)
+    expect(writer.register(siblingFile).id).toBe(siblingRecord.id)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

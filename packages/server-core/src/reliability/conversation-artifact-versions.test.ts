@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
@@ -420,5 +420,28 @@ test('batch capture registers many new deliverables without redundant store.capt
     expect(refs.every(ref => ref.change === 'created' && ref.ordinal === 1 && !!ref.artifactId)).toBe(true)
     expect(registerCalls).toBe(40)
     expect(captureCalls).toBe(0)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('excluded blocked paths also exclude tracked hard-link aliases of the same file', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-hardlink-exclude-'))
+  try {
+    const sharedDir = join(root, 'shared')
+    const projectDir = join(root, 'project')
+    mkdirSync(sharedDir, { recursive: true })
+    mkdirSync(projectDir, { recursive: true })
+    const sharedDeck = join(sharedDir, 'deck.pptx')
+    const projectDeck = join(projectDir, 'deck.pptx')
+    writeFileSync(sharedDeck, 'v1-deck')
+    linkSync(sharedDeck, projectDeck)
+
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(store, [root], async p => realpathSync(p), () => {}, Date.now() - 1000)
+    await turn.trackPath(sharedDeck)
+    // Edit in place via the project hard link, then block the project path.
+    writeFileSync(projectDeck, 'v2-blocked-deck')
+    const refs = await turn.capture('G4 blocked.', 'session/u2', undefined, [], false, [projectDeck])
+    expect(refs).toEqual([])
+    expect(store.findByPath(sharedDeck)!.versions).toHaveLength(1)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

@@ -122,6 +122,7 @@ it('surfaces top deliverables and clusters remaining files when many outputs liv
   expect(organized.shelfItems[2]?.kind).toBe('group')
   if (organized.shelfItems[2]?.kind === 'group') {
     expect(organized.shelfItems[2].label).toBe('outputs/')
+    expect(organized.shelfItems[2].revealPath).toBe('/work/outputs')
     expect(organized.shelfItems[2].rows).toHaveLength(30)
     expect(organized.shelfItems[2].extensions).toEqual(['MD'])
   }
@@ -198,11 +199,22 @@ it('handles Windows mixed-case folder grouping, deep folder label elision, CJK m
   expect(organized.orderedRows.findIndex(r => r.artifact.name === 'a.docx'))
     .toBeLessThan(organized.orderedRows.findIndex(r => r.artifact.name === 'a.doc'))
 
-  // Mixed-case Windows paths share one folder group with elided >2 segment label.
+  // Mixed-case Windows paths share one folder group with elided >2 segment label and directory revealPath.
   const group = organized.shelfItems.find(item => item.kind === 'group')
   expect(group?.kind).toBe('group')
   if (group?.kind === 'group') {
     expect(group.rows).toHaveLength(5)
     expect(group.label).toBe('…/nested/chapters/')
+    expect(group.revealPath).toBe('C:/Work/Proj/deep/nested/chapters')
+  }
+
+  // Drive-root files preserve trailing slash on revealPath.
+  const driveRootGroup = organizeArtifactShelf(
+    Array.from({ length: 6 }, (_, i) => makeRow(`C:\\note-${i + 1}.md`)),
+  ).shelfItems.find(item => item.kind === 'group')
+  expect(driveRootGroup?.kind).toBe('group')
+  if (driveRootGroup?.kind === 'group') {
+    expect(driveRootGroup.label).toBe('C:/')
+    expect(driveRootGroup.revealPath).toBe('C:/')
   }
 })

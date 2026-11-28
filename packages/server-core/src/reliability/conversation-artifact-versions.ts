@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { isSessionScratchPath, localArtifactLinks } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
 import { compactArtifactVersionSummary } from '@craft-agent/core/utils'
-import { ArtifactVersions, canonicalLocation, type ArtifactRecord } from './artifact-versions'
+import { ArtifactLocationMap, ArtifactLocationSet, ArtifactVersions, canonicalLocation, type ArtifactRecord } from './artifact-versions'
 import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from './artifact-candidate-inventory'
 
 /** Use the agent's delivered prose as the version title, never the user's request. */
@@ -153,27 +153,16 @@ export class ConversationArtifactVersions {
     const title = suppliedVersionTitle(aiTitle) ?? artifactVersionTitle(markdown)
     const deliveries = new Map<string, string>()
     const writtenPaths = [...changedPaths, ...this.pendingWrites]
-    const excludedSet = new Set<string>()
-    for (const file of excludedPaths) {
-      try { excludedSet.add(canonicalLocation(file)) } catch { excludedSet.add(file) }
-    }
-    const excluded = (path: string) => {
-      if (excludedSet.size === 0) return false
-      if (excludedSet.has(path)) return true
-      try { return excludedSet.has(canonicalLocation(path)) } catch { return false }
-    }
-    const writtenByCanonical = new Map<string, string>()
-    for (const path of writtenPaths) {
-      let key = path
-      try { key = canonicalLocation(path) } catch { /* keep raw key */ }
-      if (!writtenByCanonical.has(key)) writtenByCanonical.set(key, path)
-    }
+    const excludedLocations = new ArtifactLocationSet(excludedPaths)
+    const excluded = (path: string) => excludedLocations.size > 0 && excludedLocations.has(path)
+    const writtenByLocation = new ArtifactLocationMap<string>()
+    for (const path of writtenPaths) writtenByLocation.setIfAbsent(path, path)
 
     // Phase 1: authorize all candidate and tracked paths asynchronously before
     // taking the synchronous registry lock once for the whole batch.
     const authorizedCandidates: Array<{ safe: string; canonicalSafe: string; originalPath: string; changedPath?: string }> = []
-    const seenCanonicalCandidates = new Set<string>()
-    const authorizedSet = new Set<string>()
+    const seenCandidateLocations = new ArtifactLocationSet()
+    const authorizedCanonicalByPath = new Map<string, string>()
     const seenInputPaths = new Set<string>()
     for (const path of [...(includeAnswerLinks ? localArtifactLinks(markdown) : []), ...writtenPaths]) {
       if (seenInputPaths.has(path)) continue
@@ -185,11 +174,11 @@ export class ConversationArtifactVersions {
           if (isSessionScratchPath(safe) || excluded(safe)) continue
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const canonicalSafe = canonicalLocation(safe)
-          authorizedSet.add(safe)
-          authorizedSet.add(canonicalSafe)
-          if (!seenCanonicalCandidates.has(canonicalSafe)) {
-            seenCanonicalCandidates.add(canonicalSafe)
-            const changedPath = writtenByCanonical.get(canonicalSafe) ?? writtenByCanonical.get(safe)
+          authorizedCanonicalByPath.set(safe, canonicalSafe)
+          authorizedCanonicalByPath.set(canonicalSafe, canonicalSafe)
+          if (!seenCandidateLocations.has(safe)) {
+            seenCandidateLocations.add(safe)
+            const changedPath = writtenByLocation.get(safe)
             authorizedCandidates.push({ safe, canonicalSafe, originalPath: path, changedPath })
           }
           break
@@ -199,13 +188,27 @@ export class ConversationArtifactVersions {
 
     const authFailedTracked = new Set<string>()
     for (const path of this.paths) {
-      if (authorizedSet.has(path)) continue
+      if (authorizedCanonicalByPath.has(path)) continue
       if (!existsSync(path) || !lstatSync(path).isFile()) continue
       try {
-        await authorize(path)
-        authorizedSet.add(path)
+        const safe = await authorize(path)
+        const canonicalSafe = canonicalLocation(safe)
+        authorizedCanonicalByPath.set(path, canonicalSafe)
+        authorizedCanonicalByPath.set(canonicalSafe, canonicalSafe)
       } catch {
         authFailedTracked.add(path)
+      }
+    }
+
+    // Re-verify synchronously right before reading bytes so a symlink swap on a
+    // parent directory between Phase 1 authorization and Phase 2 capture cannot
+    // redirect the snapshot outside the authorized location.
+    const assertStillAuthorized = (path: string, expectedCanonical: string): void => {
+      if (lstatSync(path).isSymbolicLink() || !lstatSync(path).isFile()) {
+        throw new Error('Artifact path changed to non-regular file after authorization')
+      }
+      if (canonicalLocation(path) !== expectedCanonical) {
+        throw new Error('Artifact path redirected after authorization')
       }
     }
 
@@ -217,6 +220,7 @@ export class ConversationArtifactVersions {
       for (const { safe, canonicalSafe, originalPath, changedPath } of authorizedCandidates) {
         try {
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
+          assertStillAuthorized(safe, canonicalSafe)
           const existing = this.store.findByPath(safe)
           if (!existing && !changedPath && !this.writtenThisTurn(safe)) continue
           // A file tracked before this turn can be atomically replaced by an
@@ -273,6 +277,9 @@ export class ConversationArtifactVersions {
             if (baseline) result.push({ path: published, artifactId: record.id, versionId: baseline.versionId, ordinal: baseline.ordinal, change: 'deleted' })
             continue
           }
+          const expectedCanonical = authorizedCanonicalByPath.get(record.path) ?? authorizedCanonicalByPath.get(path)
+          if (!expectedCanonical) throw new Error('Artifact path was not authorized for capture')
+          assertStillAuthorized(record.path, expectedCanonical)
           const after = this.store.capture(record.id, sourceRunId, title, title ? 'assistant' : undefined)
           const current = after.versions.find(version => version.id === after.currentVersion)!
           const restored = after.lastRestore?.versionId === current.id && after.lastRestore.sourceRunId === sourceRunId
